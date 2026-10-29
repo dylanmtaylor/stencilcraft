@@ -3131,6 +3131,7 @@ dependencies = [
  "stencilcraft-engine",
  "stencilcraft-geom",
  "stencilcraft-kerf",
+ "stencilcraft-machine",
  "stencilcraft-mcp",
  "stencilcraft-ui-egui",
 ]

@@ -3254,6 +3254,7 @@ name = "stencilcraft-svg"
 version = "0.1.0"
 dependencies = [
  "kurbo",
+ "roxmltree",
  "stencilcraft-doc",
  "stencilcraft-geom",
  "thiserror 2.0.21",

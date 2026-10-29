@@ -230,6 +230,48 @@ fn make_starter_writes_a_reloadable_document() {
 }
 
 #[test]
+fn import_svg_cli_roundtrips_our_svg_exports() {
+    let dir = fresh_out_dir();
+    let native = dir.join("native.stencilcraft");
+    let svg = dir.join("roundtrip.svg");
+    let reexported = dir.join("reexported.svg");
+    let mut export_cmd = bin();
+    export_cmd.args([
+        "run",
+        "--in",
+        &example("starter.stencilcraft"),
+        "--export",
+        &svg.to_string_lossy(),
+    ]);
+    let export_out = export_cmd.output().expect("export command starts");
+    expect_exit0(&export_out, &String::from_utf8_lossy(&export_out.stdout));
+    let mut import_cmd = bin();
+    import_cmd.args([
+        "import-svg",
+        "--in",
+        &svg.to_string_lossy(),
+        "--out",
+        &native.to_string_lossy(),
+    ]);
+    let import_out = import_cmd.output().expect("import command starts");
+    expect_exit0(&import_out, &String::from_utf8_lossy(&import_out.stdout));
+    let mut reexport = bin();
+    reexport.args([
+        "run",
+        "--in",
+        &native.to_string_lossy(),
+        "--export",
+        &reexported.to_string_lossy(),
+    ]);
+    let reexport_out = reexport.output().expect("re-export command starts");
+    expect_exit0(
+        &reexport_out,
+        &String::from_utf8_lossy(&reexport_out.stdout),
+    );
+    assert!(reexported.is_file(), "reimported document exports again");
+}
+
+#[test]
 fn unknown_flag_fails_with_a_message_naming_the_flag() {
     let mut cmd = bin();
     cmd.args(["run", "--wednesday"]);

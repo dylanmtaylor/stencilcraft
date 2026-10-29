@@ -89,6 +89,7 @@ Every image below is rendered by StencilCraft's own SVG exporter from the
 git clone https://github.com/dylanmtaylor/stencilcraft
 cd stencilcraft
 cargo run --release -p stencilcraft                      # desktop app (Design / Send)
+cargo run --release -p stencilcraft-cli -- import-svg --in artwork.svg --out artwork.stencilcraft
 cargo run --release -p stencilcraft-cli -- run --in examples/starter.stencilcraft --export out.svg
 cargo run --release -p stencilcraft-cli -- run --in examples/stencil-frame.stencilcraft --export out.svg   # kerf applied (0.2 mm)
 cargo run --release -p stencilcraft-cli -- run --in examples/poster.stencilcraft \
@@ -134,14 +135,15 @@ saves/opens files and shows the **Design/Send** split with a live machine dry-ru
 real-hardware transport is the next step).
 
 **What's missing:**
-- SVG import beyond bare `<path>` data (groups, transforms, `style` attributes, the
-  basic shapes, unit inference, `viewBox` scaling);
+- SVG features beyond common paths/shapes/groups/transforms/styles (CSS selectors,
+  `<use>`, text conversion, clipping/masks/filters);
 - drawing tools (pen, selection, node editing) — StencilCraft starts behind a vector app;
 - tiling edge clipping, bridge generation so counters stay attached, registration marks;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).
 
-**Where we're going:** next is real-world SVG import (transforms, groups, styles), then
-the kerf offset hardening pass, then bridges and machine transports. The ranked list is
+**Where we're going:** next is broader SVG import (CSS, `<use>`, text conversion,
+clipping/masks/filters), then the kerf offset hardening pass, then bridges and
+machine transports. The ranked list is
 in [`docs/gaps.md`](docs/gaps.md).
 
 **Workspace:** `crates/{geom, color, doc, kerf, tiling, svg, dxf, gcode, engine, machine, mcp, ui-egui, testkit}`

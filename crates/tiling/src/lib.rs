@@ -243,6 +243,48 @@ mod tests {
     }
 
     #[test]
+    fn grid_coverage_has_no_gaps_and_overlap_is_bounded() {
+        let board_w = 511.0;
+        let board_h = 397.0;
+        let sheet_w = 230.0;
+        let sheet_h = 180.0;
+        let overlap = 12.0;
+        let tiles = layout(board_w, board_h, sheet_w, sheet_h, overlap).unwrap();
+        // Sample the entire board at a 1 mm pitch. Every point must belong to
+        // at least one tile; adjacent tile interiors overlap by no more than
+        // the requested overlap in either axis.
+        for yi in 0..=board_h as usize {
+            for xi in 0..=board_w as usize {
+                let x = xi as f64;
+                let y = yi as f64;
+                assert!(
+                    tiles.iter().any(|tile| {
+                        x >= tile.rect.x0
+                            && x <= tile.rect.x1
+                            && y >= tile.rect.y0
+                            && y <= tile.rect.y1
+                    }),
+                    "uncovered point ({x}, {y})"
+                );
+            }
+        }
+        for a in &tiles {
+            for b in &tiles {
+                if a.row == b.row && a.col + 1 == b.col {
+                    let shared = a.rect.x1.min(b.rect.x1) - a.rect.x0.max(b.rect.x0);
+                    assert!(shared >= overlap - 1e-9, "horizontal gap: {shared}");
+                    assert!(shared <= overlap + 1e-9, "horizontal overlap: {shared}");
+                }
+                if a.col == b.col && a.row + 1 == b.row {
+                    let shared = a.rect.y1.min(b.rect.y1) - a.rect.y0.max(b.rect.y0);
+                    assert!(shared >= overlap - 1e-9, "vertical gap: {shared}");
+                    assert!(shared <= overlap + 1e-9, "vertical overlap: {shared}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn no_overlap_when_sheet_covers_board() {
         let tiles = layout(200.0, 200.0, 300.0, 300.0, 5.0).unwrap();
         assert_eq!(tiles.len(), 1);

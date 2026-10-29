@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 
 use kurbo::BezPath;
 use stencilcraft_doc::{CutStyle, Document, Layer};
-use stencilcraft_geom::{Polyline, bounds_of_polylines, path_to_polylines};
+use stencilcraft_geom::{Polyline, path_to_polylines};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SvgError {
@@ -114,113 +114,800 @@ fn path_to_svg_d(path: &BezPath) -> Result<String, SvgError> {
     Ok(s)
 }
 
-/// Import the minimal SVG subset: every `<path>` whose `d` parses, in document
-/// order, filed onto layers by production style. Groups are skipped (their
-/// geometry meaning here is none — transforms are rejected above, so skipping
-/// them cannot silently misread art); other SVG features are not supported yet
-/// (see `docs/gaps.md` 1).
+const MAX_SVG_BYTES: usize = 16 * 1024 * 1024;
+const MAX_SVG_NODES: usize = 100_000;
+const MAX_SVG_DEPTH: usize = 128;
+
+#[derive(Clone, Copy)]
+struct ImportState {
+    transform: kurbo::Affine,
+    kind: CutStyle,
+    display_none: bool,
+    visibility_hidden: bool,
+}
+
+impl Default for ImportState {
+    fn default() -> Self {
+        Self {
+            transform: kurbo::Affine::IDENTITY,
+            kind: CutStyle::Cut,
+            display_none: false,
+            visibility_hidden: false,
+        }
+    }
+}
+
+/// Import common SVG artwork into a cutting document.
+///
+/// Supported geometry: `<path>`, `<rect>` (including rounded corners),
+/// `<circle>`, `<ellipse>`, `<line>`, `<polyline>`, and `<polygon>`. Nested
+/// groups, transforms (`matrix`, `translate`, `scale`, `rotate`, `skewX/Y`),
+/// and inherited presentation/inline styles (`display`, `visibility`, CSS
+/// `style`, `class`, `data-kind`) are applied. SVG paths are flattened nowhere
+/// here: curves remain curves in the document. Each imported shape is assigned
+/// to cut or engrave according to inherited `data-kind`/`data-style` or class.
+/// Stroke/fill colors are not represented by the current document model.
+///
+/// Physical root dimensions accept unitless SVG px, `px`, `mm`, `cm`, `in`,
+/// `pt`, and `pc`; a `viewBox` maps its user coordinates onto that physical
+/// viewport, following `preserveAspectRatio`. Without physical dimensions,
+/// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
+/// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
+/// convention. Text, `<use>`, CSS selectors/stylesheets, gradients, clipping,
+/// and percentage lengths are not expanded; unsupported drawable elements
+/// are reported rather than silently lost.
 pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
-    if svg.contains("transform") {
-        return Err(SvgError::Import(pathname_msg(
-            path_name,
-            "transforms are not supported yet; bake them down first",
-        )));
+    if svg.len() > MAX_SVG_BYTES {
+        return Err(svg_error(path_name, "SVG exceeds the 16 MiB import limit"));
     }
+    let xml = roxmltree::Document::parse(svg)
+        .map_err(|e| svg_error(path_name, &format!("invalid XML: {e}")))?;
+    let root = xml.root_element();
+    let (width_mm, height_mm, viewport) = viewport_transform(root, path_name)?;
+
     let mut doc = Document::default();
-    let mut cut_layer = -1_i64;
-    let mut engrave_layer = -1_i64;
-    // Walk the markup tag by tag: <path> elements are read, every other tag
-    // (<g>, </g>, <svg>, comments, whitespace) is skipped. Transforms anywhere
-    // were already rejected above, so skipping groups cannot silently misread
-    // geometry.
-    let mut rest = svg;
-    while let Some(start) = rest.find('<') {
-        let Some(end) = rest[start..].find('>') else {
-            return Err(SvgError::Import(pathname_msg(
-                path_name,
-                "unterminated tag",
-            )));
-        };
-        let tag = rest[start + 1..start + end].trim_end_matches('/').trim();
-        rest = &rest[start + end + 1..];
-        let tag_name = tag.split_whitespace().next().unwrap_or("");
-        if tag_name != "path" {
-            continue;
+    doc.board.width_mm = width_mm;
+    doc.board.height_mm = height_mm;
+    let mut engrave_layer: Option<usize> = None;
+    let base = ImportState {
+        transform: viewport,
+        ..ImportState::default()
+    };
+    let mut visited = 0usize;
+    import_node(
+        root,
+        base,
+        0,
+        &mut visited,
+        path_name,
+        &mut doc,
+        &mut engrave_layer,
+    )?;
+
+    // SVG art may legitimately extend beyond its nominal viewport; do not clip
+    // cut geometry silently. Normalize negative coordinates onto the sheet.
+    let mut bounds: Option<kurbo::Rect> = None;
+    for layer in &doc.layers {
+        if let Some(b) = layer.bounds() {
+            bounds = Some(bounds.map_or(b, |prev| prev.union(b)));
         }
-        let Some(d) = attr_value(tag, "d") else {
-            return Err(SvgError::Import(pathname_msg(
-                path_name,
-                "<path> has no d attribute",
-            )));
-        };
-        let bez = BezPath::from_svg(d)
-            .map_err(|e| SvgError::Import(format!("{path_name}: bad path data: {e}")))?;
-        let style = class_of(tag).unwrap_or(CutStyle::Cut);
-        let layer_index = match style {
-            CutStyle::Cut => {
-                // Document::default() already opens with a cut layer: use it.
-                if cut_layer < 0 {
-                    cut_layer = 0;
-                }
-                cut_layer as usize
-            }
-            CutStyle::Engrave => {
-                if engrave_layer < 0 {
-                    engrave_layer = doc.layers.len() as i64;
-                    doc.layers.push(Layer::new("engrave", CutStyle::Engrave));
-                }
-                engrave_layer as usize
-            }
-        };
-        // A valid import must be plottable relative to the board: enlarge the
-        // board when art lands outside it rather than clipping silently.
-        if let Some(b) = bounds_of_polylines(&Polyline::from_path(&bez)) {
-            doc.board.width_mm = doc.board.width_mm.max(b.x1);
-            doc.board.height_mm = doc.board.height_mm.max(b.y1);
-        }
-        doc.push_shape(layer_index, bez, style)
-            .map_err(|e| SvgError::Model(e.to_string()))?;
     }
+    if let Some(b) = bounds {
+        let shift_x = (-b.x0).max(0.0);
+        let shift_y = (-b.y0).max(0.0);
+        if shift_x != 0.0 || shift_y != 0.0 {
+            let shift = kurbo::Affine::translate((shift_x, shift_y));
+            for layer in &mut doc.layers {
+                for shape in &mut layer.shapes {
+                    shape.path = transform_path(&shape.path, shift);
+                }
+            }
+        }
+        doc.board.width_mm = doc.board.width_mm.max(b.x1 + shift_x).max(1.0);
+        doc.board.height_mm = doc.board.height_mm.max(b.y1 + shift_y).max(1.0);
+    }
+    doc.validate()
+        .map_err(|e| svg_error(path_name, &format!("invalid imported document: {e}")))?;
     Ok(doc)
 }
 
-fn class_of(tag: &str) -> Option<CutStyle> {
-    let class = attr_value(tag, "class")?;
-    match class {
-        c if c.contains("stencilcraft-cut") => Some(CutStyle::Cut),
-        c if c.contains("stencilcraft-engrave") => Some(CutStyle::Engrave),
-        _ => Some(CutStyle::Cut),
+fn import_node(
+    node: roxmltree::Node<'_, '_>,
+    inherited: ImportState,
+    depth: usize,
+    visited: &mut usize,
+    path_name: &str,
+    doc: &mut Document,
+    engrave_layer: &mut Option<usize>,
+) -> Result<(), SvgError> {
+    *visited = visited
+        .checked_add(1)
+        .ok_or_else(|| svg_error(path_name, "SVG node counter overflow"))?;
+    if *visited > MAX_SVG_NODES {
+        return Err(svg_error(
+            path_name,
+            "SVG exceeds the 100,000-node import limit",
+        ));
     }
-}
-
-fn attr_value<'a>(tag: &'a str, attr: &str) -> Option<&'a str> {
-    for quote in ['"', '\''] {
-        let mut from = 0;
-        while let Some(rel) = tag[from..].find(attr) {
-            let at = from + rel;
-            from = at + attr.len();
-            // Attribute names must start after whitespace (or the tag opening)
-            // so `width` will not match inside `stroke-width`.
-            if !(at == 0 || tag[..at].ends_with(char::is_whitespace)) {
-                continue;
-            }
-            let Some(rest) = tag[from..].strip_prefix('=') else {
-                continue;
-            };
-            let Some(opened) = rest.strip_prefix(quote) else {
-                continue;
-            };
-            let Some(end) = opened.find(quote) else {
-                return None; // unterminated value
-            };
-            return Some(&opened[..end]);
+    if depth > MAX_SVG_DEPTH {
+        return Err(svg_error(path_name, "SVG nesting exceeds 128 levels"));
+    }
+    let tag = node.tag_name().name();
+    // Definitions are not drawable content unless instantiated via `<use>`;
+    // `<use>` expansion is deliberately unsupported, so never import defs' children.
+    if matches!(tag, "defs" | "symbol" | "clipPath" | "mask" | "pattern") {
+        return Ok(());
+    }
+    let mut state = inherited;
+    // SVG presentation attributes and inline declarations inherit. `display`
+    // is different: a descendant cannot override an ancestor's display:none.
+    if node.attribute("display") == Some("none") {
+        state.display_none = true;
+    }
+    if let Some(transform) = node.attribute("transform") {
+        let local = parse_transform(transform)
+            .map_err(|e| svg_error(path_name, &format!("<{}> transform: {e}", tag)))?;
+        state.transform = compose(inherited.transform, local);
+    }
+    if let Some(kind) = style_kind(node) {
+        state.kind = kind;
+    }
+    let style = style_properties(node);
+    if style.get("display").is_some_and(|v| *v == "none") {
+        state.display_none = true;
+    }
+    if let Some(visibility) = style.get("visibility") {
+        state.visibility_hidden = *visibility == "hidden" || *visibility == "collapse";
+    }
+    let color_property = style.get("stroke").or_else(|| style.get("fill"));
+    if state.kind == CutStyle::Cut && color_property.is_some_and(|v| *v == "none") {
+        // A line with fill:none can still be a cut path; stroke:none plus
+        // fill:none is empty and can safely be ignored.
+        if style.get("stroke").is_some_and(|v| *v == "none")
+            && style.get("fill").is_some_and(|v| *v == "none")
+        {
+            state.display_none = true;
         }
     }
-    None
+    if !state.display_none
+        && !state.visibility_hidden
+        && let Some(path) = geometry_for(node, path_name)?
+    {
+        let transformed = transform_path(&path, state.transform);
+        validate_import_path(&transformed, path_name)?;
+        let index = match state.kind {
+            CutStyle::Cut => 0,
+            CutStyle::Engrave => match *engrave_layer {
+                Some(i) => i,
+                None => {
+                    let i = doc.layers.len();
+                    doc.layers.push(Layer::new("engrave", CutStyle::Engrave));
+                    *engrave_layer = Some(i);
+                    i
+                }
+            },
+        };
+        doc.push_shape(index, transformed, state.kind)
+            .map_err(|e| svg_error(path_name, &e.to_string()))?;
+    }
+    for child in node.children().filter(|n| n.is_element()) {
+        import_node(
+            child,
+            state,
+            depth + 1,
+            visited,
+            path_name,
+            doc,
+            engrave_layer,
+        )?;
+    }
+    Ok(())
 }
 
-fn pathname_msg(path: &str, msg: &str) -> String {
-    format!("{path}: {msg}")
+fn geometry_for(
+    node: roxmltree::Node<'_, '_>,
+    path_name: &str,
+) -> Result<Option<BezPath>, SvgError> {
+    let tag = node.tag_name().name();
+    let number = |name: &str, default: f64| -> Result<f64, SvgError> {
+        match node.attribute(name) {
+            Some(value) => parse_number(value).ok_or_else(|| {
+                svg_error(path_name, &format!("<{tag}> has invalid {name}={value:?}"))
+            }),
+            None => Ok(default),
+        }
+    };
+    let path = match tag {
+        "svg" | "g" | "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "title" | "desc"
+        | "metadata" | "style" | "stop" | "namedview" | "guide" | "perspective" => return Ok(None),
+        "path" => {
+            let d = node
+                .attribute("d")
+                .ok_or_else(|| svg_error(path_name, "<path> has no d attribute"))?;
+            BezPath::from_svg(d)
+                .map_err(|e| svg_error(path_name, &format!("bad path data: {e}")))?
+        }
+        "rect" => {
+            let x = number("x", 0.0)?;
+            let y = number("y", 0.0)?;
+            let w = number("width", 0.0)?;
+            let h = number("height", 0.0)?;
+            if w < 0.0 || h < 0.0 {
+                return Err(svg_error(
+                    path_name,
+                    "<rect> width/height cannot be negative",
+                ));
+            }
+            let mut rx = number("rx", number("ry", 0.0)?)?;
+            let mut ry = number("ry", rx)?;
+            if rx < 0.0 || ry < 0.0 {
+                return Err(svg_error(
+                    path_name,
+                    "<rect> corner radii cannot be negative",
+                ));
+            }
+            if rx == 0.0 {
+                rx = ry;
+            }
+            if ry == 0.0 {
+                ry = rx;
+            }
+            rounded_rect(x, y, w, h, rx.min(w / 2.0), ry.min(h / 2.0))
+        }
+        "circle" => {
+            let cx = number("cx", 0.0)?;
+            let cy = number("cy", 0.0)?;
+            let r = number("r", 0.0)?;
+            if r < 0.0 {
+                return Err(svg_error(path_name, "<circle> radius cannot be negative"));
+            }
+            ellipse_path(cx, cy, r, r)
+        }
+        "ellipse" => {
+            let cx = number("cx", 0.0)?;
+            let cy = number("cy", 0.0)?;
+            let rx = number("rx", 0.0)?;
+            let ry = number("ry", 0.0)?;
+            if rx < 0.0 || ry < 0.0 {
+                return Err(svg_error(path_name, "<ellipse> radii cannot be negative"));
+            }
+            ellipse_path(cx, cy, rx, ry)
+        }
+        "line" => {
+            let mut p = BezPath::new();
+            p.move_to(kurbo::Point::new(number("x1", 0.0)?, number("y1", 0.0)?));
+            p.line_to(kurbo::Point::new(number("x2", 0.0)?, number("y2", 0.0)?));
+            p
+        }
+        "polyline" | "polygon" => {
+            let points = node
+                .attribute("points")
+                .ok_or_else(|| svg_error(path_name, &format!("<{tag}> has no points attribute")))?;
+            points_path(points, tag == "polygon", path_name)?
+        }
+        "text" | "tspan" | "image" | "use" | "foreignObject" => {
+            return Err(svg_error(
+                path_name,
+                &format!("<{tag}> is not supported yet"),
+            ));
+        }
+        name if is_supported_non_drawable(name) => return Ok(None),
+        _ => {
+            return Err(svg_error(
+                path_name,
+                &format!(
+                    "unsupported SVG element <{tag}>; import stopped to avoid silently dropping art"
+                ),
+            ));
+        }
+    };
+    Ok(Some(path))
+}
+
+fn is_supported_non_drawable(tag: &str) -> bool {
+    matches!(
+        tag,
+        "a" | "switch"
+            | "marker"
+            | "linearGradient"
+            | "radialGradient"
+            | "filter"
+            | "feGaussianBlur"
+            | "feOffset"
+            | "feBlend"
+            | "feColorMatrix"
+            | "feComponentTransfer"
+            | "feComposite"
+            | "feConvolveMatrix"
+            | "feDiffuseLighting"
+            | "feDisplacementMap"
+            | "feDistantLight"
+            | "feDropShadow"
+            | "feFlood"
+            | "feFuncA"
+            | "feFuncB"
+            | "feFuncG"
+            | "feFuncR"
+            | "feImage"
+            | "feMerge"
+            | "feMergeNode"
+            | "feMorphology"
+            | "fePointLight"
+            | "feSpecularLighting"
+            | "feSpotLight"
+            | "feTile"
+            | "feTurbulence"
+            | "animate"
+            | "animateMotion"
+            | "animateTransform"
+            | "set"
+            | "view"
+            | "cursor"
+            | "color-profile"
+            | "font"
+            | "font-face"
+            | "glyph"
+            | "missing-glyph"
+    )
+}
+
+fn points_path(points: &str, closed: bool, path_name: &str) -> Result<BezPath, SvgError> {
+    let values =
+        parse_number_list(points).ok_or_else(|| svg_error(path_name, "invalid points list"))?;
+    if values.len() % 2 != 0 {
+        return Err(svg_error(
+            path_name,
+            "points list must contain coordinate pairs",
+        ));
+    }
+    if values.len() / 2 > 500_000 {
+        return Err(svg_error(
+            path_name,
+            "a polygon exceeds the 500,000-point limit",
+        ));
+    }
+    let mut path = BezPath::new();
+    let mut pairs = values.chunks_exact(2);
+    if let Some(first) = pairs.next() {
+        path.move_to(kurbo::Point::new(first[0], first[1]));
+        for pair in pairs {
+            path.line_to(kurbo::Point::new(pair[0], pair[1]));
+        }
+        if closed {
+            path.close_path();
+        }
+    }
+    Ok(path)
+}
+
+fn rounded_rect(x: f64, y: f64, w: f64, h: f64, rx: f64, ry: f64) -> BezPath {
+    if rx <= 0.0 || ry <= 0.0 {
+        let mut p = BezPath::new();
+        p.move_to(kurbo::Point::new(x, y));
+        p.line_to(kurbo::Point::new(x + w, y));
+        p.line_to(kurbo::Point::new(x + w, y + h));
+        p.line_to(kurbo::Point::new(x, y + h));
+        p.close_path();
+        return p;
+    }
+    let k = 0.552_284_749_830_793_6;
+    let mut p = BezPath::new();
+    p.move_to(kurbo::Point::new(x + rx, y));
+    p.line_to(kurbo::Point::new(x + w - rx, y));
+    p.curve_to(
+        kurbo::Point::new(x + w - rx + k * rx, y),
+        kurbo::Point::new(x + w, y + ry - k * ry),
+        kurbo::Point::new(x + w, y + ry),
+    );
+    p.line_to(kurbo::Point::new(x + w, y + h - ry));
+    p.curve_to(
+        kurbo::Point::new(x + w, y + h - ry + k * ry),
+        kurbo::Point::new(x + w - rx + k * rx, y + h),
+        kurbo::Point::new(x + w - rx, y + h),
+    );
+    p.line_to(kurbo::Point::new(x + rx, y + h));
+    p.curve_to(
+        kurbo::Point::new(x + rx - k * rx, y + h),
+        kurbo::Point::new(x, y + h - ry + k * ry),
+        kurbo::Point::new(x, y + h - ry),
+    );
+    p.line_to(kurbo::Point::new(x, y + ry));
+    p.curve_to(
+        kurbo::Point::new(x, y + ry - k * ry),
+        kurbo::Point::new(x + rx - k * rx, y),
+        kurbo::Point::new(x + rx, y),
+    );
+    p.close_path();
+    p
+}
+
+fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> BezPath {
+    let k = 0.552_284_749_830_793_6;
+    let mut p = BezPath::new();
+    p.move_to(kurbo::Point::new(cx + rx, cy));
+    p.curve_to(
+        kurbo::Point::new(cx + rx, cy + k * ry),
+        kurbo::Point::new(cx + k * rx, cy + ry),
+        kurbo::Point::new(cx, cy + ry),
+    );
+    p.curve_to(
+        kurbo::Point::new(cx - k * rx, cy + ry),
+        kurbo::Point::new(cx - rx, cy + k * ry),
+        kurbo::Point::new(cx - rx, cy),
+    );
+    p.curve_to(
+        kurbo::Point::new(cx - rx, cy - k * ry),
+        kurbo::Point::new(cx - k * rx, cy - ry),
+        kurbo::Point::new(cx, cy - ry),
+    );
+    p.curve_to(
+        kurbo::Point::new(cx + k * rx, cy - ry),
+        kurbo::Point::new(cx + rx, cy - k * ry),
+        kurbo::Point::new(cx + rx, cy),
+    );
+    p.close_path();
+    p
+}
+
+fn style_properties<'a, 'input: 'a>(
+    node: roxmltree::Node<'a, 'input>,
+) -> std::collections::HashMap<&'a str, &'a str> {
+    let mut props = std::collections::HashMap::new();
+    for key in [
+        "display",
+        "visibility",
+        "data-kind",
+        "data-style",
+        "fill",
+        "stroke",
+        "stroke-width",
+    ] {
+        if let Some(value) = node.attribute(key) {
+            props.insert(key, value.trim());
+        }
+    }
+    if let Some(style) = node.attribute("style") {
+        for item in style.split(';') {
+            if let Some((key, value)) = item.split_once(':') {
+                props.insert(key.trim(), value.trim());
+            }
+        }
+    }
+    props
+}
+
+fn style_kind(node: roxmltree::Node<'_, '_>) -> Option<CutStyle> {
+    let props = style_properties(node);
+    let explicit = props.get("data-kind").or_else(|| props.get("data-style"));
+    if let Some(value) = explicit {
+        match *value {
+            "cut" => return Some(CutStyle::Cut),
+            "engrave" | "score" | "mark" => return Some(CutStyle::Engrave),
+            _ => {}
+        }
+    }
+    let class = node.attribute("class").unwrap_or("").to_ascii_lowercase();
+    if class
+        .split_ascii_whitespace()
+        .any(|c| c.contains("engrave") || c.contains("score"))
+    {
+        Some(CutStyle::Engrave)
+    } else if class.split_ascii_whitespace().any(|c| c.contains("cut")) {
+        Some(CutStyle::Cut)
+    } else {
+        None
+    }
+}
+
+fn viewport_transform(
+    root: roxmltree::Node<'_, '_>,
+    path_name: &str,
+) -> Result<(f64, f64, kurbo::Affine), SvgError> {
+    let view_box = match root.attribute("viewBox") {
+        Some(raw) => {
+            let values = parse_number_list(raw)
+                .filter(|v| v.len() == 4)
+                .ok_or_else(|| svg_error(path_name, "viewBox must contain four finite numbers"))?;
+            if values[2] <= 0.0 || values[3] <= 0.0 {
+                return Err(svg_error(
+                    path_name,
+                    "viewBox width and height must be positive",
+                ));
+            }
+            Some((values[0], values[1], values[2], values[3]))
+        }
+        None => None,
+    };
+    let width_attr = root.attribute("width");
+    let height_attr = root.attribute("height");
+    let explicit_viewport = width_attr.is_some() || height_attr.is_some();
+    let fallback = view_box
+        .map(|(_, _, w, h)| (w, h))
+        .unwrap_or((100.0, 150.0));
+    let width = width_attr
+        .map(svg_length_mm)
+        .transpose()
+        .map_err(|e| svg_error(path_name, &format!("root width: {e}")))?
+        .unwrap_or(fallback.0);
+    let height = height_attr
+        .map(svg_length_mm)
+        .transpose()
+        .map_err(|e| svg_error(path_name, &format!("root height: {e}")))?
+        .unwrap_or(fallback.1);
+    if !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || width > 1.0e9
+        || height > 1.0e9
+    {
+        return Err(svg_error(
+            path_name,
+            "viewport dimensions must be positive, finite, and no larger than 1e9 mm",
+        ));
+    }
+    let Some((min_x, min_y, vb_w, vb_h)) = view_box else {
+        // Without viewBox, physical SVG user units are CSS px (96/in). For a
+        // bare SVG fragment there is no viewport and paths remain mm-based.
+        let sx = if explicit_viewport { 25.4 / 96.0 } else { 1.0 };
+        let sy = sx;
+        return Ok((width, height, kurbo::Affine::scale_non_uniform(sx, sy)));
+    };
+    let preserve = root
+        .attribute("preserveAspectRatio")
+        .unwrap_or("xMidYMid meet");
+    let tokens: Vec<&str> = preserve.split_ascii_whitespace().collect();
+    let align = tokens.first().copied().unwrap_or("xMidYMid");
+    let mode = tokens.get(1).copied().unwrap_or("meet");
+    if align == "none" {
+        return Ok((
+            width,
+            height,
+            kurbo::Affine::new([
+                width / vb_w,
+                0.0,
+                0.0,
+                height / vb_h,
+                -min_x * width / vb_w,
+                -min_y * height / vb_h,
+            ]),
+        ));
+    }
+    if !matches!(mode, "meet" | "slice") {
+        return Err(svg_error(
+            path_name,
+            "preserveAspectRatio supports only meet, slice, or none",
+        ));
+    }
+    let x_align = if align.contains("xMin") {
+        0.0
+    } else if align.contains("xMax") {
+        1.0
+    } else if align.contains("xMid") {
+        0.5
+    } else {
+        return Err(svg_error(
+            path_name,
+            "unsupported preserveAspectRatio x alignment",
+        ));
+    };
+    let y_align = if align.contains("YMin") {
+        0.0
+    } else if align.contains("YMax") {
+        1.0
+    } else if align.contains("YMid") {
+        0.5
+    } else {
+        return Err(svg_error(
+            path_name,
+            "unsupported preserveAspectRatio y alignment",
+        ));
+    };
+    let sx = width / vb_w;
+    let sy = height / vb_h;
+    let scale = if mode == "meet" {
+        sx.min(sy)
+    } else {
+        sx.max(sy)
+    };
+    let tx = (width - vb_w * scale) * x_align - min_x * scale;
+    let ty = (height - vb_h * scale) * y_align - min_y * scale;
+    Ok((
+        width,
+        height,
+        kurbo::Affine::new([scale, 0.0, 0.0, scale, tx, ty]),
+    ))
+}
+
+fn svg_length_mm(raw: &str) -> Result<f64, String> {
+    let raw = raw.trim();
+    let split = raw
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | 'e' | 'E')))
+        .unwrap_or(raw.len());
+    let value = raw[..split]
+        .parse::<f64>()
+        .map_err(|_| format!("invalid length {raw:?}"))?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!("length {raw:?} must be positive and finite"));
+    }
+    let unit = raw[split..].trim();
+    let scale = match unit {
+        "" | "px" => 25.4 / 96.0,
+        "mm" => 1.0,
+        "cm" => 10.0,
+        "in" => 25.4,
+        "pt" => 25.4 / 72.0,
+        "pc" => 25.4 / 6.0,
+        _ => return Err(format!("unsupported length unit {unit:?}")),
+    };
+    Ok(value * scale)
+}
+
+fn parse_number(raw: &str) -> Option<f64> {
+    let value = raw.trim().parse::<f64>().ok()?;
+    value.is_finite().then_some(value)
+}
+
+fn parse_number_list(raw: &str) -> Option<Vec<f64>> {
+    let mut values = Vec::new();
+    let mut token = String::new();
+    let mut comma_pending = false;
+    let mut saw_any = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_whitespace() {
+            if !token.is_empty() {
+                values.push(parse_number(&token)?);
+                token.clear();
+                saw_any = true;
+            }
+        } else if ch == ',' {
+            if !token.is_empty() {
+                values.push(parse_number(&token)?);
+                token.clear();
+                saw_any = true;
+                comma_pending = true;
+            } else if !comma_pending && saw_any {
+                // Whitespace before a comma is valid; consecutive commas or
+                // a leading comma are not part of SVG's number-list grammar.
+                comma_pending = true;
+            } else {
+                return None;
+            }
+        } else if (ch == '+' || ch == '-')
+            && !token.is_empty()
+            && !token.ends_with('e')
+            && !token.ends_with('E')
+        {
+            values.push(parse_number(&token)?);
+            token.clear();
+            token.push(ch);
+            saw_any = true;
+            comma_pending = false;
+        } else if ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E') {
+            token.push(ch);
+            comma_pending = false;
+        } else {
+            return None;
+        }
+        if values.len() > 200_000 {
+            return None;
+        }
+    }
+    if comma_pending {
+        return None;
+    }
+    if !token.is_empty() {
+        values.push(parse_number(&token)?);
+    }
+    Some(values)
+}
+
+fn parse_transform(raw: &str) -> Result<kurbo::Affine, String> {
+    let mut rest = raw.trim();
+    let mut result = kurbo::Affine::IDENTITY;
+    while !rest.is_empty() {
+        rest = rest.trim_start_matches(|c: char| c.is_ascii_whitespace() || c == ',');
+        if rest.is_empty() {
+            break;
+        }
+        let open = rest
+            .find('(')
+            .ok_or_else(|| "expected '(' after transform name".to_string())?;
+        let name = rest[..open].trim();
+        let close = rest[open + 1..]
+            .find(')')
+            .map(|i| i + open + 1)
+            .ok_or_else(|| "unterminated transform".to_string())?;
+        let values = parse_number_list(&rest[open + 1..close])
+            .ok_or_else(|| "transform has invalid numeric arguments".to_string())?;
+        let local = match (name, values.as_slice()) {
+            ("matrix", [a, b, c, d, e, f]) => kurbo::Affine::new([*a, *b, *c, *d, *e, *f]),
+            ("translate", [x]) => kurbo::Affine::translate((*x, 0.0)),
+            ("translate", [x, y]) => kurbo::Affine::translate((*x, *y)),
+            ("scale", [s]) => kurbo::Affine::scale(*s),
+            ("scale", [x, y]) => kurbo::Affine::scale_non_uniform(*x, *y),
+            ("rotate", [deg]) => kurbo::Affine::rotate(deg.to_radians()),
+            ("rotate", [deg, cx, cy]) => {
+                let to = kurbo::Affine::translate((*cx, *cy));
+                let rot = kurbo::Affine::rotate(deg.to_radians());
+                let from = kurbo::Affine::translate((-*cx, -*cy));
+                compose(compose(to, rot), from)
+            }
+            ("skewX", [deg]) => {
+                kurbo::Affine::new([1.0, 0.0, deg.to_radians().tan(), 1.0, 0.0, 0.0])
+            }
+            ("skewY", [deg]) => {
+                kurbo::Affine::new([1.0, deg.to_radians().tan(), 0.0, 1.0, 0.0, 0.0])
+            }
+            _ => return Err(format!("unsupported or malformed transform {name:?}")),
+        };
+        if !local.as_coeffs().iter().all(|v| v.is_finite()) {
+            return Err("transform contains non-finite values".to_string());
+        }
+        result = compose(result, local);
+        rest = &rest[close + 1..];
+    }
+    Ok(result)
+}
+
+/// Matrix composition `parent(local(point))` for kurbo's [a,b,c,d,e,f]
+/// affine coefficient order.
+fn compose(parent: kurbo::Affine, local: kurbo::Affine) -> kurbo::Affine {
+    let [a, b, c, d, e, f] = parent.as_coeffs();
+    let [g, h, i, j, k, l] = local.as_coeffs();
+    kurbo::Affine::new([
+        a * g + c * h,
+        b * g + d * h,
+        a * i + c * j,
+        b * i + d * j,
+        a * k + c * l + e,
+        b * k + d * l + f,
+    ])
+}
+
+fn transform_path(path: &BezPath, affine: kurbo::Affine) -> BezPath {
+    let mut out = BezPath::new();
+    for elem in path.elements() {
+        match *elem {
+            kurbo::PathEl::MoveTo(p) => out.move_to(affine * p),
+            kurbo::PathEl::LineTo(p) => out.line_to(affine * p),
+            kurbo::PathEl::QuadTo(c, p) => out.quad_to(affine * c, affine * p),
+            kurbo::PathEl::CurveTo(c1, c2, p) => out.curve_to(affine * c1, affine * c2, affine * p),
+            kurbo::PathEl::ClosePath => out.close_path(),
+        }
+    }
+    out
+}
+
+fn validate_import_path(path: &BezPath, path_name: &str) -> Result<(), SvgError> {
+    if path.elements().len() > 1_000_000 {
+        return Err(svg_error(
+            path_name,
+            "a shape exceeds the 1,000,000-segment limit",
+        ));
+    }
+    let valid = |p: kurbo::Point| {
+        p.x.is_finite() && p.y.is_finite() && p.x.abs() <= 1.0e9 && p.y.abs() <= 1.0e9
+    };
+    for element in path.elements() {
+        let safe = match *element {
+            kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => valid(p),
+            kurbo::PathEl::QuadTo(c, p) => valid(c) && valid(p),
+            kurbo::PathEl::CurveTo(c1, c2, p) => valid(c1) && valid(c2) && valid(p),
+            kurbo::PathEl::ClosePath => true,
+        };
+        if !safe {
+            return Err(svg_error(
+                path_name,
+                "geometry coordinates must be finite and within ±1e9 mm",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn svg_error(path_name: &str, message: &str) -> SvgError {
+    SvgError::Import(format!("{path_name}: {message}"))
 }
 
 #[cfg(test)]
@@ -304,8 +991,12 @@ mod tests {
             import("<path d=\"M 0 0 Q\"/>", "bad.svg"),
             Err(SvgError::Import(_))
         ));
+        let transformed = import(
+            "<g transform=\"scale(nope)\"><path d=\"M0 0 L1 0 Z\"/></g>",
+            "tx.svg",
+        );
         assert!(matches!(
-            import("<g transform=\"scale(2)\"><path d=\"M0 0 L1 0 Z\"/></g>", "tx.svg"),
+            transformed,
             Err(SvgError::Import(ref m)) if m.contains("transform")
         ));
     }
@@ -315,5 +1006,157 @@ mod tests {
         let back = import("<path d=\"M 200 250 L 210 250 L 210 260 Z\"/>", "big.svg").unwrap();
         assert!(back.board.width_mm >= 210.0);
         assert!(back.board.height_mm >= 260.0);
+    }
+
+    #[test]
+    fn imports_all_common_basic_shapes() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <rect x="1" y="2" width="10" height="8"/>
+          <circle cx="20" cy="20" r="5"/>
+          <ellipse cx="40" cy="20" rx="8" ry="4"/>
+          <line x1="1" y1="30" x2="20" y2="30"/>
+          <polyline points="1,40 10,45 20,40"/>
+          <polygon points="30,40 40,40 35,50"/>
+          <path d="M50 50 C55 45 60 55 65 50 Z"/>
+        </svg>"#;
+        let doc = import(svg, "shapes.svg").unwrap();
+        assert_eq!(doc.shape_count(), 7);
+        assert!(doc.layers[0].shapes[0].path.elements().len() >= 5);
+        assert!(doc.layers[0].shapes[1].path.elements().len() >= 6);
+    }
+
+    #[test]
+    fn imports_nested_group_transforms_and_inherited_production_style() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <g transform="translate(10,20)" data-kind="engrave">
+            <g scale="2" transform="scale(2)">
+              <rect x="1" y="2" width="3" height="4"/>
+            </g>
+          </g>
+        </svg>"#;
+        let doc = import(svg, "groups.svg").unwrap();
+        assert_eq!(doc.shape_count(), 1);
+        assert_eq!(doc.layers.len(), 2);
+        assert_eq!(doc.layers[1].kind, CutStyle::Engrave);
+        let b = doc.layers[1].shapes[0].bounds().unwrap();
+        assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
+        assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
+        assert!((b.width() - 6.0).abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn viewbox_maps_physical_mm_and_preserves_aspect_ratio() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200mm" height="100mm"
+          viewBox="0 0 100 100" preserveAspectRatio="none">
+          <rect x="10" y="20" width="5" height="4"/>
+        </svg>"#;
+        let doc = import(svg, "viewbox.svg").unwrap();
+        assert_eq!(doc.board.width_mm, 200.0);
+        assert_eq!(doc.board.height_mm, 100.0);
+        let b = doc.layers[0].shapes[0].bounds().unwrap();
+        assert!((b.x0 - 20.0).abs() < 1e-9, "{b:?}");
+        assert!((b.y0 - 20.0).abs() < 1e-9, "{b:?}");
+        assert!((b.width() - 10.0).abs() < 1e-9, "{b:?}");
+        assert!((b.height() - 4.0).abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn imports_hidden_visibility_and_inline_styles() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <g style="display:none"><rect width="10" height="10"/></g>
+          <g style="visibility:hidden" data-kind="engrave">
+            <line style="visibility:visible" x1="1" y1="2" x2="3" y2="4"/>
+            <line x1="5" y1="6" x2="7" y2="8"/>
+          </g>
+        </svg>"#;
+        let doc = import(svg, "style.svg").unwrap();
+        assert_eq!(doc.shape_count(), 1);
+        assert_eq!(doc.layers.len(), 2);
+        assert_eq!(doc.layers[1].shapes.len(), 1);
+    }
+
+    #[test]
+    fn reports_unsupported_drawables_instead_of_dropping_them() {
+        let svg =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><text x="0" y="10">hello</text></svg>"#;
+        assert!(matches!(
+            import(svg, "text.svg"),
+            Err(SvgError::Import(ref message)) if message.contains("<text> is not supported")
+        ));
+    }
+
+    #[test]
+    fn rejects_nonfinite_geometry_and_malformed_number_lists() {
+        assert!(import(r#"<svg viewBox="0 0 NaN 100"/>"#, "nan.svg").is_err());
+        assert!(import(r#"<svg><polygon points="0,0,,1,1"/></svg>"#, "points.svg").is_err());
+        assert!(
+            import(
+                r#"<svg><rect x="1e400" width="10" height="10"/></svg>"#,
+                "huge.svg"
+            )
+            .is_err()
+        );
+        assert!(
+            import(
+                &format!("<svg>{}</svg>", " ".repeat(MAX_SVG_BYTES)),
+                "large.svg"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn parses_transform_lists_and_keeps_physical_px_units() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="96px" height="48px">
+          <g transform="translate(10 0) scale(2)"><line x1="0" y1="0" x2="4" y2="0"/></g>
+        </svg>"#;
+        let doc = import(svg, "px.svg").unwrap();
+        assert!((doc.board.width_mm - 25.4).abs() < 1e-9);
+        assert!((doc.board.height_mm - 12.7).abs() < 1e-9);
+        let b = doc.layers[0].shapes[0].bounds().unwrap();
+        assert!((b.x0 - 10.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
+        assert!((b.width() - 8.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn malformed_xml_and_resource_limits_are_errors_not_panics() {
+        assert!(matches!(
+            import("<svg><g></svg>", "bad-xml.svg"),
+            Err(SvgError::Import(ref e)) if e.contains("invalid XML")
+        ));
+        let deep = format!(
+            "{}<path d=\"M0 0L1 0\"/>{}",
+            "<g>".repeat(MAX_SVG_DEPTH + 2),
+            "</g>".repeat(MAX_SVG_DEPTH + 2)
+        );
+        assert!(matches!(
+            import(&deep, "deep.svg"),
+            Err(SvgError::Import(ref e)) if e.contains("nesting exceeds")
+        ));
+        let nodes = format!("<svg>{}</svg>", "<g/>".repeat(MAX_SVG_NODES + 1));
+        assert!(matches!(
+            import(&nodes, "nodes.svg"),
+            Err(SvgError::Import(ref e)) if e.contains("100,000-node")
+        ));
+    }
+
+    #[test]
+    fn deterministically_mutated_svg_never_panics() {
+        let seed = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><rect x="2" y="3" width="7" height="8"/></svg>"#;
+        let bytes = seed.as_bytes();
+        let mut state = 0x51_6f_9a_u64;
+        for _ in 0..512 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let index = (state as usize) % bytes.len();
+            let mut mutated = bytes.to_vec();
+            mutated[index] = (state >> 32) as u8;
+            if let Ok(text) = std::str::from_utf8(&mutated)
+                && let Ok(doc) = import(text, "mutated.svg")
+            {
+                doc.validate().unwrap();
+            }
+        }
     }
 }

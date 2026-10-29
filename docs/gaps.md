@@ -2,9 +2,12 @@
 
 Every known shortfall, ranked; the standing work list. Pick the first item you can finish.
 
-1. **SVG import**: only bare `<path>` `d` data reads. No groups, transforms, `style`
-   attributes, `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, no unit inference,
-   no `viewBox` scaling. The parser is not fuzzed yet (untrusted input rule).
+1. **SVG import**: common shapes (`path`, basic shapes), groups, standard affine
+   transforms, inherited presentation/inline display and production styles, physical
+   units/viewBox/`preserveAspectRatio`, and a deterministic malformed-input corpus now
+   work. Still no CSS stylesheets/selectors, color model, `<use>`, text, clip paths, masks,
+   or filters; unsupported drawable elements fail explicitly rather than disappear. The
+   parser has bounded XML bytes/nodes/depth/coordinates, but still needs coverage-guided fuzzing.
 2. **Kerf robustness**: offsetting assumes simple contours; a self-intersecting subpath
    or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset; no
    nested-counter detection beyond bbox-in-bbox.

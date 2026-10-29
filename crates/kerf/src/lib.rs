@@ -299,6 +299,41 @@ mod tests {
     }
 
     #[test]
+    fn nested_counter_moves_inward_while_outer_contour_expands() {
+        let mut doc = Document {
+            board: Board {
+                width_mm: 120.0,
+                height_mm: 120.0,
+            },
+            kerf: KerfSettings {
+                width_mm: 0.4,
+                apply_to_exports: true,
+            },
+            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            next_shape_id: 1,
+        };
+        doc.push_shape(0, ccw_path(100.0), CutStyle::Cut).unwrap();
+        let mut counter = kurbo::BezPath::new();
+        counter.move_to(Point::new(30.0, 30.0));
+        counter.line_to(Point::new(70.0, 30.0));
+        counter.line_to(Point::new(70.0, 70.0));
+        counter.line_to(Point::new(30.0, 70.0));
+        counter.close_path();
+        // Both contours are deliberately one shape; they are subpaths, and the
+        // inner one must move into the scrap rather than enlarge the hole.
+        let mut compound = ccw_path(100.0);
+        compound.extend(counter.elements().iter().copied());
+        doc.layers[0].shapes[0].path = compound;
+        let compensated = apply(&doc, 4.0).unwrap();
+        let polylines = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        assert_eq!(polylines.len(), 2);
+        let outer = bounds_of_points(&polylines[0].points).unwrap();
+        let inner = bounds_of_points(&polylines[1].points).unwrap();
+        assert!((outer.width() - 100.4).abs() < 1e-6, "outer: {outer:?}");
+        assert!((inner.width() - 39.6).abs() < 1e-6, "counter: {inner:?}");
+    }
+
+    #[test]
     fn negative_kerf_is_rejected() {
         let mut doc = Document::default();
         doc.kerf.width_mm = -1.0;

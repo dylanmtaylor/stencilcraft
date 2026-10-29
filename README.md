@@ -135,8 +135,8 @@ saves/opens files and shows the **Design/Send** split with a live machine dry-ru
 real-hardware transport is the next step).
 
 **What's missing:**
-- SVG features beyond common paths/shapes/groups/transforms/styles (CSS selectors,
-  `<use>`, text conversion, clipping/masks/filters);
+- SVG features beyond common paths/shapes/groups/transforms/styles (advanced CSS,
+  external/symbol `<use>`, text conversion, clipping/masks/filters);
 - drawing tools (pen, selection, node editing) — StencilCraft starts behind a vector app;
 - tiling edge clipping, bridge generation so counters stay attached, registration marks;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).

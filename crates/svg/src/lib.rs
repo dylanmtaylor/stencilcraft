@@ -118,12 +118,13 @@ const MAX_SVG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SVG_NODES: usize = 100_000;
 const MAX_SVG_DEPTH: usize = 128;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ImportState {
     transform: kurbo::Affine,
     kind: CutStyle,
     display_none: bool,
     visibility_hidden: bool,
+    inherited_style: std::collections::HashMap<String, String>,
 }
 
 impl Default for ImportState {
@@ -133,6 +134,7 @@ impl Default for ImportState {
             kind: CutStyle::Cut,
             display_none: false,
             visibility_hidden: false,
+            inherited_style: std::collections::HashMap::new(),
         }
     }
 }
@@ -143,10 +145,14 @@ impl Default for ImportState {
 /// `<circle>`, `<ellipse>`, `<line>`, `<polyline>`, and `<polygon>`. Nested
 /// groups, transforms (`matrix`, `translate`, `scale`, `rotate`, `skewX/Y`),
 /// and inherited presentation/inline styles (`display`, `visibility`, CSS
-/// `style`, `class`, `data-kind`) are applied. SVG paths are flattened nowhere
+/// `style`, `class`, `data-kind`) are applied. Stylesheets support simple type,
+/// class and ID selectors (including compound, descendant and child selectors)
+/// with specificity-based cascade. SVG paths are flattened nowhere
 /// here: curves remain curves in the document. Each imported shape is assigned
 /// to cut or engrave according to inherited `data-kind`/`data-style` or class.
-/// Stroke/fill colors are not represented by the current document model.
+/// Stroke/fill colors are not represented by the current document model. Embedded
+/// stylesheets support type, class, ID and attribute selectors, descendant/child
+/// combinators, selector lists, and a bounded presentation-property cascade.
 ///
 /// Physical root dimensions accept unitless SVG px, `px`, `mm`, `cm`, `in`,
 /// `pt`, and `pc`; a `viewBox` maps its user coordinates onto that physical
@@ -154,7 +160,7 @@ impl Default for ImportState {
 /// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
 /// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
 /// convention. Local fragment-only `<use>` references can instantiate supported
-/// shapes and groups; external references, symbols, text, CSS selectors/stylesheets,
+/// shapes and groups; external references, symbols, text, advanced CSS selectors,
 /// gradients, clipping, and percentage lengths are not expanded. Unsupported
 /// drawable elements are reported rather than silently lost.
 pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
@@ -185,10 +191,12 @@ pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
             return Err(svg_error(path_name, &format!("duplicate SVG id {id:?}")));
         }
     }
+    let css_rules = parse_stylesheets(root, path_name)?;
     let mut context = ImportContext {
         visited: 0,
         path_name,
         id_index,
+        css_rules,
         reference_stack: Vec::new(),
         doc: &mut doc,
         engrave_layer: None,
@@ -230,6 +238,7 @@ struct ImportContext<'a, 'input, 'doc> {
     visited: usize,
     path_name: &'a str,
     id_index: std::collections::HashMap<String, roxmltree::Node<'a, 'input>>,
+    css_rules: Vec<CssRule>,
     reference_stack: Vec<String>,
     doc: &'doc mut Document,
     engrave_layer: Option<usize>,
@@ -263,7 +272,7 @@ fn import_node<'a, 'input>(
     if matches!(tag, "defs" | "symbol" | "clipPath" | "mask" | "pattern") {
         return Ok(());
     }
-    let mut state = inherited;
+    let mut state = inherited.clone();
     // SVG presentation attributes and inline declarations inherit. `display`
     // is different: a descendant cannot override an ancestor's display:none.
     if node.attribute("display") == Some("none") {
@@ -274,22 +283,27 @@ fn import_node<'a, 'input>(
             .map_err(|e| svg_error(context.path_name, &format!("<{}> transform: {e}", tag)))?;
         state.transform = compose(inherited.transform, local);
     }
-    if let Some(kind) = style_kind(node) {
+    let style = computed_style(node, &state.inherited_style, &context.css_rules);
+    state.inherited_style = style
+        .iter()
+        .filter(|(key, _)| key.as_str() != "display")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if let Some(kind) = style_kind(&style, node) {
         state.kind = kind;
     }
-    let style = style_properties(node);
-    if style.get("display").is_some_and(|v| *v == "none") {
+    if style.get("display").is_some_and(|v| v == "none") {
         state.display_none = true;
     }
     if let Some(visibility) = style.get("visibility") {
-        state.visibility_hidden = *visibility == "hidden" || *visibility == "collapse";
+        state.visibility_hidden = visibility == "hidden" || visibility == "collapse";
     }
     let color_property = style.get("stroke").or_else(|| style.get("fill"));
     if state.kind == CutStyle::Cut && color_property.is_some_and(|v| *v == "none") {
         // A line with fill:none can still be a cut path; stroke:none plus
         // fill:none is empty and can safely be ignored.
-        if style.get("stroke").is_some_and(|v| *v == "none")
-            && style.get("fill").is_some_and(|v| *v == "none")
+        if style.get("stroke").is_some_and(|v| v == "none")
+            && style.get("fill").is_some_and(|v| v == "none")
         {
             state.display_none = true;
         }
@@ -386,7 +400,7 @@ fn import_node<'a, 'input>(
             .map_err(|e| svg_error(context.path_name, &e.to_string()))?;
     }
     for child in node.children().filter(|n| n.is_element()) {
-        import_node(child, state, depth + 1, context)?;
+        import_node(child, state.clone(), depth + 1, context)?;
     }
     Ok(())
 }
@@ -636,38 +650,477 @@ fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> BezPath {
     p
 }
 
-fn style_properties<'a, 'input: 'a>(
-    node: roxmltree::Node<'a, 'input>,
-) -> std::collections::HashMap<&'a str, &'a str> {
-    let mut props = std::collections::HashMap::new();
-    for key in [
-        "display",
-        "visibility",
-        "data-kind",
-        "data-style",
-        "fill",
-        "stroke",
-        "stroke-width",
-    ] {
-        if let Some(value) = node.attribute(key) {
-            props.insert(key, value.trim());
+const MAX_CSS_BYTES: usize = 1024 * 1024;
+const MAX_CSS_RULES: usize = 10_000;
+const MAX_CSS_PROPERTIES: usize = 32;
+const SUPPORTED_STYLE_PROPERTIES: &[&str] = &[
+    "display",
+    "visibility",
+    "data-kind",
+    "data-style",
+    "fill",
+    "stroke",
+    "stroke-width",
+];
+
+type StyleMap = std::collections::HashMap<String, String>;
+type CssPriority = (bool, u32, u32, u32, usize);
+type CascadeWinners = std::collections::HashMap<String, (CssPriority, String)>;
+
+#[derive(Clone)]
+struct CssRule {
+    selectors: Vec<SimpleSelector>,
+    declarations: StyleMap,
+    important: std::collections::HashSet<String>,
+    order: usize,
+}
+
+#[derive(Clone)]
+struct SimpleSelector {
+    compounds: Vec<CompoundSelector>,
+    combinators: Vec<char>,
+    specificity: (u32, u32, u32),
+}
+
+#[derive(Clone)]
+struct CompoundSelector {
+    tag: Option<String>,
+    id: Option<String>,
+    classes: Vec<String>,
+    attributes: Vec<(String, Option<String>)>,
+}
+
+impl CompoundSelector {
+    fn matches(&self, node: roxmltree::Node<'_, '_>) -> bool {
+        if self
+            .tag
+            .as_deref()
+            .is_some_and(|tag| tag != "*" && tag != node.tag_name().name())
+        {
+            return false;
         }
+        if self
+            .id
+            .as_deref()
+            .is_some_and(|id| node.attribute("id") != Some(id))
+        {
+            return false;
+        }
+        let classes: Vec<&str> = node
+            .attribute("class")
+            .unwrap_or("")
+            .split_ascii_whitespace()
+            .collect();
+        if self
+            .classes
+            .iter()
+            .any(|class| !classes.contains(&class.as_str()))
+        {
+            return false;
+        }
+        self.attributes.iter().all(|(name, value)| match value {
+            Some(value) => node.attribute(name.as_str()) == Some(value.as_str()),
+            None => node.attribute(name.as_str()).is_some(),
+        })
     }
-    if let Some(style) = node.attribute("style") {
-        for item in style.split(';') {
-            if let Some((key, value)) = item.split_once(':') {
-                props.insert(key.trim(), value.trim());
+}
+
+impl SimpleSelector {
+    fn matches(&self, node: roxmltree::Node<'_, '_>) -> bool {
+        let Some(last) = self.compounds.last() else {
+            return false;
+        };
+        if !last.matches(node) {
+            return false;
+        }
+        let mut current = node;
+        for index in (0..self.combinators.len()).rev() {
+            let previous = &self.compounds[index];
+            match self.combinators[index] {
+                '>' => {
+                    let Some(parent) = current.parent_element() else {
+                        return false;
+                    };
+                    if !previous.matches(parent) {
+                        return false;
+                    }
+                    current = parent;
+                }
+                ' ' => {
+                    let mut ancestor = current.parent_element();
+                    let mut found = None;
+                    while let Some(candidate) = ancestor {
+                        if previous.matches(candidate) {
+                            found = Some(candidate);
+                            break;
+                        }
+                        ancestor = candidate.parent_element();
+                    }
+                    let Some(parent) = found else {
+                        return false;
+                    };
+                    current = parent;
+                }
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+fn parse_stylesheets(
+    root: roxmltree::Node<'_, '_>,
+    path_name: &str,
+) -> Result<Vec<CssRule>, SvgError> {
+    let mut rules = Vec::new();
+    for node in root
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "style")
+    {
+        if let Some(media) = node.attribute("media")
+            && !matches!(media.trim(), "" | "all" | "screen")
+        {
+            continue;
+        }
+        let stylesheet = node.text().unwrap_or("");
+        if stylesheet.len() > MAX_CSS_BYTES {
+            return Err(svg_error(
+                path_name,
+                "CSS stylesheet exceeds the 1 MiB limit",
+            ));
+        }
+        let stylesheet = strip_css_comments(stylesheet);
+        for raw_rule in stylesheet.split('}') {
+            let Some((raw_selector, raw_declarations)) = raw_rule.split_once('{') else {
+                if !raw_rule.trim().is_empty() {
+                    return Err(svg_error(path_name, "malformed CSS rule"));
+                }
+                continue;
+            };
+            let selector_cleaned = strip_css_comments(raw_selector);
+            let selector_text = selector_cleaned.trim();
+            if selector_text.is_empty() {
+                continue;
+            }
+            let (declarations, important) = parse_declarations(raw_declarations, path_name)?;
+            for selector in split_selector_list(selector_text) {
+                let selector = parse_selector(selector.trim()).ok_or_else(|| {
+                    svg_error(path_name, &format!("unsupported CSS selector {selector:?}"))
+                })?;
+                rules.push(CssRule {
+                    selectors: vec![selector],
+                    declarations: declarations.clone(),
+                    important: important.clone(),
+                    order: rules.len(),
+                });
+                if rules.len() > MAX_CSS_RULES {
+                    return Err(svg_error(path_name, "CSS exceeds the 10,000-rule limit"));
+                }
             }
         }
     }
-    props
+    Ok(rules)
 }
 
-fn style_kind(node: roxmltree::Node<'_, '_>) -> Option<CutStyle> {
-    let props = style_properties(node);
-    let explicit = props.get("data-kind").or_else(|| props.get("data-style"));
+fn strip_css_comments(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find("/*") {
+        output.push_str(&rest[..start]);
+        let Some(end) = rest[start + 2..].find("*/") else {
+            return output;
+        };
+        rest = &rest[start + end + 4..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn split_selector_list(raw: &str) -> Vec<&str> {
+    let mut selectors = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, ch) in raw.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                selectors.push(raw[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    selectors.push(raw[start..].trim());
+    selectors
+}
+
+fn parse_selector(raw: &str) -> Option<SimpleSelector> {
+    let mut compounds = Vec::new();
+    let mut combinators = Vec::new();
+    let mut compound = String::new();
+    let mut bracket_depth = 0usize;
+    let mut pending_space = false;
+    for ch in raw.chars() {
+        if ch == '[' {
+            bracket_depth += 1;
+            compound.push(ch);
+        } else if ch == ']' {
+            bracket_depth = bracket_depth.saturating_sub(1);
+            compound.push(ch);
+        } else if bracket_depth == 0 && ch.is_ascii_whitespace() {
+            if !compound.is_empty() {
+                compounds.push(parse_compound(&compound)?);
+                compound.clear();
+                pending_space = true;
+            }
+        } else if bracket_depth == 0 && ch == '>' {
+            if !compound.is_empty() {
+                compounds.push(parse_compound(&compound)?);
+                compound.clear();
+            } else if compounds.is_empty() || combinators.len() == compounds.len() {
+                return None;
+            }
+            if pending_space {
+                pending_space = false;
+            }
+            combinators.push('>');
+        } else {
+            if pending_space {
+                combinators.push(' ');
+                pending_space = false;
+            }
+            compound.push(ch);
+        }
+    }
+    if !compound.is_empty() {
+        compounds.push(parse_compound(&compound)?);
+    }
+    if compounds.is_empty() || combinators.len() + 1 != compounds.len() {
+        return None;
+    }
+    let specificity = compounds.iter().fold((0, 0, 0), |mut total, part| {
+        total.0 += u32::from(part.id.is_some());
+        total.1 += part.classes.len() as u32 + part.attributes.len() as u32;
+        total.2 += u32::from(part.tag.as_deref().is_some_and(|tag| tag != "*"));
+        total
+    });
+    Some(SimpleSelector {
+        compounds,
+        combinators,
+        specificity,
+    })
+}
+
+fn parse_compound(raw: &str) -> Option<CompoundSelector> {
+    let mut selector = CompoundSelector {
+        tag: None,
+        id: None,
+        classes: Vec::new(),
+        attributes: Vec::new(),
+    };
+    let chars: Vec<char> = raw.chars().collect();
+    let mut index = 0usize;
+    if chars
+        .first()
+        .is_some_and(|ch| *ch == '*' || ch.is_ascii_alphabetic() || *ch == '_')
+    {
+        let start = index;
+        index += 1;
+        while chars
+            .get(index)
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '*'))
+        {
+            index += 1;
+        }
+        selector.tag = Some(chars[start..index].iter().collect());
+    }
+    while index < chars.len() {
+        match chars[index] {
+            '#' | '.' => {
+                let marker = chars[index];
+                index += 1;
+                let start = index;
+                while chars
+                    .get(index)
+                    .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':'))
+                {
+                    index += 1;
+                }
+                if start == index {
+                    return None;
+                }
+                let value: String = chars[start..index].iter().collect();
+                if marker == '#' {
+                    if selector.id.replace(value).is_some() {
+                        return None;
+                    }
+                } else {
+                    selector.classes.push(value);
+                }
+            }
+            '[' => {
+                index += 1;
+                let start = index;
+                while chars.get(index).is_some_and(|ch| *ch != ']') {
+                    index += 1;
+                }
+                if index == chars.len() {
+                    return None;
+                }
+                let content: String = chars[start..index].iter().collect();
+                index += 1;
+                if let Some((name, value)) = content.split_once('=') {
+                    let value = value.trim().trim_matches(['"', '\'']);
+                    selector
+                        .attributes
+                        .push((name.trim().to_string(), Some(value.to_string())));
+                } else {
+                    selector.attributes.push((content.trim().to_string(), None));
+                }
+            }
+            _ => return None,
+        }
+    }
+    (selector.tag.is_some()
+        || selector.id.is_some()
+        || !selector.classes.is_empty()
+        || !selector.attributes.is_empty())
+    .then_some(selector)
+}
+
+fn parse_declarations(
+    raw: &str,
+    path_name: &str,
+) -> Result<(StyleMap, std::collections::HashSet<String>), SvgError> {
+    let mut declarations = StyleMap::new();
+    let mut important = std::collections::HashSet::new();
+    for declaration in strip_css_comments(raw).split(';') {
+        let Some((property, value)) = declaration.split_once(':') else {
+            if !declaration.trim().is_empty() {
+                return Err(svg_error(path_name, "malformed CSS declaration"));
+            }
+            continue;
+        };
+        let property = property.trim().to_ascii_lowercase();
+        if !SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
+            continue;
+        }
+        if declarations.len() >= MAX_CSS_PROPERTIES {
+            return Err(svg_error(path_name, "CSS rule has too many declarations"));
+        }
+        let (value, is_important) = strip_important(value.trim());
+        if is_important {
+            important.insert(property.clone());
+        }
+        declarations.insert(property, value.trim().to_string());
+    }
+    Ok((declarations, important))
+}
+
+fn computed_style(
+    node: roxmltree::Node<'_, '_>,
+    inherited: &StyleMap,
+    rules: &[CssRule],
+) -> StyleMap {
+    let mut result = inherited.clone();
+    result.remove("display");
+    let mut winners = CascadeWinners::new();
+    // SVG presentation attributes participate below every author stylesheet rule.
+    for (property, value) in style_properties(node) {
+        result.insert(property, value);
+    }
+    for rule in rules {
+        for selector in &rule.selectors {
+            if selector.matches(node) {
+                let (ids, classes, tags) = selector.specificity;
+                for (property, value) in &rule.declarations {
+                    let priority = (
+                        rule.important.contains(property),
+                        ids,
+                        classes,
+                        tags,
+                        rule.order,
+                    );
+                    if winners
+                        .get(property)
+                        .is_none_or(|(old_priority, _)| priority >= *old_priority)
+                    {
+                        winners.insert(property.clone(), (priority, value.clone()));
+                    }
+                }
+            }
+        }
+    }
+    let mut important_winners = std::collections::HashSet::new();
+    for (property, (priority, value)) in &winners {
+        result.insert(property.clone(), value.clone());
+        if priority.0 {
+            important_winners.insert(property.clone());
+        }
+    }
+    let mut inline_winners = std::collections::HashMap::<String, (bool, String)>::new();
+    if let Some(inline) = node.attribute("style") {
+        for declaration in inline.split(';') {
+            let Some((property, value)) = declaration.split_once(':') else {
+                continue;
+            };
+            let property = property.trim().to_ascii_lowercase();
+            if !SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
+                continue;
+            }
+            let (value, important) = strip_important(value.trim());
+            if inline_winners
+                .get(&property)
+                .is_none_or(|(old_important, _)| important || !old_important)
+            {
+                inline_winners.insert(property, (important, value.to_string()));
+            }
+        }
+    }
+    for (property, (important, value)) in inline_winners {
+        if important || !important_winners.contains(&property) {
+            result.insert(property, value);
+        }
+    }
+    result
+}
+
+fn strip_important(value: &str) -> (&str, bool) {
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with("!important") {
+        (&trimmed[..trimmed.len() - "!important".len()], true)
+    } else {
+        (trimmed, false)
+    }
+}
+
+fn style_properties(node: roxmltree::Node<'_, '_>) -> StyleMap {
+    let mut properties = StyleMap::new();
+    for key in SUPPORTED_STYLE_PROPERTIES {
+        if let Some(value) = node.attribute(*key) {
+            properties.insert((*key).to_string(), value.trim().to_string());
+        }
+    }
+    if let Some(inline) = node.attribute("style") {
+        for declaration in inline.split(';') {
+            if let Some((property, value)) = declaration.split_once(':') {
+                let property = property.trim().to_ascii_lowercase();
+                if SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
+                    let (value, _) = strip_important(value.trim());
+                    properties.insert(property, value.trim().to_string());
+                }
+            }
+        }
+    }
+    properties
+}
+
+fn style_kind(style: &StyleMap, node: roxmltree::Node<'_, '_>) -> Option<CutStyle> {
+    let explicit = style.get("data-kind").or_else(|| style.get("data-style"));
     if let Some(value) = explicit {
-        match *value {
+        match value.as_str() {
             "cut" => return Some(CutStyle::Cut),
             "engrave" | "score" | "mark" => return Some(CutStyle::Engrave),
             _ => {}
@@ -1197,6 +1650,46 @@ mod tests {
         assert_eq!(doc.shape_count(), 1);
         assert_eq!(doc.layers.len(), 2);
         assert_eq!(doc.layers[1].shapes.len(), 1);
+    }
+
+    #[test]
+    fn applies_css_selector_specificity_cascade_and_inherited_visibility() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <style>
+            /* supported selector subset */
+            path { data-kind: cut; }
+            .mark { data-kind: engrave; visibility: hidden; }
+            g#source > path.mark { visibility: visible; }
+            path.mark[id="first"] { display: none; }
+            path.mark[data-kind="engrave"] { stroke: red; }
+            .mark { data-kind: cut !important; }
+          </style>
+          <g id="source">
+            <path id="first" class="mark" d="M1 1L2 1"/>
+            <path id="second" class="mark" style="data-kind:engrave" d="M3 3L4 3"/>
+          </g>
+        </svg>"##;
+        let doc = import(svg, "css.svg").unwrap();
+        assert_eq!(doc.shape_count(), 1);
+        assert_eq!(doc.layers[0].shapes.len(), 1);
+        assert_eq!(doc.layers[0].shapes[0].bounds().unwrap().x0, 3.0);
+        assert_eq!(doc.layers.len(), 1);
+    }
+
+    #[test]
+    fn rejects_unsupported_css_selectors_and_caps_stylesheet_size() {
+        assert!(
+            import(
+                r##"<svg><style>path:hover { display:none; }</style><path d="M0 0L1 1"/></svg>"##,
+                "pseudo.svg"
+            )
+            .is_err()
+        );
+        let large = format!(
+            "<svg><style>{}</style></svg>",
+            " ".repeat(MAX_CSS_BYTES + 1)
+        );
+        assert!(import(&large, "css-large.svg").is_err());
     }
 
     #[test]

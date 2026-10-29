@@ -51,6 +51,41 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
    family, Bluetooth RFCOMM/BLE, registration marks (print-and-cut), mat-free path
    sorting for knife-pressure relief.
 
+## Silhouette Studio feature TODO
+
+The scope is to track the full feature comparison, including ecosystem-scale work; this
+list is an inventory, not a promise to reproduce proprietary services or assets.
+Completed items should be marked here only when behavior is usable end-to-end.
+
+- [x] Engine commands for moving, rotating and scaling a shape around its center, with
+  finite-geometry validation and undo/redo. UI selection/editing remains.
+- [ ] Add direct selection, box/lasso selection, pen and node editing; continue with
+  welding and path boolean operations.
+- [ ] Add image import and trace-to-path workflow, including clear trace controls and
+  geometry limits.
+- [ ] Add text objects and text-to-path conversion without bundling fonts; define a user
+  font/shaping integration point.
+- [ ] Expand SVG fidelity: advanced CSS/at-rules, external references, clipping, masks,
+  filters, and additional vector formats.
+- [ ] Implement Print & Cut: registration mark layout, printer output, sensor-aware cut
+  alignment/calibration and end-to-end fixtures.
+- [ ] Add production tools: weed lines, nesting, multi-cutter job assignment, batch and
+  repeated-pass workflows.
+- [ ] Expand design formats and project interoperability, including DXF import and a
+  documented strategy for proprietary Studio3 files (do not reverse-engineer protected
+  formats without an appropriate public specification).
+- [ ] Grow machine support: USB bulk, Bluetooth, more model generations, device discovery,
+  live status, registration-mark protocol, and mat-free knife path ordering.
+- [ ] Add cloud/account features: sign-in, library sync, purchased-design management and
+  offline cache; decide on a compatible service and data/rights model before implementation.
+- [ ] Add a design marketplace or catalog only with original or permissively licensed
+  assets, clear ownership/licensing, and a sustainable distribution model.
+- [ ] Add mobile and browser clients with shared editing/sending workflows and cloud sync.
+- [ ] Add optional integrations for external design tools (e.g. Illustrator/CorelDRAW-like
+  interchange or plugins) without coupling the core to proprietary software.
+- [ ] Improve export/production parity: PDF/print sheets, design previews, automatic
+  nesting, registration marks and multi-machine output.
+
 ## Progress log
 
 - 2026-10-29 — M0 scaffold: workspace (11 crates, 2 apps, xtask), document model v1,
@@ -70,6 +105,8 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 - 2026-10-29 — local SVG `<use>` import: fragment-only references to supported
   shapes/groups, including use-site x/y and transforms, inherited production styles,
   duplicate-ID and cycle rejection; malformed/external/unsupported references fail calmly.
+- 2026-10-29 — engine editing baseline: serde-tagged move/rotate/scale commands for
+  individual shapes, center-pivot transforms, finite-coordinate validation and undo/redo.
 - 2026-10-29 — SVG CSS subset: embedded stylesheet rules for type/class/ID/attribute
   selectors, descendant and child combinators, selector lists, source order and
   `!important`; limited to supported production/presentation properties with 1 MiB and

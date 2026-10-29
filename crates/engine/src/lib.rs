@@ -44,6 +44,15 @@ pub enum Command {
     /// Remove a shape by id.
     #[serde(rename = "shape.remove")]
     ShapeRemove { id: u64 },
+    /// Translate a shape by a finite millimetre offset.
+    #[serde(rename = "shape.move")]
+    ShapeMove { id: u64, dx_mm: f64, dy_mm: f64 },
+    /// Rotate a shape counter-clockwise around its centre, in degrees.
+    #[serde(rename = "shape.rotate")]
+    ShapeRotate { id: u64, degrees: f64 },
+    /// Scale a shape around its centre. Factors must be positive and finite.
+    #[serde(rename = "shape.scale")]
+    ShapeScale { id: u64, scale_x: f64, scale_y: f64 },
     /// Add a layer with a name and a production kind.
     #[serde(rename = "layer.add")]
     LayerAdd { name: String, kind: CutStyle },
@@ -60,6 +69,7 @@ pub enum Command {
 pub enum Effect {
     ShapeAdded { id: u64 },
     ShapeRemoved { id: u64 },
+    ShapeTransformed { id: u64 },
     LayerAdded,
     KerfSet { width_mm: f64 },
     DocumentReset,
@@ -83,8 +93,8 @@ impl History {
         }
     }
 
-    fn push(&mut self, doc: &Document) {
-        self.undo.push(doc.clone());
+    fn push_snapshot(&mut self, snapshot: Document) {
+        self.undo.push(snapshot);
         if self.undo.len() > self.limit {
             self.undo.remove(0);
         }
@@ -138,14 +148,15 @@ impl Engine {
     /// Runs a command, recording undo state. All command validation errors are
     /// printable messages; nothing here can panic on bad parameters.
     pub fn run(&mut self, command: Command) -> Result<Effect, EngineError> {
+        let before = self.doc.clone();
         let effect = self.execute(command)?;
+        self.history.push_snapshot(before);
         Ok(effect)
     }
 
     /// Runs a command without touching history (internal use: history is pushed
     /// before the workspace copy is mutated).
     fn execute(&mut self, command: Command) -> Result<Effect, EngineError> {
-        self.history.push(&self.doc);
         match command {
             Command::ShapeAddRect {
                 x,
@@ -181,6 +192,46 @@ impl Engine {
                 Err(EngineError::Invalid(format!(
                     "shape.remove: no shape has id {id}"
                 )))
+            }
+            Command::ShapeMove { id, dx_mm, dy_mm } => {
+                if !(dx_mm.is_finite() && dy_mm.is_finite()) {
+                    return Err(EngineError::Invalid(
+                        "shape.move: offsets must be finite millimetres".to_string(),
+                    ));
+                }
+                let transform = kurbo::Affine::translate((dx_mm, dy_mm));
+                self.transform_shape(id, transform, "shape.move")
+            }
+            Command::ShapeRotate { id, degrees } => {
+                if !degrees.is_finite() {
+                    return Err(EngineError::Invalid(
+                        "shape.rotate: degrees must be finite".to_string(),
+                    ));
+                }
+                let bounds = self.shape_bounds(id, "shape.rotate")?;
+                let center = bounds.center();
+                let angle = degrees.to_radians();
+                let transform = kurbo::Affine::translate((center.x, center.y))
+                    * kurbo::Affine::rotate(angle)
+                    * kurbo::Affine::translate((-center.x, -center.y));
+                self.transform_shape(id, transform, "shape.rotate")
+            }
+            Command::ShapeScale {
+                id,
+                scale_x,
+                scale_y,
+            } => {
+                if !(scale_x.is_finite() && scale_y.is_finite() && scale_x > 0.0 && scale_y > 0.0) {
+                    return Err(EngineError::Invalid(
+                        "shape.scale: scale factors must be positive and finite".to_string(),
+                    ));
+                }
+                let bounds = self.shape_bounds(id, "shape.scale")?;
+                let center = bounds.center();
+                let transform = kurbo::Affine::translate((center.x, center.y))
+                    * kurbo::Affine::scale_non_uniform(scale_x, scale_y)
+                    * kurbo::Affine::translate((-center.x, -center.y));
+                self.transform_shape(id, transform, "shape.scale")
             }
             Command::LayerAdd { name, kind } => {
                 if name.trim().is_empty() {
@@ -230,6 +281,51 @@ impl Engine {
         }
     }
 
+    fn shape_bounds(&self, id: u64, command: &str) -> Result<kurbo::Rect, EngineError> {
+        self.doc
+            .get_shape(id)
+            .and_then(stencilcraft_doc::Shape::bounds)
+            .ok_or_else(|| EngineError::Invalid(format!("{command}: shape {id} has no bounds")))
+    }
+
+    fn transform_shape(
+        &mut self,
+        id: u64,
+        transform: kurbo::Affine,
+        command: &str,
+    ) -> Result<Effect, EngineError> {
+        let shape = self
+            .doc
+            .layers
+            .iter_mut()
+            .flat_map(|layer| layer.shapes.iter_mut())
+            .find(|shape| shape.id == id)
+            .ok_or_else(|| EngineError::Invalid(format!("{command}: no shape has id {id}")))?;
+        let mut path = BezPath::new();
+        for element in shape.path.elements() {
+            match *element {
+                kurbo::PathEl::MoveTo(point) => path.move_to(transform * point),
+                kurbo::PathEl::LineTo(point) => path.line_to(transform * point),
+                kurbo::PathEl::QuadTo(control, point) => {
+                    path.quad_to(transform * control, transform * point)
+                }
+                kurbo::PathEl::CurveTo(control1, control2, point) => path.curve_to(
+                    transform * control1,
+                    transform * control2,
+                    transform * point,
+                ),
+                kurbo::PathEl::ClosePath => path.close_path(),
+            }
+        }
+        if !path.elements().iter().all(path_element_is_finite) {
+            return Err(EngineError::Invalid(format!(
+                "{command}: transformed geometry exceeds finite coordinate range"
+            )));
+        }
+        shape.path = path;
+        Ok(Effect::ShapeTransformed { id })
+    }
+
     fn top_cut_layer(&self) -> usize {
         self.doc
             .layers
@@ -246,6 +342,18 @@ impl Engine {
     /// Redo the last undone command; `false` when there is nothing to redo.
     pub fn redo(&mut self) -> bool {
         self.history.redo(&mut self.doc)
+    }
+}
+
+fn path_element_is_finite(element: &kurbo::PathEl) -> bool {
+    let point_is_finite = |point: kurbo::Point| point.x.is_finite() && point.y.is_finite();
+    match *element {
+        kurbo::PathEl::MoveTo(point) | kurbo::PathEl::LineTo(point) => point_is_finite(point),
+        kurbo::PathEl::QuadTo(control, point) => point_is_finite(control) && point_is_finite(point),
+        kurbo::PathEl::CurveTo(control1, control2, point) => {
+            point_is_finite(control1) && point_is_finite(control2) && point_is_finite(point)
+        }
+        kurbo::PathEl::ClosePath => true,
     }
 }
 
@@ -280,6 +388,97 @@ mod tests {
 
         engine.run(Command::ShapeRemove { id: 1 }).unwrap();
         assert_eq!(engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn move_rotate_scale_preserve_path_geometry_and_undo() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 20.0,
+            })
+            .unwrap();
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 5.0,
+                dy_mm: -3.0,
+            })
+            .unwrap();
+        let moved = engine.doc.get_shape(1).unwrap().bounds().unwrap();
+        assert_eq!(moved, kurbo::Rect::new(5.0, -3.0, 15.0, 17.0));
+
+        engine
+            .run(Command::ShapeRotate {
+                id: 1,
+                degrees: 90.0,
+            })
+            .unwrap();
+        let rotated = engine.doc.get_shape(1).unwrap().bounds().unwrap();
+        assert!((rotated.width() - 20.0).abs() < 1e-9);
+        assert!((rotated.height() - 10.0).abs() < 1e-9);
+        assert!((rotated.center().x - moved.center().x).abs() < 1e-9);
+        assert!((rotated.center().y - moved.center().y).abs() < 1e-9);
+
+        engine
+            .run(Command::ShapeScale {
+                id: 1,
+                scale_x: 2.0,
+                scale_y: 0.5,
+            })
+            .unwrap();
+        let scaled = engine.doc.get_shape(1).unwrap().bounds().unwrap();
+        assert!((scaled.width() - 40.0).abs() < 1e-9);
+        assert!((scaled.height() - 5.0).abs() < 1e-9);
+        assert!((scaled.center().x - rotated.center().x).abs() < 1e-9);
+        assert!((scaled.center().y - rotated.center().y).abs() < 1e-9);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds(), Some(rotated));
+    }
+
+    #[test]
+    fn shape_transforms_reject_invalid_parameters_without_changing_geometry() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            })
+            .unwrap();
+        let original = engine.doc.get_shape(1).unwrap().path.clone();
+        for command in [
+            Command::ShapeMove {
+                id: 1,
+                dx_mm: f64::INFINITY,
+                dy_mm: 0.0,
+            },
+            Command::ShapeRotate {
+                id: 1,
+                degrees: f64::NAN,
+            },
+            Command::ShapeScale {
+                id: 1,
+                scale_x: 0.0,
+                scale_y: 1.0,
+            },
+        ] {
+            assert!(engine.run(command).is_err());
+            assert_eq!(engine.doc.get_shape(1).unwrap().path, original);
+        }
+        assert!(
+            engine
+                .run(Command::ShapeMove {
+                    id: 99,
+                    dx_mm: 1.0,
+                    dy_mm: 1.0,
+                })
+                .is_err()
+        );
     }
 
     #[test]

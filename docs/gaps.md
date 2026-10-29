@@ -22,9 +22,9 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    no first/last pass, no power ramp, no Z/laser mode switch.
 5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
    line segments), no reader.
-6. **Engine**: commands cover add/remove shape, add layer, kerf; no move/rotate/scale, no
-   selection model in the engine, undo stack snapshots whole documents rather than
-   sharing structure.
+6. **Engine**: commands cover add/remove/move/rotate/scale shape, add layer and kerf;
+   no selection model or batch transform command. Undo snapshots whole documents rather
+   than sharing structure.
 7. **UI**: no node editing, no ruler, no zoom-to-fit keyboard shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.
 8. **Agent surface**: control methods do not cover the whole engine command set;

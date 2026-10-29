@@ -2,8 +2,8 @@
 //!
 //! Export: one `<g>` per layer with `data-kind` recording cut/engrave; the viewBox
 //! is millimetres, so 1 SVG user unit = 1 mm and the sheet prints true to size.
-//! Import: minimal — bare `<path d="…">` elements only (no groups, transforms,
-//! styles; see `docs/gaps.md` 1). kurbo's own SVG path grammar handles `d`.
+//! Import supports common SVG shapes, groups, transforms, production styles, and
+//! local `<use>` references; see `docs/gaps.md` for remaining gaps.
 
 use std::fmt::Write as _;
 
@@ -153,9 +153,10 @@ impl Default for ImportState {
 /// viewport, following `preserveAspectRatio`. Without physical dimensions,
 /// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
 /// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
-/// convention. Text, `<use>`, CSS selectors/stylesheets, gradients, clipping,
-/// and percentage lengths are not expanded; unsupported drawable elements
-/// are reported rather than silently lost.
+/// convention. Local fragment-only `<use>` references can instantiate supported
+/// shapes and groups; external references, symbols, text, CSS selectors/stylesheets,
+/// gradients, clipping, and percentage lengths are not expanded. Unsupported
+/// drawable elements are reported rather than silently lost.
 pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
     if svg.len() > MAX_SVG_BYTES {
         return Err(svg_error(path_name, "SVG exceeds the 16 MiB import limit"));
@@ -168,21 +169,35 @@ pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
     let mut doc = Document::default();
     doc.board.width_mm = width_mm;
     doc.board.height_mm = height_mm;
-    let mut engrave_layer: Option<usize> = None;
+    let mut id_index = std::collections::HashMap::new();
+    let mut xml_node_count = 0usize;
+    for node in root.descendants() {
+        xml_node_count += 1;
+        if xml_node_count > MAX_SVG_NODES {
+            return Err(svg_error(
+                path_name,
+                "SVG exceeds the 100,000-node import limit",
+            ));
+        }
+        if let Some(id) = node.attribute("id")
+            && id_index.insert(id.to_string(), node).is_some()
+        {
+            return Err(svg_error(path_name, &format!("duplicate SVG id {id:?}")));
+        }
+    }
+    let mut context = ImportContext {
+        visited: 0,
+        path_name,
+        id_index,
+        reference_stack: Vec::new(),
+        doc: &mut doc,
+        engrave_layer: None,
+    };
     let base = ImportState {
         transform: viewport,
         ..ImportState::default()
     };
-    let mut visited = 0usize;
-    import_node(
-        root,
-        base,
-        0,
-        &mut visited,
-        path_name,
-        &mut doc,
-        &mut engrave_layer,
-    )?;
+    import_node(root, base, 0, &mut context)?;
 
     // SVG art may legitimately extend beyond its nominal viewport; do not clip
     // cut geometry silently. Normalize negative coordinates onto the sheet.
@@ -211,30 +226,40 @@ pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
     Ok(doc)
 }
 
-fn import_node(
-    node: roxmltree::Node<'_, '_>,
+struct ImportContext<'a, 'input, 'doc> {
+    visited: usize,
+    path_name: &'a str,
+    id_index: std::collections::HashMap<String, roxmltree::Node<'a, 'input>>,
+    reference_stack: Vec<String>,
+    doc: &'doc mut Document,
+    engrave_layer: Option<usize>,
+}
+
+fn import_node<'a, 'input>(
+    node: roxmltree::Node<'a, 'input>,
     inherited: ImportState,
     depth: usize,
-    visited: &mut usize,
-    path_name: &str,
-    doc: &mut Document,
-    engrave_layer: &mut Option<usize>,
+    context: &mut ImportContext<'a, 'input, '_>,
 ) -> Result<(), SvgError> {
-    *visited = visited
+    context.visited = context
+        .visited
         .checked_add(1)
-        .ok_or_else(|| svg_error(path_name, "SVG node counter overflow"))?;
-    if *visited > MAX_SVG_NODES {
+        .ok_or_else(|| svg_error(context.path_name, "SVG node counter overflow"))?;
+    if context.visited > MAX_SVG_NODES {
         return Err(svg_error(
-            path_name,
+            context.path_name,
             "SVG exceeds the 100,000-node import limit",
         ));
     }
     if depth > MAX_SVG_DEPTH {
-        return Err(svg_error(path_name, "SVG nesting exceeds 128 levels"));
+        return Err(svg_error(
+            context.path_name,
+            "SVG nesting exceeds 128 levels",
+        ));
     }
     let tag = node.tag_name().name();
     // Definitions are not drawable content unless instantiated via `<use>`;
-    // `<use>` expansion is deliberately unsupported, so never import defs' children.
+    // references resolve directly into supported targets inside these containers.
     if matches!(tag, "defs" | "symbol" | "clipPath" | "mask" | "pattern") {
         return Ok(());
     }
@@ -246,7 +271,7 @@ fn import_node(
     }
     if let Some(transform) = node.attribute("transform") {
         let local = parse_transform(transform)
-            .map_err(|e| svg_error(path_name, &format!("<{}> transform: {e}", tag)))?;
+            .map_err(|e| svg_error(context.path_name, &format!("<{}> transform: {e}", tag)))?;
         state.transform = compose(inherited.transform, local);
     }
     if let Some(kind) = style_kind(node) {
@@ -269,37 +294,99 @@ fn import_node(
             state.display_none = true;
         }
     }
+    if tag == "use" {
+        if !state.display_none {
+            let href = node
+                .attribute("href")
+                .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")))
+                .ok_or_else(|| svg_error(context.path_name, "<use> has no href reference"))?;
+            let id = href
+                .strip_prefix('#')
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    svg_error(
+                        context.path_name,
+                        "<use> supports only local fragment references",
+                    )
+                })?;
+            if context.reference_stack.iter().any(|active| active == id) {
+                return Err(svg_error(
+                    context.path_name,
+                    &format!("cyclic <use> reference to #{id}"),
+                ));
+            }
+            let target = context.id_index.get(id).copied().ok_or_else(|| {
+                svg_error(
+                    context.path_name,
+                    &format!("<use> references missing id #{id}"),
+                )
+            })?;
+            if !matches!(
+                target.tag_name().name(),
+                "g" | "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
+            ) {
+                return Err(svg_error(
+                    context.path_name,
+                    &format!(
+                        "<use> reference #{id} targets unsupported <{}>",
+                        target.tag_name().name()
+                    ),
+                ));
+            }
+            let x = match node.attribute("x") {
+                Some(value) => parse_number(value).ok_or_else(|| {
+                    svg_error(context.path_name, "<use> has invalid x coordinate")
+                })?,
+                None => 0.0,
+            };
+            let y = match node.attribute("y") {
+                Some(value) => parse_number(value).ok_or_else(|| {
+                    svg_error(context.path_name, "<use> has invalid y coordinate")
+                })?,
+                None => 0.0,
+            };
+            if x.abs() > 1.0e9 || y.abs() > 1.0e9 {
+                return Err(svg_error(
+                    context.path_name,
+                    "<use> coordinates exceed ±1e9",
+                ));
+            }
+            state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
+            context.reference_stack.push(id.to_string());
+            let result = import_node(target, state, depth + 1, context);
+            context.reference_stack.pop();
+            return result;
+        }
+        return Ok(());
+    }
     if !state.display_none
         && !state.visibility_hidden
-        && let Some(path) = geometry_for(node, path_name)?
+        && let Some(path) = geometry_for(node, context.path_name)?
     {
         let transformed = transform_path(&path, state.transform);
-        validate_import_path(&transformed, path_name)?;
+        validate_import_path(&transformed, context.path_name)?;
         let index = match state.kind {
             CutStyle::Cut => 0,
-            CutStyle::Engrave => match *engrave_layer {
+            CutStyle::Engrave => match context.engrave_layer {
                 Some(i) => i,
                 None => {
-                    let i = doc.layers.len();
-                    doc.layers.push(Layer::new("engrave", CutStyle::Engrave));
-                    *engrave_layer = Some(i);
+                    let i = context.doc.layers.len();
+                    context
+                        .doc
+                        .layers
+                        .push(Layer::new("engrave", CutStyle::Engrave));
+                    context.engrave_layer = Some(i);
                     i
                 }
             },
         };
-        doc.push_shape(index, transformed, state.kind)
-            .map_err(|e| svg_error(path_name, &e.to_string()))?;
+        context
+            .doc
+            .push_shape(index, transformed, state.kind)
+            .map_err(|e| svg_error(context.path_name, &e.to_string()))?;
     }
     for child in node.children().filter(|n| n.is_element()) {
-        import_node(
-            child,
-            state,
-            depth + 1,
-            visited,
-            path_name,
-            doc,
-            engrave_layer,
-        )?;
+        import_node(child, state, depth + 1, context)?;
     }
     Ok(())
 }
@@ -385,7 +472,7 @@ fn geometry_for(
                 .ok_or_else(|| svg_error(path_name, &format!("<{tag}> has no points attribute")))?;
             points_path(points, tag == "polygon", path_name)?
         }
-        "text" | "tspan" | "image" | "use" | "foreignObject" => {
+        "text" | "tspan" | "image" | "foreignObject" => {
             return Err(svg_error(
                 path_name,
                 &format!("<{tag}> is not supported yet"),
@@ -1042,6 +1129,43 @@ mod tests {
         assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 6.0).abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn imports_local_use_with_x_y_transform_and_inherited_style() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+          <defs>
+            <g id="shape" data-kind="engrave" transform="scale(2)">
+              <rect x="1" y="2" width="3" height="4"/>
+            </g>
+          </defs>
+          <use href="#shape" x="10" y="20" transform="translate(5,0)"/>
+          <use xlink:href="#shape" x="30" y="5"
+            xmlns:xlink="http://www.w3.org/1999/xlink"/>
+        </svg>"##;
+        let doc = import(svg, "use.svg").unwrap();
+        assert_eq!(doc.shape_count(), 2);
+        assert_eq!(doc.layers[1].shapes.len(), 2);
+        let first = doc.layers[1].shapes[0].bounds().unwrap();
+        assert!((first.x0 - 17.0).abs() < 1e-9, "{first:?}");
+        assert!((first.y0 - 24.0).abs() < 1e-9, "{first:?}");
+        assert!((first.width() - 6.0).abs() < 1e-9, "{first:?}");
+        let second = doc.layers[1].shapes[1].bounds().unwrap();
+        assert!((second.x0 - 32.0).abs() < 1e-9, "{second:?}");
+        assert!((second.y0 - 9.0).abs() < 1e-9, "{second:?}");
+    }
+
+    #[test]
+    fn local_use_cycles_missing_and_external_references_fail_calmly() {
+        for svg in [
+            r##"<svg><defs><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g></defs><use href="#a"/></svg>"##,
+            r##"<svg><use href="#missing"/></svg>"##,
+            r#"<svg><use href="other.svg#shape"/></svg>"#,
+            r##"<svg><defs><text id="label">no</text></defs><use href="#label"/></svg>"##,
+            r##"<svg><rect id="same"/><circle id="same"/></svg>"##,
+        ] {
+            assert!(import(svg, "use-error.svg").is_err(), "{svg}");
+        }
     }
 
     #[test]

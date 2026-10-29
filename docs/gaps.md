@@ -4,10 +4,12 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 
 1. **SVG import**: common shapes (`path`, basic shapes), groups, standard affine
    transforms, inherited presentation/inline display and production styles, physical
-   units/viewBox/`preserveAspectRatio`, and a deterministic malformed-input corpus now
-   work. Still no CSS stylesheets/selectors, color model, `<use>`, text, clip paths, masks,
-   or filters; unsupported drawable elements fail explicitly rather than disappear. The
-   parser has bounded XML bytes/nodes/depth/coordinates, but still needs coverage-guided fuzzing.
+   units/viewBox/`preserveAspectRatio`, local `<use>` of supported shapes/groups, and a
+   deterministic malformed-input corpus now work. Still no CSS stylesheets/selectors,
+   color model, external `<use>`, symbol instancing, text, clip paths, masks, or filters;
+   unsupported drawable elements fail explicitly rather than disappear. The parser has
+   bounded XML bytes/nodes/depth/coordinates and rejects duplicate IDs/reference cycles,
+   but still needs coverage-guided fuzzing.
 2. **Kerf robustness**: offsetting assumes simple contours; a self-intersecting subpath
    or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset; no
    nested-counter detection beyond bbox-in-bbox.

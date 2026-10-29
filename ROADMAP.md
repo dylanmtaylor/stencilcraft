@@ -37,8 +37,9 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 
 ## What's next (ranked)
 
-1. SVG import completeness (M1): CSS selectors/stylesheets, `<use>`, text conversion,
-   clip paths/masks and filters; run coverage-guided fuzzing on the bounded XML parser.
+1. SVG import completeness (M1): CSS selectors/stylesheets, external `<use>`/symbol
+   instancing, text conversion, clip paths/masks and filters; run coverage-guided fuzzing
+   on the bounded XML parser.
 2. Property tests: kerf invariants (area monotonic in kerf width on convex shapes),
    tiling coverage (every point of the board interior lies within `overlap/2` of a tile
    cut path), format fuzz.
@@ -66,6 +67,9 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
   elements fail closed; 16 MiB/100k node/128 depth/±1e9 coordinate limits. Added CLI
   `import-svg --in ... --out ...`, native SVG export→import→export e2e, 12 SVG tests;
   `cargo xtask ci` green.
+- 2026-10-29 — local SVG `<use>` import: fragment-only references to supported
+  shapes/groups, including use-site x/y and transforms, inherited production styles,
+  duplicate-ID and cycle rejection; malformed/external/unsupported references fail calmly.
 - 2026-10-29 — parity pass with VectorCraft conventions: original app icon
   (`assets/app-icon/stencilcraft.svg`, Crafting Apps tile template) with ASSETS/NOTICE
   attribution; README restyled to the ArtCraft README structure with PNG previews

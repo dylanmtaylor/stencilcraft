@@ -18,11 +18,21 @@ paper object with heavy ink outlines on a full-bleed rounded square (`rx = 112` 
 
 **Provenance:** original work by StencilCraft contributors, licensed
 MIT OR Apache-2.0 as part of the project. Listed in [`../../ASSETS.md`](../../ASSETS.md).
-This file is the only form that exists; raster renders are derived from it when
-packaging needs them:
+`stencilcraft.svg` is the canonical artwork; every other file here is rendered from it.
 
-```sh
-rsvg-convert -w 256 -h 256 stencilcraft.svg > stencilcraft-256.png
-rsvg-convert -w 1024 -h 1024 stencilcraft.svg > stencilcraft-1024.png
-# macOS .icns / Windows .ico are built from the PNGs at release time
-```
+## Files
+
+| File | What |
+|---|---|
+| `stencilcraft.svg` | master vector; also the hicolor scalable icon |
+| `stencilcraft-1024.png` | full tile, 1024 px (docs, store listings) |
+| `stencilcraft-macos-512.png` | tile with Apple's transparent margin (tile = 824/1024 of the canvas), 512 px |
+| `stencilcraft.icns` | macOS icon set, on Apple's grid |
+| `stencilcraft.ico` | Windows icon, 16 to 256 px |
+| `hicolor/<size>/apps/ai.storyteller.stencilcraft.png` | Linux theme icons, 16 to 512 px |
+| `hicolor/scalable/apps/ai.storyteller.stencilcraft.svg` | Linux scalable icon |
+
+## Regenerate
+
+Edit `stencilcraft.svg`, then run `packaging/icons.sh` (needs `rsvg-convert` and python3 with
+Pillow).

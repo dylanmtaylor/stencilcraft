@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/app-icon/stencilcraft.svg" width="128" height="128" alt="StencilCraft icon: stacked stencil sheets crossed by a dashed cut path">
+  <img src="assets/app-icon/stencilcraft.svg" width="128" height="128" alt="StencilCraft icon: a paper stencil with a bridged ring cut-out and a craft knife">
 </p>
 
 <h1 align="center">StencilCraft</h1>

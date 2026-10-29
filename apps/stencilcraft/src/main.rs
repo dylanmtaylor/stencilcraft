@@ -148,6 +148,9 @@ struct StencilApp {
     tab: PanelTab,
     /// The cutting mat shown under the sheet and used for Send's encoded job.
     mat: stencilcraft_machine::Mat,
+    selected_shape: Option<u64>,
+    canvas_drag_shape: Option<u64>,
+    last_drag_delta: egui::Vec2,
     send: SendTab,
 }
 
@@ -214,6 +217,9 @@ impl StencilApp {
             open_path,
             tab: PanelTab::Design,
             mat: stencilcraft_machine::Mat::CameoPro24x24,
+            selected_shape: None,
+            canvas_drag_shape: None,
+            last_drag_delta: egui::Vec2::ZERO,
             send: SendTab::default(),
         }
     }
@@ -389,8 +395,52 @@ impl StencilApp {
             ui.checkbox(&mut self.kerf_preview, "Kerf preview");
             ui.separator();
             ui.label("Shapes");
-            for (_, shape) in self.engine.doc.shapes() {
-                ui.label(format!("#{} ({:?})", shape.id, shape.style));
+            let shape_rows: Vec<(u64, String)> = self
+                .engine
+                .doc
+                .shapes()
+                .map(|(_, shape)| (shape.id, format!("#{} ({:?})", shape.id, shape.style)))
+                .collect();
+            for (id, label) in shape_rows {
+                if ui
+                    .selectable_label(self.selected_shape == Some(id), label)
+                    .clicked()
+                {
+                    self.selected_shape = Some(id);
+                }
+            }
+            if let Some(id) = self.selected_shape {
+                if self.engine.doc.get_shape(id).is_some() {
+                    ui.separator();
+                    ui.label(format!("Selected shape #{id}"));
+                    ui.horizontal(|ui| {
+                        if ui.button("Rotate −15°").clicked() {
+                            self.run_command(Command::ShapeRotate { id, degrees: -15.0 });
+                        }
+                        if ui.button("Rotate +15°").clicked() {
+                            self.run_command(Command::ShapeRotate { id, degrees: 15.0 });
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        if ui.button("Scale −10%").clicked() {
+                            self.run_command(Command::ShapeScale {
+                                id,
+                                scale_x: 0.9,
+                                scale_y: 0.9,
+                            });
+                        }
+                        if ui.button("Scale +10%").clicked() {
+                            self.run_command(Command::ShapeScale {
+                                id,
+                                scale_x: 1.1,
+                                scale_y: 1.1,
+                            });
+                        }
+                    });
+                    ui.small("Drag a shape on the canvas to move it.");
+                } else {
+                    self.selected_shape = None;
+                }
             }
         });
     }
@@ -515,7 +565,47 @@ impl StencilApp {
                 &view,
                 Some(&backdrop),
                 kerf_preview,
+                self.selected_shape,
             );
+
+            if response.drag_started() {
+                self.canvas_drag_shape = response.interact_pointer_pos().and_then(|pointer| {
+                    stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0)
+                });
+                if self.canvas_drag_shape.is_some() {
+                    self.selected_shape = self.canvas_drag_shape;
+                } else {
+                    self.selected_shape = None;
+                }
+                self.last_drag_delta = egui::Vec2::ZERO;
+            } else if response.clicked()
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                self.selected_shape =
+                    stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
+            }
+
+            if response.dragged() {
+                let total_delta = response.drag_delta();
+                let delta = total_delta - self.last_drag_delta;
+                self.last_drag_delta = total_delta;
+                if delta != egui::Vec2::ZERO {
+                    if let Some(id) = self.canvas_drag_shape {
+                        self.run_command(Command::ShapeMove {
+                            id,
+                            dx_mm: f64::from(delta.x / self.view.zoom),
+                            dy_mm: f64::from(delta.y / self.view.zoom),
+                        });
+                    } else {
+                        self.view.pan_mm.x -= delta.x / self.view.zoom;
+                        self.view.pan_mm.y -= delta.y / self.view.zoom;
+                    }
+                }
+            }
+            if response.drag_stopped() {
+                self.canvas_drag_shape = None;
+                self.last_drag_delta = egui::Vec2::ZERO;
+            }
 
             // Zoom: scroll wheel around the pointer.
             if response.hovered() {
@@ -524,13 +614,6 @@ impl StencilApp {
                     let pointer = response.interact_pointer_pos().unwrap_or(clip.center());
                     self.view.zoom_at(1.0 + scroll / 600.0, pointer);
                 }
-            }
-
-            // Pan: drag.
-            let delta = response.drag_delta();
-            if delta != egui::Vec2::ZERO {
-                self.view.pan_mm.x -= delta.x / self.view.zoom;
-                self.view.pan_mm.y -= delta.y / self.view.zoom;
             }
         });
     }

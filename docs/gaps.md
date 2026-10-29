@@ -25,7 +25,9 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 6. **Engine**: commands cover add/remove/move/rotate/scale shape, add layer and kerf;
    no selection model or batch transform command. Undo snapshots whole documents rather
    than sharing structure.
-7. **UI**: no node editing, no ruler, no zoom-to-fit keyboard shortcuts, kerf preview
+7. **UI**: basic visible-outline shape selection, canvas drag-to-move and selected-shape
+   rotate/scale controls now work. Remaining: box/lasso selection, node editing, a ruler,
+   zoom-to-fit keyboard shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.
 8. **Agent surface**: control methods do not cover the whole engine command set;
    no MCP tool schema hydration yet; no fuzz corpus for the JSON channel. (The

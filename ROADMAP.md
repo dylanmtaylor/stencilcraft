@@ -59,8 +59,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 - [x] Engine commands for moving, rotating and scaling a shape around its center, with
   finite-geometry validation and undo/redo. UI selection/editing remains.
-- [ ] Add direct selection, box/lasso selection, pen and node editing; continue with
-  welding and path boolean operations.
+- [ ] Add box/lasso selection, pen and node editing; continue with welding and path
+  boolean operations. The desktop canvas can now select a visible shape by clicking its
+  outline, drag it to move, and rotate/scale it from the Design panel.
 - [ ] Add image import and trace-to-path workflow, including clear trace controls and
   geometry limits.
 - [ ] Add text objects and text-to-path conversion without bundling fonts; define a user

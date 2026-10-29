@@ -199,6 +199,7 @@ pub fn paint_document(
     view: &View,
     backdrop: Option<&MatBackdrop>,
     kerf_preview: bool,
+    selected_shape: Option<u64>,
 ) {
     // Canvas backing, then (optionally) the cutting mat, then the design
     // sheet. Overflow beyond the mat simply stays canvas — a real-world
@@ -246,7 +247,11 @@ pub fn paint_document(
             continue;
         }
         for shape in &layer.shapes {
-            let (color, width) = shape_visual(shape, view, kerf_preview);
+            let (mut color, mut width) = shape_visual(shape, view, kerf_preview);
+            if selected_shape == Some(shape.id) {
+                color = Tokens::ACCENT;
+                width = width.max(2.5);
+            }
             for pl in stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
@@ -265,6 +270,77 @@ pub fn paint_document(
             }
         }
     }
+
+    if let Some(id) = selected_shape
+        && let Some(shape) = doc.get_shape(id)
+        && let Some(bounds) = shape.bounds()
+    {
+        let bounds = egui::Rect::from_two_pos(
+            view.world_to_screen(stencilcraft_geom::Point::new(bounds.x0, bounds.y0)),
+            view.world_to_screen(stencilcraft_geom::Point::new(bounds.x1, bounds.y1)),
+        );
+        painter.rect_stroke(
+            bounds.expand(3.0),
+            0.0,
+            egui::Stroke::new(1.0, Tokens::ACCENT),
+            egui::StrokeKind::Outside,
+        );
+    }
+}
+
+/// Find the topmost visible shape whose flattened outline is within the screen-space
+/// tolerance of `pointer`. Returns its stable document id.
+pub fn hit_test_shape(
+    doc: &stencilcraft_doc::Document,
+    view: &View,
+    pointer: egui::Pos2,
+    tolerance_px: f32,
+) -> Option<u64> {
+    if !pointer.x.is_finite() || !pointer.y.is_finite() || !tolerance_px.is_finite() {
+        return None;
+    }
+    let tolerance_sq = tolerance_px.max(0.0).powi(2);
+    for layer in doc.layers.iter().rev().filter(|layer| layer.visible) {
+        for shape in layer.shapes.iter().rev() {
+            let polylines = stencilcraft_geom::path_to_polylines(
+                &shape.path,
+                stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
+            );
+            if polylines.iter().any(|polyline| {
+                let mut segments = polyline.points.windows(2).map(|pair| (pair[0], pair[1]));
+                let hit_open = segments.any(|(start, end)| {
+                    let start = view.world_to_screen(start);
+                    let end = view.world_to_screen(end);
+                    distance_to_segment_squared(pointer, start, end) <= tolerance_sq
+                });
+                let hit_close = polyline.closed
+                    && polyline
+                        .points
+                        .first()
+                        .zip(polyline.points.last())
+                        .is_some_and(|(first, last)| {
+                            let first = view.world_to_screen(*first);
+                            let last = view.world_to_screen(*last);
+                            distance_to_segment_squared(pointer, last, first) <= tolerance_sq
+                        });
+                hit_open || hit_close
+            }) {
+                return Some(shape.id);
+            }
+        }
+    }
+    None
+}
+
+fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::Pos2) -> f32 {
+    let segment = end - start;
+    let length_sq = segment.length_sq();
+    let fraction = if length_sq <= f32::EPSILON {
+        0.0
+    } else {
+        ((point - start).dot(segment) / length_sq).clamp(0.0, 1.0)
+    };
+    point.distance_sq(start + fraction * segment)
 }
 
 #[cfg(test)]
@@ -326,6 +402,24 @@ mod tests {
         assert_eq!(inch_col, Tokens::RULER);
         assert_eq!(half_len, 4.0);
         assert_ne!(inch_col, half_col);
+    }
+
+    #[test]
+    fn hit_test_selects_topmost_visible_outline_in_screen_space() {
+        let mut doc = simple_square();
+        let first = doc.layers[0].shapes[0].clone();
+        doc.push_shape(0, first.path, first.style).unwrap();
+        let view = View {
+            zoom: 2.0,
+            pan_mm: egui::Vec2::ZERO,
+        };
+        let edge = view.world_to_screen(stencilcraft_geom::Point::new(10.0, 35.0));
+        let interior = view.world_to_screen(stencilcraft_geom::Point::new(35.0, 35.0));
+        assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), Some(2));
+        assert_eq!(hit_test_shape(&doc, &view, interior, 3.0), None);
+        assert_eq!(hit_test_shape(&doc, &view, edge, f32::NAN), None);
+        doc.layers[0].visible = false;
+        assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), None);
     }
 
     #[test]

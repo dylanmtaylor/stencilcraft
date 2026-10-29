@@ -117,6 +117,7 @@ fn path_to_svg_d(path: &BezPath) -> Result<String, SvgError> {
 const MAX_SVG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SVG_NODES: usize = 100_000;
 const MAX_SVG_DEPTH: usize = 128;
+const MAX_SVG_INSTANCES: usize = 10_000;
 
 #[derive(Clone)]
 struct ImportState {
@@ -160,9 +161,9 @@ impl Default for ImportState {
 /// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
 /// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
 /// convention. Local fragment-only `<use>` references can instantiate supported
-/// shapes and groups; external references, symbols, text, advanced CSS selectors,
-/// gradients, clipping, and percentage lengths are not expanded. Unsupported
-/// drawable elements are reported rather than silently lost.
+/// shapes, groups and `<symbol>` templates with viewBox sizing; external references,
+/// text, advanced CSS selectors, gradients, clipping, and percentage lengths are not
+/// expanded. Unsupported drawable elements are reported rather than silently lost.
 pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
     if svg.len() > MAX_SVG_BYTES {
         return Err(svg_error(path_name, "SVG exceeds the 16 MiB import limit"));
@@ -198,6 +199,7 @@ pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
         id_index,
         css_rules,
         reference_stack: Vec::new(),
+        instance_count: 0,
         doc: &mut doc,
         engrave_layer: None,
     };
@@ -240,6 +242,7 @@ struct ImportContext<'a, 'input, 'doc> {
     id_index: std::collections::HashMap<String, roxmltree::Node<'a, 'input>>,
     css_rules: Vec<CssRule>,
     reference_stack: Vec<String>,
+    instance_count: usize,
     doc: &'doc mut Document,
     engrave_layer: Option<usize>,
 }
@@ -337,7 +340,14 @@ fn import_node<'a, 'input>(
             })?;
             if !matches!(
                 target.tag_name().name(),
-                "g" | "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
+                "g" | "symbol"
+                    | "path"
+                    | "rect"
+                    | "circle"
+                    | "ellipse"
+                    | "line"
+                    | "polyline"
+                    | "polygon"
             ) {
                 return Err(svg_error(
                     context.path_name,
@@ -347,23 +357,27 @@ fn import_node<'a, 'input>(
                     ),
                 ));
             }
-            let x = match node.attribute("x") {
-                Some(value) => parse_number(value).ok_or_else(|| {
-                    svg_error(context.path_name, "<use> has invalid x coordinate")
-                })?,
-                None => 0.0,
-            };
-            let y = match node.attribute("y") {
-                Some(value) => parse_number(value).ok_or_else(|| {
-                    svg_error(context.path_name, "<use> has invalid y coordinate")
-                })?,
-                None => 0.0,
-            };
-            if x.abs() > 1.0e9 || y.abs() > 1.0e9 {
+            let x = use_viewport_length(node, "x", 0.0, context.path_name)?;
+            let y = use_viewport_length(node, "y", 0.0, context.path_name)?;
+            if x > 1.0e9 || y > 1.0e9 {
                 return Err(svg_error(
                     context.path_name,
                     "<use> coordinates exceed ±1e9",
                 ));
+            }
+            context.instance_count = context
+                .instance_count
+                .checked_add(1)
+                .ok_or_else(|| svg_error(context.path_name, "SVG use-instance counter overflow"))?;
+            if context.instance_count > MAX_SVG_INSTANCES {
+                return Err(svg_error(
+                    context.path_name,
+                    "SVG exceeds the 10,000 use-instance limit",
+                ));
+            }
+            if target.tag_name().name() == "symbol" {
+                import_symbol(target, node, state, x, y, depth + 1, context)?;
+                return Ok(());
             }
             state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
             context.reference_stack.push(id.to_string());
@@ -400,6 +414,141 @@ fn import_node<'a, 'input>(
             .map_err(|e| svg_error(context.path_name, &e.to_string()))?;
     }
     for child in node.children().filter(|n| n.is_element()) {
+        import_node(child, state.clone(), depth + 1, context)?;
+    }
+    Ok(())
+}
+
+fn import_symbol<'a, 'input>(
+    symbol: roxmltree::Node<'a, 'input>,
+    use_node: roxmltree::Node<'a, 'input>,
+    mut state: ImportState,
+    x: f64,
+    y: f64,
+    depth: usize,
+    context: &mut ImportContext<'a, 'input, '_>,
+) -> Result<(), SvgError> {
+    if depth > MAX_SVG_DEPTH {
+        return Err(svg_error(
+            context.path_name,
+            "SVG nesting exceeds 128 levels",
+        ));
+    }
+    let id = symbol
+        .attribute("id")
+        .ok_or_else(|| svg_error(context.path_name, "<use> symbol target is missing its id"))?;
+    if symbol.attribute("display") == Some("none") {
+        return Ok(());
+    }
+    if let Some(transform) = symbol.attribute("transform") {
+        let local = parse_transform(transform)
+            .map_err(|e| svg_error(context.path_name, &format!("<symbol> transform: {e}")))?;
+        state.transform = compose(state.transform, local);
+    }
+    let style = computed_style(symbol, &state.inherited_style, &context.css_rules);
+    if style.get("display").is_some_and(|value| value == "none") {
+        return Ok(());
+    }
+    if let Some(visibility) = style.get("visibility") {
+        state.visibility_hidden = visibility == "hidden" || visibility == "collapse";
+    }
+    if let Some(kind) = style_kind(&style, symbol) {
+        state.kind = kind;
+    }
+    state.inherited_style = style
+        .iter()
+        .filter(|(key, _)| key.as_str() != "display")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+
+    if let Some(raw_view_box) = symbol.attribute("viewBox") {
+        let values = parse_number_list(raw_view_box)
+            .filter(|values| values.len() == 4)
+            .ok_or_else(|| {
+                svg_error(
+                    context.path_name,
+                    "<symbol> viewBox must contain four finite numbers",
+                )
+            })?;
+        let (min_x, min_y, vb_w, vb_h) = (values[0], values[1], values[2], values[3]);
+        if values.iter().any(|value| value.abs() > 1.0e9) {
+            return Err(svg_error(
+                context.path_name,
+                "<symbol> viewBox exceeds ±1e9",
+            ));
+        }
+        if vb_w <= 0.0 || vb_h <= 0.0 {
+            return Err(svg_error(
+                context.path_name,
+                "<symbol> viewBox dimensions must be positive",
+            ));
+        }
+        let width = use_viewport_length(use_node, "width", vb_w, context.path_name)?;
+        let height = use_viewport_length(use_node, "height", vb_h, context.path_name)?;
+        if width == 0.0 || height == 0.0 {
+            return Ok(());
+        }
+        let preserve = symbol
+            .attribute("preserveAspectRatio")
+            .unwrap_or("xMidYMid meet");
+        let viewport =
+            preserve_viewbox_transform(min_x, min_y, vb_w, vb_h, width, height, preserve)
+                .map_err(|message| svg_error(context.path_name, &format!("<symbol>: {message}")))?;
+        if !viewport.as_coeffs().iter().all(|value| value.is_finite()) {
+            return Err(svg_error(
+                context.path_name,
+                "<symbol> viewport transform is not finite",
+            ));
+        }
+        state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
+        state.transform = compose(state.transform, viewport);
+    } else {
+        state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
+    }
+
+    context.reference_stack.push(id.to_string());
+    let result = import_children(symbol, state, depth, context);
+    context.reference_stack.pop();
+    result
+}
+
+fn use_viewport_length(
+    use_node: roxmltree::Node<'_, '_>,
+    attribute: &str,
+    fallback: f64,
+    path_name: &str,
+) -> Result<f64, SvgError> {
+    let Some(raw) = use_node.attribute(attribute) else {
+        return Ok(fallback);
+    };
+    let value = parse_number(raw).ok_or_else(|| {
+        svg_error(
+            path_name,
+            &format!("<use> {attribute} must be a unitless finite SVG length"),
+        )
+    })?;
+    if value.abs() > 1.0e9 || (attribute != "x" && attribute != "y" && value < 0.0) {
+        return Err(svg_error(
+            path_name,
+            &format!("<use> {attribute} is outside its supported range"),
+        ));
+    }
+    Ok(value)
+}
+
+fn import_children<'a, 'input>(
+    parent: roxmltree::Node<'a, 'input>,
+    state: ImportState,
+    depth: usize,
+    context: &mut ImportContext<'a, 'input, '_>,
+) -> Result<(), SvgError> {
+    if depth > MAX_SVG_DEPTH {
+        return Err(svg_error(
+            context.path_name,
+            "SVG nesting exceeds 128 levels",
+        ));
+    }
+    for child in parent.children().filter(|node| node.is_element()) {
         import_node(child, state.clone(), depth + 1, context)?;
     }
     Ok(())
@@ -1143,6 +1292,12 @@ fn viewport_transform(
     root: roxmltree::Node<'_, '_>,
     path_name: &str,
 ) -> Result<(f64, f64, kurbo::Affine), SvgError> {
+    if root.tag_name().name() == "symbol" {
+        return Err(svg_error(
+            path_name,
+            "a standalone <symbol> cannot be an SVG root",
+        ));
+    }
     let view_box = match root.attribute("viewBox") {
         Some(raw) => {
             let values = parse_number_list(raw)
@@ -1196,52 +1351,56 @@ fn viewport_transform(
     let preserve = root
         .attribute("preserveAspectRatio")
         .unwrap_or("xMidYMid meet");
+    let transform = preserve_viewbox_transform(min_x, min_y, vb_w, vb_h, width, height, preserve)
+        .map_err(|message| svg_error(path_name, &message))?;
+    if !transform.as_coeffs().iter().all(|value| value.is_finite()) {
+        return Err(svg_error(path_name, "viewBox transform is not finite"));
+    }
+    Ok((width, height, transform))
+}
+
+fn preserve_viewbox_transform(
+    min_x: f64,
+    min_y: f64,
+    vb_w: f64,
+    vb_h: f64,
+    width: f64,
+    height: f64,
+    preserve: &str,
+) -> Result<kurbo::Affine, String> {
     let tokens: Vec<&str> = preserve.split_ascii_whitespace().collect();
     let align = tokens.first().copied().unwrap_or("xMidYMid");
     let mode = tokens.get(1).copied().unwrap_or("meet");
+    if tokens.len() > 2 {
+        return Err("preserveAspectRatio has unexpected trailing tokens".to_string());
+    }
     if align == "none" {
-        return Ok((
-            width,
-            height,
-            kurbo::Affine::new([
-                width / vb_w,
-                0.0,
-                0.0,
-                height / vb_h,
-                -min_x * width / vb_w,
-                -min_y * height / vb_h,
-            ]),
-        ));
+        if tokens.len() > 1 {
+            return Err("preserveAspectRatio `none` does not accept a meet/slice mode".to_string());
+        }
+        return Ok(kurbo::Affine::new([
+            width / vb_w,
+            0.0,
+            0.0,
+            height / vb_h,
+            -min_x * width / vb_w,
+            -min_y * height / vb_h,
+        ]));
     }
     if !matches!(mode, "meet" | "slice") {
-        return Err(svg_error(
-            path_name,
-            "preserveAspectRatio supports only meet, slice, or none",
-        ));
+        return Err("preserveAspectRatio supports only meet, slice, or none".to_string());
     }
-    let x_align = if align.contains("xMin") {
-        0.0
-    } else if align.contains("xMax") {
-        1.0
-    } else if align.contains("xMid") {
-        0.5
-    } else {
-        return Err(svg_error(
-            path_name,
-            "unsupported preserveAspectRatio x alignment",
-        ));
-    };
-    let y_align = if align.contains("YMin") {
-        0.0
-    } else if align.contains("YMax") {
-        1.0
-    } else if align.contains("YMid") {
-        0.5
-    } else {
-        return Err(svg_error(
-            path_name,
-            "unsupported preserveAspectRatio y alignment",
-        ));
+    let (x_align, y_align) = match align {
+        "xMinYMin" => (0.0, 0.0),
+        "xMidYMin" => (0.5, 0.0),
+        "xMaxYMin" => (1.0, 0.0),
+        "xMinYMid" => (0.0, 0.5),
+        "xMidYMid" => (0.5, 0.5),
+        "xMaxYMid" => (1.0, 0.5),
+        "xMinYMax" => (0.0, 1.0),
+        "xMidYMax" => (0.5, 1.0),
+        "xMaxYMax" => (1.0, 1.0),
+        _ => return Err("unsupported preserveAspectRatio alignment".to_string()),
     };
     let sx = width / vb_w;
     let sy = height / vb_h;
@@ -1252,11 +1411,11 @@ fn viewport_transform(
     };
     let tx = (width - vb_w * scale) * x_align - min_x * scale;
     let ty = (height - vb_h * scale) * y_align - min_y * scale;
-    Ok((
-        width,
-        height,
-        kurbo::Affine::new([scale, 0.0, 0.0, scale, tx, ty]),
-    ))
+    let transform = kurbo::Affine::new([scale, 0.0, 0.0, scale, tx, ty]);
+    if !transform.as_coeffs().iter().all(|value| value.is_finite()) {
+        return Err("preserveAspectRatio produces a non-finite transform".to_string());
+    }
+    Ok(transform)
 }
 
 fn svg_length_mm(raw: &str) -> Result<f64, String> {
@@ -1591,14 +1750,19 @@ mod tests {
             <g id="shape" data-kind="engrave" transform="scale(2)">
               <rect x="1" y="2" width="3" height="4"/>
             </g>
+            <symbol id="badge" viewBox="10 20 20 10" preserveAspectRatio="xMidYMid meet" data-kind="engrave">
+              <rect x="10" y="20" width="20" height="10"/>
+            </symbol>
           </defs>
           <use href="#shape" x="10" y="20" transform="translate(5,0)"/>
           <use xlink:href="#shape" x="30" y="5"
             xmlns:xlink="http://www.w3.org/1999/xlink"/>
+          <use href="#badge" x="50" y="10" width="40" height="40"/>
         </svg>"##;
         let doc = import(svg, "use.svg").unwrap();
-        assert_eq!(doc.shape_count(), 2);
-        assert_eq!(doc.layers[1].shapes.len(), 2);
+        assert_eq!(doc.shape_count(), 3);
+        assert_eq!(doc.layers[0].shapes.len(), 0);
+        assert_eq!(doc.layers[1].shapes.len(), 3);
         let first = doc.layers[1].shapes[0].bounds().unwrap();
         assert!((first.x0 - 17.0).abs() < 1e-9, "{first:?}");
         assert!((first.y0 - 24.0).abs() < 1e-9, "{first:?}");
@@ -1606,6 +1770,12 @@ mod tests {
         let second = doc.layers[1].shapes[1].bounds().unwrap();
         assert!((second.x0 - 32.0).abs() < 1e-9, "{second:?}");
         assert!((second.y0 - 9.0).abs() < 1e-9, "{second:?}");
+        let badge = doc.layers[1].shapes[2].bounds().unwrap();
+        assert!((badge.x0 - 50.0).abs() < 1e-9, "{badge:?}");
+        assert!((badge.y0 - 20.0).abs() < 1e-9, "{badge:?}");
+        assert!((badge.width() - 40.0).abs() < 1e-9, "{badge:?}");
+        assert!((badge.height() - 20.0).abs() < 1e-9, "{badge:?}");
+        assert_eq!(doc.layers[1].shapes[2].style, CutStyle::Engrave);
     }
 
     #[test]
@@ -1616,6 +1786,9 @@ mod tests {
             r#"<svg><use href="other.svg#shape"/></svg>"#,
             r##"<svg><defs><text id="label">no</text></defs><use href="#label"/></svg>"##,
             r##"<svg><rect id="same"/><circle id="same"/></svg>"##,
+            r##"<svg><defs><symbol id="cycle"><use href="#cycle"/></symbol></defs><use href="#cycle"/></svg>"##,
+            r##"<svg><defs><symbol id="bad" viewBox="0 0 0 4"><rect width="2" height="2"/></symbol></defs><use href="#bad"/></svg>"##,
+            r##"<svg><defs><symbol id="zero" viewBox="0 0 4 4"><rect width="2" height="2"/></symbol></defs><use href="#zero" width="-1"/></svg>"##,
         ] {
             assert!(import(svg, "use-error.svg").is_err(), "{svg}");
         }
@@ -1623,6 +1796,12 @@ mod tests {
 
     #[test]
     fn viewbox_maps_physical_mm_and_preserves_aspect_ratio() {
+        for preserve in ["xMidYMid meet extra", "notxMidYMid"] {
+            let svg = format!(
+                r#"<svg width="200mm" height="100mm" viewBox="0 0 100 100" preserveAspectRatio="{preserve}"/>"#
+            );
+            assert!(import(&svg, "aspect.svg").is_err(), "{preserve}");
+        }
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="200mm" height="100mm"
           viewBox="0 0 100 100" preserveAspectRatio="none">
           <rect x="10" y="20" width="5" height="4"/>

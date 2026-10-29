@@ -136,7 +136,7 @@ real-hardware transport is the next step).
 
 **What's missing:**
 - SVG features beyond common paths/shapes/groups/transforms/styles (advanced CSS,
-  external/symbol `<use>`, text conversion, clipping/masks/filters);
+  external `<use>`, text conversion, clipping/masks/filters);
 - drawing tools (pen, selection, node editing) — StencilCraft starts behind a vector app;
 - tiling edge clipping, bridge generation so counters stay attached, registration marks;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).

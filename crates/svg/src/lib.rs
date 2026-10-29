@@ -59,7 +59,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
         board.width(),
         board.height()
     );
-    svg.push('\n');
+    svg.push_str(">\n");
     let title = svg_title(doc);
     svg.push_str(&title);
     for layer in &doc.layers {

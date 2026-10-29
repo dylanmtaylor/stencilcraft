@@ -1,0 +1,16 @@
+[package]
+name = "stencilcraft-kerf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Kerf compensation: contour offsetting for StencilCraft documents"
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+
+[lints]
+workspace = true

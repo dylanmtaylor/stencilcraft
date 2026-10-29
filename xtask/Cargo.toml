@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+description = "StencilCraft automation: ci, layers, fmt, clippy, test"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

@@ -1,0 +1,20 @@
+[package]
+name = "stencilcraft-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "StencilCraft command model, undo/redo, and document editing"
+
+[dependencies]
+kurbo = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

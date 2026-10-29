@@ -1,0 +1,28 @@
+[package]
+name = "stencilcraft-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "StencilCraft headless CLI: run/kerf/tile/export, MCP control mode"
+
+[[bin]]
+name = "stencilcraft-cli"
+path = "src/main.rs"
+
+[dependencies]
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-dxf = { workspace = true }
+stencilcraft-engine = { workspace = true }
+stencilcraft-gcode = { workspace = true }
+stencilcraft-kerf = { workspace = true }
+stencilcraft-mcp = { workspace = true }
+stencilcraft-svg = { workspace = true }
+stencilcraft-tiling = { workspace = true }
+stencilcraft-testkit = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

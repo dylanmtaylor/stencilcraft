@@ -9,6 +9,12 @@ Standalone components carry their own notices:
 - egui/eframe (UI): Copyright the egui contributors, MIT OR Apache-2.0.
 - serde, serde_json, log, thiserror: dual-licensed MIT OR Apache-2.0.
 
-No fonts, icons, images or other creative assets are bundled in this repository yet.
-When the first such asset arrives, it must be listed with its author, source and licence
-in ASSETS.md, and its notice must appear in this file.
+Creative assets bundled in this repository are original works by StencilCraft
+contributors, licensed MIT OR Apache-2.0:
+
+- `assets/app-icon/stencilcraft.svg` — the StencilCraft app icon.
+
+They are listed with full attribution in ASSETS.md. No fonts are bundled; fonts
+shared by the Crafting Apps live outside this repository, when the need arises.
+Any further asset must be listed with its author, source and licence in ASSETS.md,
+and its notice must appear in this file.

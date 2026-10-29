@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!--
+    StencilCraft app icon: two stacked stencil sheets crossed by a dashed
+    cut path, on the full-bleed field. Original art by StencilCraft
+    contributors, licensed MIT OR Apache-2.0 (see ASSETS.md).
+  -->
+  <defs>
+    <!-- The Crafting Apps tile: rounded square, full bleed. -->
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <!-- Field: StencilCraft cut color. -->
+    <rect width="512" height="512" fill="#e8573f"/>
+    <!-- Back sheet (ink), offset to suggest a stack. -->
+    <rect x="140" y="196" width="232" height="144" rx="16" fill="#0b0b0c"/>
+    <!-- Front sheet (paper), the stencil itself. -->
+    <rect x="116" y="176" width="232" height="144" rx="16" fill="#efe9dc"/>
+    <!-- The dashed cut path crossing the stencil. -->
+    <polyline points="150,258 232,196 330,286"
+      fill="none" stroke="#e8573f" stroke-width="14"
+      stroke-dasharray="26 20" stroke-linecap="butt"/>
+    <!-- A weeding hole beside the path. -->
+    <circle cx="316" cy="206" r="15" fill="#e8573f"/>
+  </g>
+</svg>

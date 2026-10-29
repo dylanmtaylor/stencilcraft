@@ -21,7 +21,12 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 7. **UI**: no node editing, no ruler, no zoom-to-fit keyboard shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.
 8. **Agent surface**: control methods do not cover the whole engine command set;
-   no MCP tool schema hydration yet; no fuzz corpus for the JSON channel.
+   no MCP tool schema hydration yet; no fuzz corpus for the JSON channel. (The
+   document reader does have a malformed-input no-panic corpus now; the JSON
+   control channel does not.)
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.
+11. **Packaging**: no window/app icon wiring yet (the SVG icon exists in
+   `assets/app-icon/`); no desktop integration (`.desktop`, file associations,
+   `xtask bundle`); PNG previews in the README only (`docs/images/`).

@@ -12,11 +12,12 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Import (SVG) | preliminary | `<path>`-only, no transforms/groups/styles |
 | Kerf compensation | working | polygon offsetting with miter join; convex shapes exact |
 | Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
-| Exports | preliminary | SVG, DXF R14, G-code: straight-line structure works |
+| Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | none | rectangle add/remove only |
 | UI | preliminary | canvas pan/zoom, layers panel, kerf preview, save/open |
-| Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks ✅ command set small |
+| Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
+| Craft-libs & parity | preliminary | `color` crate added; reusable domain-crate layering like VectorCraft's family; icon/README/examples parity pass done |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
 ## Milestones
@@ -58,3 +59,11 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
   Cameo-4 preamble, media/mat/model tables,`RecordingTransport` dry-run + optional
   serial transport, CLI `cut` (transcript by default, `--device` real send), protocol
   reference in `docs/machine.md` (clean-room from GPL community drivers; facts only).
+- 2026-10-29 — parity pass with VectorCraft conventions: original app icon
+  (`assets/app-icon/stencilcraft.svg`, Crafting Apps tile template) with ASSETS/NOTICE
+  attribution; README restyled to the ArtCraft README structure with PNG previews
+  rendered from our own exporter; committed `examples/` (starter, kerf counter,
+  tiling); new `stencilcraft-color` craft-lib (CSS parse/format, luminance, blend);
+  CLI end-to-end integration tests (9) and a malformed-input no-panic corpus (5) —
+  110 workspace tests; fixed the SVG export `<svg>` unterminated-tag bug found by
+  the preview renders.

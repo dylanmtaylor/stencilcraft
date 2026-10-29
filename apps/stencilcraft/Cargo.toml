@@ -15,6 +15,7 @@ eframe = { workspace = true }
 rfd = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-engine = { workspace = true }
+stencilcraft-machine = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-mcp = { workspace = true }

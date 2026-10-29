@@ -67,7 +67,10 @@ Every image below is rendered by StencilCraft's own SVG exporter from the
 - **Familiar.** Laser/vinyl workflow conventions from public user documentation only,
   clean-room: never reading or copying another cutting-prep program's code or assets.
   Graphtec protocol facts come from community-reverse-engineered GPL drivers as
-  *specifications only* — no GPL code in this MIT/Apache codebase.
+  *specifications only* ([inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette),
+  [inkscape-cutcutgo](https://github.com/virtualabs/inkscape-cutcutgo),
+  [pklaus/Silhouette-Cutting-Plotters](https://github.com/pklaus/Silhouette-Cutting-Plotters)) —
+  no GPL code in this MIT/Apache codebase.
 - **Robust.** No panics in shipped code: an untrusted file can never lose unsaved work.
   Fallible operations return `Result`; errors become calm messages, never aborts. The
   document reader is corpus-tested against thousands of malformed inputs.

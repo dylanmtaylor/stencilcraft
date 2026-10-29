@@ -4,8 +4,9 @@
 //! The protocol facts here (framing, command vocabulary per model family,
 //! media presets, mat codes, hardware geometry) come from community reverse
 //! engineering of these cutting plotters — chiefly `inkscape-silhouette`
-//! (GPL-2.0, fablabnbg) and `pklaus/Silhouette-Cutting-Plotters`, both of
-//! which credit the robocut lineage. This crate is an independent, panic-free
+//! (GPL-2.0, fablabnbg), `inkscape-cutcutgo` (GPL-3.0, virtualabs) and
+//! `pklaus/Silhouette-Cutting-Plotters`, which credit the robocut lineage.
+//! This crate is an independent, panic-free
 //! Rust implementation of those *facts*; no GPL code was ported. See
 //! `docs/machine.md` for the protocol reference and licensing note.
 //!

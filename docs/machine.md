@@ -82,8 +82,12 @@ The command vocabulary, tables, and sequences above are protocol *facts*
 learned by the community, chiefly from:
 
 - `fablabnbg/inkscape-silhouette` — Python driver, **GPL-2.0** ( Cameo 4 Pro
-  confirmed working; USB + Bluetooth; mat-free strategies). We did not port
-  its code; our Rust implementation is written from the facts, keeping
-  StencilCraft MIT OR Apache-2.0 clean.
+  confirmed working; USB + Bluetooth; mat-free strategies): <https://github.com/fablabnbg/inkscape-silhouette>.
+  We did not port its code; our Rust implementation is written from the facts,
+  keeping StencilCraft MIT OR Apache-2.0 clean.
+- `virtualabs/inkscape-cutcutgo` — **GPL-3.0** Silhouette cutting extension,
+  independent confirmation of the command set and status-handling on cameos of
+  the 3× era: <https://github.com/virtualabs/inkscape-cutcutgo>. Facts only;
+  no code ported.
 - `pklaus/Silhouette-Cutting-Plotters` — protocol notes and media table.
 - The `robocut` lineage both of the above credit.

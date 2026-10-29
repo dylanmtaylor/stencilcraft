@@ -1,0 +1,18 @@
+[package]
+name = "stencilcraft-ui-egui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "StencilCraft egui frontend: canvas painting, panels, theme tokens"
+
+[dependencies]
+egui = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+
+[dev-dependencies]
+stencilcraft-testkit = { workspace = true }
+
+[lints]
+workspace = true

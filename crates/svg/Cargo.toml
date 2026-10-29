@@ -1,0 +1,16 @@
+[package]
+name = "stencilcraft-svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "SVG import and export for StencilCraft documents"
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+
+[lints]
+workspace = true

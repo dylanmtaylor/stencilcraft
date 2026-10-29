@@ -1,0 +1,15 @@
+[package]
+name = "stencilcraft-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared sample documents for StencilCraft tests"
+
+[dependencies]
+kurbo = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+
+[lints]
+workspace = true

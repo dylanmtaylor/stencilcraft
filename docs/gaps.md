@@ -1,0 +1,27 @@
+# gaps
+
+Every known shortfall, ranked; the standing work list. Pick the first item you can finish.
+
+1. **SVG import**: only bare `<path>` `d` data reads. No groups, transforms, `style`
+   attributes, `rect`/`circle`/`ellipse`/`line`/`polyline`/`polygon`, no unit inference,
+   no `viewBox` scaling. The parser is not fuzzed yet (untrusted input rule).
+2. **Kerf robustness**: offsetting assumes simple contours; a self-intersecting subpath
+   or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset; no
+   nested-counter detection beyond bbox-in-bbox.
+3. **Tiling**: tile edges are not clipped; overlapping output exports whole shapes per
+   tile, relying on overlap to keep continuity. No per-tile SVG merging view, no
+   alignment marks.
+4. **G-code**: fixed modal constants, no feed/speed profiles by machine or material,
+   no first/last pass, no power ramp, no Z/laser mode switch.
+5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
+   line segments), no reader.
+6. **Engine**: commands cover add/remove shape, add layer, kerf; no move/rotate/scale, no
+   selection model in the engine, undo stack snapshots whole documents rather than
+   sharing structure.
+7. **UI**: no node editing, no ruler, no zoom-to-fit keyboard shortcuts, kerf preview
+   recomputes on every paint when dirty (no cache), no recent-files list.
+8. **Agent surface**: control methods do not cover the whole engine command set;
+   no MCP tool schema hydration yet; no fuzz corpus for the JSON channel.
+9. **wasm**: no web build.
+10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
+   but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.

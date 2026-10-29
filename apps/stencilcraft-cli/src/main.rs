@@ -5,8 +5,10 @@
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
 //! - `mcp` — JSON-lines control on stdio (see docs/mcp.md)
 //! - `make-starter --out FILE` — write the canonical starter document
+//! - `cut --in FILE [--media …] [--bbox] [--device PATH]` — machine cut prep
 //! - `help`
 
+mod cut;
 mod pipeline;
 mod run;
 
@@ -20,6 +22,10 @@ fn main() -> Result<(), String> {
             run::execute(req)
         }
         Some("mcp") => mcp_loop(),
+        Some("cut") => {
+            cut::execute(&args[1..])?;
+            Ok(())
+        }
         Some("make-starter") => {
             let out = args
                 .iter()
@@ -66,6 +72,8 @@ fn print_help() {
     println!("      Export is .svg, .dxf or .gcode; with --tile-sheet the tiles go");
     println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).",);
     println!("  mcp            JSON-lines control protocol on stdio (docs/mcp.md)");
+    println!("  cut --in FILE [--media …] [--bbox] [--device PATH]");
+    println!("      Encode + send to a cutting machine; dry-run transcript by default.");
     println!("  make-starter --out FILE");
     println!("  help");
 }

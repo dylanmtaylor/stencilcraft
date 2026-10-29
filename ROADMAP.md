@@ -16,6 +16,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Editing tools | none | rectangle add/remove only |
 | UI | preliminary | canvas pan/zoom, layers panel, kerf preview, save/open |
 | Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks ✅ command set small |
+| Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
 ## Milestones
@@ -44,9 +45,16 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
    other, not bbox equal); miter-limit fallback to bevel on spikes.
 4. Bridge generation prototype (M3 early): algorithm notes in `docs/bridges.md`.
 5. G-code profiles: material presets, first/last pass, power ramp.
+6. Machine control (docs/machine.md): USB-bulk `nusb` transport for the `0b4d` device
+   family, Bluetooth RFCOMM/BLE, registration marks (print-and-cut), mat-free path
+   sorting for knife-pressure relief.
 
 ## Progress log
 
 - 2026-10-29 — M0 scaffold: workspace (11 crates, 2 apps, xtask), document model v1,
   kerf offsetting, sheet tiling, SVG/DXF/G-code exporters, desktop shell with kerf
   preview, CLI `run`/`mcp`, `cargo xtask` quality gates.
+- 2026-10-29 — machine control (12th crate): Graphtec/Silhouette ASCII encoder with
+  Cameo-4 preamble, media/mat/model tables,`RecordingTransport` dry-run + optional
+  serial transport, CLI `cut` (transcript by default, `--device` real send), protocol
+  reference in `docs/machine.md` (clean-room from GPL community drivers; facts only).

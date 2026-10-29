@@ -1,0 +1,21 @@
+[package]
+name = "stencilcraft-machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Cutting-machine control for StencilCraft: model/media/mat tables, Graphtec ASCII command encoder, transport layer"
+
+[dependencies]
+stencilcraft-geom = { workspace = true }
+serialport = { version = "4", optional = true, default-features = false }
+
+[features]
+default = []
+# Real serial transports (USB CDC/ACM devices that expose a tty, BLE-over-RFCOMM
+# via an OS-paired /dev/rfcomm*, etc.). Everything else in this crate is
+# dependency-free so dry runs and tests build anywhere.
+serial = ["dep:serialport"]
+
+[dev-dependencies]
+stencilcraft-testkit = { workspace = true }

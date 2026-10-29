@@ -29,6 +29,7 @@ stencilcraft-svg = { path = "crates/svg" }
 stencilcraft-dxf = { path = "crates/dxf" }
 stencilcraft-gcode = { path = "crates/gcode" }
 stencilcraft-engine = { path = "crates/engine" }
+stencilcraft-machine = { path = "crates/machine" }
 stencilcraft-mcp = { path = "crates/mcp" }
 stencilcraft-ui-egui = { path = "crates/ui-egui" }
 stencilcraft-testkit = { path = "crates/testkit" }

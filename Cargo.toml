@@ -22,6 +22,11 @@ eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Shared UI components and docking, pinned to the version integrated by VectorCraft.
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["serde"] }
+# Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
+# flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
+vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
+vectorcraft-geom = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+vectorcraft-pathops = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 # internal
 stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }
@@ -69,6 +74,13 @@ codegen-units = 1
 
 # craft-ui uses the suite's egui and winit forks for shared IME and docking support.
 [patch.crates-io]
+# VectorCraft's PDF import/export dependencies use the matching Craft-Libs API revisions.
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 ecolor = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 emath = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
 epaint = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }

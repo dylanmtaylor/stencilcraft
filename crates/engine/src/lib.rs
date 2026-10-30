@@ -2542,6 +2542,128 @@ mod tests {
     }
 
     #[test]
+    fn failed_commands_after_reset_do_not_add_history_or_damage_mappings() {
+        let mut engine = Engine::default();
+        engine.run(Command::KerfSet { width_mm: 0.25 }).unwrap();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 2.0,
+                y: 3.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        let original = engine.doc.clone();
+        engine
+            .run(Command::DocumentNew {
+                width_mm: 80.0,
+                height_mm: 90.0,
+            })
+            .unwrap();
+        let reset = engine.doc.clone();
+        for command in [
+            Command::ShapeMove {
+                id: 99,
+                dx_mm: 1.0,
+                dy_mm: 0.0,
+            },
+            Command::KerfSet { width_mm: -1.0 },
+            Command::DocumentNew {
+                width_mm: 0.0,
+                height_mm: 90.0,
+            },
+        ] {
+            assert!(engine.run(command).is_err());
+            assert_eq!(engine.doc, reset);
+        }
+        assert!(engine.undo());
+        assert_eq!(engine.doc, original);
+        assert!(engine.redo());
+        assert_eq!(engine.doc, reset);
+        assert!(!engine.redo());
+        engine
+            .run(Command::ShapeAddRect {
+                x: 6.0,
+                y: 7.0,
+                width: 4.0,
+                height: 4.0,
+            })
+            .unwrap();
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 2.0,
+                dy_mm: 0.0,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 8.0);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 6.0);
+    }
+
+    #[test]
+    fn failed_commands_after_undoing_reset_preserve_both_redo_steps() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 2.0,
+                y: 3.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        let original = engine.doc.clone();
+        engine
+            .run(Command::DocumentNew {
+                width_mm: 80.0,
+                height_mm: 90.0,
+            })
+            .unwrap();
+        let reset = engine.doc.clone();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 6.0,
+                y: 7.0,
+                width: 4.0,
+                height: 4.0,
+            })
+            .unwrap();
+        let edited = engine.doc.clone();
+        assert!(engine.undo());
+        assert!(engine.undo());
+        assert_eq!(engine.doc, original);
+        for command in [
+            Command::ShapeMove {
+                id: 99,
+                dx_mm: 1.0,
+                dy_mm: 0.0,
+            },
+            Command::DocumentNew {
+                width_mm: 0.0,
+                height_mm: 90.0,
+            },
+        ] {
+            assert!(engine.run(command).is_err());
+            assert_eq!(engine.doc, original);
+        }
+        assert!(engine.redo());
+        assert_eq!(engine.doc, reset);
+        assert!(engine.redo());
+        assert_eq!(engine.doc, edited);
+        assert!(!engine.redo());
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 2.0,
+                dy_mm: 0.0,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 8.0);
+        assert!(engine.undo());
+        assert_eq!(engine.doc, edited);
+    }
+
+    #[test]
     fn undo_redo() {
         let mut engine = Engine::default();
         engine

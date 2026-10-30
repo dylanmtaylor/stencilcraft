@@ -6,6 +6,7 @@ This product includes software developed by the StencilCraft contributors.
 Standalone components carry their own notices:
 
 - kurbo (curve geometry): Copyright the kurbo contributors, MIT.
+- VectorCraft `vectorcraft-geom` and `vectorcraft-pathops` (curve-preserving Pathfinder operations): Copyright (c) 2026 ArtCraft Team and VectorCraft contributors, MIT OR Apache-2.0; source pinned at revision `6b3a6b8788ebcb420d69449199cbdf323888d27e`.
 - egui/eframe (UI): Copyright the egui contributors, MIT OR Apache-2.0.
 - serde, serde_json, log, thiserror: dual-licensed MIT OR Apache-2.0.
 

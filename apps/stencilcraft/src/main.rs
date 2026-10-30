@@ -4,13 +4,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use craft_ui::ComboBox as CraftComboBox;
+use craft_ui::controls::{Button, Checkbox, IconButton, Select};
 use craft_ui::docking::{
     Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
 };
+use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
 use eframe::egui;
-use stencilcraft_engine::Command;
+use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis};
 
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
 /// connection (the same session core the CLI's `mcp` mode uses).
@@ -278,6 +279,7 @@ struct StencilApp {
     /// The cutting mat shown under the sheet and used for Send's encoded job.
     mat: stencilcraft_machine::Mat,
     selected_shape: Option<u64>,
+    selected_shapes: Vec<u64>,
     inspector_shape: Option<u64>,
     inspector_bounds: Option<[f64; 4]>,
     inspector_values: [String; 4],
@@ -285,6 +287,11 @@ struct StencilApp {
     text_dialog: bool,
     text_value: String,
     canvas_drag_shape: Option<u64>,
+    canvas_selection_start: Option<egui::Pos2>,
+    canvas_selection_additive: bool,
+    canvas_lasso_mode: bool,
+    canvas_selection_points: Vec<egui::Pos2>,
+    canvas_panning: bool,
     last_drag_delta: egui::Vec2,
     send: SendTab,
 }
@@ -373,6 +380,7 @@ impl StencilApp {
             view_initialized: false,
             mat: stencilcraft_machine::Mat::CameoPro24x24,
             selected_shape: None,
+            selected_shapes: Vec::new(),
             inspector_shape: None,
             inspector_bounds: None,
             inspector_values: std::array::from_fn(|_| String::new()),
@@ -380,6 +388,11 @@ impl StencilApp {
             text_dialog: false,
             text_value: String::new(),
             canvas_drag_shape: None,
+            canvas_selection_start: None,
+            canvas_selection_additive: false,
+            canvas_lasso_mode: false,
+            canvas_selection_points: Vec::new(),
+            canvas_panning: false,
             last_drag_delta: egui::Vec2::ZERO,
             send: SendTab::default(),
         }
@@ -406,8 +419,59 @@ impl StencilApp {
         }
     }
 
+    fn set_selection(&mut self, ids: impl IntoIterator<Item = u64>) {
+        let mut selected = Vec::new();
+        for id in ids {
+            if self.engine.doc.get_shape(id).is_some() && !selected.contains(&id) {
+                selected.push(id);
+            }
+        }
+        self.selected_shape = selected.last().copied();
+        self.selected_shapes = selected;
+    }
+
     fn select_latest_shape(&mut self) {
-        self.selected_shape = self.engine.doc.next_shape_id.checked_sub(1);
+        if let Some(id) = self.engine.doc.next_shape_id.checked_sub(1) {
+            self.set_selection([id]);
+        }
+    }
+
+    fn retain_valid_selection(&mut self) {
+        let ids = self.selected_shapes.clone();
+        self.set_selection(ids);
+    }
+
+    fn duplicate_selection(&mut self) {
+        let ids = self.selected_shapes.clone();
+        match self.engine.run(Command::ShapesDuplicate { ids }) {
+            Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => {
+                self.set_selection(ids);
+                self.status = "duplicated in place".to_string();
+            }
+            Ok(_) => {}
+            Err(error) => self.status = error.to_string(),
+        }
+    }
+
+    fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.send_mode || ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
+            self.duplicate_selection();
+        }
+    }
+
+    fn run_pathfinder(&mut self, operation: BooleanOperation) {
+        let ids = self.selected_shapes.clone();
+        match self.engine.run(Command::ShapePathfinder { ids, operation }) {
+            Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => {
+                self.set_selection(ids);
+                self.status = "done".to_string();
+            }
+            Ok(_) => {}
+            Err(error) => self.status = error.to_string(),
+        }
     }
 
     fn add_imported_shapes(&mut self, imported: stencilcraft_doc::Document, label: &str) {
@@ -482,7 +546,7 @@ impl StencilApp {
                         height: (7.0_f64 * 1.6).max(bounds.height()),
                     });
                 }
-                self.selected_shape = Some(id);
+                self.set_selection([id]);
             }
             Ok(_) => {}
             Err(error) => self.status = error.to_string(),
@@ -504,10 +568,10 @@ impl StencilApp {
                 ui.label("Places simple single-line engraved lettering (up to 80 characters).");
                 ui.text_edit_singleline(&mut self.text_value);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    if ui.add(Button::new("Cancel")).clicked() {
                         cancel = true;
                     }
-                    if ui.button("Add text").clicked() {
+                    if ui.add(Button::new("Add text")).clicked() {
                         add_text = true;
                     }
                 });
@@ -521,10 +585,12 @@ impl StencilApp {
 
 impl eframe::App for StencilApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.ctx().set_visuals(match self.theme {
-            stencilcraft_ui_egui::ColorTheme::Dark => egui::Visuals::dark(),
-            stencilcraft_ui_egui::ColorTheme::Light => egui::Visuals::light(),
+        craft_ui::theme::install(ui.ctx(), &craft_ui::theme::Base::suite_default());
+        ui.ctx().set_theme(match self.theme {
+            stencilcraft_ui_egui::ColorTheme::Dark => egui::ThemePreference::Dark,
+            stencilcraft_ui_egui::ColorTheme::Light => egui::ThemePreference::Light,
         });
+        self.handle_keyboard_shortcuts(ui.ctx());
         self.top_panel(ui);
         self.workflow_bar(ui);
         self.status_bar(ui);
@@ -549,6 +615,7 @@ impl eframe::App for StencilApp {
             content.app.status = format!("workspace layout rejected: {error}");
         }
         content.app.workspace = workspace;
+        content.app.retain_valid_selection();
         content.app.text_dialog(ui);
         ui.ctx().request_repaint();
     }
@@ -575,17 +642,18 @@ impl StencilApp {
                         ("☾ Dark", stencilcraft_ui_egui::ColorTheme::Dark)
                     }
                 };
-                if ui.button(theme_label).clicked() {
+                if ui.add(Button::new(theme_label)).clicked() {
                     self.theme = next_theme;
                 }
-                if ui.button("New").clicked() {
+                if ui.add(Button::new("New")).clicked() {
                     self.run_command(Command::DocumentNew {
                         width_mm: 100.0,
                         height_mm: 150.0,
                     });
+                    self.set_selection([]);
                     self.open_path = None;
                 }
-                if ui.button("Open…").clicked()
+                if ui.add(Button::new("Open…")).clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("StencilCraft", &["stencilcraft"])
                         .pick_file()
@@ -593,20 +661,21 @@ impl StencilApp {
                     match stencilcraft_doc::load_from(path.to_string_lossy().as_ref()) {
                         Ok(doc) => {
                             self.engine = stencilcraft_engine::Engine::new(doc);
+                            self.set_selection([]);
                             self.open_path = Some(path.to_string_lossy().into_owned());
                             self.status = "opened".to_string();
                         }
                         Err(e) => self.status = format!("open: {e}"),
                     }
                 }
-                if ui.button("Import SVG…").clicked()
+                if ui.add(Button::new("Import SVG…")).clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("SVG", &["svg"])
                         .pick_file()
                 {
                     self.import_svg(path);
                 }
-                if ui.button("Save…").clicked() {
+                if ui.add(Button::new("Save…")).clicked() {
                     let dialog = rfd::FileDialog::new();
                     let pick = match &self.open_path {
                         Some(p) => dialog
@@ -623,11 +692,13 @@ impl StencilApp {
                     }
                 }
                 ui.separator();
-                if ui.button("Undo").clicked() {
+                if ui.add(Button::new("Undo")).clicked() {
                     let _ = self.engine.undo();
+                    self.retain_valid_selection();
                 }
-                if ui.button("Redo").clicked() {
+                if ui.add(Button::new("Redo")).clicked() {
                     let _ = self.engine.redo();
+                    self.retain_valid_selection();
                 }
             });
         });
@@ -645,7 +716,7 @@ impl StencilApp {
                     } else {
                         ("Make →", true)
                     };
-                    if ui.button(label).clicked() {
+                    if ui.add(Button::new(label)).clicked() {
                         self.send_mode = destination;
                     }
                     ui.selectable_value(&mut self.send_mode, false, "Canvas");
@@ -659,10 +730,17 @@ impl StencilApp {
             ui.add_space(8.0);
             ui.small("TOOLS");
             ui.separator();
-            if ui.button("Deselect").clicked() {
-                self.selected_shape = None;
+            if ui.add(Button::new("Deselect")).clicked() {
+                self.set_selection([]);
             }
-            if ui.button("＋ Rectangle").clicked() {
+            if !self.selected_shapes.is_empty()
+                && ui.add(Button::new("Duplicate selected")).clicked()
+            {
+                self.duplicate_selection();
+            }
+            ui.selectable_value(&mut self.canvas_lasso_mode, false, "▱ Box select");
+            ui.selectable_value(&mut self.canvas_lasso_mode, true, "⌁ Lasso select");
+            if ui.add(Button::new("＋ Rectangle")).clicked() {
                 self.run_command(Command::ShapeAddRect {
                     x: 20.0,
                     y: 20.0,
@@ -671,28 +749,30 @@ impl StencilApp {
                 });
                 self.select_latest_shape();
             }
-            if ui.button("▧ Image").clicked()
+            if ui.add(Button::new("▧ Image")).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
                     .pick_file()
             {
                 self.import_image(path);
             }
-            if ui.button("T Text").clicked() {
+            if ui.add(Button::new("T Text")).clicked() {
                 self.text_dialog = true;
             }
-            if ui.button("⊖ Delete").clicked()
-                && let Some(id) = self.selected_shape
-            {
-                self.run_command(Command::ShapeRemove { id });
-                self.selected_shape = None;
+            if ui.add(Button::new("⊖ Delete")).clicked() && self.selected_shape.is_some() {
+                self.run_command(Command::ShapesRemove {
+                    ids: self.selected_shapes.clone(),
+                });
+                self.set_selection([]);
             }
             ui.separator();
-            if ui.button("↶").clicked() {
+            if ui.add(Button::new("↶")).clicked() {
                 let _ = self.engine.undo();
+                self.retain_valid_selection();
             }
-            if ui.button("↷").clicked() {
+            if ui.add(Button::new("↷")).clicked() {
                 let _ = self.engine.redo();
+                self.retain_valid_selection();
             }
         });
     }
@@ -704,7 +784,7 @@ impl StencilApp {
                 ui.small("Review your material and machine settings before cutting.");
                 ui.separator();
                 self.send_tab(ui);
-                if ui.button("← Back to canvas").clicked() {
+                if ui.add(Button::new("← Back to canvas")).clicked() {
                     self.send_mode = false;
                 }
             } else {
@@ -719,15 +799,11 @@ impl StencilApp {
         ui.add_space(8.0);
 
         ui.label("Cutting mat");
-        CraftComboBox::from_id_salt("design-mat")
-            .selected_text(mat_label(self.mat))
-            .show_ui(ui, |ui| {
-                for (mat, label) in MAT_CHOICES {
-                    if ui.selectable_label(self.mat == *mat, *label).clicked() {
-                        self.mat = *mat;
-                    }
-                }
-            });
+        let mut mat_select = Select::new("design-mat", "Cutting mat", &mut self.mat);
+        for (mat, label) in MAT_CHOICES {
+            mat_select = mat_select.option(*mat, *label);
+        }
+        let _ = mat_select.show(ui);
 
         ui.separator();
         ui.horizontal(|ui| {
@@ -747,11 +823,13 @@ impl StencilApp {
             .enumerate()
             .filter_map(|(i, layer)| {
                 let mut visible = layer.visible;
-                let response = ui.checkbox(
-                    &mut visible,
+                let response = Checkbox::bool(
                     format!("{}  ·  {}", layer.name, layer.shapes.len()),
-                );
-                response.changed().then_some((i, visible))
+                    &mut visible,
+                )
+                .id_salt(("layer-visibility", i))
+                .show(ui);
+                response.response.changed().then_some((i, visible))
             })
             .collect();
         for (i, visible) in visibility_changes {
@@ -775,11 +853,112 @@ impl StencilApp {
             .collect();
         for (id, label) in shape_rows {
             if ui
-                .selectable_label(self.selected_shape == Some(id), label)
+                .selectable_label(self.selected_shapes.contains(&id), label)
                 .clicked()
             {
-                self.selected_shape = Some(id);
+                let additive = ui.input(|input| input.modifiers.shift);
+                if additive {
+                    let mut ids = self.selected_shapes.clone();
+                    if let Some(index) = ids.iter().position(|selected| *selected == id) {
+                        ids.remove(index);
+                    } else {
+                        ids.push(id);
+                    }
+                    self.set_selection(ids);
+                } else {
+                    self.set_selection([id]);
+                }
             }
+        }
+
+        if self.selected_shapes.len() >= 2 {
+            ui.separator();
+            ui.heading(format!("{} selected", self.selected_shapes.len()));
+            ui.horizontal_wrapped(|ui| {
+                if ui.add(Button::new("Unite")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Union);
+                }
+                if ui.add(Button::new("Minus front")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Difference);
+                }
+                if ui.add(Button::new("Intersect")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Intersect);
+                }
+                if ui.add(Button::new("Exclude")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Xor);
+                }
+                if ui.add(Button::new("Divide")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Divide);
+                }
+                if ui.add(Button::new("Trim")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Trim);
+                }
+                if ui.add(Button::new("Merge")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Merge);
+                }
+                if ui.add(Button::new("Crop")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Crop);
+                }
+                if ui.add(Button::new("Outline")).clicked() {
+                    self.run_pathfinder(BooleanOperation::Outline);
+                }
+                if ui.add(Button::new("Minus back")).clicked() {
+                    self.run_pathfinder(BooleanOperation::MinusBack);
+                }
+            });
+            ui.label("Align to selection");
+            ui.horizontal_wrapped(|ui| {
+                for (label, alignment) in [
+                    ("Left", Alignment::Left),
+                    ("H center", Alignment::HorizontalCenter),
+                    ("Right", Alignment::Right),
+                    ("Top", Alignment::Top),
+                    ("V center", Alignment::VerticalCenter),
+                    ("Bottom", Alignment::Bottom),
+                ] {
+                    if ui.add(Button::new(label)).clicked() {
+                        self.run_command(Command::ShapesAlign {
+                            ids: self.selected_shapes.clone(),
+                            alignment,
+                            to_board: false,
+                        });
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                if ui.add(Button::new("Distribute ↔")).clicked() {
+                    self.run_command(Command::ShapesDistribute {
+                        ids: self.selected_shapes.clone(),
+                        axis: DistributionAxis::Horizontal,
+                    });
+                }
+                if ui.add(Button::new("Distribute ↕")).clicked() {
+                    self.run_command(Command::ShapesDistribute {
+                        ids: self.selected_shapes.clone(),
+                        axis: DistributionAxis::Vertical,
+                    });
+                }
+                if ui.add(Button::new("−15°")).clicked() {
+                    self.run_command(Command::ShapesTransform {
+                        ids: self.selected_shapes.clone(),
+                        dx_mm: 0.0,
+                        dy_mm: 0.0,
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        degrees: -15.0,
+                    });
+                }
+                if ui.add(Button::new("+15°")).clicked() {
+                    self.run_command(Command::ShapesTransform {
+                        ids: self.selected_shapes.clone(),
+                        dx_mm: 0.0,
+                        dy_mm: 0.0,
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        degrees: 15.0,
+                    });
+                }
+            });
         }
 
         ui.separator();
@@ -795,9 +974,12 @@ impl StencilApp {
                 width_mm: kerf_widget,
             });
         }
-        ui.checkbox(&mut self.kerf_preview, "Preview kerf compensation");
+        let _ = Checkbox::bool("Preview kerf compensation", &mut self.kerf_preview).show(ui);
 
-        if let Some(id) = self.selected_shape {
+        if let Some(id) = (self.selected_shapes.len() == 1)
+            .then_some(self.selected_shape)
+            .flatten()
+        {
             if self.engine.doc.get_shape(id).is_some() {
                 ui.separator();
                 ui.heading(format!("Object #{id}"));
@@ -841,7 +1023,7 @@ impl StencilApp {
                         }
                     });
                 self.inspector_editing = editing;
-                submitted |= ui.button("Apply").clicked();
+                submitted |= ui.add(Button::new("Apply")).clicked();
                 let valid_bounds = self
                     .inspector_values
                     .iter()
@@ -873,22 +1055,22 @@ impl StencilApp {
                     }
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("−15°").clicked() {
+                    if ui.add(Button::new("−15°")).clicked() {
                         self.run_command(Command::ShapeRotate { id, degrees: -15.0 });
                     }
-                    if ui.button("+15°").clicked() {
+                    if ui.add(Button::new("+15°")).clicked() {
                         self.run_command(Command::ShapeRotate { id, degrees: 15.0 });
                     }
                 });
                 ui.horizontal(|ui| {
-                    if ui.button("−10%").clicked() {
+                    if ui.add(Button::new("−10%")).clicked() {
                         self.run_command(Command::ShapeScale {
                             id,
                             scale_x: 0.9,
                             scale_y: 0.9,
                         });
                     }
-                    if ui.button("+10%").clicked() {
+                    if ui.add(Button::new("+10%")).clicked() {
                         self.run_command(Command::ShapeScale {
                             id,
                             scale_x: 1.1,
@@ -898,47 +1080,35 @@ impl StencilApp {
                 });
                 ui.small("Drag an object on the mat to reposition it.");
             } else {
-                self.selected_shape = None;
+                self.set_selection([]);
             }
         }
     }
 
     fn send_tab(&mut self, ui: &mut egui::Ui) {
         ui.label("Model");
-        CraftComboBox::from_label("Model")
-            .selected_text(model_label(self.send.model))
-            .show_ui(ui, |ui| {
-                for (model, label) in MODEL_CHOICES {
-                    if ui
-                        .selectable_label(self.send.model == *model, *label)
-                        .clicked()
-                    {
-                        self.send.model = *model;
-                    }
-                }
-            });
+        let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
+        for (model, label) in MODEL_CHOICES {
+            model_select = model_select.option(*model, *label);
+        }
+        let _ = model_select.show(ui);
         ui.label("Material");
-        CraftComboBox::from_label("Material")
-            .selected_text(media_label(self.send.media_index))
-            .show_ui(ui, |ui| {
-                for (i, media) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {
-                    if ui
-                        .selectable_label(self.send.media_index == i, media_label(i))
-                        .clicked()
-                    {
-                        self.send.media_index = i;
-                        // Defaults follow the preset.
-                        self.send.pressure_override = media.pressure.unwrap_or(10);
-                        self.send.speed_override = media.speed.unwrap_or(5);
-                    }
-                }
-            });
+        let mut media_select = Select::new("send-material", "Material", &mut self.send.media_index);
+        for (i, _) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {
+            media_select = media_select.option(i, media_label(i));
+        }
+        if let Some(&index) = media_select.show(ui).committed()
+            && let Some(media) = stencilcraft_machine::MEDIA_PRESETS.get(index)
+        {
+            self.send.pressure_override = media.pressure.unwrap_or(10);
+            self.send.speed_override = media.speed.unwrap_or(5);
+        }
         ui.add_space(4.0);
         ui.add(egui::Slider::new(&mut self.send.pressure_override, 1..=33).text("Pressure"));
         ui.add(egui::Slider::new(&mut self.send.speed_override, 1..=30).text("Speed"));
-        ui.checkbox(&mut self.send.bbox_only, "Bounding box preview");
+        let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         ui.separator();
-        if ui.button("Encode dry run").clicked() {
+        if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
         }
         if let Some(summary) = &self.send.summary {
@@ -1008,32 +1178,82 @@ impl StencilApp {
     }
 
     fn canvas_body(&mut self, ui: &mut egui::Ui) {
-        let clip = ui.available_rect_before_wrap();
         let doc = self.engine.doc.clone();
         let backdrop = mat_backdrop(self.mat);
+        let mut fit_clicked = false;
+        let mut center_clicked = false;
+        let mut zoom_delta = 0.0_f32;
+        let mut requested_zoom = None;
+        let mut zoom_value = (self.view.zoom * 100.0).round().clamp(5.0, 40000.0) as u32;
+        ui.horizontal(|ui| {
+            if ui.add(Button::new("Fit")).clicked() {
+                fit_clicked = true;
+            }
+            if ui.add(Button::new("Center")).clicked() {
+                center_clicked = true;
+            }
+            if ui.add(IconButton::new(Icon::Minus, "Zoom out")).clicked() {
+                zoom_delta = -1.0;
+            }
+            let slider_width = (ui.available_width() - 112.0).clamp(56.0, 180.0);
+            if ui
+                .add_sized(
+                    [slider_width, 18.0],
+                    egui::Slider::new(&mut zoom_value, 5..=40000)
+                        .logarithmic(true)
+                        .suffix("%"),
+                )
+                .changed()
+            {
+                requested_zoom = Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
+            }
+            if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
+                zoom_delta = 1.0;
+            }
+            ui.small("Space+drag or middle-drag to pan · wheel to zoom");
+        });
+        ui.separator();
+        let clip = ui.available_rect_before_wrap();
+        let extent_width = backdrop.width_mm.max(doc.board.width_mm);
+        let extent_height = backdrop.height_mm.max(doc.board.height_mm);
         if !self.view_initialized {
-            let width_mm = backdrop.width_mm.max(doc.board.width_mm);
-            let height_mm = backdrop.height_mm.max(doc.board.height_mm);
-            let available = egui::vec2(
-                (clip.width() - 48.0).max(1.0),
-                (clip.height() - 48.0).max(1.0),
-            );
-            let zoom = (available.x / width_mm as f32)
-                .min(available.y / height_mm as f32)
-                .clamp(0.05, 4.0);
-            self.view.zoom = zoom;
-            self.view.pan_mm = egui::vec2(
-                width_mm as f32 * 0.5 - clip.center().x / zoom,
-                height_mm as f32 * 0.5 - clip.center().y / zoom,
-            );
+            self.view
+                .fit_extent(extent_width, extent_height, clip, 24.0);
             self.view_initialized = true;
+        }
+        if fit_clicked {
+            self.view
+                .fit_extent(extent_width, extent_height, clip, 24.0);
+        } else if center_clicked {
+            self.view.center_extent(extent_width, extent_height, clip);
+        }
+        if let Some(zoom) = requested_zoom {
+            self.view.zoom_at(zoom / self.view.zoom, clip.center());
+        }
+        if zoom_delta != 0.0 {
+            self.view.zoom_at(1.2_f32.powf(zoom_delta), clip.center());
         }
         let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
         let view = self.view;
         let painter = ui.painter_at(clip);
         let selection = stencilcraft_ui_egui::SelectionState {
-            selected_shapes: self.selected_shape.into_iter().collect(),
-            overlay: None,
+            selected_shapes: self.selected_shapes.clone(),
+            overlay: self
+                .canvas_selection_start
+                .zip(ui.ctx().pointer_interact_pos())
+                .map(|(start, end)| {
+                    if self.canvas_lasso_mode {
+                        let mut points = self.canvas_selection_points.clone();
+                        if points.last().is_none_or(|last| *last != end) {
+                            points.push(end);
+                        }
+                        stencilcraft_ui_egui::SelectionOverlay::Lasso(points)
+                    } else {
+                        stencilcraft_ui_egui::SelectionOverlay::Box(egui::Rect::from_two_pos(
+                            start, end,
+                        ))
+                    }
+                }),
         };
         stencilcraft_ui_egui::paint_document(
             &painter,
@@ -1048,50 +1268,159 @@ impl StencilApp {
             &selection,
         );
 
-        if response.drag_started() {
-            self.canvas_drag_shape = response.interact_pointer_pos().and_then(|pointer| {
-                stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0)
-            });
-            if self.canvas_drag_shape.is_some() {
-                self.selected_shape = self.canvas_drag_shape;
+        let (space_down, middle_down, primary_down, pointer_delta) = ui.ctx().input(|input| {
+            (
+                input.key_down(egui::Key::Space),
+                input.pointer.middle_down(),
+                input.pointer.primary_down(),
+                input.pointer.delta(),
+            )
+        });
+        let pan_requested = middle_down || (space_down && primary_down);
+        if pan_requested && response.hovered() {
+            self.canvas_panning = true;
+            self.canvas_drag_shape = None;
+        } else if !pan_requested {
+            self.canvas_panning = false;
+        }
+
+        if self.canvas_panning {
+            if pointer_delta != egui::Vec2::ZERO {
+                self.view.pan_mm -= pointer_delta / self.view.zoom;
+            }
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if response.drag_started()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let hit = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
+            self.canvas_selection_additive = ui.ctx().input(|input| input.modifiers.shift);
+            self.canvas_drag_shape = if self.canvas_lasso_mode || self.canvas_selection_additive {
+                None
             } else {
-                self.selected_shape = None;
+                hit.filter(|id| self.selected_shapes.contains(id))
+            };
+            if self.canvas_lasso_mode {
+                self.canvas_selection_start = Some(pointer);
+                self.canvas_selection_points.clear();
+                self.canvas_selection_points.push(pointer);
+                if !self.canvas_selection_additive {
+                    self.set_selection([]);
+                }
+            } else if let Some(id) = hit {
+                if self.canvas_selection_additive {
+                    let mut ids = self.selected_shapes.clone();
+                    if let Some(index) = ids.iter().position(|selected| *selected == id) {
+                        ids.remove(index);
+                    } else {
+                        ids.push(id);
+                    }
+                    self.set_selection(ids);
+                } else if !self.selected_shapes.contains(&id) {
+                    self.set_selection([id]);
+                    self.canvas_drag_shape = Some(id);
+                }
+            } else {
+                self.canvas_selection_start = Some(pointer);
+                if !self.canvas_selection_additive {
+                    self.set_selection([]);
+                }
             }
             self.last_drag_delta = egui::Vec2::ZERO;
         } else if response.clicked()
             && let Some(pointer) = response.interact_pointer_pos()
         {
-            self.selected_shape = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
+            let hit = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
+            if ui.ctx().input(|input| input.modifiers.shift) {
+                let mut ids = self.selected_shapes.clone();
+                if let Some(id) = hit {
+                    if let Some(index) = ids.iter().position(|selected| *selected == id) {
+                        ids.remove(index);
+                    } else {
+                        ids.push(id);
+                    }
+                }
+                self.set_selection(ids);
+            } else {
+                self.set_selection(hit);
+            }
         }
 
-        if response.dragged() {
+        if response.dragged() && !self.canvas_panning {
             let total_delta = response.drag_delta();
             let delta = total_delta - self.last_drag_delta;
             self.last_drag_delta = total_delta;
             if delta != egui::Vec2::ZERO {
                 if let Some(id) = self.canvas_drag_shape {
-                    self.run_command(Command::ShapeMove {
-                        id,
-                        dx_mm: f64::from(delta.x / self.view.zoom),
-                        dy_mm: f64::from(delta.y / self.view.zoom),
-                    });
-                } else {
+                    if self.selected_shapes.len() > 1 {
+                        self.run_command(Command::ShapesTransform {
+                            ids: self.selected_shapes.clone(),
+                            dx_mm: f64::from(delta.x / self.view.zoom),
+                            dy_mm: f64::from(delta.y / self.view.zoom),
+                            scale_x: 1.0,
+                            scale_y: 1.0,
+                            degrees: 0.0,
+                        });
+                    } else {
+                        self.run_command(Command::ShapeMove {
+                            id,
+                            dx_mm: f64::from(delta.x / self.view.zoom),
+                            dy_mm: f64::from(delta.y / self.view.zoom),
+                        });
+                    }
+                } else if self.canvas_selection_start.is_none() {
                     self.view.pan_mm.x -= delta.x / self.view.zoom;
                     self.view.pan_mm.y -= delta.y / self.view.zoom;
                 }
             }
         }
+        if response.dragged()
+            && let Some(start) = self.canvas_selection_start
+            && let Some(end) = response.interact_pointer_pos()
+        {
+            let found = if self.canvas_lasso_mode {
+                if self
+                    .canvas_selection_points
+                    .last()
+                    .is_none_or(|last| last.distance(end) >= 3.0)
+                {
+                    self.canvas_selection_points.push(end);
+                }
+                stencilcraft_ui_egui::select_shapes_in_lasso(
+                    &doc,
+                    &view,
+                    &self.canvas_selection_points,
+                    stencilcraft_ui_egui::SelectionMode::Intersect,
+                )
+            } else {
+                let rect = egui::Rect::from_two_pos(start, end);
+                let mode = if end.x < start.x {
+                    stencilcraft_ui_egui::SelectionMode::Intersect
+                } else {
+                    stencilcraft_ui_egui::SelectionMode::Contain
+                };
+                stencilcraft_ui_egui::select_shapes_in_rect(&doc, &view, rect, mode)
+            };
+            let mut ids = if self.canvas_selection_additive {
+                self.selected_shapes.clone()
+            } else {
+                Vec::new()
+            };
+            ids.extend(found);
+            self.set_selection(ids);
+        }
         if response.drag_stopped() {
             self.canvas_drag_shape = None;
+            self.canvas_selection_start = None;
+            self.canvas_selection_points.clear();
             self.last_drag_delta = egui::Vec2::ZERO;
         }
 
         // Zoom: scroll wheel around the pointer.
         if response.hovered() {
-            let scroll = ui.ctx().input(|i| i.smooth_scroll_delta.y);
+            let scroll = ui.ctx().input(|input| input.smooth_scroll_delta.y);
             if scroll != 0.0 {
                 let pointer = response.interact_pointer_pos().unwrap_or(clip.center());
-                self.view.zoom_at(1.0 + scroll / 600.0, pointer);
+                self.view.zoom_at((scroll / 400.0).exp(), pointer);
             }
         }
     }
@@ -1110,5 +1439,122 @@ impl StencilApp {
                 ui.label(&self.status);
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_d_duplicates_the_selection_and_selects_the_copies() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 3.0,
+            y: 4.0,
+            width: 12.0,
+            height: 8.0,
+        });
+        app.set_selection([1]);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::D,
+                    physical_key: Some(egui::Key::D),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }],
+                ..Default::default()
+            },
+            |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.engine.doc.shape_count(), 2);
+        assert_eq!(app.selected_shapes, vec![2]);
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().bounds(),
+            app.engine.doc.get_shape(2).unwrap().bounds()
+        );
+    }
+
+    #[test]
+    fn design_system_controls_dispatch_app_actions() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        {
+            let mut frame = |events: Vec<egui::Event>| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(800.0, 600.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.tools_panel(ui),
+                );
+                output.textures_delta.clear();
+                output
+            };
+            let output = frame(vec![]);
+            let tree = output.platform_output.accesskit_update.unwrap();
+            let node = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("＋ Rectangle"))
+                .unwrap();
+            assert_eq!(node.1.role(), egui::accesskit::Role::Button);
+            let bounds = node.1.bounds().unwrap();
+            let pos = egui::pos2(
+                ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                ((bounds.y0 + bounds.y1) / 2.0) as f32,
+            );
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = frame(vec![egui::Event::PointerMoved(pos)]);
+            let _ = frame(vec![pointer(true)]);
+            let _ = frame(vec![pointer(false)]);
+            let tree = frame(vec![]).platform_output.accesskit_update.unwrap();
+            let node = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Duplicate selected"))
+                .unwrap();
+            assert_eq!(node.1.role(), egui::accesskit::Role::Button);
+            let bounds = node.1.bounds().unwrap();
+            let pos = egui::pos2(
+                ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                ((bounds.y0 + bounds.y1) / 2.0) as f32,
+            );
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let _ = frame(vec![egui::Event::PointerMoved(pos)]);
+            let _ = frame(vec![pointer(true)]);
+            let _ = frame(vec![pointer(false)]);
+        }
+        assert_eq!(app.engine.doc.shape_count(), 2);
+        assert_eq!(app.selected_shape, Some(2));
+        assert_eq!(app.selected_shapes, vec![2]);
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().bounds(),
+            app.engine.doc.get_shape(2).unwrap().bounds()
+        );
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().style,
+            app.engine.doc.get_shape(2).unwrap().style
+        );
     }
 }

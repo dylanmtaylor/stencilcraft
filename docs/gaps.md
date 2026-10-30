@@ -23,18 +23,22 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    no first/last pass, no power ramp, no Z/laser mode switch.
 5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
    line segments), no reader.
-6. **Engine**: commands cover add/remove/move/rotate/scale shape, add layer and kerf;
-   no selection model or batch transform command. Undo snapshots whole documents rather
-   than sharing structure.
-7. **UI**: basic visible-outline shape selection, canvas drag-to-move, selected-shape
-   rotate/scale controls, and box/lasso selection now work (selection uses conservative
-   shape bounds). Remaining: multi-select transforms and additive selection, node editing,
-   a ruler, zoom-to-fit keyboard shortcuts, kerf preview
+6. **Engine**: VectorCraft backs StencilCraft shape creation, transforms, Pathfinder,
+   alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
+   document and metadata snapshots. The model still has no explicit persistent selection,
+   and undo snapshots clone whole documents rather than sharing structure.
+7. **UI**: visible-outline selection, canvas drag-to-move, multi-select with additive
+   selection, exact-position duplication (button and Ctrl/Command+D shortcut), box/lasso
+   selection, Pathfinder operations, alignment/distribution and primary-shape rotate/scale
+   controls work (selection uses
+   conservative shape bounds). Remaining: node editing, a ruler, zoom-to-fit keyboard
+   shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.
-8. **Agent surface**: control methods do not cover the whole engine command set;
-   no MCP tool schema hydration yet; no fuzz corpus for the JSON channel. (The
-   document reader does have a malformed-input no-panic corpus now; the JSON
-   control channel does not.)
+8. **Agent surface**: `command.execute` exposes the serde-tagged engine commands through
+   the CLI JSON-lines process and shared session; the wider command set is not wrapped in
+   dedicated control methods, MCP tool schema hydration is not implemented, and the JSON
+   channel has no fuzz corpus. (The document reader does have a malformed-input no-panic
+   corpus now.)
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.

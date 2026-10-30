@@ -13,8 +13,8 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Kerf compensation | working | polygon offsetting with miter join; convex shapes exact |
 | Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
-| Editing tools | none | rectangle add/remove only |
-| UI | preliminary | canvas pan/zoom, layers panel, basic click/box/lasso selection, kerf preview, save/open; dockable design panels and broad toolset remain gaps |
+| Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
+| UI | preliminary | canvas pan/zoom, layers panel, click/box/lasso multi-select, Pathfinder, alignment/distribution, kerf preview and save/open; dockable design panels and node editing remain gaps |
 | Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
 | Craft-libs & parity | early foundation | domain crates established; reusable dockable panel/app-shell craft-libs are not yet part of this workspace |
@@ -57,9 +57,11 @@ The scope is to track the full feature comparison, including ecosystem-scale wor
 list is an inventory, not a promise to reproduce proprietary services or assets.
 Completed items should be marked here only when behavior is usable end-to-end.
 
-- [x] Engine commands for moving, rotating and scaling a shape around its center, with
-  finite-geometry validation and undo/redo. UI selection/editing remains.
-- [ ] Add pen and node editing; continue with welding and path boolean operations. The desktop supports click, box and lasso selection, drag-to-move, and primary-shape rotate/scale controls.
+- [x] VectorCraft-backed engine commands for ellipses, polygons, stars, moving, rotating,
+  scaling, exact-position duplication, Pathfinder, alignment and distribution, with
+  finite-geometry validation and journal-backed undo/redo that preserves StencilCraft
+  metadata snapshots. The desktop exposes duplication for selected objects.
+- [ ] Add pen and node editing; continue expanding path construction and editing. The desktop supports click, box and lasso selection, additive multi-select, drag-to-move, Pathfinder operations, alignment/distribution, and primary-shape rotate/scale controls.
 - [x] Add image import and threshold silhouette trace-to-path workflow for PNG/JPEG, with a configurable threshold and geometry/resource limits; full-color tracing and embedded raster editing remain open.
 - [ ] Add text objects and text-to-path conversion without bundling fonts; define a user
   font/shaping integration point.

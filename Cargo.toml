@@ -20,8 +20,13 @@ log = "0.4"
 egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
-# Shared UI components and docking, pinned to the version integrated by VectorCraft.
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["serde"] }
+# Shared UI components and docking, pinned to the design-system branch.
+craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a", features = ["serde"] }
+# Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
+# flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
+vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
+vectorcraft-geom = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+vectorcraft-pathops = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 # internal
 stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }
@@ -69,18 +74,25 @@ codegen-units = 1
 
 # craft-ui uses the suite's egui and winit forks for shared IME and docking support.
 [patch.crates-io]
-ecolor = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-emath = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-epaint_default_fonts = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-winit = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui-wgpu = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_glow = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_extras = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_kittest = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_system_font_provider = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-eframe = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_demo_lib = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
-egui_inspection = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+# VectorCraft's PDF import/export dependencies use the matching Craft-Libs API revisions.
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+ecolor = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+emath = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+epaint = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+epaint_default_fonts = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui-winit = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui-wgpu = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_glow = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_extras = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_kittest = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_system_font_provider = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+eframe = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_demo_lib = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+egui_inspection = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
 winit = { git = "https://github.com/storytold/winit", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

@@ -140,12 +140,59 @@ impl View {
     /// Zoom by a factor while keeping `anchor_screen` stationary on the same
     /// world point.
     pub fn zoom_at(&mut self, factor: f32, anchor_screen: egui::Pos2) {
+        if !factor.is_finite()
+            || factor <= 0.0
+            || !self.zoom.is_finite()
+            || self.zoom <= 0.0
+            || !anchor_screen.is_finite()
+        {
+            return;
+        }
         let anchor = egui::vec2(anchor_screen.x, anchor_screen.y);
         let world_before = self.screen_to_world(anchor);
         self.zoom = (self.zoom * factor).clamp(0.05, 400.0);
         // Re-anchor: solve `anchor/new_zoom + pan = world_before` for pan.
         self.pan_mm.x += world_before.x as f32 - anchor.x / self.zoom;
         self.pan_mm.y += world_before.y as f32 - anchor.y / self.zoom;
+    }
+
+    /// Center a world-space extent in `viewport` while preserving the current zoom.
+    pub fn center_extent(&mut self, width_mm: f64, height_mm: f64, viewport: egui::Rect) -> bool {
+        if !valid_view_extent(width_mm, height_mm, viewport)
+            || !self.zoom.is_finite()
+            || self.zoom <= 0.0
+        {
+            return false;
+        }
+        self.pan_mm = egui::vec2(
+            (width_mm * 0.5 - f64::from(viewport.center().x / self.zoom)) as f32,
+            (height_mm * 0.5 - f64::from(viewport.center().y / self.zoom)) as f32,
+        );
+        self.pan_mm.is_finite()
+    }
+
+    /// Fit a world-space extent inside `viewport`, leaving `margin` points on each side.
+    pub fn fit_extent(
+        &mut self,
+        width_mm: f64,
+        height_mm: f64,
+        viewport: egui::Rect,
+        margin: f32,
+    ) -> bool {
+        if !valid_view_extent(width_mm, height_mm, viewport)
+            || !margin.is_finite()
+            || margin < 0.0
+            || viewport.width() <= margin * 2.0
+            || viewport.height() <= margin * 2.0
+        {
+            return false;
+        }
+        let available_width = f64::from(viewport.width() - margin * 2.0);
+        let available_height = f64::from(viewport.height() - margin * 2.0);
+        self.zoom = (available_width / width_mm)
+            .min(available_height / height_mm)
+            .clamp(0.05, 400.0) as f32;
+        self.center_extent(width_mm, height_mm, viewport)
     }
 
     /// The document's artboard corners on screen.
@@ -168,6 +215,16 @@ impl View {
         ));
         egui::Rect::from_min_max(min, max)
     }
+}
+
+fn valid_view_extent(width_mm: f64, height_mm: f64, viewport: egui::Rect) -> bool {
+    width_mm.is_finite()
+        && height_mm.is_finite()
+        && width_mm > 0.0
+        && height_mm > 0.0
+        && viewport.is_finite()
+        && viewport.width() > 0.0
+        && viewport.height() > 0.0
 }
 
 /// Paint the cutting mat: surface, inch grid, one-inch ruler ticks on the
@@ -648,6 +705,48 @@ mod tests {
         let after = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
         assert!((after.x - before.x).abs() < 1e-6, "{before:?} → {after:?}");
         assert!((after.y - before.y).abs() < 1e-6);
+    }
+
+    #[test]
+    fn center_extent_places_its_center_at_the_viewport_center_without_changing_zoom() {
+        let mut view = View {
+            zoom: 2.5,
+            pan_mm: egui::Vec2::ZERO,
+        };
+        let viewport = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), egui::vec2(800.0, 500.0));
+        assert!(view.center_extent(600.0, 300.0, viewport));
+        let center = view.world_to_screen(stencilcraft_geom::Point::new(300.0, 150.0));
+        assert_eq!(center, viewport.center());
+        assert_eq!(view.zoom, 2.5);
+    }
+
+    #[test]
+    fn fit_extent_contains_the_mat_with_a_margin_and_centers_it() {
+        let mut view = View::default();
+        let viewport = egui::Rect::from_min_size(egui::pos2(30.0, 20.0), egui::vec2(1000.0, 700.0));
+        assert!(view.fit_extent(600.0, 300.0, viewport, 40.0));
+        let rect = view.mat_rect_screen(&MatBackdrop {
+            width_mm: 600.0,
+            height_mm: 300.0,
+            label: "mat".into(),
+        });
+        assert!(rect.left() >= viewport.left() + 39.9);
+        assert!(rect.right() <= viewport.right() - 39.9);
+        assert!(rect.top() >= viewport.top() + 39.9);
+        assert!(rect.bottom() <= viewport.bottom() - 39.9);
+        assert_eq!(rect.center(), viewport.center());
+    }
+
+    #[test]
+    fn view_operations_ignore_invalid_geometry_and_zoom_inputs() {
+        let mut view = View::default();
+        let original = view;
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+        assert!(!view.center_extent(f64::NAN, 20.0, viewport));
+        assert!(!view.fit_extent(20.0, 20.0, viewport, f32::NAN));
+        view.zoom_at(f32::NAN, viewport.center());
+        view.zoom_at(2.0, egui::pos2(f32::NAN, 0.0));
+        assert_eq!(view, original);
     }
 
     #[test]

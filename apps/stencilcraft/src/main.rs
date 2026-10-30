@@ -2450,6 +2450,117 @@ mod tests {
     }
 
     #[test]
+    fn custom_overrides_and_bounding_box_preview_reach_dry_run_program() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let mut path = stencilcraft_geom::BezPath::new();
+        path.move_to(stencilcraft_geom::Point::new(2.0, 3.0));
+        path.line_to(stencilcraft_geom::Point::new(7.0, 3.0));
+        path.line_to(stencilcraft_geom::Point::new(4.0, 7.0));
+        path.close_path();
+        app.engine
+            .run(Command::ShapeAddPath {
+                path,
+                style: stencilcraft_doc::CutStyle::Cut,
+            })
+            .unwrap();
+
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Material"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Home, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(
+            stencilcraft_machine::MEDIA_PRESETS[app.send.media_index].id,
+            300
+        );
+        assert_eq!(
+            (app.send.pressure_override, app.send.speed_override),
+            (10, 5)
+        );
+
+        for label in ["Pressure", "Speed"] {
+            let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+            click(
+                &ctx,
+                &mut app,
+                StencilApp::send_tab,
+                node_center(&out, label),
+            );
+            frame(
+                &ctx,
+                &mut app,
+                vec![key(egui::Key::End, egui::Modifiers::NONE)],
+                StencilApp::send_tab,
+            );
+        }
+        assert_eq!(
+            (app.send.pressure_override, app.send.speed_override),
+            (33, 30)
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let normal = app.send.summary.clone().unwrap();
+        assert!(normal.iter().any(|line| line == "FX33,1"));
+        assert!(normal.iter().any(|line| line == "!30,1"));
+        assert!(normal.iter().any(|line| line == "D140,80"));
+        assert!(!normal.iter().any(|line| line == "D140,140"));
+
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Bounding box preview"),
+        );
+        assert!(app.send.bbox_only);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let preview = app.send.summary.as_ref().unwrap();
+        assert!(preview.iter().any(|line| line == "FX33,1"));
+        assert!(preview.iter().any(|line| line == "!30,1"));
+        let plot: Vec<&str> = preview
+            .iter()
+            .filter(|line| line.starts_with('M') || line.starts_with('D'))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            plot,
+            [
+                "M60,40", "D60,140", "D140,140", "D140,40", "D60,40", "M140,0"
+            ]
+        );
+        assert!(!preview.iter().any(|line| line == "D140,80"));
+    }
+
+    #[test]
     fn checkbox_interactions_change_preview_and_layer_visibility() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();

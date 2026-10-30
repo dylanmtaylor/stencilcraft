@@ -2384,6 +2384,72 @@ mod tests {
     }
 
     #[test]
+    fn material_selection_changes_encoded_dry_run_commands() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.engine
+            .run(Command::ShapeAddRect {
+                x: 2.0,
+                y: 3.0,
+                width: 5.0,
+                height: 4.0,
+            })
+            .unwrap();
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let initial = app.send.summary.clone().unwrap();
+        assert!(initial.iter().any(|line| line == "FX10,1"));
+        assert!(initial.iter().any(|line| line == "!5,1"));
+        assert!(initial.iter().any(|line| line.starts_with('D')));
+
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Material"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(
+            stencilcraft_machine::MEDIA_PRESETS[app.send.media_index].id,
+            106
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let updated = app.send.summary.as_ref().unwrap();
+        assert!(updated.iter().any(|line| line == "FX14,1"));
+        assert!(updated.iter().any(|line| line == "!10,1"));
+        assert!(!updated.iter().any(|line| line == "FX10,1"));
+        assert!(!updated.iter().any(|line| line == "!5,1"));
+        assert!(updated.iter().any(|line| line.starts_with('D')));
+    }
+
+    #[test]
     fn checkbox_interactions_change_preview_and_layer_visibility() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();

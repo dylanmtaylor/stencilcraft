@@ -2305,6 +2305,90 @@ mod tests {
     }
 
     #[test]
+    fn vectorcraft_history_limit_preserves_oldest_retained_state() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        for _ in 0..101 {
+            engine
+                .run(Command::ShapeMove {
+                    id: 1,
+                    dx_mm: 1.0,
+                    dy_mm: 0.0,
+                })
+                .unwrap();
+        }
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 101.0);
+        for x in (1..=100).rev() {
+            assert!(engine.undo(), "undo to x={x}");
+            assert_eq!(
+                engine.doc.get_shape(1).unwrap().bounds().unwrap().x0,
+                f64::from(x)
+            );
+        }
+        assert!(!engine.undo());
+        for x in 2..=101 {
+            assert!(engine.redo(), "redo to x={x}");
+            assert_eq!(
+                engine.doc.get_shape(1).unwrap().bounds().unwrap().x0,
+                f64::from(x)
+            );
+        }
+        assert!(!engine.redo());
+    }
+
+    #[test]
+    fn vectorcraft_branch_discards_redo_and_keeps_metadata_in_sync() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        engine.run(Command::KerfSet { width_mm: 0.25 }).unwrap();
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 10.0,
+                dy_mm: 0.0,
+            })
+            .unwrap();
+        assert!(engine.undo());
+        assert!(engine.undo());
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 3.0,
+                dy_mm: 0.0,
+            })
+            .unwrap();
+        assert!(!engine.redo());
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 3.0);
+        assert_eq!(engine.doc.kerf.width_mm, 0.0);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 0.0);
+        assert!(engine.redo());
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 3.0);
+        engine
+            .run(Command::ShapeMove {
+                id: 1,
+                dx_mm: 2.0,
+                dy_mm: 0.0,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 5.0);
+    }
+
+    #[test]
     fn document_new_rebases_both_history_stacks_to_snapshots() {
         let mut engine = Engine::default();
         engine.run(Command::KerfSet { width_mm: 0.25 }).unwrap();

@@ -2450,6 +2450,117 @@ mod tests {
     }
 
     #[test]
+    fn material_selector_supports_accessible_focus_and_keyboard_selection() {
+        use egui::accesskit::{Action, ActionRequest, HasPopup, Role, TreeId};
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let initial = app.send.media_index;
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let (id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Material"))
+            .unwrap();
+        assert_eq!(node.role(), Role::ComboBox);
+        assert_eq!(node.value(), Some(media_label(initial).as_str()));
+        assert_eq!(node.is_expanded(), Some(false));
+        assert_eq!(node.has_popup(), Some(HasPopup::Listbox));
+        let material_id = *id;
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::Focus,
+                target_tree: TreeId::ROOT,
+                target_node: material_id,
+                data: None,
+            })],
+            StencilApp::send_tab,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::ALT)],
+            StencilApp::send_tab,
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let combo = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == material_id)
+            .unwrap();
+        assert_eq!(combo.1.is_expanded(), Some(true));
+        let initial_label = media_label(initial);
+        let option = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label() == Some(initial_label.as_str()) && node.role() == Role::ListBoxOption
+            })
+            .unwrap();
+        assert_eq!(option.1.is_selected(), Some(true));
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(app.send.media_index, initial + 1);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let combo = tree
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == material_id)
+            .unwrap();
+        assert_eq!(combo.1.is_expanded(), Some(false));
+        assert_eq!(combo.1.value(), Some(media_label(initial + 1).as_str()));
+        let media = &stencilcraft_machine::MEDIA_PRESETS[initial + 1];
+        assert_eq!(
+            (app.send.pressure_override, app.send.speed_override),
+            (media.pressure.unwrap_or(10), media.speed.unwrap_or(5))
+        );
+        let settings = (app.send.pressure_override, app.send.speed_override);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(app.send.media_index, initial + 2);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(app.send.media_index, initial + 1);
+        assert_eq!(
+            (app.send.pressure_override, app.send.speed_override),
+            settings
+        );
+    }
+
+    #[test]
     fn custom_overrides_and_bounding_box_preview_reach_dry_run_program() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();

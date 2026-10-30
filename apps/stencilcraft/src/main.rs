@@ -2202,6 +2202,104 @@ mod tests {
     }
 
     #[test]
+    fn material_selection_updates_overrides_and_cancel_restores_selection() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let initial = app.send.media_index;
+        assert!(initial + 1 < stencilcraft_machine::MEDIA_PRESETS.len());
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Material"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(app.send.media_index, initial + 1);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        assert_eq!(app.send.media_index, initial);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Material"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let media = &stencilcraft_machine::MEDIA_PRESETS[initial + 1];
+        assert_eq!(app.send.media_index, initial + 1);
+        assert_eq!(app.send.pressure_override, media.pressure.unwrap_or(10));
+        assert_eq!(app.send.speed_override, media.speed.unwrap_or(5));
+    }
+
+    #[test]
+    fn checkbox_interactions_change_preview_and_layer_visibility() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let layer_label = format!("{}  ·  0", app.engine.doc.layers[0].name);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::inspector,
+            node_center(&out, &layer_label),
+        );
+        assert!(!app.engine.doc.layers[0].visible);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::inspector,
+            node_center(&out, "Preview kerf compensation"),
+        );
+        assert!(app.kerf_preview);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Bounding box preview"),
+        );
+        assert!(app.send.bbox_only);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Bounding box preview"),
+        );
+        assert!(!app.send.bbox_only);
+    }
+
+    #[test]
     fn design_system_controls_dispatch_app_actions() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();

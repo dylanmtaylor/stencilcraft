@@ -2538,6 +2538,81 @@ mod tests {
     }
 
     #[test]
+    fn screen_reader_actions_select_material_and_update_dry_run() {
+        use egui::accesskit::{Action, ActionRequest, Role, TreeId};
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.engine
+            .run(Command::ShapeAddRect {
+                x: 2.0,
+                y: 3.0,
+                width: 5.0,
+                height: 4.0,
+            })
+            .unwrap();
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let (selector_id, selector) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Material"))
+            .unwrap();
+        assert_eq!(selector.role(), Role::ComboBox);
+        assert!(selector.supports_action(Action::Click));
+        let request = |action, target_node| {
+            egui::Event::AccessKitActionRequest(ActionRequest {
+                action,
+                target_tree: TreeId::ROOT,
+                target_node,
+                data: None,
+            })
+        };
+        frame(
+            &ctx,
+            &mut app,
+            vec![request(Action::Click, *selector_id)],
+            StencilApp::send_tab,
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let (option_id, option) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == Role::ListBoxOption && node.label() == Some("Film Labels (ID 106)")
+            })
+            .unwrap();
+        assert!(option.supports_action(Action::Click));
+        frame(
+            &ctx,
+            &mut app,
+            vec![request(Action::Click, *option_id)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(
+            stencilcraft_machine::MEDIA_PRESETS[app.send.media_index].id,
+            106
+        );
+        assert_eq!(
+            (app.send.pressure_override, app.send.speed_override),
+            (14, 10)
+        );
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let summary = app.send.summary.as_ref().unwrap();
+        assert!(summary.iter().any(|line| line == "FX14,1"));
+        assert!(summary.iter().any(|line| line == "!10,1"));
+    }
+
+    #[test]
     fn material_selector_supports_accessible_focus_and_keyboard_selection() {
         use egui::accesskit::{Action, ActionRequest, HasPopup, Role, TreeId};
         let ctx = egui::Context::default();

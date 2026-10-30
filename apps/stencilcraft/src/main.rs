@@ -2450,6 +2450,94 @@ mod tests {
     }
 
     #[test]
+    fn selected_model_and_mat_change_dry_run_setup() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.engine
+            .run(Command::ShapeAddRect {
+                x: 2.0,
+                y: 3.0,
+                width: 5.0,
+                height: 4.0,
+            })
+            .unwrap();
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let baseline = app.send.summary.clone().unwrap();
+        assert!(baseline.iter().any(|line| line == "TG9"));
+        assert!(baseline.iter().any(|line| line == "Z60000,12000"));
+        assert!(baseline[0].contains("Cameo 4 Pro"));
+
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Model"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::End, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        assert_eq!(app.send.model, stencilcraft_machine::Model::Portrait3);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::inspector,
+            node_center(&out, "Cutting mat"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Home, egui::Modifiers::NONE)],
+            StencilApp::inspector,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::inspector,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        assert_eq!(app.mat, stencilcraft_machine::Mat::None);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Encode dry run"),
+        );
+        let updated = app.send.summary.as_ref().unwrap();
+        assert!(updated.iter().any(|line| line == "TG0"));
+        assert!(updated.iter().any(|line| line == "Z365800,4060"));
+        assert!(
+            !updated
+                .iter()
+                .any(|line| line == "TG9" || line == "Z60000,12000")
+        );
+        assert!(updated[0].contains("Portrait 3"));
+        assert!(updated.iter().any(|line| line.contains("no mat")));
+        assert!(updated.iter().any(|line| line.starts_with('D')));
+    }
+
+    #[test]
     fn material_selector_supports_accessible_focus_and_keyboard_selection() {
         use egui::accesskit::{Action, ActionRequest, HasPopup, Role, TreeId};
         let ctx = egui::Context::default();

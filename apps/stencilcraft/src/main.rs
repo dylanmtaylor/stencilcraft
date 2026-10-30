@@ -2134,6 +2134,131 @@ mod tests {
     }
 
     #[test]
+    fn kerf_drag_cancel_preserves_history_and_commit_is_one_undo_step() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.engine.run(Command::KerfSet { width_mm: 0.2 }).unwrap();
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        let start = node_center(&out, "Kerf");
+        let end = start + egui::vec2(35.0, 0.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            StencilApp::inspector,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(end)],
+            StencilApp::inspector,
+        );
+        assert!(app.kerf_draft.is_some_and(|value| value != 0.2));
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.2);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            StencilApp::inspector,
+        );
+        assert_eq!(app.kerf_draft, None);
+        frame(
+            &ctx,
+            &mut app,
+            vec![button(end, false)],
+            StencilApp::inspector,
+        );
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.2);
+        assert!(app.engine.undo());
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.0);
+        assert!(app.engine.redo());
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.2);
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            StencilApp::inspector,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(end)],
+            StencilApp::inspector,
+        );
+        let final_pos = end + egui::vec2(15.0, 0.0);
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(final_pos)],
+            StencilApp::inspector,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![button(final_pos, false)],
+            StencilApp::inspector,
+        );
+        let committed = app.engine.doc.kerf.width_mm;
+        assert_ne!(committed, 0.2);
+        assert!(app.engine.undo());
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.2);
+        assert!(app.engine.redo());
+        assert_eq!(app.engine.doc.kerf.width_mm, committed);
+    }
+
+    #[test]
+    fn pressure_slider_drag_cancel_restores_value() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        let start = node_center(&out, "Pressure");
+        let end = start + egui::vec2(35.0, 0.0);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            StencilApp::send_tab,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(end)],
+            StencilApp::send_tab,
+        );
+        assert_ne!(app.send.pressure_override, 10);
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            StencilApp::send_tab,
+        );
+        assert_eq!(app.send.pressure_override, 10);
+        frame(
+            &ctx,
+            &mut app,
+            vec![button(end, false)],
+            StencilApp::send_tab,
+        );
+        assert_eq!(app.send.pressure_override, 10);
+    }
+
+    #[test]
     fn shared_send_sliders_and_text_dialog_accept_input() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();

@@ -45,6 +45,7 @@ pub struct Palette {
     pub engrave_line: egui::Color32,
     pub text: egui::Color32,
     pub accent: egui::Color32,
+    pub selection: egui::Color32,
 }
 
 impl Palette {
@@ -62,36 +63,45 @@ impl Palette {
                 engrave_line: Tokens::ENGRAVE_LINE,
                 text: Tokens::TEXT,
                 accent: Tokens::ACCENT,
+                selection: Tokens::SELECTION,
             },
             ColorTheme::Light => Self {
-                canvas_bg: egui::Color32::from_rgb(238, 240, 244),
-                mat: egui::Color32::from_rgb(220, 224, 232),
-                mat_grid: egui::Color32::from_rgb(190, 196, 207),
-                ruler: egui::Color32::from_rgb(105, 111, 123),
-                grid: egui::Color32::from_rgb(214, 217, 224),
-                board: egui::Color32::from_rgb(251, 250, 247),
-                cut_line: Tokens::CUT_LINE,
-                kerf_line: Tokens::KERF_LINE,
-                engrave_line: egui::Color32::from_gray(82),
-                text: egui::Color32::from_gray(72),
-                accent: Tokens::ACCENT,
+                canvas_bg: egui::Color32::from_rgb(0xdf, 0xe3, 0xe9),
+                mat: egui::Color32::from_rgb(0xf3, 0xf5, 0xf8),
+                mat_grid: egui::Color32::from_rgb(0xd0, 0xd5, 0xdd),
+                ruler: egui::Color32::from_rgb(0x58, 0x60, 0x6e),
+                grid: egui::Color32::from_rgb(0xdd, 0xe1, 0xe8),
+                board: egui::Color32::WHITE,
+                cut_line: Tokens::ACCENT_LIGHT,
+                kerf_line: egui::Color32::from_rgb(0x14, 0x73, 0xe6),
+                engrave_line: egui::Color32::from_rgb(0x58, 0x60, 0x6e),
+                text: egui::Color32::from_rgb(0x1b, 0x1f, 0x27),
+                accent: Tokens::ACCENT_LIGHT,
+                selection: Tokens::SELECTION,
             },
         }
     }
 }
 
 impl Tokens {
-    pub const CANVAS_BG: egui::Color32 = egui::Color32::from_gray(28);
-    pub const MAT: egui::Color32 = egui::Color32::from_gray(36);
-    pub const MAT_GRID: egui::Color32 = egui::Color32::from_gray(46);
-    pub const RULER: egui::Color32 = egui::Color32::from_gray(90);
-    pub const GRID: egui::Color32 = egui::Color32::from_gray(46);
-    pub const BOARD: egui::Color32 = egui::Color32::from_gray(50);
+    /// Suite-shared dark canvas hues: VectorCraft Modern Dark pasteboard/panel
+    /// with the Craft coral accent and blue selection. Chrome (craft-ui
+    /// `suite_default`) and canvas now share one source.
+    pub const CANVAS_BG: egui::Color32 = egui::Color32::from_rgb(0x10, 0x12, 0x17);
+    pub const MAT: egui::Color32 = egui::Color32::from_rgb(0x18, 0x1b, 0x22);
+    pub const MAT_GRID: egui::Color32 = egui::Color32::from_rgb(0x26, 0x2b, 0x35);
+    pub const RULER: egui::Color32 = egui::Color32::from_rgb(0x6f, 0x78, 0x8a);
+    pub const GRID: egui::Color32 = egui::Color32::from_rgb(0x23, 0x28, 0x32);
+    pub const BOARD: egui::Color32 = egui::Color32::from_rgb(0x27, 0x2c, 0x36);
     pub const CUT_LINE: egui::Color32 = egui::Color32::from_rgb(232, 87, 63);
     pub const KERF_LINE: egui::Color32 = egui::Color32::from_rgb(63, 136, 232);
-    pub const ENGRAVE_LINE: egui::Color32 = egui::Color32::from_gray(140);
-    pub const TEXT: egui::Color32 = egui::Color32::from_gray(200);
-    pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 35, 135);
+    pub const ENGRAVE_LINE: egui::Color32 = egui::Color32::from_rgb(0x96, 0x9f, 0xaf);
+    pub const TEXT: egui::Color32 = egui::Color32::from_rgb(0xdf, 0xe4, 0xec);
+    pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xf0, 0x6a, 0x52);
+    /// Dark-on-light coral for the light theme (VectorCraft Modern Light).
+    pub const ACCENT_LIGHT: egui::Color32 = egui::Color32::from_rgb(0xd9, 0x47, 0x2f);
+    /// Selection blue, shared by both themes (VectorCraft `selection`).
+    pub const SELECTION: egui::Color32 = egui::Color32::from_rgb(0x4f, 0x80, 0xff);
 }
 
 /// The cutting mat under the design sheet: physical extent in millimetres
@@ -380,7 +390,7 @@ pub fn paint_document(
         for shape in &layer.shapes {
             let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
             if selection.selected_shapes.contains(&shape.id) {
-                color = palette.accent;
+                color = palette.selection;
                 width = width.max(2.5);
             }
             for pl in stencilcraft_geom::path_to_polylines(
@@ -408,15 +418,15 @@ pub fn paint_document(
                 painter.rect_stroke(
                     *rect,
                     0.0,
-                    egui::Stroke::new(1.0, palette.accent),
+                    egui::Stroke::new(1.0, palette.selection),
                     egui::StrokeKind::Outside,
                 );
-                painter.rect_filled(*rect, 0.0, palette.accent.linear_multiply(0.08));
+                painter.rect_filled(*rect, 0.0, palette.selection.linear_multiply(0.08));
             }
             SelectionOverlay::Lasso(points) if points.len() >= 2 => {
                 painter.add(egui::Shape::line(
                     points.clone(),
-                    egui::Stroke::new(1.0, palette.accent),
+                    egui::Stroke::new(1.0, palette.selection),
                 ));
             }
             SelectionOverlay::Lasso(_) => {}
@@ -434,7 +444,7 @@ pub fn paint_document(
         painter.rect_stroke(
             bounds.expand(3.0),
             0.0,
-            egui::Stroke::new(1.0, palette.accent),
+            egui::Stroke::new(1.0, palette.selection),
             egui::StrokeKind::Outside,
         );
     }
@@ -682,8 +692,13 @@ mod tests {
         assert_eq!(dark.board, Tokens::BOARD);
         assert_ne!(light.canvas_bg, dark.canvas_bg);
         assert_ne!(light.board, dark.board);
-        assert_eq!(light.cut_line, dark.cut_line);
-        assert_eq!(light.accent, Tokens::ACCENT);
+        // Cut/kerf darken for paper-white boards; selection blue is shared.
+        assert_eq!(dark.cut_line, Tokens::CUT_LINE);
+        assert_eq!(light.cut_line, Tokens::ACCENT_LIGHT);
+        assert_eq!(dark.accent, Tokens::ACCENT);
+        assert_eq!(light.accent, Tokens::ACCENT_LIGHT);
+        assert_eq!(dark.selection, Tokens::SELECTION);
+        assert_eq!(light.selection, Tokens::SELECTION);
     }
 
     #[test]

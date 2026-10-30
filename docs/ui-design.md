@@ -26,10 +26,14 @@ copied; skin is ours. Everything colours-wise comes from
 
 ## StencilCraft visual conventions
 
-- Dark gray canvas (`CANVAS_BG 28`), sober panel styling, no gradients, no
+- Slate canvas shared with the suite chrome (VectorCraft Modern Dark:
+  canvas `101217`, mat `181B22`, board `272C36`; light: canvas `DFE3E9`,
+  mat `F3F5F8`, paper-white board), sober panel styling, no gradients, no
   comic helpers, no mascot buttons.
-- Hairline `1.5px`-min production strokes: cut = red `E8573F`, kerf preview =
-  blue `3F88E8`, engrave = gray 140.
+- Hairline `1.5px`-min production strokes: cut = coral `E8573F` (light:
+  `D9472F`), kerf preview = blue `3F88E8` (light: `1473E6`), engrave =
+  `969FAF` (light: `58606E`). Selection is suite blue `4F80FF`; coral
+  `F06A52` marks what is on/active.
 - A single status line at the bottom, terse, machine-readable-ish.
 - All actions flow through engine `Command`s / transports — the UI stays thin.
 - Selection supports click, left-to-right box/lasso containment, and right-to-left intersecting selection. Current candidates use shape bounds, so curved or concave paths may be conservatively selected; multi-select transforms and modifier-key additive selection remain future work.

@@ -2664,6 +2664,93 @@ mod tests {
     }
 
     #[test]
+    fn invalid_multi_shape_commands_after_reset_preserve_history_and_editability() {
+        let mut engine = Engine::default();
+        engine.run(Command::KerfSet { width_mm: 0.25 }).unwrap();
+        let original = engine.doc.clone();
+        engine
+            .run(Command::DocumentNew {
+                width_mm: 80.0,
+                height_mm: 90.0,
+            })
+            .unwrap();
+        let reset = engine.doc.clone();
+        engine
+            .run(Command::ShapeAddPaths {
+                shapes: vec![
+                    (rect_path(1.0, 2.0, 5.0, 5.0), CutStyle::Cut),
+                    (rect_path(20.0, 2.0, 5.0, 5.0), CutStyle::Engrave),
+                ],
+            })
+            .unwrap();
+        let shapes = engine.doc.clone();
+        engine
+            .run(Command::ShapesTransform {
+                ids: vec![1, 2],
+                dx_mm: 3.0,
+                dy_mm: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                degrees: 0.0,
+            })
+            .unwrap();
+        let moved = engine.doc.clone();
+        assert!(engine.undo());
+        assert_eq!(engine.doc, shapes);
+        for command in [
+            Command::ShapesTransform {
+                ids: vec![1, 99],
+                dx_mm: 5.0,
+                dy_mm: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                degrees: 0.0,
+            },
+            Command::ShapesAlign {
+                ids: vec![1, 1],
+                alignment: Alignment::Left,
+                to_board: false,
+            },
+            Command::ShapePathfinder {
+                ids: vec![1, 99],
+                operation: BooleanOperation::Union,
+            },
+        ] {
+            assert!(engine.run(command).is_err());
+            assert_eq!(engine.doc, shapes);
+        }
+        assert!(engine.redo());
+        assert_eq!(engine.doc, moved);
+        assert!(!engine.redo());
+        assert!(engine.undo());
+        assert_eq!(engine.doc, shapes);
+        assert!(engine.undo());
+        assert_eq!(engine.doc, reset);
+        assert!(engine.undo());
+        assert_eq!(engine.doc, original);
+        assert!(engine.redo());
+        assert_eq!(engine.doc, reset);
+        assert!(engine.redo());
+        assert_eq!(engine.doc, shapes);
+        assert!(engine.redo());
+        assert_eq!(engine.doc, moved);
+        engine
+            .run(Command::ShapesTransform {
+                ids: vec![1, 2],
+                dx_mm: 2.0,
+                dy_mm: 0.0,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                degrees: 0.0,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().bounds().unwrap().x0, 6.0);
+        assert_eq!(engine.doc.get_shape(2).unwrap().bounds().unwrap().x0, 25.0);
+        assert!(engine.undo());
+        assert_eq!(engine.doc, moved);
+    }
+
+    #[test]
     fn undo_redo() {
         let mut engine = Engine::default();
         engine

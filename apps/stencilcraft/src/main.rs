@@ -4,10 +4,11 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use craft_ui::controls::{Button, Checkbox, IconButton, Select};
+use craft_ui::controls::{Button, Checkbox, IconButton, Select, Slider, SliderScale, TextField};
 use craft_ui::docking::{
     Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
 };
+use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
 use eframe::egui;
@@ -20,6 +21,36 @@ mod control;
 /// The same bounded PNG/JPEG silhouette tracer used by the CLI.
 #[path = "../../stencilcraft-cli/src/trace.rs"]
 mod trace;
+
+fn apply_edit<T: Clone>(
+    value: &mut T,
+    before: &mut Option<T>,
+    event: Option<EditEvent<T>>,
+) -> bool {
+    match event {
+        Some(EditEvent::Begin { .. }) => *before = Some(value.clone()),
+        Some(EditEvent::Update { value: next, .. }) => {
+            *value = next;
+            return true;
+        }
+        Some(EditEvent::Set { value: next, .. }) | Some(EditEvent::Commit { value: next, .. }) => {
+            *value = next;
+            *before = None;
+            return true;
+        }
+        Some(EditEvent::Cancel { reason, .. }) => {
+            if reason != CancelReason::External
+                && let Some(original) = before.take()
+            {
+                *value = original;
+                return true;
+            }
+            *before = None;
+        }
+        _ => {}
+    }
+    false
+}
 
 /// Display label for a media preset index (parallel to `MEDIA_PRESETS`).
 fn media_label(index: usize) -> String {
@@ -279,6 +310,12 @@ struct StencilApp {
     pending_view_command: Option<CanvasViewCommand>,
     kerf_preview: bool,
     kerf_preview_cache: Option<KerfPreviewCache>,
+    kerf_draft: Option<f64>,
+    pressure_before: Option<f64>,
+    speed_before: Option<f64>,
+    zoom_before: Option<f64>,
+    text_before: Option<String>,
+    inspector_before: [Option<String>; 4],
     status: String,
     open_path: Option<String>,
     send_mode: bool,
@@ -390,6 +427,12 @@ impl StencilApp {
             pending_view_command: None,
             kerf_preview: false,
             kerf_preview_cache: None,
+            kerf_draft: None,
+            pressure_before: None,
+            speed_before: None,
+            zoom_before: None,
+            text_before: None,
+            inspector_before: std::array::from_fn(|_| None),
             status,
             open_path: open_path.clone(),
             send_mode: false,
@@ -697,7 +740,10 @@ impl StencilApp {
             .resizable(false)
             .show(parent.ctx(), |ui| {
                 ui.label("Places simple single-line engraved lettering (up to 80 characters).");
-                ui.text_edit_singleline(&mut self.text_value);
+                let edit = TextField::new("place-text", "Text to place", &self.text_value)
+                    .char_limit(80)
+                    .show(ui);
+                apply_edit(&mut self.text_value, &mut self.text_before, edit.event);
                 ui.horizontal(|ui| {
                     if ui.add(Button::new("Cancel")).clicked() {
                         cancel = true;
@@ -1111,16 +1157,25 @@ impl StencilApp {
 
         ui.separator();
         ui.heading("Cut settings");
-        let kerf_width = self.engine.doc.kerf.width_mm;
+        let kerf_width = self.kerf_draft.unwrap_or(self.engine.doc.kerf.width_mm);
         ui.label(format!("Kerf  {:.3} mm", kerf_width));
-        let mut kerf_widget = kerf_width;
-        if ui
-            .add(egui::Slider::new(&mut kerf_widget, 0.0..=1.0).suffix(" mm"))
-            .changed()
+        match Slider::new("kerf", "Kerf", kerf_width, 0.0..=1.0)
+            .show(ui)
+            .event
         {
-            self.run_command(Command::KerfSet {
-                width_mm: kerf_widget,
-            });
+            Some(EditEvent::Begin { .. }) => self.kerf_draft = Some(kerf_width),
+            Some(EditEvent::Update { value, .. }) => self.kerf_draft = Some(value),
+            Some(EditEvent::Commit { value, changed, .. }) => {
+                self.kerf_draft = None;
+                if changed {
+                    self.run_command(Command::KerfSet { width_mm: value });
+                }
+            }
+            Some(EditEvent::Set { value, .. }) => {
+                self.run_command(Command::KerfSet { width_mm: value })
+            }
+            Some(EditEvent::Cancel { .. }) => self.kerf_draft = None,
+            _ => {}
         }
         let _ = Checkbox::bool("Preview kerf compensation", &mut self.kerf_preview).show(ui);
 
@@ -1142,6 +1197,7 @@ impl StencilApp {
                     || (self.inspector_bounds != bound_values && !self.inspector_editing)
                 {
                     self.inspector_shape = Some(id);
+                    self.inspector_before = std::array::from_fn(|_| None);
                     self.inspector_bounds = bound_values;
                     if let Some(values) = bound_values {
                         self.inspector_values = values.map(|value| format!("{value:.2}"));
@@ -1158,14 +1214,24 @@ impl StencilApp {
                         {
                             for (label, index) in [(label_a, index_a), (label_b, index_b)] {
                                 ui.label(label);
-                                let response = ui.add(
-                                    egui::TextEdit::singleline(&mut self.inspector_values[index])
-                                        .desired_width(62.0)
-                                        .id_salt(("bound", id, index)),
+                                let edit = ui
+                                    .scope(|ui| {
+                                        ui.set_max_width(62.0);
+                                        TextField::new(
+                                            ("bound", id, index),
+                                            label,
+                                            &self.inspector_values[index],
+                                        )
+                                        .show(ui)
+                                    })
+                                    .inner;
+                                editing |= edit.response.has_focus();
+                                submitted |= edit.submitted;
+                                apply_edit(
+                                    &mut self.inspector_values[index],
+                                    &mut self.inspector_before[index],
+                                    edit.event,
                                 );
-                                editing |= response.has_focus();
-                                submitted |= response.lost_focus()
-                                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
                             }
                             ui.end_row();
                         }
@@ -1252,8 +1318,22 @@ impl StencilApp {
             self.send.speed_override = media.speed.unwrap_or(5);
         }
         ui.add_space(4.0);
-        ui.add(egui::Slider::new(&mut self.send.pressure_override, 1..=33).text("Pressure"));
-        ui.add(egui::Slider::new(&mut self.send.speed_override, 1..=30).text("Speed"));
+        ui.label(format!("Pressure  {}", self.send.pressure_override));
+        let mut pressure = f64::from(self.send.pressure_override);
+        let edit = Slider::new("send-pressure", "Pressure", pressure, 1.0..=33.0)
+            .step(1.0)
+            .show(ui);
+        if apply_edit(&mut pressure, &mut self.pressure_before, edit.event) {
+            self.send.pressure_override = pressure as u8;
+        }
+        ui.label(format!("Speed  {}", self.send.speed_override));
+        let mut speed = f64::from(self.send.speed_override);
+        let edit = Slider::new("send-speed", "Speed", speed, 1.0..=30.0)
+            .step(1.0)
+            .show(ui);
+        if apply_edit(&mut speed, &mut self.speed_before, edit.event) {
+            self.send.speed_override = speed as u8;
+        }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         ui.separator();
         if ui.add(Button::new("Encode dry run")).clicked() {
@@ -1326,11 +1406,14 @@ impl StencilApp {
     }
 
     fn canvas_body(&mut self, ui: &mut egui::Ui) {
-        let doc = self.engine.doc.clone();
+        let mut doc = self.engine.doc.clone();
+        if let Some(width_mm) = self.kerf_draft {
+            doc.kerf.width_mm = width_mm;
+        }
         let backdrop = mat_backdrop(self.mat);
         let mut zoom_delta = 0.0_f32;
         let mut requested_zoom = None;
-        let mut zoom_value = (self.view.zoom * 100.0).round().clamp(5.0, 40000.0) as u32;
+        let mut zoom_value = f64::from((self.view.zoom * 100.0).round().clamp(5.0, 40000.0));
         let mut fit_clicked = false;
         let mut center_clicked = false;
         ui.horizontal(|ui| {
@@ -1344,17 +1427,15 @@ impl StencilApp {
                 zoom_delta = -1.0;
             }
             let slider_width = (ui.available_width() - 112.0).clamp(56.0, 180.0);
-            if ui
-                .add_sized(
-                    [slider_width, 18.0],
-                    egui::Slider::new(&mut zoom_value, 5..=40000)
-                        .logarithmic(true)
-                        .suffix("%"),
-                )
-                .changed()
-            {
+            let edit = Slider::new("canvas-zoom", "Zoom", zoom_value, 5.0..=40000.0)
+                .scale(SliderScale::Log)
+                .step(1.0)
+                .width(slider_width)
+                .show(ui);
+            if apply_edit(&mut zoom_value, &mut self.zoom_before, edit.event) {
                 requested_zoom = Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
             }
+            ui.small(format!("{zoom_value:.0}%"));
             if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
                 zoom_delta = 1.0;
             }
@@ -1938,6 +2019,186 @@ mod tests {
             assert_eq!(app.engine.doc.shape_count(), 0);
             assert!(app.selected_shapes.is_empty());
         }
+    }
+
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut StencilApp,
+        events: Vec<egui::Event>,
+        panel: fn(&mut StencilApp, &mut egui::Ui),
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| panel(app, ui),
+        );
+        output.textures_delta.clear();
+        output
+    }
+
+    fn node_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+        let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        let node = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .unwrap_or_else(|| panic!("missing node {label}"));
+        let bounds = node.1.bounds().unwrap();
+        egui::pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        )
+    }
+
+    fn click(
+        ctx: &egui::Context,
+        app: &mut StencilApp,
+        panel: fn(&mut StencilApp, &mut egui::Ui),
+        pos: egui::Pos2,
+    ) {
+        frame(ctx, app, vec![egui::Event::PointerMoved(pos)], panel);
+        for pressed in [true, false] {
+            frame(
+                ctx,
+                app,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                panel,
+            );
+        }
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn shared_kerf_slider_and_inspector_field_edit_the_document() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        app.set_selection([1]);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        let pos = node_center(&out, "Kerf");
+        click(&ctx, &mut app, StencilApp::inspector, pos);
+        assert!(app.engine.doc.kerf.width_mm > 0.0);
+        assert!(app.engine.undo());
+        assert_eq!(app.engine.doc.kerf.width_mm, 0.0);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
+        let pos = node_center(&out, "X");
+        click(&ctx, &mut app, StencilApp::inspector, pos);
+        frame(
+            &ctx,
+            &mut app,
+            vec![
+                key(egui::Key::A, egui::Modifiers::COMMAND),
+                egui::Event::Text("12".into()),
+            ],
+            StencilApp::inspector,
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::inspector,
+        );
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().bounds().unwrap().x0,
+            12.0
+        );
+    }
+
+    #[test]
+    fn shared_send_sliders_and_text_dialog_accept_input() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Pressure"),
+        );
+        assert_ne!(app.send.pressure_override, 10);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::send_tab,
+            node_center(&out, "Speed"),
+        );
+        assert_ne!(app.send.speed_override, 5);
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        app.text_dialog = true;
+        frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::text_dialog,
+            node_center(&out, "Text to place"),
+        );
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("HELLO".into())],
+            StencilApp::text_dialog,
+        );
+        frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
+        assert_eq!(app.text_value, "HELLO");
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            StencilApp::text_dialog,
+        );
+        assert_eq!(app.text_value, "");
+    }
+
+    #[test]
+    fn shared_zoom_slider_changes_the_canvas_view() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        let out = frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
+        let old_zoom = app.view.zoom;
+        click(
+            &ctx,
+            &mut app,
+            StencilApp::canvas_body,
+            node_center(&out, "Zoom"),
+        );
+        assert_ne!(app.view.zoom, old_zoom);
     }
 
     #[test]

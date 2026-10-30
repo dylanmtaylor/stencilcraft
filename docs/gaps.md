@@ -16,8 +16,9 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset; no
    nested-counter detection beyond bbox-in-bbox.
 3. **Tiling**: tile edges are not clipped; overlapping output exports whole shapes per
-   tile, relying on overlap to keep continuity. No per-tile SVG merging view, no
-   alignment marks.
+   tile, relying on overlap to keep continuity. No per-tile SVG merging view or tile
+   alignment marks. A separate `print-cut` command outputs artwork with three printable
+   registration/alignment marks, but it does not send sensor commands or calibrate a cutter.
 4. **G-code**: fixed modal constants, no feed/speed profiles by machine or material,
    no first/last pass, no power ramp, no Z/laser mode switch.
 5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
@@ -25,9 +26,10 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 6. **Engine**: commands cover add/remove/move/rotate/scale shape, add layer and kerf;
    no selection model or batch transform command. Undo snapshots whole documents rather
    than sharing structure.
-7. **UI**: basic visible-outline shape selection, canvas drag-to-move and selected-shape
-   rotate/scale controls now work. Remaining: box/lasso selection, node editing, a ruler,
-   zoom-to-fit keyboard shortcuts, kerf preview
+7. **UI**: basic visible-outline shape selection, canvas drag-to-move, selected-shape
+   rotate/scale controls, and box/lasso selection now work (selection uses conservative
+   shape bounds). Remaining: multi-select transforms and additive selection, node editing,
+   a ruler, zoom-to-fit keyboard shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.
 8. **Agent surface**: control methods do not cover the whole engine command set;
    no MCP tool schema hydration yet; no fuzz corpus for the JSON channel. (The
@@ -36,6 +38,8 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.
-11. **Packaging**: no window/app icon wiring yet (the SVG icon exists in
+11. **Raster trace**: CLI imports bounded PNG/JPEG and traces a configurable dark threshold silhouette into closed cut contours (96 dpi default). No UI import panel, multi-color tracing, or smoothing controls.
+12. **Packaging**: no window/app icon wiring yet (the SVG icon exists in
    `assets/app-icon/`); no desktop integration (`.desktop`, file associations,
    `xtask bundle`); PNG previews in the README only (`docs/images/`).
+13. **Craft-libs and desktop UI**: the workspace currently contains foundational domain crates (`geom`, `color`, `doc`, `kerf`, `tiling`, `svg`, `dxf`, `gcode`, `engine`, `machine`, `mcp`) and an egui canvas crate. Reusable dockable/movable panel infrastructure, a tool palette, broad design tools and reusable app-shell components have not been built in this workspace. Avoid implying the UI has parity with larger creative applications; select and adopt suitable craft-libs only after their source and APIs are available in this project.

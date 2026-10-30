@@ -31,8 +31,13 @@ fn example(name: &str) -> String {
 }
 
 fn fresh_out_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join("stencilcraft-e2e");
-    let _ = std::fs::remove_dir_all(&dir);
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join("stencilcraft-e2e").join(format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&dir).ok().expect("create temp dir");
     dir
 }
@@ -269,6 +274,57 @@ fn import_svg_cli_roundtrips_our_svg_exports() {
         &String::from_utf8_lossy(&reexport_out.stdout),
     );
     assert!(reexported.is_file(), "reimported document exports again");
+}
+
+#[test]
+fn trace_image_cli_imports_png_to_native_document() {
+    let dir = fresh_out_dir();
+    let image_path = dir.join("silhouette.png");
+    let native = dir.join("silhouette.stencilcraft");
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+        1,
+        1,
+        image::Rgba([0_u8, 0, 0, 255]),
+    ))
+    .write_to(&mut png, image::ImageFormat::Png)
+    .expect("PNG fixture encodes");
+    std::fs::write(&image_path, png.into_inner()).expect("image fixture written");
+
+    let mut cmd = bin();
+    cmd.args([
+        "trace-image",
+        "--in",
+        &image_path.to_string_lossy(),
+        "--out",
+        &native.to_string_lossy(),
+    ]);
+    let out = cmd.output().expect("trace-image command starts");
+    expect_exit0(&out, &String::from_utf8_lossy(&out.stdout));
+    let native_path = native.to_string_lossy();
+    let doc = stencilcraft_doc::load_from(&native_path).expect("native document written");
+    assert_eq!(doc.shape_count(), 1);
+    assert!(doc.layers[0].shapes[0].path.elements().len() >= 4);
+}
+
+#[test]
+fn print_cut_cli_writes_registration_sheet() {
+    let dir = fresh_out_dir();
+    let target = dir.join("starter-print-cut.svg");
+    let mut cmd = bin();
+    cmd.args([
+        "print-cut",
+        "--in",
+        &example("starter.stencilcraft"),
+        "--out",
+        &target.to_string_lossy(),
+    ]);
+    let out = cmd.output().expect("print-cut command starts");
+    expect_exit0(&out, &String::from_utf8_lossy(&out.stdout));
+    let svg = std::fs::read_to_string(target).expect("sheet written");
+    assert!(svg.contains("id=\"registration-marks\""));
+    assert!(svg.contains("width=\"124.000mm\""));
+    assert!(svg.contains("class=\"stencilcraft-cut\""));
 }
 
 #[test]

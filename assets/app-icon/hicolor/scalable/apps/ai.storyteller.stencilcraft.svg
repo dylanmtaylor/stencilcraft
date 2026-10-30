@@ -4,13 +4,13 @@
     and a craft knife finishing a dashed cut. Original art by StencilCraft
     contributors, licensed MIT OR Apache-2.0 (see ASSETS.md).
   -->
-  <rect width="512" height="512" rx="112" fill="#e8573f"/>
+  <rect width="512" height="512" rx="112" fill="#702387"/>
   <g transform="rotate(-6 256 256)">
     <!-- The stencil sheet. -->
     <rect x="104" y="84" width="288" height="320" rx="14" fill="#efe9dc" stroke="#0b0b0c" stroke-width="14" stroke-linejoin="round"/>
     <!-- The ring cut-out: the field shows through around a paper island. -->
     <path d="M248 126 a100 100 0 1 0 0.01 0 Z M248 180 a46 46 0 1 1 -0.01 0 Z"
-      fill="#e8573f" fill-rule="evenodd" stroke="#0b0b0c" stroke-width="10"/>
+      fill="#702387" fill-rule="evenodd" stroke="#0b0b0c" stroke-width="10"/>
     <!-- Stencil bridges holding the island in place. -->
     <g fill="#efe9dc">
       <rect x="239" y="118" width="18" height="66"/>

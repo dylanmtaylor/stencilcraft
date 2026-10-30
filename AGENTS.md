@@ -3,9 +3,7 @@
 StencilCraft is a clean-room, open-source, Rust-native cutting-prep app: it takes vector
 art (SVG) and prepares it for laser, vinyl and blade cutting — kerf compensation, sheet
 tiling, SVG/DXF/G-code export. It runs natively on macOS, Windows and Linux, and on the
-web via WASM (planned). Structure and conventions follow
-[storytold/vectorcraft](https://github.com/storytold/vectorcraft): same workspace shape,
-same quality gates, same no-panic discipline. Target-app reference: public user
+web via WASM (planned). The workspace uses strict quality gates and a no-panic discipline. Target-app reference: public user
 documentation of consumer laser/vinyl ecosystem software, cited by URL — never its code.
 
 ## Start every session here
@@ -19,6 +17,11 @@ documentation of consumer laser/vinyl ecosystem software, cited by URL — never
    (`M1.2: kerf for nested counters`).
 
 `plan/` is gitignored (local session notes).
+
+- **Use craft-libs where they exist.** Before rebuilding common UI or domain facilities,
+  inspect this workspace's available craft-libs and reuse their public APIs. Do not claim
+  parity with sibling applications unless the relevant components are actually in this
+  checkout and wired into the app.
 
 ## Non-negotiables
 
@@ -35,8 +38,7 @@ documentation of consumer laser/vinyl ecosystem software, cited by URL — never
   asset.
 - **Fonts live elsewhere, never here.** If the UI ever ships custom text shaping, fonts go
   into a sibling craft-fonts repository read through an optional `CRAFT_FONTS_DIR` build
-  option, exactly as VectorCraft does. Everything must build, test and run with fonts
-  absent.
+  option. Everything must build, test and run with fonts absent.
 - **Never crash: no panics in shipped code.** A crash loses the user's unsaved work.
   Files, cut parameters, MCP and control messages, and UI gestures are all untrusted input.
   - Fallible work returns `Result`/`Option`; callers handle or propagate with `?`.
@@ -55,8 +57,8 @@ documentation of consumer laser/vinyl ecosystem software, cited by URL — never
   on a specific export format.
 - **Units are millimetres.** The document, kerf, tiling and every export speak mm. Never
   hand-roll unit conversion at call sites: convert once at a boundary, through
-  `stencilcraft_geom` (and later, when pixels enter the UI, one scaling point in
-  `ui-egui`).
+  `stencilcraft_geom` (and later, when pixels enter the UI, one scaling point in   `ui-egui`).
+
 - **Rust only** (no handwritten JS/TS). **Never break wasm** (keep every dependency
   wasm-buildable; `cargo xtask ci` checks the workspace config compiles for wasm32).
 - **Shared corpora.** Real-file test oracles (a .dxf from a real user's machine, machine

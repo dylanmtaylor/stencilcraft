@@ -29,7 +29,7 @@ impl From<stencilcraft_doc::DocError> for EngineError {
 /// The command set. Every variant must carry enough data to execute AND to make
 /// sense in a control-channel message: only plain, serde-serializable params.
 /// Names use the dot convention the control protocol documents
-/// (`"command": "shape.add-rect"`), matching VectorCraft's command API style.
+/// (`"command": "shape.add-rect"`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "command", content = "params")]
 pub enum Command {
@@ -53,6 +53,21 @@ pub enum Command {
     /// Scale a shape around its centre. Factors must be positive and finite.
     #[serde(rename = "shape.scale")]
     ShapeScale { id: u64, scale_x: f64, scale_y: f64 },
+    /// Set a shape's axis-aligned bounds in millimetres.
+    #[serde(rename = "shape.set-bounds")]
+    ShapeSetBounds {
+        id: u64,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
+    /// Add an imported vector path to the matching production layer.
+    #[serde(rename = "shape.add-path")]
+    ShapeAddPath { path: BezPath, style: CutStyle },
+    /// Add imported vector paths together as one undoable document edit.
+    #[serde(rename = "shape.add-paths")]
+    ShapeAddPaths { shapes: Vec<(BezPath, CutStyle)> },
     /// Add a layer with a name and a production kind.
     #[serde(rename = "layer.add")]
     LayerAdd { name: String, kind: CutStyle },
@@ -233,6 +248,77 @@ impl Engine {
                     * kurbo::Affine::translate((-center.x, -center.y));
                 self.transform_shape(id, transform, "shape.scale")
             }
+            Command::ShapeSetBounds {
+                id,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                if !(x.is_finite()
+                    && y.is_finite()
+                    && width.is_finite()
+                    && height.is_finite()
+                    && width > 0.0
+                    && height > 0.0
+                    && (x + width).is_finite()
+                    && (y + height).is_finite())
+                {
+                    return Err(EngineError::Invalid(
+                        "shape.set-bounds: position must be finite and size positive and finite"
+                            .to_string(),
+                    ));
+                }
+                let bounds = self.shape_bounds(id, "shape.set-bounds")?;
+                if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+                    return Err(EngineError::Invalid(
+                        "shape.set-bounds: cannot resize geometry with a zero-size bound"
+                            .to_string(),
+                    ));
+                }
+                let transform = kurbo::Affine::translate((x, y))
+                    * kurbo::Affine::scale_non_uniform(
+                        width / bounds.width(),
+                        height / bounds.height(),
+                    )
+                    * kurbo::Affine::translate((-bounds.x0, -bounds.y0));
+                self.transform_shape(id, transform, "shape.set-bounds")
+            }
+            Command::ShapeAddPath { path, style } => {
+                if path.elements().is_empty() || !path.elements().iter().all(path_element_is_finite)
+                {
+                    return Err(EngineError::Invalid(
+                        "shape.add-path: path must contain finite geometry".to_string(),
+                    ));
+                }
+                let layer = self.top_layer_for_style(style);
+                let shape = self
+                    .doc
+                    .push_shape(layer, path, style)
+                    .map_err(EngineError::from)?;
+                Ok(Effect::ShapeAdded { id: shape.id })
+            }
+            Command::ShapeAddPaths { shapes } => {
+                if shapes.is_empty()
+                    || shapes.iter().any(|(path, _)| {
+                        path.elements().is_empty()
+                            || !path.elements().iter().all(path_element_is_finite)
+                    })
+                {
+                    return Err(EngineError::Invalid(
+                        "shape.add-paths: expected non-empty paths with finite geometry"
+                            .to_string(),
+                    ));
+                }
+                for (path, style) in shapes {
+                    let layer = self.top_layer_for_style(style);
+                    self.doc
+                        .push_shape(layer, path, style)
+                        .map_err(EngineError::from)?;
+                }
+                let id = self.doc.next_shape_id.saturating_sub(1);
+                Ok(Effect::ShapeAdded { id })
+            }
             Command::LayerAdd { name, kind } => {
                 if name.trim().is_empty() {
                     return Err(EngineError::Invalid(
@@ -326,12 +412,28 @@ impl Engine {
         Ok(Effect::ShapeTransformed { id })
     }
 
-    fn top_cut_layer(&self) -> usize {
-        self.doc
+    fn top_cut_layer(&mut self) -> usize {
+        self.top_layer_for_style(CutStyle::Cut)
+    }
+
+    fn top_layer_for_style(&mut self, style: CutStyle) -> usize {
+        if let Some(index) = self
+            .doc
             .layers
             .iter()
-            .rposition(|l| l.kind == CutStyle::Cut)
-            .unwrap_or(0)
+            .rposition(|layer| layer.kind == style)
+        {
+            index
+        } else {
+            let name = match style {
+                CutStyle::Cut => "cut",
+                CutStyle::Engrave => "engrave",
+            };
+            self.doc
+                .layers
+                .push(stencilcraft_doc::Layer::new(name, style));
+            self.doc.layers.len() - 1
+        }
     }
 
     /// Undo the last command; `false` when there is nothing to undo.
@@ -437,6 +539,75 @@ mod tests {
         assert!((scaled.center().y - rotated.center().y).abs() < 1e-9);
         assert!(engine.undo());
         assert_eq!(engine.doc.get_shape(1).unwrap().bounds(), Some(rotated));
+    }
+
+    #[test]
+    fn set_bounds_edits_position_and_size_in_one_undoable_command() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 5.0,
+                y: 7.0,
+                width: 10.0,
+                height: 20.0,
+            })
+            .unwrap();
+        engine
+            .run(Command::ShapeSetBounds {
+                id: 1,
+                x: 12.0,
+                y: 15.0,
+                width: 40.0,
+                height: 5.0,
+            })
+            .unwrap();
+        assert_eq!(
+            engine.doc.get_shape(1).unwrap().bounds(),
+            Some(kurbo::Rect::new(12.0, 15.0, 52.0, 20.0))
+        );
+        assert!(engine.undo());
+        assert_eq!(
+            engine.doc.get_shape(1).unwrap().bounds(),
+            Some(kurbo::Rect::new(5.0, 7.0, 15.0, 27.0))
+        );
+    }
+
+    #[test]
+    fn imported_paths_are_added_to_the_matching_layer_and_undoable() {
+        let mut engine = Engine::default();
+        let mut path = BezPath::new();
+        path.move_to(kurbo::Point::new(1.0, 2.0));
+        path.line_to(kurbo::Point::new(3.0, 4.0));
+        engine
+            .run(Command::ShapeAddPath {
+                path,
+                style: CutStyle::Engrave,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Engrave);
+        assert_eq!(engine.doc.layers[0].kind, CutStyle::Cut);
+        assert_eq!(engine.doc.layers[1].kind, CutStyle::Engrave);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn imported_paths_are_one_undoable_edit() {
+        let mut first = BezPath::new();
+        first.move_to(kurbo::Point::new(1.0, 2.0));
+        first.line_to(kurbo::Point::new(3.0, 4.0));
+        let mut second = BezPath::new();
+        second.move_to(kurbo::Point::new(5.0, 6.0));
+        second.line_to(kurbo::Point::new(7.0, 8.0));
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddPaths {
+                shapes: vec![(first, CutStyle::Cut), (second, CutStyle::Engrave)],
+            })
+            .unwrap();
+        assert_eq!(engine.doc.shape_count(), 2);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 0);
     }
 
     #[test]

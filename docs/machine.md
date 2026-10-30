@@ -66,13 +66,17 @@ crate; e.g. `102` Vinyl Sticker = 10 / 5, `122` Cardstock = 30 / 10.
 - CLI: `stencilcraft-cli cut --in FILE [--media vinyl] [--bbox] …` — dry run
   prints a one-command-per-line transcript; `--device PATH` performs a real
   serial send (initialize, version check, ready-poll, stream).
+- Print template: `stencilcraft-cli print-cut --in FILE --out SHEET.svg` writes
+  an artwork page with three registration marks for printing at actual size and
+  manual alignment; this does not implement optical-sensor or automatic alignment.
+  See [`print-cut.md`](print-cut.md).
 
 ## Not yet implemented (deliberate gaps)
 
 - USB bulk transport for the `0b4d` devices proper (needs `nusb`; serial path
   only covers CDC/ACM-style tty exposure).
 - Bluetooth (RFCOMM/BLE) transport.
-- Registration marks (`TB51/52/53/55/99…`, print-and-cut).
+- Automatic registration mark reading/alignment (`TB51/52/53/55/99…`, print-and-cut); the separate printable template does not drive these commands.
 - Mat-free cutting strategy (path sorting for knife pressure relief);
   StencilCraft's kerf/tiling crates are the natural home for that logic.
 

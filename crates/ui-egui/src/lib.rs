@@ -5,8 +5,80 @@
 //! depends on the app crate; the app depends on this crate and calls
 //! [`paint_document`] with an [`egui::Painter`].
 
+/// Theme selection shared by the workspace chrome and canvas renderer.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColorTheme {
+    #[default]
+    Dark,
+    Light,
+}
+
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
+
+/// Semantic canvas colours for a specific workspace theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanvasOptions {
+    pub kerf_preview: bool,
+    pub theme: ColorTheme,
+}
+
+impl Default for CanvasOptions {
+    fn default() -> Self {
+        Self {
+            kerf_preview: false,
+            theme: ColorTheme::Dark,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Palette {
+    pub canvas_bg: egui::Color32,
+    pub mat: egui::Color32,
+    pub mat_grid: egui::Color32,
+    pub ruler: egui::Color32,
+    pub grid: egui::Color32,
+    pub board: egui::Color32,
+    pub cut_line: egui::Color32,
+    pub kerf_line: egui::Color32,
+    pub engrave_line: egui::Color32,
+    pub text: egui::Color32,
+    pub accent: egui::Color32,
+}
+
+impl Palette {
+    pub fn for_theme(theme: ColorTheme) -> Self {
+        match theme {
+            ColorTheme::Dark => Self {
+                canvas_bg: Tokens::CANVAS_BG,
+                mat: Tokens::MAT,
+                mat_grid: Tokens::MAT_GRID,
+                ruler: Tokens::RULER,
+                grid: Tokens::GRID,
+                board: Tokens::BOARD,
+                cut_line: Tokens::CUT_LINE,
+                kerf_line: Tokens::KERF_LINE,
+                engrave_line: Tokens::ENGRAVE_LINE,
+                text: Tokens::TEXT,
+                accent: Tokens::ACCENT,
+            },
+            ColorTheme::Light => Self {
+                canvas_bg: egui::Color32::from_rgb(238, 240, 244),
+                mat: egui::Color32::from_rgb(220, 224, 232),
+                mat_grid: egui::Color32::from_rgb(190, 196, 207),
+                ruler: egui::Color32::from_rgb(105, 111, 123),
+                grid: egui::Color32::from_rgb(214, 217, 224),
+                board: egui::Color32::from_rgb(251, 250, 247),
+                cut_line: Tokens::CUT_LINE,
+                kerf_line: Tokens::KERF_LINE,
+                engrave_line: egui::Color32::from_gray(82),
+                text: egui::Color32::from_gray(72),
+                accent: Tokens::ACCENT,
+            },
+        }
+    }
+}
 
 impl Tokens {
     pub const CANVAS_BG: egui::Color32 = egui::Color32::from_gray(28);
@@ -19,7 +91,7 @@ impl Tokens {
     pub const KERF_LINE: egui::Color32 = egui::Color32::from_rgb(63, 136, 232);
     pub const ENGRAVE_LINE: egui::Color32 = egui::Color32::from_gray(140);
     pub const TEXT: egui::Color32 = egui::Color32::from_gray(200);
-    pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(232, 87, 63);
+    pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(112, 35, 135);
 }
 
 /// The cutting mat under the design sheet: physical extent in millimetres
@@ -100,9 +172,9 @@ impl View {
 
 /// Paint the cutting mat: surface, inch grid, one-inch ruler ticks on the
 /// top and left edges, and the mat label. The sheet paints on top later.
-fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
+fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop, palette: Palette) {
     let rect = view.mat_rect_screen(backdrop);
-    painter.rect_filled(rect, 2.0, Tokens::MAT);
+    painter.rect_filled(rect, 2.0, palette.mat);
 
     let inch_px = (25.4 * view.zoom as f64) as f32;
     if inch_px > 10.0 {
@@ -112,7 +184,7 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
             let x = rect.left() + (i * 25.4 * view.zoom as f64) as f32;
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                (1.0, Tokens::MAT_GRID),
+                (1.0, palette.mat_grid),
             );
             i += 1.0;
         }
@@ -121,7 +193,7 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
             let y = rect.top() + (j * 25.4 * view.zoom as f64) as f32;
             painter.line_segment(
                 [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                (1.0, Tokens::MAT_GRID),
+                (1.0, palette.mat_grid),
             );
             j += 1.0;
         }
@@ -132,7 +204,7 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
         let mut k = 1.0_f64;
         while k * 12.7 < backdrop.width_mm {
             let x = rect.left() + (k * 12.7 * view.zoom as f64) as f32;
-            let (len, color) = tick_style(k);
+            let (len, color) = tick_style(k, palette);
             painter.line_segment(
                 [egui::pos2(x, rect.top()), egui::pos2(x, rect.top() + len)],
                 (1.0, color),
@@ -142,7 +214,7 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
         let mut m = 1.0_f64;
         while m * 12.7 < backdrop.height_mm {
             let y = rect.top() + (m * 12.7 * view.zoom as f64) as f32;
-            let (len, color) = tick_style(m);
+            let (len, color) = tick_style(m, palette);
             painter.line_segment(
                 [egui::pos2(rect.left(), y), egui::pos2(rect.left() + len, y)],
                 (1.0, color),
@@ -155,16 +227,16 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop) {
         egui::Align2::LEFT_BOTTOM,
         &backdrop.label,
         egui::FontId::proportional(10.0),
-        Tokens::TEXT,
+        palette.text,
     );
 }
 
 /// Ruler tick length and colour: inch marks are bold, half-inch marks faint.
-fn tick_style(index: f64) -> (f32, egui::Color32) {
+fn tick_style(index: f64, palette: Palette) -> (f32, egui::Color32) {
     if index % 2.0 == 0.0 {
-        (8.0, Tokens::RULER)
+        (8.0, palette.ruler)
     } else {
-        (4.0, Tokens::MAT_GRID)
+        (4.0, palette.mat_grid)
     }
 }
 
@@ -173,15 +245,16 @@ fn shape_visual(
     shape: &stencilcraft_doc::Shape,
     view: &View,
     kerf_preview: bool,
+    palette: Palette,
 ) -> (egui::Color32, f32) {
     let line_color = if kerf_preview {
         // The compensated-contours preview: a different line colour so a user can
         // tell what the machine will actually trace.
-        Tokens::KERF_LINE
+        palette.kerf_line
     } else {
         match shape.style {
-            stencilcraft_doc::CutStyle::Cut => Tokens::CUT_LINE,
-            stencilcraft_doc::CutStyle::Engrave => Tokens::ENGRAVE_LINE,
+            stencilcraft_doc::CutStyle::Cut => palette.cut_line,
+            stencilcraft_doc::CutStyle::Engrave => palette.engrave_line,
         }
     };
     (line_color, 1.5_f32.max(0.4 * view.zoom))
@@ -198,17 +271,18 @@ pub fn paint_document(
     doc: &stencilcraft_doc::Document,
     view: &View,
     backdrop: Option<&MatBackdrop>,
-    kerf_preview: bool,
-    selected_shape: Option<u64>,
+    options: CanvasOptions,
+    selection: &SelectionState,
 ) {
+    let palette = Palette::for_theme(options.theme);
     // Canvas backing, then (optionally) the cutting mat, then the design
     // sheet. Overflow beyond the mat simply stays canvas — a real-world
     // situation (12×24 art on a 12×12 mat) is visible, not masked.
-    painter.rect_filled(clip, 0.0, Tokens::CANVAS_BG);
+    painter.rect_filled(clip, 0.0, palette.canvas_bg);
     if let Some(backdrop) = backdrop {
-        paint_mat(painter, view, backdrop);
+        paint_mat(painter, view, backdrop, palette);
     }
-    painter.rect_filled(view.board_rect_screen(doc), 2.0, Tokens::BOARD);
+    painter.rect_filled(view.board_rect_screen(doc), 2.0, palette.board);
 
     // Grid: 10 mm major pitch, drawn only over the board as hairlines.
     let pitch_mm = 10.0_f64;
@@ -223,7 +297,7 @@ pub fn paint_document(
                     egui::pos2(x_px, origin.y),
                     egui::pos2(x_px, origin.y + doc.board.height_mm as f32 * view.zoom),
                 ],
-                (1.0, Tokens::GRID),
+                (1.0, palette.grid),
             );
             x_mm += pitch_mm;
         }
@@ -235,7 +309,7 @@ pub fn paint_document(
                     egui::pos2(origin.x, y_px),
                     egui::pos2(origin.x + doc.board.width_mm as f32 * view.zoom, y_px),
                 ],
-                (1.0, Tokens::GRID),
+                (1.0, palette.grid),
             );
             y_mm += pitch_mm;
         }
@@ -247,9 +321,9 @@ pub fn paint_document(
             continue;
         }
         for shape in &layer.shapes {
-            let (mut color, mut width) = shape_visual(shape, view, kerf_preview);
-            if selected_shape == Some(shape.id) {
-                color = Tokens::ACCENT;
+            let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
+            if selection.selected_shapes.contains(&shape.id) {
+                color = palette.accent;
                 width = width.max(2.5);
             }
             for pl in stencilcraft_geom::path_to_polylines(
@@ -271,8 +345,29 @@ pub fn paint_document(
         }
     }
 
-    if let Some(id) = selected_shape
-        && let Some(shape) = doc.get_shape(id)
+    if let Some(overlay) = selection.overlay.as_ref() {
+        match overlay {
+            SelectionOverlay::Box(rect) => {
+                painter.rect_stroke(
+                    *rect,
+                    0.0,
+                    egui::Stroke::new(1.0, palette.accent),
+                    egui::StrokeKind::Outside,
+                );
+                painter.rect_filled(*rect, 0.0, palette.accent.linear_multiply(0.08));
+            }
+            SelectionOverlay::Lasso(points) if points.len() >= 2 => {
+                painter.add(egui::Shape::line(
+                    points.clone(),
+                    egui::Stroke::new(1.0, palette.accent),
+                ));
+            }
+            SelectionOverlay::Lasso(_) => {}
+        }
+    }
+
+    if let Some(id) = selection.selected_shapes.first()
+        && let Some(shape) = doc.get_shape(*id)
         && let Some(bounds) = shape.bounds()
     {
         let bounds = egui::Rect::from_two_pos(
@@ -282,10 +377,184 @@ pub fn paint_document(
         painter.rect_stroke(
             bounds.expand(3.0),
             0.0,
-            egui::Stroke::new(1.0, Tokens::ACCENT),
+            egui::Stroke::new(1.0, palette.accent),
             egui::StrokeKind::Outside,
         );
     }
+}
+
+/// Selection state painted over the canvas.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SelectionState {
+    pub selected_shapes: Vec<u64>,
+    pub overlay: Option<SelectionOverlay>,
+}
+
+/// A visible selection gesture painted over the canvas.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SelectionOverlay {
+    Box(egui::Rect),
+    Lasso(Vec<egui::Pos2>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionMode {
+    Contain,
+    Intersect,
+}
+
+/// Select visible shapes whose geometry intersects the screen-space rectangle or
+/// lies completely inside it. Box/lasso gestures use these same testable primitives.
+pub fn select_shapes_in_rect(
+    doc: &stencilcraft_doc::Document,
+    view: &View,
+    rect: egui::Rect,
+    mode: SelectionMode,
+) -> Vec<u64> {
+    if !rect.is_finite() || !view.zoom.is_finite() || view.zoom <= 0.0 {
+        return Vec::new();
+    }
+    doc.layers
+        .iter()
+        .filter(|layer| layer.visible)
+        .flat_map(|layer| layer.shapes.iter())
+        .filter(|shape| {
+            let Some(bounds) = shape.bounds() else {
+                return false;
+            };
+            let bounds = egui::Rect::from_two_pos(
+                view.world_to_screen(stencilcraft_geom::Point::new(bounds.x0, bounds.y0)),
+                view.world_to_screen(stencilcraft_geom::Point::new(bounds.x1, bounds.y1)),
+            );
+            match mode {
+                SelectionMode::Contain => rect.contains_rect(bounds),
+                SelectionMode::Intersect => rect.intersects(bounds),
+            }
+        })
+        .map(|shape| shape.id)
+        .collect()
+}
+
+/// The even-odd point-in-lasso test in screen coordinates.
+pub fn point_in_lasso(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
+    if polygon.len() < 3 || !point.x.is_finite() || !point.y.is_finite() {
+        return false;
+    }
+    let mut inside = false;
+    let mut previous = polygon.len() - 1;
+
+    for current in 0..polygon.len() {
+        let a = polygon[current];
+        let b = polygon[previous];
+        if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
+            return false;
+        }
+        if (a.y > point.y) != (b.y > point.y)
+            && point.x < (b.x - a.x) * (point.y - a.y) / (b.y - a.y) + a.x
+        {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    inside
+}
+
+/// Select shape bounds by lasso containment or intersection with the polygon's
+/// bounding rectangle (conservative intersection avoids missing any crossed shape).
+pub fn select_shapes_in_lasso(
+    doc: &stencilcraft_doc::Document,
+    view: &View,
+    polygon: &[egui::Pos2],
+    mode: SelectionMode,
+) -> Vec<u64> {
+    if polygon.len() < 3 || polygon.len() > 10_000 {
+        return Vec::new();
+    }
+    let Some(first) = polygon.first() else {
+        return Vec::new();
+    };
+    if polygon
+        .iter()
+        .any(|point| !point.x.is_finite() || !point.y.is_finite())
+    {
+        return Vec::new();
+    }
+    let bounds =
+        polygon
+            .iter()
+            .skip(1)
+            .fold(egui::Rect::from_min_max(*first, *first), |rect, point| {
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x.min(point.x), rect.min.y.min(point.y)),
+                    egui::pos2(rect.max.x.max(point.x), rect.max.y.max(point.y)),
+                )
+            });
+    let candidates = select_shapes_in_rect(doc, view, bounds, SelectionMode::Intersect);
+    candidates
+        .into_iter()
+        .filter(|id| {
+            let Some(shape) = doc.get_shape(*id) else {
+                return false;
+            };
+            let Some(shape_bounds) = shape.bounds() else {
+                return false;
+            };
+            let corners = [
+                stencilcraft_geom::Point::new(shape_bounds.x0, shape_bounds.y0),
+                stencilcraft_geom::Point::new(shape_bounds.x1, shape_bounds.y0),
+                stencilcraft_geom::Point::new(shape_bounds.x1, shape_bounds.y1),
+                stencilcraft_geom::Point::new(shape_bounds.x0, shape_bounds.y1),
+            ];
+            let screen_corners = corners.map(|point| view.world_to_screen(point));
+            match mode {
+                SelectionMode::Contain => screen_corners
+                    .iter()
+                    .all(|point| point_in_lasso(*point, polygon)),
+                SelectionMode::Intersect => {
+                    screen_corners
+                        .iter()
+                        .any(|point| point_in_lasso(*point, polygon))
+                        || polygon.iter().any(|point| {
+                            egui::Rect::from_min_max(screen_corners[0], screen_corners[2])
+                                .contains(*point)
+                        })
+                        || polygon.windows(2).any(|segment| {
+                            rects_intersect_segment(
+                                egui::Rect::from_min_max(screen_corners[0], screen_corners[2]),
+                                segment[0],
+                                segment[1],
+                            )
+                        })
+                }
+            }
+        })
+        .collect()
+}
+
+fn rects_intersect_segment(rect: egui::Rect, start: egui::Pos2, end: egui::Pos2) -> bool {
+    if rect.contains(start) || rect.contains(end) {
+        return true;
+    }
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    (0..4).any(|index| segments_intersect(start, end, corners[index], corners[(index + 1) % 4]))
+}
+
+fn segments_intersect(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2, d: egui::Pos2) -> bool {
+    let orient = |p: egui::Pos2, q: egui::Pos2, r: egui::Pos2| {
+        (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+    };
+    let (o1, o2, o3, o4) = (
+        orient(a, b, c),
+        orient(a, b, d),
+        orient(c, d, a),
+        orient(c, d, b),
+    );
+    o1 * o2 <= 0.0 && o3 * o4 <= 0.0
 }
 
 /// Find the topmost visible shape whose flattened outline is within the screen-space
@@ -349,6 +618,18 @@ mod tests {
     use stencilcraft_testkit::simple_square;
 
     #[test]
+    fn palettes_keep_the_design_legible_in_both_themes() {
+        let dark = Palette::for_theme(ColorTheme::Dark);
+        let light = Palette::for_theme(ColorTheme::Light);
+        assert_eq!(dark.canvas_bg, Tokens::CANVAS_BG);
+        assert_eq!(dark.board, Tokens::BOARD);
+        assert_ne!(light.canvas_bg, dark.canvas_bg);
+        assert_ne!(light.board, dark.board);
+        assert_eq!(light.cut_line, dark.cut_line);
+        assert_eq!(light.accent, Tokens::ACCENT);
+    }
+
+    #[test]
     fn world_screen_roundtrip_at_identity_pan() {
         let view = View::default();
         let world = stencilcraft_geom::Point::new(12.5, 30.25);
@@ -396,12 +677,59 @@ mod tests {
         assert_eq!(rect.width(), 2400.0, "600 mm at 4 px/mm");
         assert_eq!(rect.height(), 2400.0);
         // Full-inch ticks are bold, half-inch ticks faint.
-        let (inch_len, inch_col) = tick_style(2.0);
-        let (half_len, half_col) = tick_style(1.0);
+        let palette = Palette::for_theme(ColorTheme::Dark);
+        let (inch_len, inch_col) = tick_style(2.0, palette);
+        let (half_len, half_col) = tick_style(1.0, palette);
         assert_eq!(inch_len, 8.0);
         assert_eq!(inch_col, Tokens::RULER);
         assert_eq!(half_len, 4.0);
         assert_ne!(inch_col, half_col);
+    }
+
+    #[test]
+    fn box_selection_supports_containment_and_intersection_modes() {
+        let doc = simple_square();
+        let view = View {
+            zoom: 2.0,
+            pan_mm: egui::Vec2::ZERO,
+        };
+        let contained = egui::Rect::from_min_max(egui::pos2(15.0, 15.0), egui::pos2(125.0, 125.0));
+        let crossing = egui::Rect::from_min_max(egui::pos2(15.0, 15.0), egui::pos2(50.0, 50.0));
+        assert_eq!(
+            select_shapes_in_rect(&doc, &view, contained, SelectionMode::Contain),
+            vec![1]
+        );
+        assert_eq!(
+            select_shapes_in_rect(&doc, &view, crossing, SelectionMode::Contain),
+            Vec::<u64>::new()
+        );
+        assert_eq!(
+            select_shapes_in_rect(&doc, &view, crossing, SelectionMode::Intersect),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn lasso_selection_uses_polygon_not_only_bounds_for_containment() {
+        let doc = simple_square();
+        let view = View {
+            zoom: 2.0,
+            pan_mm: egui::Vec2::ZERO,
+        };
+        let lasso = [
+            egui::pos2(0.0, 0.0),
+            egui::pos2(140.0, 0.0),
+            egui::pos2(140.0, 140.0),
+            egui::pos2(0.0, 140.0),
+        ];
+        assert!(point_in_lasso(egui::pos2(80.0, 80.0), &lasso));
+        assert_eq!(
+            select_shapes_in_lasso(&doc, &view, &lasso, SelectionMode::Contain),
+            vec![1]
+        );
+        assert!(
+            select_shapes_in_lasso(&doc, &view, &lasso[..2], SelectionMode::Contain).is_empty()
+        );
     }
 
     #[test]
@@ -427,8 +755,9 @@ mod tests {
         let doc = simple_square();
         let shape = &doc.layers[0].shapes[0];
         let view = View::default();
-        let (plain_col, _) = shape_visual(shape, &view, false);
-        let (kerf_col, _) = shape_visual(shape, &view, true);
+        let palette = Palette::for_theme(ColorTheme::Dark);
+        let (plain_col, _) = shape_visual(shape, &view, false, palette);
+        let (kerf_col, _) = shape_visual(shape, &view, true, palette);
         assert_ne!(plain_col, kerf_col);
     }
 }

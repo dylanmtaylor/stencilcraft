@@ -56,7 +56,7 @@ recomputes and round-trips so a kerf build is always present in tests).
 ## Fonts
 
 No fonts are bundled here, ever. If a UI feature later needs custom text shaping, fonts
-go into a sibling craft-fonts-style repository read through an optional `CRAFT_FONTS_DIR`
-build input, as VectorCraft does with `storytold/craft-fonts` — build, test and runtime
-must all work with `CRAFT_FONTS_DIR` unset. For now the UI renders no user text via shaped
-fonts beyond the toolkit's own interface font.
+go into a separately maintained craft-fonts repository read through an optional
+`CRAFT_FONTS_DIR` build input. Build, test and runtime must all work with that variable
+unset. For now the UI renders no user text via shaped fonts beyond the toolkit's own
+interface font.

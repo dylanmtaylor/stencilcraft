@@ -14,7 +14,7 @@ paper object with heavy ink outlines on a full-bleed rounded square (`rx = 112` 
 |---|---|---|
 | Ink | `#0b0b0c` | outlines, the cut line, the knife handle |
 | Paper | `#efe9dc` | the stencil sheet, bridges, blade and collar |
-| StencilCraft colour | `#e8573f` | the full-bleed field, showing through the cut-out |
+| StencilCraft colour | `#702387` | the full-bleed field, showing through the cut-out |
 
 **Provenance:** original work by StencilCraft contributors, licensed
 MIT OR Apache-2.0 as part of the project. Listed in [`../../ASSETS.md`](../../ASSETS.md).

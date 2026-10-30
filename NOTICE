@@ -12,7 +12,7 @@ Standalone components carry their own notices:
 Creative assets bundled in this repository are original works by StencilCraft
 contributors, licensed MIT OR Apache-2.0:
 
-- `assets/app-icon/stencilcraft.svg` — the StencilCraft app icon.
+- `assets/app-icon/stencilcraft.svg` — the StencilCraft app icon (field color `#702387`).
 
 They are listed with full attribution in ASSETS.md. No fonts are bundled; fonts
 shared by the Crafting Apps live outside this repository, when the need arises.

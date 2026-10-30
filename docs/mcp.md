@@ -50,4 +50,4 @@ produces a response with `id: null`. No request may abort the session on a bad p
 The stdio loop is a subset of the Model Context Protocol tool surface: a later milestone
 exposes each method above as an MCP tool with a JSON-schema parameter description, backed
 by the same session type, so the CLI (`stencilcraft-cli mcp`) is the server process —
-the shape VectorCraft uses for `vectorcraft-cli mcp`.
+the same server process used by the command-line tools.

@@ -14,10 +14,10 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | none | rectangle add/remove only |
-| UI | preliminary | canvas pan/zoom, layers panel, kerf preview, save/open |
+| UI | preliminary | canvas pan/zoom, layers panel, basic click/box/lasso selection, kerf preview, save/open; dockable design panels and broad toolset remain gaps |
 | Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
-| Craft-libs & parity | preliminary | `color` crate added; reusable domain-crate layering like VectorCraft's family; icon/README/examples parity pass done |
+| Craft-libs & parity | early foundation | domain crates established; reusable dockable panel/app-shell craft-libs are not yet part of this workspace |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
 ## Milestones
@@ -59,17 +59,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 - [x] Engine commands for moving, rotating and scaling a shape around its center, with
   finite-geometry validation and undo/redo. UI selection/editing remains.
-- [ ] Add box/lasso selection, pen and node editing; continue with welding and path
-  boolean operations. The desktop canvas can now select a visible shape by clicking its
-  outline, drag it to move, and rotate/scale it from the Design panel.
-- [ ] Add image import and trace-to-path workflow, including clear trace controls and
-  geometry limits.
+- [ ] Add pen and node editing; continue with welding and path boolean operations. The desktop supports click, box and lasso selection, drag-to-move, and primary-shape rotate/scale controls.
+- [x] Add image import and threshold silhouette trace-to-path workflow for PNG/JPEG, with a configurable threshold and geometry/resource limits; full-color tracing and embedded raster editing remain open.
 - [ ] Add text objects and text-to-path conversion without bundling fonts; define a user
   font/shaping integration point.
 - [ ] Expand SVG fidelity: advanced CSS/at-rules, external references, clipping, masks,
   filters, and additional vector formats.
-- [ ] Implement Print & Cut: registration mark layout, printer output, sensor-aware cut
-  alignment/calibration and end-to-end fixtures.
+- [ ] Implement Print & Cut: printable SVG sheet export with three alignment marks is available; printer dialog support, machine sensor protocol, calibration and hardware end-to-end tests remain open.
 - [ ] Add production tools: weed lines, nesting, multi-cutter job assignment, batch and
   repeated-pass workflows.
 - [ ] Expand design formats and project interoperability, including DXF import and a
@@ -85,7 +81,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - [ ] Add optional integrations for external design tools (e.g. Illustrator/CorelDRAW-like
   interchange or plugins) without coupling the core to proprietary software.
 - [ ] Improve export/production parity: PDF/print sheets, design previews, automatic
-  nesting, registration marks and multi-machine output.
+  nesting, printer controls and multi-machine output. A manual printable SVG page with
+  three registration marks is available through `print-cut`; automatic sensor alignment
+  is not implemented.
 
 ## Progress log
 
@@ -115,9 +113,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - 2026-10-29 — SVG `<symbol>` templates: local `<use>` instancing with `viewBox`,
   `preserveAspectRatio`, use-site x/y/width/height and style inheritance; bounded
   instance expansion and clear errors for invalid viewports and cycles.
-- 2026-10-29 — parity pass with VectorCraft conventions: original app icon
-  (`assets/app-icon/stencilcraft.svg`, Crafting Apps tile template) with ASSETS/NOTICE
-  attribution; README restyled to the ArtCraft README structure with PNG previews
+- 2026-10-29 — app identity pass: original app icon
+  (`assets/app-icon/stencilcraft.svg`, original artwork) with ASSETS/NOTICE
+  attribution; README with PNG previews
   rendered from our own exporter; committed `examples/` (starter, kerf counter,
   tiling); new `stencilcraft-color` craft-lib (CSS parse/format, luminance, blend);
   CLI end-to-end integration tests (9) and a malformed-input no-panic corpus (5) —

@@ -10,9 +10,7 @@
 
 <p align="center">
   A fast, open-source stencil workflow. It runs natively on macOS, Windows and Linux, and in the
-  browser via WebAssembly (planned). Following the direction of
-  [VectorCraft](https://github.com/storytold/vectorcraft) and the Crafting Apps: one codebase,
-  written from scratch.
+  browser via WebAssembly (planned). It is one Rust codebase, written from scratch.
 </p>
 
 <p align="center">
@@ -30,8 +28,7 @@
   <a href="#use-it-from-claude-code-and-other-agents">Agents</a> ·
   <a href="#status">Status</a> ·
   <a href="#downloads">Downloads</a> ·
-  <a href="#the-crafting-direction">The Crafting direction</a> ·
-  <a href="#license-and-credits">License</a>
+    <a href="#license-and-credits">License</a>
 </p>
 
 ## A look around
@@ -79,11 +76,24 @@ Every image below is rendered by StencilCraft's own SVG exporter from the
   read years later.
 - **Agent-native.** The CLI doubles as a JSON-lines control channel and MCP server, so
   agents can load, kerf-apply, tile, export and *dry-run cut* files the way a person does.
-- **Craft-libs.** Reusable domain crates, the VectorCraft way: `geom`, `color`, `doc`,
-  `kerf`, `tiling` … `machine` are each a layer any future Crafting App could borrow,
-  and nothing below `ui-egui` knows about egui (enforced by `cargo xtask layers`).
+- **Modular Rust workspace.** The reusable domain crates separate geometry, color,
+  documents, kerf, tiling, exports and machine communication; nothing below `ui-egui`
+  knows about egui (enforced by `cargo xtask layers`). Reusable movable/dockable panel
+  infrastructure is not yet implemented.
 
 ## Quick start
+
+Import a raster silhouette as closed cut contours, then export a printable artwork
+sheet with registration marks for a manual alignment workflow:
+
+```sh
+cargo run --release -p stencilcraft-cli -- trace-image --in logo.png --out logo.stencilcraft --threshold 128
+cargo run --release -p stencilcraft-cli -- print-cut --in logo.stencilcraft --out logo-print-cut.svg
+```
+
+The trace path supports bounded PNG/JPEG inputs; its default physical scale is 96 dpi.
+Print & Cut export requires printing at actual size. Optical-sensor reading and automatic
+machine alignment are not implemented yet; see [the alignment limitations](docs/print-cut.md).
 
 ```sh
 git clone https://github.com/dylanmtaylor/stencilcraft
@@ -128,17 +138,17 @@ the numbers by dimension and what's next; [`docs/gaps.md`](docs/gaps.md) the ran
 list of what's missing.
 
 **Where we are (2026-10-29): scaffold+.** The document model and `.stencilcraft` round
-trip, kerf compensation, sheet tiling, and SVG/DXF/G-code exports work and are tested
-(110 workspace tests); the desktop shell edits rectangle shapes, previews kerf,
-saves/opens files and shows the **Design/Send** split with a live machine dry-run;
+trip, kerf compensation, sheet tiling, and SVG/DXF/G-code exports work and are tested;
+the desktop shell edits rectangle shapes, previews kerf, saves/opens files, provides basic
+click/box/lasso selection, and shows the **Design/Send** split with a live machine dry-run;
 `cut` encodes Silhouette/Graphtec Cameo streams end to end (the protocol is in place;
 real-hardware transport is the next step).
 
 **What's missing:**
 - SVG features beyond common paths/shapes/groups/transforms/styles (advanced CSS,
   external `<use>`, text conversion, clipping/masks/filters);
-- drawing tools (pen, selection, node editing) — StencilCraft starts behind a vector app;
-- tiling edge clipping, bridge generation so counters stay attached, registration marks;
+- drawing tools (pen, node editing) and selection refinements (box/lasso now exist, but are basic);
+- tiling edge clipping and bridge generation so counters stay attached; print-and-cut has printable marks but no automatic sensor alignment;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).
 
 **Where we're going:** next is broader SVG import (CSS, `<use>`, text conversion,
@@ -155,14 +165,7 @@ UI can be swapped without touching the engine.
 There are no packaged releases yet — StencilCraft builds from source with
 `cargo run --release -p stencilcraft` (desktop) or `cargo build --release -p stencilcraft-cli`
 (headless). Release packaging, signed installers and the web build follow the Crafting
-Apps release pattern and are on the roadmap (M5).
-
-## The Crafting direction
-
-StencilCraft follows the design decisions of
-[VectorCraft](https://github.com/storytold/vectorcraft) and the Crafting Apps community.
-It stands on its own: pure Rust, no dependency on Adobe software or code, dual-licensed
-MIT OR Apache-2.0.
+release packaging is on the roadmap (M5).
 
 Agent and contributor rules (clean-room, the asset policy, no panics in shipped code,
 quality gates) are in [`AGENTS.md`](AGENTS.md). Every bundled asset is listed with its

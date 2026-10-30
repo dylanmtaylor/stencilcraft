@@ -18,8 +18,10 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
 # ui
 egui = "0.37"
-eframe = "0.37"
+eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
+# Shared UI components and docking, pinned to the version integrated by VectorCraft.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["serde"] }
 # internal
 stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }
@@ -34,7 +36,7 @@ stencilcraft-mcp = { path = "crates/mcp" }
 stencilcraft-ui-egui = { path = "crates/ui-egui" }
 stencilcraft-testkit = { path = "crates/testkit" }
 
-# VectorCraft never crashes: shipped code returns `Result`/`Option` instead of
+# Shipped code returns `Result`/`Option` instead of
 # panicking (see AGENTS.md › Robustness). Tests may unwrap (clippy.toml).
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -64,3 +66,21 @@ debug = "line-tables-only"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# craft-ui uses the suite's egui and winit forks for shared IME and docking support.
+[patch.crates-io]
+ecolor = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+emath = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+epaint_default_fonts = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-winit = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui-wgpu = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_glow = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_extras = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_kittest = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_system_font_provider = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+eframe = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_demo_lib = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+egui_inspection = { git = "https://github.com/storytold/egui", rev = "6d518fc799681571963842f95b55a6b68431b15a" }
+winit = { git = "https://github.com/storytold/winit", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

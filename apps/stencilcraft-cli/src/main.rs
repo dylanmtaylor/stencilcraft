@@ -1,5 +1,4 @@
-//! `stencilcraft-cli`: the headless driver and agent surface, following the
-//! direction of the Crafting Apps CLI (`vectorcraft-cli run … --export out.pdf`).
+//! `stencilcraft-cli`: the headless driver and agent surface.
 //!
 //! Subcommands:
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
@@ -11,7 +10,9 @@
 
 mod cut;
 mod pipeline;
+mod print_cut;
 mod run;
+mod trace;
 
 use run::RunRequest;
 
@@ -23,6 +24,8 @@ fn main() -> Result<(), String> {
             run::execute(req)
         }
         Some("import-svg") => import_svg_command(&args[1..]),
+        Some("trace-image") => trace_image_command(&args[1..]),
+        Some("print-cut") => print_cut_command(&args[1..]),
         Some("mcp") => mcp_loop(),
         Some("cut") => {
             cut::execute(&args[1..])?;
@@ -107,6 +110,91 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn trace_image_command(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut output = None;
+    let mut threshold = trace::TraceOptions::default().threshold;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args.get(i).map(String::as_str).unwrap_or("");
+        match arg {
+            "--in" => {
+                i += 1;
+                input = args.get(i).cloned();
+            }
+            "--out" => {
+                i += 1;
+                output = args.get(i).cloned();
+            }
+            "--threshold" => {
+                i += 1;
+                let value = args.get(i).ok_or("trace-image: --threshold needs 0..255")?;
+                threshold = value
+                    .parse::<u8>()
+                    .map_err(|_| "trace-image: --threshold must be an integer from 0 to 255")?;
+            }
+            "-h" | "--help" => {
+                println!(
+                    "usage: stencilcraft-cli trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]"
+                );
+                println!(
+                    "Dark threshold silhouette; output uses 96 dpi as the physical pixel scale."
+                );
+                return Ok(());
+            }
+            other => return Err(format!("trace-image: unknown argument {other}")),
+        }
+        i += 1;
+    }
+    let input = input.ok_or("trace-image: --in IMAGE is required")?;
+    let output = output.ok_or("trace-image: --out FILE.stencilcraft is required")?;
+    let doc = trace::trace_file(&input, trace::TraceOptions { threshold })?;
+    stencilcraft_doc::save_to(&doc, &output).map_err(|error| error.to_string())?;
+    println!(
+        "traced {} closed cut contours ({} × {} mm): {output}",
+        doc.shape_count(),
+        doc.board.width_mm,
+        doc.board.height_mm
+    );
+    Ok(())
+}
+
+fn print_cut_command(args: &[String]) -> Result<(), String> {
+    let mut input = None;
+    let mut output = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args.get(i).map(String::as_str).unwrap_or("") {
+            "--in" => {
+                i += 1;
+                input = args.get(i).cloned();
+            }
+            "--out" => {
+                i += 1;
+                output = args.get(i).cloned();
+            }
+            "-h" | "--help" => {
+                println!(
+                    "usage: stencilcraft-cli print-cut --in FILE.stencilcraft --out SHEET.svg"
+                );
+                println!(
+                    "Print the generated sheet at 100% / actual size, disable fit-to-page, and load it in the same orientation for manual visual alignment. Machine sensor reading is not implemented."
+                );
+                return Ok(());
+            }
+            other => return Err(format!("print-cut: unknown argument {other}")),
+        }
+        i += 1;
+    }
+    let input = input.ok_or("print-cut: --in FILE.stencilcraft is required")?;
+    let output = output.ok_or("print-cut: --out SHEET.svg is required")?;
+    let doc = stencilcraft_doc::load_from(&input).map_err(|error| error.to_string())?;
+    let svg = print_cut::export_sheet(&doc)?;
+    std::fs::write(&output, svg).map_err(|error| format!("{output}: {error}"))?;
+    println!("wrote printable registration sheet: {output}");
+    Ok(())
+}
+
 fn print_help() {
     println!("stencilcraft-cli — StencilCraft headless tools");
     println!();
@@ -115,9 +203,18 @@ fn print_help() {
     println!("      Export is .svg, .dxf or .gcode; with --tile-sheet the tiles go");
     println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).",);
     println!("  import-svg --in FILE.svg --out FILE.stencilcraft");
+    println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
+    println!("  print-cut --in FILE.stencilcraft --out SHEET.svg");
     println!("      Import common SVG shapes/groups/transforms into the native format.");
+    println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
+    println!("      Trace dark raster silhouettes into closed cut contours at 96 dpi.");
+    println!("  print-cut --in FILE.stencilcraft --out SHEET.svg");
+    println!(
+        "      Export artwork and three registration marks for a manually aligned print/cut workflow."
+    );
     println!("  mcp            JSON-lines control protocol on stdio (docs/mcp.md)");
     println!("  cut --in FILE [--media …] [--bbox] [--device PATH]");
+    println!("      Machine sensor registration and automatic alignment are not implemented.");
     println!("      Encode + send to a cutting machine; dry-run transcript by default.");
     println!("  make-starter --out FILE");
     println!("  help");

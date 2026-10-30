@@ -441,6 +441,16 @@ impl StencilApp {
         self.set_selection(ids);
     }
 
+    fn select_all_shapes(&mut self) {
+        let ids = self
+            .engine
+            .doc
+            .shapes()
+            .map(|(_, shape)| shape.id)
+            .collect::<Vec<_>>();
+        self.set_selection(ids);
+    }
+
     fn duplicate_selection(&mut self) {
         let ids = self.selected_shapes.clone();
         match self.engine.run(Command::ShapesDuplicate { ids }) {
@@ -471,7 +481,9 @@ impl StencilApp {
         if self.send_mode || ctx.egui_wants_keyboard_input() {
             return;
         }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+            self.select_all_shapes();
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
             self.duplicate_selection();
         } else if ctx.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
@@ -1493,6 +1505,37 @@ mod tests {
             app.engine.doc.get_shape(1).unwrap().bounds(),
             app.engine.doc.get_shape(2).unwrap().bounds()
         );
+    }
+
+    #[test]
+    fn command_a_selects_every_shape_on_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        for x in [3.0, 23.0, 43.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 4.0,
+                width: 12.0,
+                height: 8.0,
+            });
+        }
+        app.set_selection([2]);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: Some(egui::Key::A),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }],
+                ..Default::default()
+            },
+            |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.selected_shapes, vec![1, 2, 3]);
+        assert_eq!(app.selected_shape, Some(3));
     }
 
     #[test]

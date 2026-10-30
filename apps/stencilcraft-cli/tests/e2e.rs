@@ -7,8 +7,9 @@
 // helpers are not #[test] annotated). This file never ships.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::ok_expect)]
 
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_stencilcraft-cli"))
@@ -325,6 +326,70 @@ fn print_cut_cli_writes_registration_sheet() {
     assert!(svg.contains("id=\"registration-marks\""));
     assert!(svg.contains("width=\"124.000mm\""));
     assert!(svg.contains("class=\"stencilcraft-cut\""));
+}
+
+#[test]
+fn mcp_process_executes_vectorcraft_primitives_and_undo_redo() {
+    let requests = [
+        serde_json::json!({
+            "id": 1,
+            "method": "command.execute",
+            "params": {"command": "shape.add-ellipse", "params": {"x": 5.0, "y": 5.0, "width": 10.0, "height": 6.0}}
+        }),
+        serde_json::json!({
+            "id": 2,
+            "method": "command.execute",
+            "params": {"command": "shape.add-polygon", "params": {"cx": 25.0, "cy": 20.0, "radius": 8.0, "sides": 6, "rotation": 10.0}}
+        }),
+        serde_json::json!({
+            "id": 3,
+            "method": "command.execute",
+            "params": {"command": "shape.add-star", "params": {"cx": 45.0, "cy": 20.0, "radius": 9.0, "inner_radius": 4.0, "points": 5, "rotation": 0.0}}
+        }),
+        serde_json::json!({"id": 4, "method": "doc.summary"}),
+        serde_json::json!({
+            "id": 5,
+            "method": "command.execute",
+            "params": {"command": "edit.undo", "params": null}
+        }),
+        serde_json::json!({"id": 6, "method": "doc.summary"}),
+        serde_json::json!({
+            "id": 7,
+            "method": "command.execute",
+            "params": {"command": "edit.redo", "params": null}
+        }),
+        serde_json::json!({"id": 8, "method": "doc.summary"}),
+    ];
+    let input = requests
+        .iter()
+        .map(serde_json::Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut child = bin()
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("MCP CLI process starts");
+    child
+        .stdin
+        .as_mut()
+        .expect("MCP stdin is piped")
+        .write_all(input.as_bytes())
+        .expect("write MCP requests");
+    drop(child.stdin.take());
+    let output = child.wait_with_output().expect("MCP process finishes");
+    expect_exit0(&output, &String::from_utf8_lossy(&output.stdout));
+
+    let responses = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("response is JSON"))
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), requests.len());
+    assert!(responses.iter().all(|response| response["ok"] == true));
+    assert_eq!(responses[3]["result"]["shapes"], 3);
+    assert_eq!(responses[5]["result"]["shapes"], 2);
+    assert_eq!(responses[7]["result"]["shapes"], 3);
 }
 
 #[test]

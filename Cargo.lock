@@ -3953,6 +3953,7 @@ name = "stencilcraft-cli"
 version = "0.1.0"
 dependencies = [
  "image",
+ "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
  "stencilcraft-engine",

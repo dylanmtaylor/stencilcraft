@@ -29,6 +29,7 @@ stencilcraft-testkit = { workspace = true }
 serial = ["stencilcraft-machine/serial"]
 
 [dev-dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

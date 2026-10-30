@@ -453,12 +453,31 @@ impl StencilApp {
         }
     }
 
+    fn delete_selection(&mut self) {
+        if self.selected_shapes.is_empty() {
+            return;
+        }
+        let ids = self.selected_shapes.clone();
+        match self.engine.run(Command::ShapesRemove { ids }) {
+            Ok(_) => {
+                self.set_selection([]);
+                self.status = "deleted".to_string();
+            }
+            Err(error) => self.status = error.to_string(),
+        }
+    }
+
     fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         if self.send_mode || ctx.egui_wants_keyboard_input() {
             return;
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
             self.duplicate_selection();
+        } else if ctx.input_mut(|input| {
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+        }) {
+            self.delete_selection();
         }
     }
 
@@ -759,11 +778,8 @@ impl StencilApp {
             if ui.add(Button::new("T Text")).clicked() {
                 self.text_dialog = true;
             }
-            if ui.add(Button::new("⊖ Delete")).clicked() && self.selected_shape.is_some() {
-                self.run_command(Command::ShapesRemove {
-                    ids: self.selected_shapes.clone(),
-                });
-                self.set_selection([]);
+            if ui.add(Button::new("⊖ Delete")).clicked() {
+                self.delete_selection();
             }
             ui.separator();
             if ui.add(Button::new("↶")).clicked() {
@@ -1477,6 +1493,37 @@ mod tests {
             app.engine.doc.get_shape(1).unwrap().bounds(),
             app.engine.doc.get_shape(2).unwrap().bounds()
         );
+    }
+
+    #[test]
+    fn delete_and_backspace_remove_selected_shapes() {
+        for key in [egui::Key::Delete, egui::Key::Backspace] {
+            let ctx = egui::Context::default();
+            let mut app = StencilApp::new(None);
+            app.run_command(Command::ShapeAddRect {
+                x: 3.0,
+                y: 4.0,
+                width: 12.0,
+                height: 8.0,
+            });
+            app.set_selection([1]);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+            );
+            output.textures_delta.clear();
+            assert_eq!(app.engine.doc.shape_count(), 0);
+            assert!(app.selected_shapes.is_empty());
+        }
     }
 
     #[test]

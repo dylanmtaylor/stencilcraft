@@ -28,9 +28,9 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    document and metadata snapshots. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
 7. **UI**: visible-outline selection, canvas drag-to-move, multi-select with additive
-   selection, exact-position duplication (button and Ctrl/Command+D shortcut), box/lasso
-   selection, Pathfinder operations, alignment/distribution and primary-shape rotate/scale
-   controls work (selection uses
+   selection, exact-position duplication (button and Ctrl/Command+D shortcut), Delete/
+   Backspace removal, box/lasso selection, Pathfinder operations, alignment/distribution
+   and primary-shape rotate/scale controls work (selection uses
    conservative shape bounds). Remaining: node editing, a ruler, zoom-to-fit keyboard
    shortcuts, kerf preview
    recomputes on every paint when dirty (no cache), no recent-files list.

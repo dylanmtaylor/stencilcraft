@@ -16,8 +16,8 @@ use craft_ui::canvas::{
 };
 use craft_ui::composites::PanelFooter;
 use craft_ui::controls::{
-    Button, Checkbox, IconButton, Kbd, NumberField, Select, Slider, SliderScale, TextField,
-    ToggleButton,
+    Button, ButtonVariant, Checkbox, IconButton, Kbd, NumberField, Select, Slider, SliderScale,
+    TextField, ToggleButton,
 };
 use craft_ui::docking::{
     Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
@@ -653,32 +653,23 @@ impl Default for SendTab {
 }
 
 pub fn default_workspace() -> Layout<WorkspacePanel> {
-    let dock = |side, panel, width| Node::Dock {
-        side,
-        columns: vec![Column::new(vec![Group::new(vec![panel], 0)], width)],
-    };
     Layout {
         root: Some(Node::Split {
             axis: SplitAxis::Horizontal,
-            size: SplitSize::Ratio(0.18),
-            first: Box::new(dock(Side::Start, WorkspacePanel::Tools, 76.0)),
-            second: Box::new(Node::Split {
-                axis: SplitAxis::Horizontal,
-                size: SplitSize::Ratio(0.75),
-                first: Box::new(Node::Tabs {
-                    panels: vec![WorkspacePanel::Canvas],
-                    active: 0,
-                }),
-                second: Box::new(Node::Dock {
-                    side: Side::End,
-                    columns: vec![Column::new(
-                        vec![
-                            Group::new(vec![WorkspacePanel::Inspector], 0),
-                            Group::new(vec![WorkspacePanel::Layers], 0),
-                        ],
-                        280.0,
-                    )],
-                }),
+            size: SplitSize::Ratio(0.78),
+            first: Box::new(Node::Tabs {
+                panels: vec![WorkspacePanel::Canvas],
+                active: 0,
+            }),
+            second: Box::new(Node::Dock {
+                side: Side::End,
+                columns: vec![Column::new(
+                    vec![
+                        Group::new(vec![WorkspacePanel::Inspector], 0),
+                        Group::new(vec![WorkspacePanel::Layers], 0),
+                    ],
+                    280.0,
+                )],
             }),
         }),
         floating: Vec::new(),
@@ -1911,10 +1902,12 @@ impl StencilApp {
         };
         let kerf_val_init = self.kerf_draft.unwrap_or(self.engine.doc.kerf.width_mm);
         let locale_numbers = self.locale_numbers.clone();
+        let object_count = self.engine.doc.shape_count();
 
         let mut preview_kerf = self.kerf_preview;
         let mut show_rulers = self.prefs.show_rulers;
         let mut show_grid = self.prefs.show_grid;
+        let mut send_mode = self.send_mode;
         let mut new_kerf = None;
         let mut do_unite = false;
         let mut do_minus = false;
@@ -1979,6 +1972,19 @@ impl StencilApp {
                                 .icon(Icon::Grid)
                                 .size(ControlSize::Sm),
                         );
+                        ui.separator();
+                        ui.label(format!("{object_count} objects"));
+                        let (mode_label, variant) = if send_mode {
+                            ("← Design", ButtonVariant::Secondary)
+                        } else {
+                            ("Make →", ButtonVariant::Primary)
+                        };
+                        let btn = Button::new(mode_label)
+                            .variant(variant)
+                            .size(ControlSize::Sm);
+                        if ui.add(btn).clicked() {
+                            send_mode = !send_mode;
+                        }
                     });
                 });
             });
@@ -1986,6 +1992,7 @@ impl StencilApp {
         self.kerf_preview = preview_kerf;
         self.prefs.show_rulers = show_rulers;
         self.prefs.show_grid = show_grid;
+        self.send_mode = send_mode;
         if let Some(k) = new_kerf {
             self.run_command(Command::KerfSet { width_mm: k });
         }
@@ -3138,7 +3145,6 @@ impl eframe::App for StencilApp {
 
         self.top_panel(ui);
         self.options_bar(ui);
-        self.workflow_bar(ui);
         self.status_bar(ui);
 
         let slots = build_tool_slots();
@@ -3220,7 +3226,7 @@ mod tests {
             .apply_all(
                 [Action::Move {
                     panel: WorkspacePanel::Inspector,
-                    anchor: WorkspacePanel::Tools,
+                    anchor: WorkspacePanel::Layers,
                     placement: Placement::Tab { before: None },
                 }],
                 |panel| {

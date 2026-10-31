@@ -15,10 +15,12 @@ APP_ID=ai.storyteller.stencilcraft
 FLATHUB=https://dl.flathub.org/repo/flathub.flatpakrepo
 
 TEST=1
+OCI=0
 TARBALL=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-test) TEST=0; shift ;;
+    --oci) OCI=1; shift ;;
     -h | --help) sed -n '2,10p' "$0"; exit 0 ;;
     -*) echo "unknown argument: $1" >&2; exit 2 ;;
     *) TARBALL="$1"; shift ;;
@@ -81,6 +83,13 @@ fi
 OUT="$DIST/$BASENAME.flatpak"
 flatpak build-bundle --runtime-repo="$FLATHUB" "$WORK/repo" "$OUT" "$APP_ID" stable
 echo "wrote $OUT"
+
+if [ "$OCI" = 1 ]; then
+  OUT_OCI="$DIST/$BASENAME-oci"
+  rm -rf "$OUT_OCI"
+  flatpak build-bundle --oci "$WORK/repo" "$OUT_OCI" "$APP_ID" stable
+  echo "wrote OCI layout to $OUT_OCI"
+fi
 
 if [ "$TEST" = 1 ]; then
   flatpak install --user -y --noninteractive --reinstall "$OUT"

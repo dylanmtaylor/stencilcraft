@@ -119,6 +119,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
   fields retain their keys; compensated kerf geometry is cached until shape geometry
   or kerf width changes; a persisted, bounded Recent menu reopens the eight most
   recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
+- 2026-10-31 — Flatpak OCI distribution: added `--oci` export support to
+  `packaging/linux/flatpak-bundle.sh` and `packaging/linux/flatpak-oci.sh` publishing helper
+  for GHCR distribution alongside standard bundle builds.
 - 2026-10-30 — desktop craft-suite UI overhaul: integrated `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic`. Implemented CSD `TitleBar` with embedded icon, `MenuBar`, contextual `OptionsBar`, vertical `ToolRail` with flyouts, millimetre `Rulers` with zero reset, interactive `BezierOverlay` node editing, `PenDraft` path tool, live drag-shape creation, and persistent settings. Quality gates and 32 desktop tests pass.
 - 2026-10-29 — app identity pass: original app icon
   (`assets/app-icon/stencilcraft.svg`, original artwork) with ASSETS/NOTICE

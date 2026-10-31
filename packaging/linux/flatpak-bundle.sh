@@ -38,7 +38,7 @@ command -v flatpak >/dev/null || { echo "error: flatpak not found" >&2; exit 1; 
 
 echo "==> StencilCraft $VERSION Flatpak bundle for $ARCH from $(basename "$TARBALL")"
 
-WORK="$CARGO_TARGET_DIR/flatpak-bundle"
+WORK="${WORK:-/tmp/stencilcraft-flatpak-bundle}"
 rm -rf "$WORK"
 mkdir -p "$WORK/stage"
 tar -xzf "$TARBALL" -C "$WORK/stage" --strip-components=1
@@ -53,14 +53,8 @@ if command -v flatpak-builder >/dev/null; then
 else
   echo "==> flatpak-builder not found; building Flatpak directory & OSTree repo natively via flatpak"
   BUILD_DIR="$WORK/build"
-  mkdir -p "$BUILD_DIR/files" "$BUILD_DIR/var/tmp" "$BUILD_DIR/export"
-  cat >"$BUILD_DIR/metadata" <<EOF
-[Application]
-name=$APP_ID
-runtime=org.freedesktop.Platform/$ARCH/26.08
-sdk=org.freedesktop.Sdk/$ARCH/26.08
-command=stencilcraft
-EOF
+  rm -rf "$BUILD_DIR"
+  flatpak build-init "$BUILD_DIR" "$APP_ID" org.freedesktop.Platform org.freedesktop.Platform 26.08
   install -Dm755 "$WORK/stage/bin/stencilcraft" "$BUILD_DIR/files/bin/stencilcraft"
   install -Dm755 "$WORK/stage/bin/stencilcraft-cli" "$BUILD_DIR/files/bin/stencilcraft-cli"
   install -Dm644 "$WORK/stage/share/applications/$APP_ID.desktop" "$BUILD_DIR/files/share/applications/$APP_ID.desktop"
@@ -79,6 +73,8 @@ EOF
     --filesystem=xdg-documents \
     --filesystem=xdg-pictures
 
+  ostree init --mode=archive --repo="$WORK/repo"
+  ostree config --repo="$WORK/repo" set core.min-free-space-percent 0
   flatpak build-export "$WORK/repo" "$BUILD_DIR" stable
 fi
 

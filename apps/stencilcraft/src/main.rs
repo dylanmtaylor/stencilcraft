@@ -10,10 +10,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
 use craft_theme::ControlSize;
-use craft_ui::canvas::{
+use craft_draw::ui::pen::{
     BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
-    PenDraft, PenNames, Readout, RulerNames, RulerUnits, Rulers,
+    PenDraft, PenNames,
 };
+use craft_ui::canvas::{Readout, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::PanelFooter;
 use craft_ui::controls::{
     Button, ButtonVariant, Checkbox, IconButton, Kbd, NumberField, Select, Slider, SliderScale,
@@ -4473,10 +4474,10 @@ mod tests {
     fn pen_draft_commit_creates_cut_path() {
         let mut app = StencilApp::new(None);
         let initial_count = app.engine.doc.shape_count();
-        let k1 = craft_ui::canvas::Knot::corner(stencilcraft_geom::Point::new(10.0, 10.0));
-        let k2 = craft_ui::canvas::Knot::corner(stencilcraft_geom::Point::new(50.0, 10.0));
-        let k3 = craft_ui::canvas::Knot::corner(stencilcraft_geom::Point::new(50.0, 40.0));
-        let sub = craft_ui::canvas::EditSubpath {
+        let k1 = craft_draw::ui::pen::Knot::corner(stencilcraft_geom::Point::new(10.0, 10.0));
+        let k2 = craft_draw::ui::pen::Knot::corner(stencilcraft_geom::Point::new(50.0, 10.0));
+        let k3 = craft_draw::ui::pen::Knot::corner(stencilcraft_geom::Point::new(50.0, 40.0));
+        let sub = craft_draw::ui::pen::EditSubpath {
             closed: true,
             knots: vec![k1, k2, k3],
         };

@@ -21,11 +21,12 @@ egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Shared UI components and docking, pinned to the design-system branch.
-craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a", features = ["serde"] }
-craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a", features = ["serde"] }
-craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
-craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
-craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
+craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
+craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
+craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
+craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["ui"] }
+craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
+craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
@@ -85,18 +86,18 @@ hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cf
 hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-ecolor = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-emath = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-epaint = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-epaint_default_fonts = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui-winit = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui-wgpu = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_glow = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_extras = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_kittest = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_system_font_provider = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-eframe = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_demo_lib = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
-egui_inspection = { git = "https://github.com/aiongg/egui.git", rev = "94a2ac9917531fdf7285e4a30e7ae8372b8104b5" }
+ecolor = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+emath = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+epaint = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+epaint_default_fonts = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui-winit = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui-wgpu = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_glow = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_extras = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_kittest = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_system_font_provider = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+eframe = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_demo_lib = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
+egui_inspection = { git = "https://github.com/aiongg/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
 winit = { git = "https://github.com/storytold/winit", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }

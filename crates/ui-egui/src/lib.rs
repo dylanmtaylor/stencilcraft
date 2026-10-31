@@ -555,10 +555,10 @@ fn paint_registration_marks(
     painter.rect_filled(bl_v, 0.0, mark_color);
 }
 
-/// Convert a [`kurbo::BezPath`] into editable [`craft_ui::canvas::EditSubpath`]s for
+/// Convert a [`kurbo::BezPath`] into editable [`craft_draw::ui::pen::EditSubpath`]s for
 /// `BezierOverlay` (Direct Selection & Convert Anchor Point tools).
-pub fn bezpath_to_edit_subpaths(path: &kurbo::BezPath) -> Vec<craft_ui::canvas::EditSubpath> {
-    use craft_ui::canvas::{EditSubpath, Knot};
+pub fn bezpath_to_edit_subpaths(path: &kurbo::BezPath) -> Vec<craft_draw::ui::pen::EditSubpath> {
+    use craft_draw::ui::pen::{EditSubpath, Knot};
     let mut subpaths: Vec<EditSubpath> = Vec::new();
     let mut current: Option<EditSubpath> = None;
 
@@ -647,7 +647,7 @@ pub fn bezpath_to_edit_subpaths(path: &kurbo::BezPath) -> Vec<craft_ui::canvas::
     subpaths
 }
 
-fn finalize_subpath_smoothness(sub: &mut craft_ui::canvas::EditSubpath) {
+fn finalize_subpath_smoothness(sub: &mut craft_draw::ui::pen::EditSubpath) {
     for knot in &mut sub.knots {
         let v_in = knot.anchor - knot.in_ctrl;
         let v_out = knot.out_ctrl - knot.anchor;
@@ -660,9 +660,9 @@ fn finalize_subpath_smoothness(sub: &mut craft_ui::canvas::EditSubpath) {
     }
 }
 
-/// Convert [`craft_ui::canvas::EditSubpath`]s back into a [`kurbo::BezPath`], preserving
+/// Convert [`craft_draw::ui::pen::EditSubpath`]s back into a [`kurbo::BezPath`], preserving
 /// straight segments as `LineTo` and curves as `CurveTo`.
-pub fn edit_subpaths_to_bezpath(subpaths: &[craft_ui::canvas::EditSubpath]) -> kurbo::BezPath {
+pub fn edit_subpaths_to_bezpath(subpaths: &[craft_draw::ui::pen::EditSubpath]) -> kurbo::BezPath {
     let mut out = kurbo::BezPath::new();
     for sub in subpaths {
         let Some(first) = sub.knots.first() else {
@@ -693,12 +693,12 @@ pub fn edit_subpaths_to_bezpath(subpaths: &[craft_ui::canvas::EditSubpath]) -> k
     out
 }
 
-/// Apply a [`craft_ui::canvas::PathEdit`] gesture to a subpath slice.
+/// Apply a [`craft_draw::ui::pen::PathEdit`] gesture to a subpath slice.
 pub fn apply_path_edit(
-    base: &[craft_ui::canvas::EditSubpath],
-    edit: &craft_ui::canvas::PathEdit,
-) -> Vec<craft_ui::canvas::EditSubpath> {
-    use craft_ui::canvas::{HandleSide, Knot, PathEdit};
+    base: &[craft_draw::ui::pen::EditSubpath],
+    edit: &craft_draw::ui::pen::PathEdit,
+) -> Vec<craft_draw::ui::pen::EditSubpath> {
+    use craft_draw::ui::pen::{HandleSide, Knot, PathEdit};
     use kurbo::ParamCurve as _;
     let mut subpaths = base.to_vec();
     match edit {
@@ -783,11 +783,11 @@ pub fn apply_path_edit(
 
 /// Split segment `seg` at parameter `t` (`0.0..=1.0`) by inserting a smooth cubic knot.
 pub fn insert_path_knot(
-    subpaths: &mut [craft_ui::canvas::EditSubpath],
-    seg: craft_ui::canvas::KnotRef,
+    subpaths: &mut [craft_draw::ui::pen::EditSubpath],
+    seg: craft_draw::ui::pen::KnotRef,
     t: f64,
-) -> Option<craft_ui::canvas::KnotRef> {
-    use craft_ui::canvas::{Knot, KnotRef};
+) -> Option<craft_draw::ui::pen::KnotRef> {
+    use craft_draw::ui::pen::{Knot, KnotRef};
     use kurbo::ParamCurve as _;
     let sub = subpaths.get_mut(seg.subpath)?;
     let (a, b) = sub.segment_ends(seg.knot)?;
@@ -811,8 +811,8 @@ pub fn insert_path_knot(
 
 /// Remove the specified knots from `subpaths`, dropping any subpath that becomes empty.
 pub fn delete_path_knots(
-    subpaths: &mut Vec<craft_ui::canvas::EditSubpath>,
-    knots: &[craft_ui::canvas::KnotRef],
+    subpaths: &mut Vec<craft_draw::ui::pen::EditSubpath>,
+    knots: &[craft_draw::ui::pen::KnotRef],
 ) {
     for (si, sub) in subpaths.iter_mut().enumerate() {
         let mut indices: Vec<usize> = knots
@@ -1281,7 +1281,7 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].knots.len(), 4);
         assert!(subs[0].closed);
-        let inserted = insert_path_knot(&mut subs, craft_ui::canvas::KnotRef::new(0, 0), 0.5);
+        let inserted = insert_path_knot(&mut subs, craft_draw::ui::pen::KnotRef::new(0, 0), 0.5);
         assert!(inserted.is_some());
         assert_eq!(subs[0].knots.len(), 5);
         let rebuilt = edit_subpaths_to_bezpath(&subs);

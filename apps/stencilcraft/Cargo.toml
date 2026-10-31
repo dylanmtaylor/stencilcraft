@@ -12,10 +12,11 @@ path = "src/main.rs"
 
 [dependencies]
 craft-atomic = { workspace = true }
+craft-draw = { workspace = true }
 craft-settings = { workspace = true }
 craft-theme = { workspace = true }
 craft-ui = { workspace = true, features = ["window-frame"] }
-craft-window = { workspace = true, features = ["egui"] }
+craft-window = { workspace = true, features = ["ui"] }
 eframe = { workspace = true }
 rfd = { workspace = true }
 serde = { workspace = true }

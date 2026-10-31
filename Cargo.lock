@@ -230,7 +230,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -816,9 +816,20 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "rustix 1.1.6",
+]
+
+[[package]]
+name = "craft-color"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+dependencies = [
+ "craft-i18n",
+ "craft-theme",
+ "craft-ui",
+ "egui",
 ]
 
 [[package]]
@@ -827,14 +838,38 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
 
 [[package]]
+name = "craft-draw"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+dependencies = [
+ "craft-color",
+ "craft-i18n",
+ "craft-theme",
+ "craft-ui",
+ "egui",
+ "kurbo 0.13.1",
+]
+
+[[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+
+[[package]]
+name = "craft-host"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+dependencies = [
+ "craft-i18n",
+ "egui",
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -866,22 +901,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-quit"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+dependencies = [
+ "dispatch2",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+]
+
+[[package]]
 name = "craft-settings"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-atomic",
+ "craft-host",
  "dirs",
  "serde",
+ "toml",
  "toml_edit",
 ]
 
 [[package]]
 name = "craft-theme"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "ecolor",
+ "log",
  "serde",
  "serde_json",
 ]
@@ -889,10 +937,13 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-fonts-build",
+ "craft-host",
  "craft-i18n",
+ "craft-quit",
+ "craft-settings",
  "craft-theme",
  "craft-ui-macros",
  "craft-window",
@@ -905,6 +956,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "resvg",
+ "roxmltree 0.20.0",
  "serde",
  "skrifa 0.44.0",
  "toml",
@@ -916,7 +968,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-macros"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -926,7 +978,7 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "egui",
  "objc2 0.6.5",
@@ -1034,7 +1086,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1099,7 +1151,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "emath",
@@ -1109,7 +1161,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1147,7 +1199,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1168,7 +1220,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1187,7 +1239,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1214,7 +1266,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1227,7 +1279,7 @@ dependencies = [
 [[package]]
 name = "egui_system_font_provider"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "epaint",
  "fontique",
@@ -1247,7 +1299,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1294,7 +1346,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1321,7 +1373,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[package]]
 name = "equivalent"
@@ -1336,7 +1388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3058,7 +3110,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3705,7 +3757,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3718,7 +3770,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4097,6 +4149,7 @@ name = "stencilcraft"
 version = "0.1.0"
 dependencies = [
  "craft-atomic",
+ "craft-draw",
  "craft-settings",
  "craft-theme",
  "craft-ui",
@@ -4271,6 +4324,7 @@ dependencies = [
 name = "stencilcraft-ui-egui"
 version = "0.1.0"
 dependencies = [
+ "craft-draw",
  "craft-theme",
  "craft-ui",
  "egui",
@@ -4398,7 +4452,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5704,7 +5758,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5824,15 +5878,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]
@@ -6405,19 +6450,19 @@ dependencies = [
 [[patch.unused]]
 name = "egui_demo_lib"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_extras"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_inspection"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_kittest"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=94a2ac9917531fdf7285e4a30e7ae8372b8104b5#94a2ac9917531fdf7285e4a30e7ae8372b8104b5"
+source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"

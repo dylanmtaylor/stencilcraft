@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "StencilCraft egui frontend: canvas painting, panels, theme tokens"
 
 [dependencies]
+craft-draw = { workspace = true }
 craft-theme = { workspace = true }
 craft-ui = { workspace = true }
 egui = { workspace = true }

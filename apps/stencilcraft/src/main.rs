@@ -3786,15 +3786,23 @@ mod tests {
             vec![egui::Event::Text("HELLO".into())],
             StencilApp::text_dialog,
         );
+        frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            StencilApp::text_dialog,
+        );
         frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
         assert_eq!(app.text_value, "HELLO");
+        // Enter commits the typed run. A plain text field passes Escape through, so the
+        // committed text stays.
         frame(
             &ctx,
             &mut app,
             vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
             StencilApp::text_dialog,
         );
-        assert_eq!(app.text_value, "");
+        assert_eq!(app.text_value, "HELLO");
     }
 
     #[test]

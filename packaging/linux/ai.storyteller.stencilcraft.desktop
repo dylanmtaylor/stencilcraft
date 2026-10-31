@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=StencilCraft
+GenericName=Vinyl, Stencil & Laser Cut Studio
+Comment=Prepare vector paths, kerf offsets, tiling, and machine jobs for vinyl cutters and lasers
+Exec=stencilcraft %F
+TryExec=stencilcraft
+Icon=ai.storyteller.stencilcraft
+Terminal=false
+StartupNotify=true
+StartupWMClass=ai.storyteller.stencilcraft
+Categories=Graphics;2DGraphics;VectorGraphics;
+Keywords=stencil;vinyl;cutter;cricut;silhouette;laser;kerf;svg;dxf;gcode;
+MimeType=application/x-stencilcraft;image/svg+xml;

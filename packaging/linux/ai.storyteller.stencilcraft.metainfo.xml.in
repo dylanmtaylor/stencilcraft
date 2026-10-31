@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>ai.storyteller.stencilcraft</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <name>StencilCraft</name>
+  <summary>Prepare vector paths, kerf compensation, tiling, and cutter jobs</summary>
+  <developer id="ai.storyteller">
+    <name>Learning Machines LLC</name>
+  </developer>
+  <description>
+    <p>
+      StencilCraft is an open-source desktop cut-preparation studio in pure Rust. Draw and edit
+      vector paths with pen, node-editing, and shape tools, apply kerf compensation, lay out
+      registration marks for print-and-cut sheets, tile oversized designs, and export SVG, DXF,
+      G-code, or Silhouette/Cameo cutter jobs.
+    </p>
+  </description>
+  <launchable type="desktop-id">ai.storyteller.stencilcraft.desktop</launchable>
+  <icon type="stock">ai.storyteller.stencilcraft</icon>
+  <url type="homepage">https://github.com/dylanmtaylor/stencilcraft</url>
+  <url type="bugtracker">https://github.com/dylanmtaylor/stencilcraft/issues</url>
+  <url type="help">https://github.com/dylanmtaylor/stencilcraft</url>
+  <categories>
+    <category>Graphics</category>
+    <category>2DGraphics</category>
+    <category>VectorGraphics</category>
+  </categories>
+  <keywords>
+    <keyword>stencil</keyword>
+    <keyword>vinyl</keyword>
+    <keyword>cutter</keyword>
+    <keyword>laser</keyword>
+    <keyword>kerf</keyword>
+    <keyword>svg</keyword>
+    <keyword>dxf</keyword>
+    <keyword>gcode</keyword>
+  </keywords>
+  <branding>
+    <color type="primary" scheme_preference="light">#f2a391</color>
+    <color type="primary" scheme_preference="dark">#702387</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">760</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+    <control>tablet</control>
+  </supports>
+  <provides>
+    <binary>stencilcraft</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

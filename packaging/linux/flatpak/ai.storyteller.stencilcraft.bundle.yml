@@ -1,0 +1,27 @@
+# Flatpak manifest for the single-file bundle (stencilcraft-<version>-linux-<arch>.flatpak).
+# Build it with packaging/linux/flatpak-bundle.sh.
+id: ai.storyteller.stencilcraft
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: stencilcraft
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-pictures
+modules:
+  - name: stencilcraft
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/stencilcraft /app/bin/stencilcraft
+      - install -Dm755 bin/stencilcraft-cli /app/bin/stencilcraft-cli
+      - install -Dm644 share/applications/ai.storyteller.stencilcraft.desktop /app/share/applications/ai.storyteller.stencilcraft.desktop
+      - install -Dm644 share/mime/packages/ai.storyteller.stencilcraft.xml /app/share/mime/packages/ai.storyteller.stencilcraft.xml
+      - install -Dm644 share/metainfo/ai.storyteller.stencilcraft.metainfo.xml /app/share/metainfo/ai.storyteller.stencilcraft.metainfo.xml
+      - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/stencilcraft /app/share/doc/
+    sources:
+      - type: dir
+        path: stage

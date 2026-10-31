@@ -123,6 +123,12 @@ pub enum Command {
     /// Add an imported vector path to the matching production layer.
     #[serde(rename = "shape.add-path")]
     ShapeAddPath { path: BezPath, style: CutStyle },
+    /// Replace a shape's vector path in-place (e.g. from interactive node editing).
+    #[serde(rename = "shape.set-path")]
+    ShapeSetPath { id: u64, path: BezPath },
+    /// Change the production style (Cut / Engrave) of one or more shapes.
+    #[serde(rename = "shapes.set-style")]
+    ShapesSetStyle { ids: Vec<u64>, style: CutStyle },
     /// Add imported vector paths together as one undoable document edit.
     #[serde(rename = "shape.add-paths")]
     ShapeAddPaths { shapes: Vec<(BezPath, CutStyle)> },
@@ -165,9 +171,18 @@ pub enum Command {
     /// Add a layer with a name and a production kind.
     #[serde(rename = "layer.add")]
     LayerAdd { name: String, kind: CutStyle },
+    /// Set visibility of a layer by index.
+    #[serde(rename = "layer.set-visible")]
+    LayerSetVisible { index: usize, visible: bool },
+    /// Remove a layer by index (at least one layer must remain).
+    #[serde(rename = "layer.remove")]
+    LayerRemove { index: usize },
     /// Set the kerf width (millimetres; exports compensate when asked).
     #[serde(rename = "kerf.set")]
     KerfSet { width_mm: f64 },
+    /// Resize the document board without clearing existing layers or shapes.
+    #[serde(rename = "document.set-board")]
+    DocumentSetBoard { width_mm: f64, height_mm: f64 },
     /// Clear the document to a fresh board.
     #[serde(rename = "document.new")]
     DocumentNew { width_mm: f64, height_mm: f64 },
@@ -215,9 +230,13 @@ pub enum Effect {
     ShapeRemoved { id: u64 },
     ShapesRemoved { ids: Vec<u64> },
     ShapeTransformed { id: u64 },
+    ShapesStyled { ids: Vec<u64> },
     HistoryChanged,
     LayerAdded,
+    LayerVisibilityChanged { index: usize, visible: bool },
+    LayerRemoved { index: usize },
     KerfSet { width_mm: f64 },
+    BoardChanged { width_mm: f64, height_mm: f64 },
     DocumentReset,
 }
 
@@ -348,7 +367,15 @@ impl Engine {
             _ => {}
         }
 
-        let rebuild_session = matches!(command, Command::DocumentNew { .. });
+        let rebuild_session = matches!(
+            command,
+            Command::DocumentNew { .. }
+                | Command::DocumentSetBoard { .. }
+                | Command::ShapeSetPath { .. }
+                | Command::ShapesSetStyle { .. }
+                | Command::LayerSetVisible { .. }
+                | Command::LayerRemove { .. }
+        );
         let before = self.capture_history_entry(false, false);
         let document_before = self.session.active().map(|state| Arc::clone(&state.doc));
         if !rebuild_session {
@@ -605,6 +632,78 @@ impl Engine {
                 let ids = self.vector_add_paths(vec![(path, style)], "shape.add-path")?;
                 Ok(Effect::ShapeAdded { id: ids[0] })
             }
+            Command::ShapeSetPath { id, path } => {
+                if path.elements().is_empty() || !path.elements().iter().all(path_element_is_finite)
+                {
+                    return Err(EngineError::Invalid(
+                        "shape.set-path: path must contain finite geometry".to_string(),
+                    ));
+                }
+                let Some(shape) = self.doc.get_shape_mut(id) else {
+                    return Err(EngineError::Invalid(format!(
+                        "shape.set-path: no shape has id {id}"
+                    )));
+                };
+                shape.path = path;
+                Ok(Effect::ShapeTransformed { id })
+            }
+            Command::ShapesSetStyle { ids, style } => {
+                if ids.is_empty()
+                    || std::collections::BTreeSet::from_iter(ids.iter().copied()).len() != ids.len()
+                {
+                    return Err(EngineError::Invalid(
+                        "shapes.set-style: expected one or more unique shape ids".to_string(),
+                    ));
+                }
+                for id in &ids {
+                    if self.doc.get_shape(*id).is_none() {
+                        return Err(EngineError::Invalid(format!(
+                            "shapes.set-style: no shape has id {id}"
+                        )));
+                    }
+                }
+                let target_layer = self
+                    .doc
+                    .layers
+                    .iter()
+                    .rposition(|l| l.kind == style)
+                    .unwrap_or_else(|| {
+                        let name = match style {
+                            CutStyle::Cut => "cut",
+                            CutStyle::Engrave => "engrave",
+                        };
+                        self.doc
+                            .layers
+                            .push(stencilcraft_doc::Layer::new(name, style));
+                        self.doc.layers.len() - 1
+                    });
+                let requested: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
+                let mut moved = Vec::new();
+                for (li, layer) in self.doc.layers.iter_mut().enumerate() {
+                    if li == target_layer || layer.kind == style {
+                        for shape in &mut layer.shapes {
+                            if requested.contains(&shape.id) {
+                                shape.style = style;
+                            }
+                        }
+                    } else {
+                        let mut kept = Vec::with_capacity(layer.shapes.len());
+                        for mut shape in layer.shapes.drain(..) {
+                            if requested.contains(&shape.id) {
+                                shape.style = style;
+                                moved.push(shape);
+                            } else {
+                                kept.push(shape);
+                            }
+                        }
+                        layer.shapes = kept;
+                    }
+                }
+                if let Some(layer) = self.doc.layers.get_mut(target_layer) {
+                    layer.shapes.extend(moved);
+                }
+                Ok(Effect::ShapesStyled { ids })
+            }
             Command::ShapeAddPaths { shapes } => {
                 if shapes.is_empty()
                     || shapes.iter().any(|(path, _)| {
@@ -735,6 +834,29 @@ impl Engine {
                 self.add_vector_layer(&name, kind, "layer.add")?;
                 Ok(Effect::LayerAdded)
             }
+            Command::LayerSetVisible { index, visible } => {
+                let Some(layer) = self.doc.layers.get_mut(index) else {
+                    return Err(EngineError::Invalid(format!(
+                        "layer.set-visible: no layer at index {index}"
+                    )));
+                };
+                layer.visible = visible;
+                Ok(Effect::LayerVisibilityChanged { index, visible })
+            }
+            Command::LayerRemove { index } => {
+                if index >= self.doc.layers.len() {
+                    return Err(EngineError::Invalid(format!(
+                        "layer.remove: no layer at index {index}"
+                    )));
+                }
+                if self.doc.layers.len() <= 1 {
+                    return Err(EngineError::Invalid(
+                        "layer.remove: document must keep at least one layer".to_string(),
+                    ));
+                }
+                self.doc.layers.remove(index);
+                Ok(Effect::LayerRemoved { index })
+            }
             Command::KerfSet { width_mm } => {
                 if !(width_mm.is_finite() && width_mm >= 0.0) {
                     return Err(EngineError::Invalid(format!(
@@ -744,6 +866,26 @@ impl Engine {
                 self.doc.kerf.width_mm = width_mm;
                 self.doc.kerf.apply_to_exports = width_mm > 0.0;
                 Ok(Effect::KerfSet { width_mm })
+            }
+            Command::DocumentSetBoard {
+                width_mm,
+                height_mm,
+            } => {
+                if !(width_mm.is_finite()
+                    && height_mm.is_finite()
+                    && width_mm > 0.0
+                    && height_mm > 0.0)
+                {
+                    return Err(EngineError::Invalid(format!(
+                        "document.set-board: {width_mm}×{height_mm} is not a positive finite board"
+                    )));
+                }
+                self.doc.board.width_mm = width_mm;
+                self.doc.board.height_mm = height_mm;
+                Ok(Effect::BoardChanged {
+                    width_mm,
+                    height_mm,
+                })
             }
             Command::DocumentNew {
                 width_mm,
@@ -1424,6 +1566,14 @@ impl Engine {
             self.sync_session_from_doc();
             self.history.rebase_to_snapshots();
         }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.peek_undo().is_some()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.peek_redo().is_some()
     }
 
     /// Undo the last StencilCraft command through VectorCraft's journal when the command edited
@@ -2358,5 +2508,68 @@ mod tests {
         engine.run(Command::KerfSet { width_mm: 0.25 }).unwrap();
         assert_eq!(engine.doc.kerf.width_mm, 0.25);
         assert!(engine.doc.kerf.apply_to_exports);
+    }
+
+    #[test]
+    fn board_path_style_and_layer_commands_roundtrip_undo_redo() {
+        let mut engine = Engine::default();
+        assert!(!engine.can_undo());
+        engine
+            .run(Command::DocumentSetBoard {
+                width_mm: 304.8,
+                height_mm: 609.6,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.board.width_mm, 304.8);
+        assert_eq!(engine.doc.board.height_mm, 609.6);
+        assert!(engine.can_undo());
+
+        engine
+            .run(Command::ShapeAddRect {
+                x: 10.0,
+                y: 10.0,
+                width: 20.0,
+                height: 20.0,
+            })
+            .unwrap();
+        let mut updated_path = BezPath::new();
+        updated_path.move_to(kurbo::Point::new(5.0, 5.0));
+        updated_path.line_to(kurbo::Point::new(35.0, 5.0));
+        updated_path.line_to(kurbo::Point::new(20.0, 35.0));
+        updated_path.close_path();
+        engine
+            .run(Command::ShapeSetPath {
+                id: 1,
+                path: updated_path.clone(),
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().path, updated_path);
+
+        engine
+            .run(Command::ShapesSetStyle {
+                ids: vec![1],
+                style: CutStyle::Engrave,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Engrave);
+        assert_eq!(engine.doc.layers.len(), 2);
+
+        engine
+            .run(Command::LayerSetVisible {
+                index: 1,
+                visible: false,
+            })
+            .unwrap();
+        assert!(!engine.doc.layers[1].visible);
+
+        engine.run(Command::LayerRemove { index: 0 }).unwrap();
+        assert_eq!(engine.doc.layers.len(), 1);
+        assert!(engine.run(Command::LayerRemove { index: 0 }).is_err());
+
+        assert!(engine.undo());
+        assert_eq!(engine.doc.layers.len(), 2);
+        assert!(engine.can_redo());
+        assert!(engine.redo());
+        assert_eq!(engine.doc.layers.len(), 1);
     }
 }

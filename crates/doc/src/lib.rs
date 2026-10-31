@@ -184,6 +184,13 @@ impl Document {
         self.shapes().map(|(_, s)| s).find(|s| s.id == id)
     }
 
+    pub fn get_shape_mut(&mut self, id: u64) -> Option<&mut Shape> {
+        self.layers
+            .iter_mut()
+            .flat_map(|l| l.shapes.iter_mut())
+            .find(|s| s.id == id)
+    }
+
     /// Allocates the next shape id and records the shape in `layer_index`.
     /// Errors come out printable: messages name the layer and the fault.
     pub fn push_shape(
@@ -327,9 +334,11 @@ fn structure_err(path: &str, e: &serde_json::Error) -> DocError {
 /// File helpers: errors keep the path so the message names the file.
 pub fn save_to(doc: &Document, path: &str) -> Result<(), DocError> {
     let json = doc.save_json()?;
-    std::fs::write(path, json).map_err(|source| DocError::Io {
-        path: path.to_string(),
-        source,
+    craft_atomic::atomic_write(std::path::Path::new(path), json.as_bytes()).map_err(|source| {
+        DocError::Io {
+            path: path.to_string(),
+            source,
+        }
     })
 }
 

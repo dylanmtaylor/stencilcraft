@@ -144,7 +144,7 @@ fn parse_hex_body(trimmed: &str) -> Result<Color, ColorParseError> {
     if digits.len() == 6 {
         // Pairs of hex digits; reject non-hex explicitly.
         let mut chans = [0u8; 3];
-        for (i, pair) in digits.as_bytes().chunks_exact(2).enumerate() {
+        for (i, pair) in digits.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             if !pair.iter().all(|b| b.is_ascii_hexdigit()) {
                 return Err(err());
             }

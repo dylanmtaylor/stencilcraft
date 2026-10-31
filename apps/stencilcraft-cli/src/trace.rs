@@ -66,7 +66,9 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
 
     let rgba = decoded.to_rgba8();
     let foreground: Vec<bool> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|pixel| {
             let alpha = u16::from(pixel[3]);
             let luminance = (299_u32 * u32::from(pixel[0])

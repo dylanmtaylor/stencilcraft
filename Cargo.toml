@@ -22,6 +22,10 @@ eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Shared UI components and docking, pinned to the design-system branch.
 craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a", features = ["serde"] }
+craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a", features = ["serde"] }
+craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
+craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
+craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "20c063f6844bb1364089a1a86bd959026465801a" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }

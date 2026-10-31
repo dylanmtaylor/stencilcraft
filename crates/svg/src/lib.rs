@@ -89,6 +89,77 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
     Ok(svg)
 }
 
+/// Export a physical-size Print & Cut SVG sheet with three high-contrast
+/// registration marks (top-left origin square, top-right and bottom-left L-corners)
+/// around the document board.
+pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
+    const PAGE_MARGIN_MM: f64 = 12.0;
+    const MARK_SIZE_MM: f64 = 6.0;
+
+    doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
+    let artwork = export(doc)?;
+    let page_width = doc.board.width_mm + 2.0 * PAGE_MARGIN_MM;
+    let page_height = doc.board.height_mm + 2.0 * PAGE_MARGIN_MM;
+    if !page_width.is_finite() || !page_height.is_finite() {
+        return Err(SvgError::Model(
+            "print-cut: page dimensions are not finite".to_string(),
+        ));
+    }
+
+    let mut svg = String::with_capacity(artwork.len() + 1024);
+    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        svg,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_width:.3}mm\" height=\"{page_height:.3}mm\" viewBox=\"0 0 {page_width:.3} {page_height:.3}\">"
+    );
+    svg.push_str("  <title>StencilCraft print-and-cut alignment sheet</title>\n");
+    let _ = writeln!(
+        svg,
+        "  <g id=\"registration-marks\" fill=\"#000000\" aria-label=\"Registration marks: top-left square, top-right and bottom-left corners\">"
+    );
+    let _ = writeln!(
+        svg,
+        "    <rect x=\"0\" y=\"0\" width=\"{MARK_SIZE_MM:.3}\" height=\"{MARK_SIZE_MM:.3}\"/>"
+    );
+    let _ = writeln!(
+        svg,
+        "    <path d=\"M {:.3} 0 H {:.3} V {:.3} H {:.3} V {:.3} H {:.3} Z\"/>",
+        page_width,
+        page_width - MARK_SIZE_MM,
+        MARK_SIZE_MM,
+        page_width - 1.5,
+        1.5,
+        page_width - MARK_SIZE_MM,
+    );
+    let _ = writeln!(
+        svg,
+        "    <path d=\"M 0 {:.3} H {:.3} V {:.3} H {:.3} V {:.3} H 0 Z\"/>",
+        page_height,
+        MARK_SIZE_MM,
+        page_height - MARK_SIZE_MM,
+        1.5,
+        page_height - 1.5,
+    );
+    svg.push_str("  </g>\n");
+    let _ = writeln!(
+        svg,
+        "  <svg x=\"{PAGE_MARGIN_MM:.3}\" y=\"{PAGE_MARGIN_MM:.3}\" width=\"{:.3}mm\" height=\"{:.3}mm\" viewBox=\"0 0 {:.3} {:.3}\" overflow=\"hidden\">",
+        doc.board.width_mm, doc.board.height_mm, doc.board.width_mm, doc.board.height_mm,
+    );
+    if let Some(root_start) = artwork.find('>')
+        && let Some(root_end) = artwork.rfind("</svg>")
+        && root_start < root_end
+    {
+        svg.push_str(&artwork[root_start + 1..root_end]);
+    } else {
+        return Err(SvgError::Write(
+            "print-cut: could not embed SVG artwork".to_string(),
+        ));
+    }
+    svg.push_str("  </svg>\n</svg>\n");
+    Ok(svg)
+}
+
 fn svg_title(doc: &Document) -> String {
     let mut s = String::new();
     let _ = writeln!(
@@ -717,7 +788,7 @@ fn points_path(points: &str, closed: bool, path_name: &str) -> Result<BezPath, S
         ));
     }
     let mut path = BezPath::new();
-    let mut pairs = values.chunks_exact(2);
+    let mut pairs = values.as_chunks::<2>().0.iter();
     if let Some(first) = pairs.next() {
         path.move_to(kurbo::Point::new(first[0], first[1]));
         for pair in pairs {

@@ -40,7 +40,7 @@ echo "==> Building Flatpak OCI layout for $BASENAME"
 
 [ -d "$OUT_OCI" ] || { echo "error: $OUT_OCI layout not generated" >&2; exit 1; }
 
-REGISTRY="${REGISTRY:-ghcr.io/storytold/stencilcraft}"
+REGISTRY="${REGISTRY:-ghcr.io/${GITHUB_REPOSITORY:-dylanmtaylor/stencilcraft}}"
 TAG="${TAG:-$VERSION-$ARCH}"
 
 echo "==> OCI layout ready at $OUT_OCI (Target: $REGISTRY:$TAG)"
@@ -50,7 +50,7 @@ if [ "$PUSH" = 1 ]; then
 
   AUTH_ARGS=()
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    AUTH_ARGS=(--dest-creds "${GITHUB_ACTOR:-storytold}:$GITHUB_TOKEN")
+    AUTH_ARGS=(--dest-creds "${GITHUB_ACTOR:-dylanmtaylor}:$GITHUB_TOKEN")
   fi
 
   echo "==> Pushing to $REGISTRY:$TAG"

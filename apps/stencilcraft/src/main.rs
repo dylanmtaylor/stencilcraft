@@ -7,13 +7,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(not(target_arch = "wasm32"))]
-use craft_settings::{Location, Settings, SettingsStore};
-use craft_theme::ControlSize;
 use craft_draw::ui::pen::{
     BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
     PenDraft, PenNames,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use craft_settings::{Location, Settings, SettingsStore};
+use craft_theme::ControlSize;
 use craft_ui::canvas::{Readout, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::PanelFooter;
 use craft_ui::controls::{

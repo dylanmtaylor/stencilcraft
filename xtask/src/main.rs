@@ -4,10 +4,42 @@
 //! workspace, tests, and the layering check. Every step is a plain `cargo`
 //! invocation; no external tools, no nightly.
 
+mod version;
+
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Workspace root (parent of the xtask crate).
+pub fn root() -> Result<PathBuf, String> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "xtask has no parent directory".to_string())
+}
+
+/// A `cargo` command (the one running xtask, else `cargo` on the PATH) run in the workspace root.
+pub fn cargo() -> Result<Command, String> {
+    let mut c = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    c.current_dir(root()?);
+    Ok(c)
+}
+
+/// Prints `what` and runs `cmd`, which must exit successfully.
+pub fn run(mut cmd: Command, what: &str) -> Result<(), String> {
+    eprintln!("$ {what}");
+    let status = cmd
+        .status()
+        .map_err(|e| format!("{what}: failed to spawn: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{what}: exited with {status}"))
+    }
+}
 
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let Some(task) = args.first().map(String::as_str) else {
         help();
         return Ok(());
@@ -18,12 +50,13 @@ fn main() -> Result<(), String> {
         "fmt" => cargo_ok(&["cargo", "fmt"]),
         "clippy" => clippy(),
         "test" => cargo_ok(&["cargo", "test", "--workspace"]),
+        "version" => version::run(&root()?, &rest),
         "-h" | "--help" | "help" => {
             help();
             Ok(())
         }
         other => Err(format!(
-            "xtask: unknown task {other} (methods: ci, layers, fmt, clippy, test)"
+            "xtask: unknown task {other} (methods: ci, layers, fmt, clippy, test, version)"
         )),
     }
 }
@@ -135,4 +168,5 @@ fn help() {
     println!("  fmt     cargo fmt --all");
     println!("  clippy  cargo clippy --workspace --all-targets");
     println!("  test    cargo test --workspace");
+    println!("  version show or set the workspace version");
 }

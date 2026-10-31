@@ -266,16 +266,25 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CanvasViewCommand {
+    Fit,
+    Center,
+}
+
 struct StencilApp {
     workspace: Layout<WorkspacePanel>,
     engine: stencilcraft_engine::Engine,
     view: stencilcraft_ui_egui::View,
+    pending_view_command: Option<CanvasViewCommand>,
     kerf_preview: bool,
+    kerf_preview_cache: Option<KerfPreviewCache>,
     status: String,
     open_path: Option<String>,
     send_mode: bool,
     theme: stencilcraft_ui_egui::ColorTheme,
     view_initialized: bool,
+    recent_files: Vec<String>,
     /// The cutting mat shown under the sheet and used for Send's encoded job.
     mat: stencilcraft_machine::Mat,
     selected_shape: Option<u64>,
@@ -294,6 +303,12 @@ struct StencilApp {
     canvas_panning: bool,
     last_drag_delta: egui::Vec2,
     send: SendTab,
+}
+
+struct KerfPreviewCache {
+    source: stencilcraft_doc::Document,
+    kerf_width_mm: f64,
+    preview: Result<stencilcraft_doc::Document, String>,
 }
 
 /// Send-tab UI state: media preset + model + per-job overrides. Encoding is
@@ -372,12 +387,15 @@ impl StencilApp {
             workspace: default_workspace(),
             engine,
             view: stencilcraft_ui_egui::View::default(),
+            pending_view_command: None,
             kerf_preview: false,
+            kerf_preview_cache: None,
             status,
-            open_path,
+            open_path: open_path.clone(),
             send_mode: false,
             theme: stencilcraft_ui_egui::ColorTheme::Dark,
             view_initialized: false,
+            recent_files: open_path.iter().cloned().collect(),
             mat: stencilcraft_machine::Mat::CameoPro24x24,
             selected_shape: None,
             selected_shapes: Vec::new(),
@@ -398,8 +416,20 @@ impl StencilApp {
         }
     }
 
-    fn with_egui(self, _cc: &eframe::CreationContext) -> Self {
+    fn with_egui(mut self, cc: &eframe::CreationContext) -> Self {
+        self.recent_files = cc
+            .storage
+            .and_then(|storage| eframe::get_value(storage, "recent_files"))
+            .unwrap_or_default();
+        if let Some(path) = self.open_path.clone() {
+            self.record_recent_file(path);
+        }
         self
+    }
+
+    fn reset_workspace(&mut self) {
+        self.workspace = default_workspace();
+        self.status = "panel layout restored".to_string();
     }
 
     fn run_command(&mut self, command: Command) {
@@ -412,11 +442,77 @@ impl StencilApp {
     fn save_to(&mut self, path: String) {
         match stencilcraft_doc::save_to(&self.engine.doc, &path) {
             Ok(()) => {
-                self.open_path = Some(path);
+                self.open_path = Some(path.clone());
+                self.record_recent_file(path);
                 self.status = "saved".to_string();
             }
             Err(e) => self.status = e.to_string(),
         }
+    }
+
+    fn record_recent_file(&mut self, path: String) {
+        let path = std::fs::canonicalize(&path)
+            .unwrap_or_else(|_| std::path::PathBuf::from(path))
+            .to_string_lossy()
+            .into_owned();
+        self.recent_files.retain(|recent| recent != &path);
+        self.recent_files.insert(0, path);
+        self.recent_files.truncate(8);
+    }
+
+    fn open_document(&mut self, path: &str) {
+        match stencilcraft_doc::load_from(path) {
+            Ok(doc) => {
+                self.engine = stencilcraft_engine::Engine::new(doc);
+                self.set_selection([]);
+                self.open_path = Some(path.to_string());
+                self.view_initialized = false;
+                self.kerf_preview_cache = None;
+                self.record_recent_file(path.to_string());
+                self.status = format!("opened {path}");
+            }
+            Err(error) => self.status = format!("open: {error}"),
+        }
+    }
+
+    fn update_kerf_preview_cache(&mut self, doc: &stencilcraft_doc::Document) -> bool {
+        let unchanged_geometry = self.kerf_preview_cache.as_ref().is_some_and(|cache| {
+            cache.kerf_width_mm == doc.kerf.width_mm
+                && cache.source.layers.len() == doc.layers.len()
+                && cache
+                    .source
+                    .layers
+                    .iter()
+                    .zip(&doc.layers)
+                    .all(|(old, new)| {
+                        old.shapes.len() == new.shapes.len()
+                            && old.shapes.iter().zip(&new.shapes).all(|(old, new)| {
+                                old.id == new.id && old.style == new.style && old.path == new.path
+                            })
+                    })
+        });
+
+        if unchanged_geometry {
+            if let Some(cache) = self.kerf_preview_cache.as_mut()
+                && let Ok(preview) = &mut cache.preview
+            {
+                preview.board = doc.board.clone();
+                preview.kerf = doc.kerf.clone();
+                preview.next_shape_id = doc.next_shape_id;
+                for (preview_layer, source_layer) in preview.layers.iter_mut().zip(&doc.layers) {
+                    preview_layer.name.clone_from(&source_layer.name);
+                    preview_layer.visible = source_layer.visible;
+                }
+            }
+            return false;
+        }
+        let preview = stencilcraft_kerf::apply(doc, 4.0).map_err(|error| error.to_string());
+        self.kerf_preview_cache = Some(KerfPreviewCache {
+            source: doc.clone(),
+            kerf_width_mm: doc.kerf.width_mm,
+            preview,
+        });
+        true
     }
 
     fn set_selection(&mut self, ids: impl IntoIterator<Item = u64>) {
@@ -483,6 +579,10 @@ impl StencilApp {
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
             self.select_all_shapes();
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F)) {
+            self.pending_view_command = Some(CanvasViewCommand::Fit);
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
+            self.pending_view_command = Some(CanvasViewCommand::Center);
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
             self.duplicate_selection();
         } else if ctx.input_mut(|input| {
@@ -615,6 +715,10 @@ impl StencilApp {
 }
 
 impl eframe::App for StencilApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "recent_files", &self.recent_files);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         craft_ui::theme::install(ui.ctx(), &craft_ui::theme::Base::suite_default());
         ui.ctx().set_theme(match self.theme {
@@ -628,7 +732,7 @@ impl eframe::App for StencilApp {
         let style = DockStyle::from_ui(ui);
         let mut content = WorkspaceContent { app: self };
         let mut workspace = std::mem::take(&mut content.app.workspace);
-        let output = DockArea::new(egui::Id::unique("stencilcraft-workspace")).show_content(
+        let output = DockArea::new(ui.scope_id().with("stencilcraft-workspace")).show_content(
             ui,
             &workspace,
             &style,
@@ -689,16 +793,29 @@ impl StencilApp {
                         .add_filter("StencilCraft", &["stencilcraft"])
                         .pick_file()
                 {
-                    match stencilcraft_doc::load_from(path.to_string_lossy().as_ref()) {
-                        Ok(doc) => {
-                            self.engine = stencilcraft_engine::Engine::new(doc);
-                            self.set_selection([]);
-                            self.open_path = Some(path.to_string_lossy().into_owned());
-                            self.status = "opened".to_string();
-                        }
-                        Err(e) => self.status = format!("open: {e}"),
-                    }
+                    self.open_document(&path.to_string_lossy());
                 }
+                ui.menu_button("Recent", |ui| {
+                    if self.recent_files.is_empty() {
+                        ui.label("No recent documents");
+                    }
+                    let mut open_path = None;
+                    for path in &self.recent_files {
+                        let label = std::path::Path::new(path)
+                            .file_name()
+                            .and_then(std::ffi::OsStr::to_str)
+                            .unwrap_or(path);
+                        let response = ui.push_id(path, |ui| ui.button(label)).inner;
+                        let clicked = response.on_hover_text(path).clicked();
+                        if clicked {
+                            open_path = Some(path.clone());
+                            ui.close();
+                        }
+                    }
+                    if let Some(path) = open_path {
+                        self.open_document(&path);
+                    }
+                });
                 if ui.add(Button::new("Import SVG…")).clicked()
                     && let Some(path) = rfd::FileDialog::new()
                         .add_filter("SVG", &["svg"])
@@ -723,6 +840,9 @@ impl StencilApp {
                     }
                 }
                 ui.separator();
+                if ui.add(Button::new("Reset panels")).clicked() {
+                    self.reset_workspace();
+                }
                 if ui.add(Button::new("Undo")).clicked() {
                     let _ = self.engine.undo();
                     self.retain_valid_selection();
@@ -1208,11 +1328,11 @@ impl StencilApp {
     fn canvas_body(&mut self, ui: &mut egui::Ui) {
         let doc = self.engine.doc.clone();
         let backdrop = mat_backdrop(self.mat);
-        let mut fit_clicked = false;
-        let mut center_clicked = false;
         let mut zoom_delta = 0.0_f32;
         let mut requested_zoom = None;
         let mut zoom_value = (self.view.zoom * 100.0).round().clamp(5.0, 40000.0) as u32;
+        let mut fit_clicked = false;
+        let mut center_clicked = false;
         ui.horizontal(|ui| {
             if ui.add(Button::new("Fit")).clicked() {
                 fit_clicked = true;
@@ -1238,10 +1358,16 @@ impl StencilApp {
             if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
                 zoom_delta = 1.0;
             }
-            ui.small("Space+drag or middle-drag to pan · wheel to zoom");
+            ui.small("F fit · C center · Space+drag or middle-drag to pan · wheel to zoom");
         });
         ui.separator();
         let clip = ui.available_rect_before_wrap();
+        let mut view_command = self.pending_view_command.take();
+        if fit_clicked {
+            view_command = Some(CanvasViewCommand::Fit);
+        } else if center_clicked {
+            view_command = Some(CanvasViewCommand::Center);
+        }
         let extent_width = backdrop.width_mm.max(doc.board.width_mm);
         let extent_height = backdrop.height_mm.max(doc.board.height_mm);
         if !self.view_initialized {
@@ -1249,11 +1375,8 @@ impl StencilApp {
                 .fit_extent(extent_width, extent_height, clip, 24.0);
             self.view_initialized = true;
         }
-        if fit_clicked {
-            self.view
-                .fit_extent(extent_width, extent_height, clip, 24.0);
-        } else if center_clicked {
-            self.view.center_extent(extent_width, extent_height, clip);
+        if let Some(command) = view_command {
+            apply_canvas_view_command(&mut self.view, command, extent_width, extent_height, clip);
         }
         if let Some(zoom) = requested_zoom {
             self.view.zoom_at(zoom / self.view.zoom, clip.center());
@@ -1262,6 +1385,20 @@ impl StencilApp {
             self.view.zoom_at(1.2_f32.powf(zoom_delta), clip.center());
         }
         let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
+        let preview_updated = self.kerf_preview && self.update_kerf_preview_cache(&doc);
+        if preview_updated
+            && let Some(Err(error)) = self.kerf_preview_cache.as_ref().map(|cache| &cache.preview)
+        {
+            self.status = format!("kerf preview: {error}");
+        }
+        let paint_doc = if self.kerf_preview {
+            self.kerf_preview_cache
+                .as_ref()
+                .and_then(|cache| cache.preview.as_ref().ok())
+                .unwrap_or(&doc)
+        } else {
+            &doc
+        };
         let view = self.view;
         let painter = ui.painter_at(clip);
         let selection = stencilcraft_ui_egui::SelectionState {
@@ -1286,7 +1423,7 @@ impl StencilApp {
         stencilcraft_ui_egui::paint_document(
             &painter,
             clip,
-            &doc,
+            paint_doc,
             &view,
             Some(&backdrop),
             stencilcraft_ui_egui::CanvasOptions {
@@ -1470,9 +1607,76 @@ impl StencilApp {
     }
 }
 
+fn apply_canvas_view_command(
+    view: &mut stencilcraft_ui_egui::View,
+    command: CanvasViewCommand,
+    width_mm: f64,
+    height_mm: f64,
+    viewport: egui::Rect,
+) {
+    match command {
+        CanvasViewCommand::Fit => {
+            view.fit_extent(width_mm, height_mm, viewport, 24.0);
+        }
+        CanvasViewCommand::Center => {
+            view.center_extent(width_mm, height_mm, viewport);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use craft_ui::docking::{Action, Placement};
+
+    #[test]
+    fn workspace_dock_identity_is_stable_across_frames() {
+        let ctx = egui::Context::default();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| ids.push(ui.scope_id().with("stencilcraft-workspace")),
+            );
+            output.textures_delta.clear();
+        }
+        assert_eq!(ids[0], ids[1]);
+    }
+
+    #[test]
+    fn reset_panels_restores_the_default_docking_positions() {
+        let mut app = StencilApp::new(None);
+        let default = default_workspace();
+        app.workspace
+            .apply_all(
+                [Action::Move {
+                    panel: WorkspacePanel::Inspector,
+                    anchor: WorkspacePanel::Tools,
+                    placement: Placement::Tab { before: None },
+                }],
+                |panel| {
+                    if *panel == WorkspacePanel::Canvas {
+                        Permissions::PROTECTED
+                    } else {
+                        Permissions::default()
+                    }
+                },
+            )
+            .unwrap();
+        assert_ne!(app.workspace, default);
+
+        app.reset_workspace();
+
+        assert_eq!(app.workspace, default);
+        assert_eq!(app.status, "panel layout restored");
+        assert!(app.workspace.validate().is_ok());
+    }
 
     #[test]
     fn command_d_duplicates_the_selection_and_selects_the_copies() {
@@ -1536,6 +1740,172 @@ mod tests {
         output.textures_delta.clear();
         assert_eq!(app.selected_shapes, vec![1, 2, 3]);
         assert_eq!(app.selected_shape, Some(3));
+    }
+
+    #[test]
+    fn f_and_c_queue_fit_and_center_without_command_modifiers() {
+        for (key, expected) in [
+            (egui::Key::F, CanvasViewCommand::Fit),
+            (egui::Key::C, CanvasViewCommand::Center),
+        ] {
+            let ctx = egui::Context::default();
+            let mut app = StencilApp::new(None);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+            );
+            output.textures_delta.clear();
+            assert_eq!(app.pending_view_command, Some(expected));
+
+            let mut view = stencilcraft_ui_egui::View {
+                zoom: 2.5,
+                pan_mm: egui::vec2(700.0, -300.0),
+            };
+            let viewport =
+                egui::Rect::from_min_size(egui::pos2(100.0, 60.0), egui::vec2(800.0, 500.0));
+            apply_canvas_view_command(&mut view, expected, 600.0, 300.0, viewport);
+            let center = view.world_to_screen(stencilcraft_geom::Point::new(300.0, 150.0));
+            assert!((center - viewport.center()).length() < 1e-4);
+            match expected {
+                CanvasViewCommand::Fit => assert!(view.zoom < 2.5),
+                CanvasViewCommand::Center => assert_eq!(view.zoom, 2.5),
+            }
+        }
+    }
+
+    #[test]
+    fn canvas_view_shortcuts_are_ignored_while_text_input_is_wanted() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        let mut text = String::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        });
+        output.textures_delta.clear();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::F,
+                    physical_key: Some(egui::Key::F),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                let response = ui.text_edit_singleline(&mut text);
+                assert!(response.has_focus());
+                app.handle_keyboard_shortcuts(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.pending_view_command, None);
+    }
+
+    #[test]
+    fn kerf_preview_cache_reuses_and_invalidates_by_document_content() {
+        let mut app = StencilApp::new(None);
+        assert!(app.update_kerf_preview_cache(&app.engine.doc.clone()));
+        let first = app.kerf_preview_cache.as_ref().unwrap().preview.clone();
+        let mut metadata_only_change = app.engine.doc.clone();
+        metadata_only_change.board.width_mm += 10.0;
+        metadata_only_change.layers[0].visible = false;
+        assert!(!app.update_kerf_preview_cache(&metadata_only_change));
+        let cached_preview = app
+            .kerf_preview_cache
+            .as_ref()
+            .unwrap()
+            .preview
+            .as_ref()
+            .unwrap();
+        assert_eq!(cached_preview.board, metadata_only_change.board);
+        assert!(!cached_preview.layers[0].visible);
+        assert_eq!(
+            cached_preview.layers[0].shapes,
+            first.as_ref().unwrap().layers[0].shapes
+        );
+        assert!(!app.update_kerf_preview_cache(&app.engine.doc.clone()));
+
+        app.run_command(Command::ShapeAddRect {
+            x: 3.0,
+            y: 4.0,
+            width: 12.0,
+            height: 8.0,
+        });
+        assert!(app.update_kerf_preview_cache(&app.engine.doc.clone()));
+        let preview = app
+            .kerf_preview_cache
+            .as_ref()
+            .unwrap()
+            .preview
+            .as_ref()
+            .unwrap();
+        assert_eq!(preview.shape_count(), 1);
+
+        app.run_command(Command::KerfSet { width_mm: 2.0 });
+        assert!(app.update_kerf_preview_cache(&app.engine.doc.clone()));
+        let compensated = app
+            .kerf_preview_cache
+            .as_ref()
+            .unwrap()
+            .preview
+            .as_ref()
+            .unwrap();
+        assert_ne!(
+            compensated.get_shape(1).unwrap().path,
+            app.engine.doc.get_shape(1).unwrap().path
+        );
+    }
+
+    #[test]
+    fn recent_files_are_unique_most_recent_first_and_bounded() {
+        let mut app = StencilApp::new(None);
+        for index in 0..10 {
+            app.record_recent_file(format!("/documents/design-{index}.stencilcraft"));
+        }
+        app.record_recent_file("/documents/design-5.stencilcraft".to_string());
+        assert_eq!(app.recent_files.len(), 8);
+        assert_eq!(
+            app.recent_files.first().unwrap(),
+            "/documents/design-5.stencilcraft"
+        );
+
+        assert_eq!(
+            app.recent_files
+                .iter()
+                .filter(|path| path.as_str() == "/documents/design-5.stencilcraft")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn recent_file_opens_document_and_updates_recent_order() {
+        let mut app = StencilApp::new(None);
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/starter.stencilcraft")
+            .to_string_lossy()
+            .into_owned();
+        app.record_recent_file(path.clone());
+        app.open_document(&path);
+        let expected = stencilcraft_doc::load_from(&path).unwrap();
+        assert_eq!(app.engine.doc, expected);
+        assert_eq!(app.open_path.as_deref(), Some(path.as_str()));
+        let recent_path = std::fs::canonicalize(path)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(app.recent_files.first(), Some(&recent_path));
     }
 
     #[test]

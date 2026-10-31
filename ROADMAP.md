@@ -14,7 +14,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
-| UI | preliminary | canvas pan/zoom, layers panel, click/box/lasso multi-select, Pathfinder, alignment/distribution, kerf preview and save/open; dockable design panels and node editing remain gaps |
+| UI | preliminary | canvas pan/zoom with Fit (F) and Center (C) shortcuts, layers panel, click/box/lasso multi-select, Pathfinder, alignment/distribution, cached compensated kerf preview, persisted recent files; dockable design panels and node editing remain gaps |
 | Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
 | Craft-libs & parity | early foundation | domain crates established; reusable dockable panel/app-shell craft-libs are not yet part of this workspace |
@@ -115,6 +115,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - 2026-10-29 — SVG `<symbol>` templates: local `<use>` instancing with `viewBox`,
   `preserveAspectRatio`, use-site x/y/width/height and style inheritance; bounded
   instance expansion and clear errors for invalid viewports and cycles.
+- 2026-10-30 — desktop canvas parity: F fits and C centers the board while text
+  fields retain their keys; compensated kerf geometry is cached until shape geometry
+  or kerf width changes; a persisted, bounded Recent menu reopens the eight most
+  recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
 - 2026-10-29 — app identity pass: original app icon
   (`assets/app-icon/stencilcraft.svg`, original artwork) with ASSETS/NOTICE
   attribution; README with PNG previews

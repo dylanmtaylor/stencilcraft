@@ -30,11 +30,10 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 7. **UI**: visible-outline selection, canvas drag-to-move, multi-select with additive
    selection, exact-position duplication (button and Ctrl/Command+D shortcut), Select All
    (Ctrl/Command+A), Delete/Backspace removal, box/lasso selection, Pathfinder operations,
-   alignment/distribution
-   and primary-shape rotate/scale controls work (selection uses
-   conservative shape bounds). Remaining: node editing, a ruler, zoom-to-fit keyboard
-   shortcuts, kerf preview
-   recomputes on every paint when dirty (no cache), no recent-files list.
+   alignment/distribution, primary-shape rotate/scale controls, Fit (F) and Center (C)
+   shortcuts work (selection uses conservative shape bounds). Kerf preview results are
+   cached until geometry or kerf changes; recent documents are persisted in an eight-item
+   menu. Remaining: node editing and a ruler.
 8. **Agent surface**: `command.execute` exposes the serde-tagged engine commands through
    the CLI JSON-lines process and shared session; the wider command set is not wrapped in
    dedicated control methods, MCP tool schema hydration is not implemented, and the JSON

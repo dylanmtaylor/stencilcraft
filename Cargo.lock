@@ -816,7 +816,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -824,7 +824,7 @@ dependencies = [
 [[package]]
 name = "craft-color"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-i18n",
  "craft-theme",
@@ -840,7 +840,7 @@ source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13af
 [[package]]
 name = "craft-draw"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-color",
  "craft-i18n",
@@ -853,12 +853,12 @@ dependencies = [
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 
 [[package]]
 name = "craft-host"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-i18n",
  "egui",
@@ -869,7 +869,7 @@ dependencies = [
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "fixed_decimal",
  "icu_decimal",
@@ -903,7 +903,7 @@ dependencies = [
 [[package]]
 name = "craft-quit"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "dispatch2",
  "objc2 0.6.5",
@@ -913,7 +913,7 @@ dependencies = [
 [[package]]
 name = "craft-settings"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-atomic",
  "craft-host",
@@ -926,7 +926,7 @@ dependencies = [
 [[package]]
 name = "craft-theme"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "ecolor",
  "log",
@@ -937,7 +937,7 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "craft-fonts-build",
  "craft-host",
@@ -968,7 +968,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-macros"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -978,7 +978,7 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
+source = "git+https://github.com/storytold/craft-libs?rev=053c0043dc1c05e96118f94e429f363b0fd7362b#053c0043dc1c05e96118f94e429f363b0fd7362b"
 dependencies = [
  "egui",
  "objc2 0.6.5",
@@ -1151,7 +1151,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 [[package]]
 name = "ecolor"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "emath",
@@ -1161,7 +1161,7 @@ dependencies = [
 [[package]]
 name = "eframe"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1199,7 +1199,7 @@ dependencies = [
 [[package]]
 name = "egui"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "accesskit",
  "ahash",
@@ -1220,7 +1220,7 @@ dependencies = [
 [[package]]
 name = "egui-wgpu"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1239,7 +1239,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "accesskit_winit",
  "arboard",
@@ -1266,7 +1266,7 @@ dependencies = [
 [[package]]
 name = "egui_glow"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "egui",
@@ -1279,7 +1279,7 @@ dependencies = [
 [[package]]
 name = "egui_system_font_provider"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "epaint",
  "fontique",
@@ -1299,7 +1299,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 [[package]]
 name = "emath"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "bytemuck",
  "serde",
@@ -1346,7 +1346,7 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -1373,7 +1373,7 @@ dependencies = [
 [[package]]
 name = "epaint_default_fonts"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[package]]
 name = "equivalent"
@@ -6450,19 +6450,19 @@ dependencies = [
 [[patch.unused]]
 name = "egui_demo_lib"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_extras"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_inspection"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
 
 [[patch.unused]]
 name = "egui_kittest"
 version = "0.37.0"
-source = "git+https://github.com/aiongg/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"

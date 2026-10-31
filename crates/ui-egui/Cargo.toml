@@ -7,9 +7,13 @@ rust-version.workspace = true
 description = "StencilCraft egui frontend: canvas painting, panels, theme tokens"
 
 [dependencies]
+craft-theme = { workspace = true }
+craft-ui = { workspace = true }
 egui = { workspace = true }
+kurbo = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
+stencilcraft-kerf = { workspace = true }
 
 [dev-dependencies]
 stencilcraft-testkit = { workspace = true }

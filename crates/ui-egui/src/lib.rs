@@ -16,10 +16,13 @@ pub enum ColorTheme {
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
-/// Semantic canvas colours for a specific workspace theme.
+/// Semantic canvas colours and overlay flags for a specific workspace theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasOptions {
     pub kerf_preview: bool,
+    pub show_grid: bool,
+    pub print_cut_marks: bool,
+    pub show_selection_bounds: bool,
     pub theme: ColorTheme,
 }
 
@@ -27,6 +30,9 @@ impl Default for CanvasOptions {
     fn default() -> Self {
         Self {
             kerf_preview: false,
+            show_grid: true,
+            print_cut_marks: false,
+            show_selection_bounds: true,
             theme: ColorTheme::Dark,
         }
     }
@@ -225,6 +231,32 @@ impl View {
         ));
         egui::Rect::from_min_max(min, max)
     }
+
+    /// Convert to [`craft_ui::canvas::CanvasView`] for `Rulers`, `BezierOverlay`, `PenDraft`,
+    /// `TransformBox`, `CanvasScrollbars`, and `MarqueeDrag`.
+    pub fn to_canvas_view(&self, viewport: egui::Rect) -> craft_ui::canvas::CanvasView {
+        let center_screen = viewport.center();
+        let center_world = self.screen_to_world(egui::vec2(center_screen.x, center_screen.y));
+        craft_ui::canvas::CanvasView::new(viewport, center_world, f64::from(self.zoom.max(0.05)))
+    }
+
+    /// Update `zoom` and `pan_mm` from a [`craft_ui::canvas::CanvasView`].
+    pub fn from_canvas_view(&mut self, cv: &craft_ui::canvas::CanvasView) {
+        if !cv.zoom.is_finite()
+            || cv.zoom <= 0.0
+            || !cv.center.x.is_finite()
+            || !cv.center.y.is_finite()
+        {
+            return;
+        }
+        let zoom = (cv.zoom as f32).clamp(0.05, 400.0);
+        let center_screen = cv.rect.center();
+        self.zoom = zoom;
+        self.pan_mm = egui::vec2(
+            cv.center.x as f32 - center_screen.x / zoom,
+            cv.center.y as f32 - center_screen.y / zoom,
+        );
+    }
 }
 
 fn valid_view_extent(width_mm: f64, height_mm: f64, viewport: egui::Rect) -> bool {
@@ -352,34 +384,40 @@ pub fn paint_document(
     painter.rect_filled(view.board_rect_screen(doc), 2.0, palette.board);
 
     // Grid: 10 mm major pitch, drawn only over the board as hairlines.
-    let pitch_mm = 10.0_f64;
-    let step_px = view.zoom * pitch_mm as f32;
-    if step_px > 6.0 {
-        let origin = view.world_to_screen(stencilcraft_geom::Point::ZERO);
-        let mut x_mm = 0.0_f64;
-        while x_mm <= doc.board.width_mm + 1e-9 {
-            let x_px = origin.x + (x_mm * view.zoom as f64) as f32;
-            painter.line_segment(
-                [
-                    egui::pos2(x_px, origin.y),
-                    egui::pos2(x_px, origin.y + doc.board.height_mm as f32 * view.zoom),
-                ],
-                (1.0, palette.grid),
-            );
-            x_mm += pitch_mm;
+    if options.show_grid {
+        let pitch_mm = 10.0_f64;
+        let step_px = view.zoom * pitch_mm as f32;
+        if step_px > 6.0 {
+            let origin = view.world_to_screen(stencilcraft_geom::Point::ZERO);
+            let mut x_mm = 0.0_f64;
+            while x_mm <= doc.board.width_mm + 1e-9 {
+                let x_px = origin.x + (x_mm * view.zoom as f64) as f32;
+                painter.line_segment(
+                    [
+                        egui::pos2(x_px, origin.y),
+                        egui::pos2(x_px, origin.y + doc.board.height_mm as f32 * view.zoom),
+                    ],
+                    (1.0, palette.grid),
+                );
+                x_mm += pitch_mm;
+            }
+            let mut y_mm = 0.0_f64;
+            while y_mm <= doc.board.height_mm + 1e-9 {
+                let y_px = origin.y + (y_mm * view.zoom as f64) as f32;
+                painter.line_segment(
+                    [
+                        egui::pos2(origin.x, y_px),
+                        egui::pos2(origin.x + doc.board.width_mm as f32 * view.zoom, y_px),
+                    ],
+                    (1.0, palette.grid),
+                );
+                y_mm += pitch_mm;
+            }
         }
-        let mut y_mm = 0.0_f64;
-        while y_mm <= doc.board.height_mm + 1e-9 {
-            let y_px = origin.y + (y_mm * view.zoom as f64) as f32;
-            painter.line_segment(
-                [
-                    egui::pos2(origin.x, y_px),
-                    egui::pos2(origin.x + doc.board.width_mm as f32 * view.zoom, y_px),
-                ],
-                (1.0, palette.grid),
-            );
-            y_mm += pitch_mm;
-        }
+    }
+
+    if options.print_cut_marks {
+        paint_registration_marks(painter, view, doc, palette);
     }
 
     // Shapes: flatten and convert each polyline to screen space.
@@ -433,13 +471,12 @@ pub fn paint_document(
         }
     }
 
-    if let Some(id) = selection.selected_shapes.first()
-        && let Some(shape) = doc.get_shape(*id)
-        && let Some(bounds) = shape.bounds()
+    if options.show_selection_bounds
+        && let Some(union) = selected_world_bounds(doc, &selection.selected_shapes)
     {
         let bounds = egui::Rect::from_two_pos(
-            view.world_to_screen(stencilcraft_geom::Point::new(bounds.x0, bounds.y0)),
-            view.world_to_screen(stencilcraft_geom::Point::new(bounds.x1, bounds.y1)),
+            view.world_to_screen(stencilcraft_geom::Point::new(union.x0, union.y0)),
+            view.world_to_screen(stencilcraft_geom::Point::new(union.x1, union.y1)),
         );
         painter.rect_stroke(
             bounds.expand(3.0),
@@ -448,6 +485,353 @@ pub fn paint_document(
             egui::StrokeKind::Outside,
         );
     }
+}
+
+/// Compute the union axis-aligned bounding box in millimetres of `ids` inside `doc`.
+pub fn selected_world_bounds(doc: &stencilcraft_doc::Document, ids: &[u64]) -> Option<kurbo::Rect> {
+    let mut iter = ids
+        .iter()
+        .filter_map(|id| doc.get_shape(*id).and_then(stencilcraft_doc::Shape::bounds));
+    let first = iter.next()?;
+    Some(iter.fold(first, |acc, r| acc.union(r)))
+}
+
+fn paint_registration_marks(
+    painter: &egui::Painter,
+    view: &View,
+    doc: &stencilcraft_doc::Document,
+    palette: Palette,
+) {
+    let mark_mm = 6.0_f64;
+    let inset_mm = 4.0_f64;
+    let w = doc.board.width_mm;
+    let h = doc.board.height_mm;
+    if w < 20.0 || h < 20.0 {
+        return;
+    }
+    let mark_color = match palette.board {
+        c if c.r() > 140 => egui::Color32::from_gray(24),
+        _ => egui::Color32::from_gray(230),
+    };
+    let tl_min = view.world_to_screen(stencilcraft_geom::Point::new(inset_mm, inset_mm));
+    let tl_max = view.world_to_screen(stencilcraft_geom::Point::new(
+        inset_mm + mark_mm,
+        inset_mm + mark_mm,
+    ));
+    painter.rect_filled(egui::Rect::from_min_max(tl_min, tl_max), 0.5, mark_color);
+
+    let tr_h = egui::Rect::from_min_max(
+        view.world_to_screen(stencilcraft_geom::Point::new(
+            w - inset_mm - mark_mm,
+            inset_mm,
+        )),
+        view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm, inset_mm + 1.5)),
+    );
+    let tr_v = egui::Rect::from_min_max(
+        view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm - 1.5, inset_mm)),
+        view.world_to_screen(stencilcraft_geom::Point::new(
+            w - inset_mm,
+            inset_mm + mark_mm,
+        )),
+    );
+    painter.rect_filled(tr_h, 0.0, mark_color);
+    painter.rect_filled(tr_v, 0.0, mark_color);
+
+    let bl_h = egui::Rect::from_min_max(
+        view.world_to_screen(stencilcraft_geom::Point::new(inset_mm, h - inset_mm - 1.5)),
+        view.world_to_screen(stencilcraft_geom::Point::new(
+            inset_mm + mark_mm,
+            h - inset_mm,
+        )),
+    );
+    let bl_v = egui::Rect::from_min_max(
+        view.world_to_screen(stencilcraft_geom::Point::new(
+            inset_mm,
+            h - inset_mm - mark_mm,
+        )),
+        view.world_to_screen(stencilcraft_geom::Point::new(inset_mm + 1.5, h - inset_mm)),
+    );
+    painter.rect_filled(bl_h, 0.0, mark_color);
+    painter.rect_filled(bl_v, 0.0, mark_color);
+}
+
+/// Convert a [`kurbo::BezPath`] into editable [`craft_ui::canvas::EditSubpath`]s for
+/// `BezierOverlay` (Direct Selection & Convert Anchor Point tools).
+pub fn bezpath_to_edit_subpaths(path: &kurbo::BezPath) -> Vec<craft_ui::canvas::EditSubpath> {
+    use craft_ui::canvas::{EditSubpath, Knot};
+    let mut subpaths: Vec<EditSubpath> = Vec::new();
+    let mut current: Option<EditSubpath> = None;
+
+    for el in path.elements() {
+        match *el {
+            kurbo::PathEl::MoveTo(p) => {
+                if let Some(mut sub) = current.take()
+                    && !sub.knots.is_empty()
+                {
+                    finalize_subpath_smoothness(&mut sub);
+                    subpaths.push(sub);
+                }
+                current = Some(EditSubpath {
+                    knots: vec![Knot::corner(p)],
+                    closed: false,
+                });
+            }
+            kurbo::PathEl::LineTo(p) => {
+                let sub = current.get_or_insert_with(|| EditSubpath {
+                    knots: vec![Knot::corner(p)],
+                    closed: false,
+                });
+                sub.knots.push(Knot::corner(p));
+            }
+            kurbo::PathEl::QuadTo(c, p) => {
+                let sub = current.get_or_insert_with(|| EditSubpath {
+                    knots: vec![Knot::corner(p)],
+                    closed: false,
+                });
+                let p0 = sub.knots.last().map_or(p, |k| k.anchor);
+                let c1 = p0 + (2.0 / 3.0) * (c - p0);
+                let c2 = p + (2.0 / 3.0) * (c - p);
+                if let Some(prev) = sub.knots.last_mut() {
+                    prev.out_ctrl = c1;
+                }
+                sub.knots.push(Knot {
+                    anchor: p,
+                    in_ctrl: c2,
+                    out_ctrl: p,
+                    smooth: false,
+                });
+            }
+            kurbo::PathEl::CurveTo(c1, c2, p) => {
+                let sub = current.get_or_insert_with(|| EditSubpath {
+                    knots: vec![Knot::corner(p)],
+                    closed: false,
+                });
+                if let Some(prev) = sub.knots.last_mut() {
+                    prev.out_ctrl = c1;
+                }
+                sub.knots.push(Knot {
+                    anchor: p,
+                    in_ctrl: c2,
+                    out_ctrl: p,
+                    smooth: false,
+                });
+            }
+            kurbo::PathEl::ClosePath => {
+                if let Some(mut sub) = current.take() {
+                    sub.closed = true;
+                    if sub.knots.len() > 1 {
+                        let first_anchor = sub.knots[0].anchor;
+                        let last_matches = sub
+                            .knots
+                            .last()
+                            .is_some_and(|last| last.anchor.distance(first_anchor) < 1e-6);
+                        if last_matches
+                            && let Some(last) = sub.knots.pop()
+                            && let Some(first) = sub.knots.first_mut()
+                        {
+                            first.in_ctrl = last.in_ctrl;
+                        }
+                    }
+                    finalize_subpath_smoothness(&mut sub);
+                    subpaths.push(sub);
+                }
+            }
+        }
+    }
+    if let Some(mut sub) = current.take()
+        && !sub.knots.is_empty()
+    {
+        finalize_subpath_smoothness(&mut sub);
+        subpaths.push(sub);
+    }
+    subpaths
+}
+
+fn finalize_subpath_smoothness(sub: &mut craft_ui::canvas::EditSubpath) {
+    for knot in &mut sub.knots {
+        let v_in = knot.anchor - knot.in_ctrl;
+        let v_out = knot.out_ctrl - knot.anchor;
+        let len_in = v_in.hypot();
+        let len_out = v_out.hypot();
+        if len_in > 1e-6 && len_out > 1e-6 {
+            let cos = v_in.dot(v_out) / (len_in * len_out);
+            knot.smooth = cos > 0.998;
+        }
+    }
+}
+
+/// Convert [`craft_ui::canvas::EditSubpath`]s back into a [`kurbo::BezPath`], preserving
+/// straight segments as `LineTo` and curves as `CurveTo`.
+pub fn edit_subpaths_to_bezpath(subpaths: &[craft_ui::canvas::EditSubpath]) -> kurbo::BezPath {
+    let mut out = kurbo::BezPath::new();
+    for sub in subpaths {
+        let Some(first) = sub.knots.first() else {
+            continue;
+        };
+        out.move_to(first.anchor);
+        let seg_count = sub.segment_count();
+        for i in 0..seg_count {
+            let Some((a, b)) = sub.segment_ends(i) else {
+                continue;
+            };
+            if sub.is_straight(i) {
+                if !(sub.closed && i + 1 == seg_count) {
+                    out.line_to(sub.knots[b].anchor);
+                }
+            } else {
+                out.curve_to(
+                    sub.knots[a].out_ctrl,
+                    sub.knots[b].in_ctrl,
+                    sub.knots[b].anchor,
+                );
+            }
+        }
+        if sub.closed {
+            out.close_path();
+        }
+    }
+    out
+}
+
+/// Apply a [`craft_ui::canvas::PathEdit`] gesture to a subpath slice.
+pub fn apply_path_edit(
+    base: &[craft_ui::canvas::EditSubpath],
+    edit: &craft_ui::canvas::PathEdit,
+) -> Vec<craft_ui::canvas::EditSubpath> {
+    use craft_ui::canvas::{HandleSide, Knot, PathEdit};
+    use kurbo::ParamCurve as _;
+    let mut subpaths = base.to_vec();
+    match edit {
+        PathEdit::MoveAnchors { anchors, by, .. } => {
+            for &r in anchors {
+                if let Some(k) = subpaths
+                    .get_mut(r.subpath)
+                    .and_then(|s| s.knots.get_mut(r.knot))
+                {
+                    k.anchor += *by;
+                    k.in_ctrl += *by;
+                    k.out_ctrl += *by;
+                }
+            }
+        }
+        &PathEdit::MoveHandle {
+            knot,
+            side,
+            to,
+            alone,
+            ..
+        } => {
+            if let Some(k) = subpaths
+                .get_mut(knot.subpath)
+                .and_then(|s| s.knots.get_mut(knot.knot))
+            {
+                match side {
+                    HandleSide::In => k.in_ctrl = to,
+                    HandleSide::Out => k.out_ctrl = to,
+                }
+                if alone {
+                    k.smooth = false;
+                } else if k.smooth {
+                    let v = to - k.anchor;
+                    let len = v.hypot();
+                    if len > 1e-9 {
+                        let other = match side {
+                            HandleSide::In => &mut k.out_ctrl,
+                            HandleSide::Out => &mut k.in_ctrl,
+                        };
+                        let other_len = (*other - k.anchor).hypot();
+                        *other = k.anchor - v * (other_len / len);
+                    }
+                }
+            }
+        }
+        &PathEdit::BendSegment { segment, t, by, .. } => {
+            if let Some(sub) = subpaths.get_mut(segment.subpath)
+                && let Some((a, b)) = sub.segment_ends(segment.knot)
+                && let Some(c) = sub.segment(segment.knot)
+            {
+                if sub.is_straight(segment.knot) {
+                    sub.knots[a].out_ctrl = c.eval(1.0 / 3.0);
+                    sub.knots[b].in_ctrl = c.eval(2.0 / 3.0);
+                    sub.knots[a].smooth = false;
+                    sub.knots[b].smooth = false;
+                }
+                let u = 1.0 - t;
+                let w1 = 3.0 * u * u * t;
+                let w2 = 3.0 * u * t * t;
+                let denom = w1 * w1 + w2 * w2;
+                if denom > 1e-9 {
+                    sub.knots[a].out_ctrl += by * (w1 / denom);
+                    sub.knots[b].in_ctrl += by * (w2 / denom);
+                }
+            }
+        }
+        &PathEdit::Convert { knot, out, .. } => {
+            if let Some(k) = subpaths
+                .get_mut(knot.subpath)
+                .and_then(|s| s.knots.get_mut(knot.knot))
+            {
+                *k = match out {
+                    Some(out) => Knot::smooth(k.anchor, out),
+                    None => Knot::corner(k.anchor),
+                };
+            }
+        }
+    }
+    subpaths
+}
+
+/// Split segment `seg` at parameter `t` (`0.0..=1.0`) by inserting a smooth cubic knot.
+pub fn insert_path_knot(
+    subpaths: &mut [craft_ui::canvas::EditSubpath],
+    seg: craft_ui::canvas::KnotRef,
+    t: f64,
+) -> Option<craft_ui::canvas::KnotRef> {
+    use craft_ui::canvas::{Knot, KnotRef};
+    use kurbo::ParamCurve as _;
+    let sub = subpaths.get_mut(seg.subpath)?;
+    let (a, b) = sub.segment_ends(seg.knot)?;
+    let c = sub.segment(seg.knot)?;
+    let left = c.subsegment(0.0..t);
+    let right = c.subsegment(t..1.0);
+    sub.knots[a].out_ctrl = left.p1;
+    sub.knots[b].in_ctrl = right.p2;
+    let at = a + 1;
+    sub.knots.insert(
+        at,
+        Knot {
+            anchor: left.p3,
+            in_ctrl: left.p2,
+            out_ctrl: right.p1,
+            smooth: true,
+        },
+    );
+    Some(KnotRef::new(seg.subpath, at))
+}
+
+/// Remove the specified knots from `subpaths`, dropping any subpath that becomes empty.
+pub fn delete_path_knots(
+    subpaths: &mut Vec<craft_ui::canvas::EditSubpath>,
+    knots: &[craft_ui::canvas::KnotRef],
+) {
+    for (si, sub) in subpaths.iter_mut().enumerate() {
+        let mut indices: Vec<usize> = knots
+            .iter()
+            .filter(|r| r.subpath == si)
+            .map(|r| r.knot)
+            .collect();
+        indices.sort_unstable();
+        indices.dedup();
+        for i in indices.into_iter().rev() {
+            if i < sub.knots.len() {
+                sub.knots.remove(i);
+            }
+        }
+        if sub.knots.len() < 2 {
+            sub.closed = false;
+        }
+    }
+    subpaths.retain(|s| !s.knots.is_empty());
 }
 
 /// Selection state painted over the canvas.
@@ -873,5 +1257,34 @@ mod tests {
         let (plain_col, _) = shape_visual(shape, &view, false, palette);
         let (kerf_col, _) = shape_visual(shape, &view, true, palette);
         assert_ne!(plain_col, kerf_col);
+    }
+
+    #[test]
+    fn canvas_view_and_bezpath_edit_subpath_roundtrip() {
+        let mut view = View {
+            zoom: 3.5,
+            pan_mm: egui::vec2(12.0, -8.0),
+        };
+        let rect = egui::Rect::from_min_size(egui::pos2(20.0, 40.0), egui::vec2(600.0, 400.0));
+        let cv = view.to_canvas_view(rect);
+        let p = stencilcraft_geom::Point::new(42.0, 58.0);
+        let s1 = view.world_to_screen(p);
+        let s2 = cv.to_screen(p);
+        assert!((s1.x - s2.x).abs() < 1e-4);
+        assert!((s1.y - s2.y).abs() < 1e-4);
+        view.from_canvas_view(&cv);
+        assert!((view.zoom - 3.5).abs() < 1e-5);
+
+        let doc = simple_square();
+        let orig = &doc.layers[0].shapes[0].path;
+        let mut subs = bezpath_to_edit_subpaths(orig);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].knots.len(), 4);
+        assert!(subs[0].closed);
+        let inserted = insert_path_knot(&mut subs, craft_ui::canvas::KnotRef::new(0, 0), 0.5);
+        assert!(inserted.is_some());
+        assert_eq!(subs[0].knots.len(), 5);
+        let rebuilt = edit_subpaths_to_bezpath(&subs);
+        assert!(!rebuilt.elements().is_empty());
     }
 }

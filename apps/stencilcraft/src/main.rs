@@ -1429,6 +1429,7 @@ impl StencilApp {
             stencilcraft_ui_egui::CanvasOptions {
                 kerf_preview: self.kerf_preview,
                 theme: self.theme,
+                ..Default::default()
             },
             &selection,
         );

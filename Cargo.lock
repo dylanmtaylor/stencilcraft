@@ -866,11 +866,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-settings"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+dependencies = [
+ "craft-atomic",
+ "dirs",
+ "serde",
+ "toml_edit",
+]
+
+[[package]]
 name = "craft-theme"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
 dependencies = [
  "ecolor",
+ "serde",
  "serde_json",
 ]
 
@@ -883,6 +895,7 @@ dependencies = [
  "craft-i18n",
  "craft-theme",
  "craft-ui-macros",
+ "craft-window",
  "egui",
  "epaint",
  "js-sys",
@@ -908,6 +921,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "craft-window"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=20c063f6844bb1364089a1a86bd959026465801a#20c063f6844bb1364089a1a86bd959026465801a"
+dependencies = [
+ "egui",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "wayland-client",
 ]
 
 [[package]]
@@ -989,6 +1014,27 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+]
+
+[[package]]
+name = "dirs"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
+name = "dirs-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
+dependencies = [
+ "libc",
+ "option-ext",
+ "redox_users",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2962,6 +3008,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "option-ext"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
 name = "orbclient"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3529,6 +3581,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "redox_users"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60dc65c0ff1a7ae1294b0c67b9f14baf70b644404010370171787bfac1038fc0"
+dependencies = [
+ "libredox",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4034,17 +4096,25 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stencilcraft"
 version = "0.1.0"
 dependencies = [
+ "craft-atomic",
+ "craft-settings",
+ "craft-theme",
  "craft-ui",
+ "craft-window",
  "eframe",
  "image",
  "rfd",
+ "serde",
  "stencilcraft-doc",
+ "stencilcraft-dxf",
  "stencilcraft-engine",
+ "stencilcraft-gcode",
  "stencilcraft-geom",
  "stencilcraft-kerf",
  "stencilcraft-machine",
  "stencilcraft-mcp",
  "stencilcraft-svg",
+ "stencilcraft-tiling",
  "stencilcraft-ui-egui",
 ]
 
@@ -4201,9 +4271,13 @@ dependencies = [
 name = "stencilcraft-ui-egui"
 version = "0.1.0"
 dependencies = [
+ "craft-theme",
+ "craft-ui",
  "egui",
+ "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
+ "stencilcraft-kerf",
  "stencilcraft-testkit",
 ]
 
@@ -4493,8 +4567,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3641d5bbb5349a79e1020a242d251efbc546ad8048d133958323ce9c40a9c9c"
 dependencies = [
  "indexmap",
+ "serde_core",
+ "serde_spanned",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 

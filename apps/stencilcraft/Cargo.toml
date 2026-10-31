@@ -11,17 +11,25 @@ name = "stencilcraft"
 path = "src/main.rs"
 
 [dependencies]
-craft-ui = { workspace = true }
+craft-atomic = { workspace = true }
+craft-settings = { workspace = true }
+craft-theme = { workspace = true }
+craft-ui = { workspace = true, features = ["window-frame"] }
+craft-window = { workspace = true, features = ["egui"] }
 eframe = { workspace = true }
 rfd = { workspace = true }
+serde = { workspace = true }
 stencilcraft-doc = { workspace = true }
+stencilcraft-dxf = { workspace = true }
 stencilcraft-engine = { workspace = true }
-stencilcraft-machine = { workspace = true }
+stencilcraft-gcode = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
+stencilcraft-machine = { workspace = true }
 stencilcraft-mcp = { workspace = true }
-stencilcraft-ui-egui = { workspace = true }
 stencilcraft-svg = { workspace = true }
+stencilcraft-tiling = { workspace = true }
+stencilcraft-ui-egui = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 
 [lints]

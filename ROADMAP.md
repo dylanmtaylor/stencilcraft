@@ -14,10 +14,10 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
-| UI | preliminary | canvas pan/zoom with Fit (F) and Center (C) shortcuts, layers panel, click/box/lasso multi-select, Pathfinder, alignment/distribution, cached compensated kerf preview, persisted recent files; dockable design panels and node editing remain gaps |
+| UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
 | Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
-| Craft-libs & parity | early foundation | domain crates established; reusable dockable panel/app-shell craft-libs are not yet part of this workspace |
+| Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
 ## Milestones
@@ -119,6 +119,7 @@ Completed items should be marked here only when behavior is usable end-to-end.
   fields retain their keys; compensated kerf geometry is cached until shape geometry
   or kerf width changes; a persisted, bounded Recent menu reopens the eight most
   recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
+- 2026-10-30 — desktop craft-suite UI overhaul: integrated `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic`. Implemented CSD `TitleBar` with embedded icon, `MenuBar`, contextual `OptionsBar`, vertical `ToolRail` with flyouts, millimetre `Rulers` with zero reset, interactive `BezierOverlay` node editing, `PenDraft` path tool, live drag-shape creation, and persistent settings. Quality gates and 32 desktop tests pass.
 - 2026-10-29 — app identity pass: original app icon
   (`assets/app-icon/stencilcraft.svg`, original artwork) with ASSETS/NOTICE
   attribution; README with PNG previews

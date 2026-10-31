@@ -27,13 +27,7 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
    document and metadata snapshots. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
-7. **UI**: visible-outline selection, canvas drag-to-move, multi-select with additive
-   selection, exact-position duplication (button and Ctrl/Command+D shortcut), Select All
-   (Ctrl/Command+A), Delete/Backspace removal, box/lasso selection, Pathfinder operations,
-   alignment/distribution, primary-shape rotate/scale controls, Fit (F) and Center (C)
-   shortcuts work (selection uses conservative shape bounds). Kerf preview results are
-   cached until geometry or kerf changes; recent documents are persisted in an eight-item
-   menu. Remaining: node editing and a ruler.
+7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
 8. **Agent surface**: `command.execute` exposes the serde-tagged engine commands through
    the CLI JSON-lines process and shared session; the wider command set is not wrapped in
    dedicated control methods, MCP tool schema hydration is not implemented, and the JSON
@@ -42,8 +36,6 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.
-11. **Raster trace**: CLI imports bounded PNG/JPEG and traces a configurable dark threshold silhouette into closed cut contours (96 dpi default). No UI import panel, multi-color tracing, or smoothing controls.
-12. **Packaging**: no window/app icon wiring yet (the SVG icon exists in
-   `assets/app-icon/`); no desktop integration (`.desktop`, file associations,
-   `xtask bundle`); PNG previews in the README only (`docs/images/`).
-13. **Craft-libs and desktop UI**: the workspace currently contains foundational domain crates (`geom`, `color`, `doc`, `kerf`, `tiling`, `svg`, `dxf`, `gcode`, `engine`, `machine`, `mcp`) and an egui canvas crate. Reusable dockable/movable panel infrastructure, a tool palette, broad design tools and reusable app-shell components have not been built in this workspace. Avoid implying the UI has parity with larger creative applications; select and adopt suitable craft-libs only after their source and APIs are available in this project.
+11. **Raster trace**: CLI imports bounded PNG/JPEG and traces a configurable dark threshold silhouette into closed cut contours (96 dpi default). UI has dedicated Trace Image tool trigger in the tool rail.
+12. **Packaging**: window icon wired from embedded PNG asset (`APP_ICON_PNG`); Linux packaging tarball and Flatpak scripts (`packaging/linux/package.sh`, `flatpak-bundle.sh`) with `.desktop` and metainfo established.
+13. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application, delivering a cohesive Craft-suite appearance and interaction model matching VectorCraft and desktop laser/vinyl suites.

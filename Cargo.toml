@@ -21,12 +21,12 @@ egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Shared UI components and docking, pinned to the design-system branch.
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
-craft-theme = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
-craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
-craft-draw = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["ui"] }
-craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
-craft-window = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
+craft-ui = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c" }
+craft-theme = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c" }
+craft-atomic = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c" }
+craft-draw = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c", features = ["ui"] }
+craft-settings = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c" }
+craft-window = { git = "https://github.com/aiongg/craft-libs", rev = "7ca77f6ab11f82fe7546ca5da253af48b065241c" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }

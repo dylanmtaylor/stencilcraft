@@ -29,14 +29,16 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    and undo snapshots clone whole documents rather than sharing structure.
 7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
 8. **Agent surface**: `command.execute` exposes the serde-tagged engine commands through
-   the CLI JSON-lines process and shared session; the wider command set is not wrapped in
-   dedicated control methods, MCP tool schema hydration is not implemented, and the JSON
-   channel has no fuzz corpus. (The document reader does have a malformed-input no-panic
-   corpus now.)
+   the CLI JSON-lines process. Despite the `mcp` subcommand name, it is not yet a Model
+   Context Protocol server: JSON-RPC initialization, tool discovery and tool calls are not
+   implemented. The desktop control socket creates an independent session per connection,
+   so it cannot inspect or change the visible document. The wider command set is not wrapped
+   in dedicated control methods, and the JSON channel has no fuzz corpus. (The document
+   reader does have a malformed-input no-panic corpus now.)
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.
 11. **Raster trace**: CLI imports bounded PNG/JPEG and traces a configurable dark threshold silhouette into closed cut contours (96 dpi default). UI has dedicated Trace Image tool trigger in the tool rail.
 12. **Packaging**: window icon wired from embedded PNG asset (`APP_ICON_PNG`); Linux packaging tarball and Flatpak scripts (`packaging/linux/package.sh`, `flatpak-bundle.sh`) with `.desktop` and metainfo established.
-13. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the design-system branch head (`053c0043`), with `craft-draw` supplying the Bezier/pen path editing. The app already uses the shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Remaining work is layout and visual parity with VectorCraft, which needs a display to check (not yet available in this environment).
+13. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the `aiongg/craft-libs` design-system revision `7ca77f6a`, with `craft-draw` supplying the Bezier/pen path editing. The app uses shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Layout and visual parity with VectorCraft remain incomplete.
 14. **Typing and dialog behaviour on the new head**: `TextField` buffers typing until Enter, focus loss or commit, and a plain field passes Escape through instead of clearing. The text-dialog test encodes this; any UI that assumed per-keystroke updates should commit explicitly.

@@ -585,6 +585,8 @@ pub struct StencilApp {
     pub send_mode: bool,
     pub theme: stencilcraft_ui_egui::ColorTheme,
     pub view_initialized: bool,
+    /// Board size the canvas was last framed for, millimetres.
+    pub last_board: Option<(f64, f64)>,
     pub recent_files: Vec<String>,
     pub mat: stencilcraft_machine::Mat,
     pub selected_shape: Option<u64>,
@@ -726,6 +728,7 @@ impl StencilApp {
             send_mode: false,
             theme,
             view_initialized: false,
+            last_board: None,
             recent_files: open_path.iter().cloned().collect(),
             mat: stencilcraft_machine::Mat::CameoPro24x24,
             selected_shape: None,
@@ -871,6 +874,18 @@ impl StencilApp {
         self.save_prefs();
     }
 
+    /// Records the board size the view is framed for. Returns true when the size is new,
+    /// which the canvas turns into a `Fit` so a resized canvas is framed instead of
+    /// leaving the artwork wherever the old sheet happened to place it.
+    pub fn note_board_size(&mut self, width_mm: f64, height_mm: f64) -> bool {
+        let board = (width_mm, height_mm);
+        if self.last_board == Some(board) {
+            return false;
+        }
+        self.last_board = Some(board);
+        true
+    }
+
     pub fn open_document(&mut self, path: &str) {
         match stencilcraft_doc::load_from(path) {
             Ok(doc) => {
@@ -878,6 +893,7 @@ impl StencilApp {
                 self.set_selection([]);
                 self.open_path = Some(path.to_string());
                 self.view_initialized = false;
+                self.last_board = None;
                 self.kerf_preview_cache = None;
                 self.record_recent_file(path.to_string());
                 self.status = format!("opened {path}");
@@ -2697,6 +2713,11 @@ impl StencilApp {
         };
 
         let mut view_command = self.pending_view_command.take();
+        // A new board size (document setup, New, an agent's `document.set-board`) leaves
+        // the old zoom and pan pointing at where the previous sheet was: re-frame it.
+        if self.note_board_size(doc.board.width_mm, doc.board.height_mm) && self.view_initialized {
+            view_command = Some(CanvasViewCommand::Fit);
+        }
         if fit_clicked {
             view_command = Some(CanvasViewCommand::Fit);
         } else if center_clicked {
@@ -3420,6 +3441,43 @@ mod tests {
                 CanvasViewCommand::Center => assert_eq!(view.zoom, 2.5),
             }
         }
+    }
+
+    #[test]
+    fn resizing_the_canvas_refits_the_view() {
+        let ctx = egui::Context::default();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        frame(&ctx, &mut app, vec![], |app, ui| app.canvas_body(ui));
+        assert!(app.view_initialized);
+        // A second frame on the same board keeps what the user set up.
+        let steady_zoom = app.view.zoom;
+        frame(&ctx, &mut app, vec![], |app, ui| app.canvas_body(ui));
+        assert_eq!(app.view.zoom, steady_zoom);
+
+        app.engine
+            .run(Command::DocumentSetBoard {
+                width_mm: 900.0,
+                height_mm: 600.0,
+            })
+            .expect("set board");
+        // A zoom that only made sense for the old 100 × 150 mm sheet.
+        app.view.zoom = 6.0;
+        frame(&ctx, &mut app, vec![], |app, ui| app.canvas_body(ui));
+        assert_eq!(app.last_board, Some((900.0, 600.0)));
+        assert!(
+            app.view.zoom < 6.0,
+            "a resized canvas must refit, zoom stayed {}",
+            app.view.zoom
+        );
+        // Framed, not merely zoomed out: the far corner lands on screen.
+        let corner = app
+            .view
+            .world_to_screen(stencilcraft_geom::Point::new(900.0, 600.0));
+        assert!(
+            corner.x > 0.0 && corner.y > 0.0,
+            "board corner off screen: {corner:?}"
+        );
     }
 
     #[test]

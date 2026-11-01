@@ -40,13 +40,12 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 1. SVG import completeness (M1): advanced CSS selectors/at-rules, external `<use>`,
    text conversion, clip paths/masks and filters; run coverage-guided fuzzing on the
    bounded XML/CSS parser.
-2. Property tests: kerf invariants (area monotonic in kerf width on convex shapes),
-   tiling coverage (every point of the board interior lies within `overlap/2` of a tile
-   cut path), format fuzz.
+2. Property tests: convex kerf invariants and tiling coverage/bounds are in place; still
+   open are containment-heavy kerf cases, format fuzz, and coverage-guided parsing.
 3. Kerf: sweep-based offset for self-intersecting contours; nesting depth is counted now,
    but containment still tests flattened vertices.
 4. Bridge generation prototype (M3 early): algorithm notes in `docs/bridges.md`.
-5. G-code profiles: material presets, first/last pass, power ramp.
+5. G-code profiles: material/machine presets, separate first/last pass, Z knife mode.
 6. Machine control (docs/machine.md): USB-bulk `nusb` transport for the `0b4d` device
    family, Bluetooth RFCOMM/BLE, registration marks (print-and-cut), mat-free path
    sorting for knife-pressure relief.
@@ -88,6 +87,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
   is not implemented.
 
 ## Progress log
+
+- 2026-11-01 — Kerf invariants: convex contours must grow in area with every kerf width
+  (triangles through 64-gons, 5–120 mm), a hairline kerf must add perimeter × kerf/2
+  of area within 5%, and mitered vertices must land at the geometric miter distance.
 
 - 2026-11-01 — Cut profiles and canvas auto-fit. G-code export takes feed, cut and
   engrave power, repeated passes with an optional power ramp, and the `M4`/`M3` mode

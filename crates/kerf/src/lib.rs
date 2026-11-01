@@ -384,6 +384,143 @@ mod tests {
         assert!((widths[2] - 20.4).abs() < 1e-6, "island: {widths:?}");
     }
 
+    /// Regular `sides`-gon centred on the origin, wound counter-clockwise.
+    fn regular_polygon(sides: usize, radius: f64) -> kurbo::BezPath {
+        let mut p = kurbo::BezPath::new();
+        for i in 0..sides {
+            let angle = std::f64::consts::TAU * i as f64 / sides as f64;
+            let point = Point::new(radius * angle.cos(), radius * angle.sin());
+            if i == 0 {
+                p.move_to(point);
+            } else {
+                p.line_to(point);
+            }
+        }
+        p.close_path();
+        p
+    }
+
+    fn perimeter(points: &[Point]) -> f64 {
+        (0..points.len())
+            .map(|i| {
+                let a = points[i];
+                let b = points[(i + 1) % points.len()];
+                (b - a).hypot()
+            })
+            .sum()
+    }
+
+    /// Compensates one closed path at `kerf_mm` and returns the resulting contour's
+    /// area and the source perimeter.
+    fn compensated_area(path: kurbo::BezPath, kerf_mm: f64, radius: f64) -> (f64, f64) {
+        let mut doc = Document {
+            board: Board {
+                width_mm: radius * 4.0,
+                height_mm: radius * 4.0,
+            },
+            kerf: KerfSettings {
+                width_mm: kerf_mm,
+                apply_to_exports: kerf_mm > 0.0,
+            },
+            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            next_shape_id: 1,
+        };
+        let source = Polyline::from_path(&path);
+        let source_perimeter = perimeter(&source[0].points);
+        doc.push_shape(0, path, CutStyle::Cut).unwrap();
+        let compensated = apply(&doc, 4.0).unwrap();
+        let out = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        assert_eq!(out.len(), 1, "one closed contour in, one out");
+        assert!(out[0].closed);
+        for point in &out[0].points {
+            assert!(
+                point.x.is_finite() && point.y.is_finite(),
+                "finite vertex: {point:?}"
+            );
+        }
+        (signed_area(&out[0].points).abs(), source_perimeter)
+    }
+
+    #[test]
+    fn convex_area_grows_with_every_kerf() {
+        // Convexity makes kerf compensation unambiguous (every vertex moves outward),
+        // so the area must be strictly increasing in kerf width — from triangles to
+        // a many-sided near-circle, and from small to large shapes.
+        for sides in [3usize, 4, 5, 8, 16, 64] {
+            for radius in [5.0, 25.0, 120.0] {
+                let mut previous = 0.0;
+                for kerf in [0.0, 0.05, 0.2, 0.6, 1.0] {
+                    let (area, _) = compensated_area(regular_polygon(sides, radius), kerf, radius);
+                    assert!(
+                        area > previous,
+                        "{sides}-gon r={radius}: kerf {kerf} gave area {area}, not more than {previous}"
+                    );
+                    previous = area;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn small_kerf_grows_area_by_half_its_perimeter() {
+        // First-order geometry: offsetting a contour by d adds roughly perimeter × d
+        // of area. A hairline kerf is where that linear estimate is tight, so it is a
+        // useful check that the offset distance is really kerf/2 and not, say, kerf.
+        for sides in [4usize, 8, 32] {
+            let radius = 40.0;
+            let kerf = 0.05;
+            let (base_area, base_perimeter) =
+                compensated_area(regular_polygon(sides, radius), 0.0, radius);
+            let (grown, _) = compensated_area(regular_polygon(sides, radius), kerf, radius);
+            let expected = base_area + base_perimeter * kerf / 2.0;
+            let error = (grown - expected).abs() / expected;
+            assert!(
+                error < 0.05,
+                "{sides}-gon: area {grown} vs {expected} ({:.1}% off)",
+                error * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn convex_vertices_move_at_least_half_the_kerf_outward() {
+        for sides in [3usize, 6, 24] {
+            let radius = 30.0;
+            let compensated = {
+                let mut doc = Document {
+                    board: Board {
+                        width_mm: radius * 4.0,
+                        height_mm: radius * 4.0,
+                    },
+                    kerf: KerfSettings {
+                        width_mm: 0.8,
+                        apply_to_exports: true,
+                    },
+                    layers: vec![Layer::new("cut", CutStyle::Cut)],
+                    next_shape_id: 1,
+                };
+                doc.push_shape(0, regular_polygon(sides, radius), CutStyle::Cut)
+                    .unwrap();
+                let out = apply(&doc, 4.0).unwrap();
+                Polyline::from_path(&out.layers[0].shapes[0].path)
+            };
+            assert_eq!(compensated[0].points.len(), sides, "no vertices invented");
+            for point in &compensated[0].points {
+                let distance = point.to_vec2().hypot();
+                assert!(
+                    distance > radius,
+                    "{sides}-gon vertex at {distance} did not move out from {radius}"
+                );
+                // Miter joins extend the corner by 1/cos(π/sides) times d.
+                let mitered = radius + 0.4 / (std::f64::consts::PI / sides as f64).cos();
+                assert!(
+                    (distance - mitered).abs() < 1e-6,
+                    "{sides}-gon vertex at {distance}, expected {mitered}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn negative_kerf_is_rejected() {
         let mut doc = Document::default();

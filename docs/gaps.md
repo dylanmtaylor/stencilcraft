@@ -19,10 +19,14 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    touching pair can still be misjudged.
 3. **Tiling**: geometry is clipped to each sheet (closed contours that cross the edge come
    back as open runs, so no cut is added along the material edge) and sheets with nothing
-   on them are not exported. Still missing: overlap merge of the clipped halves into one
-   registered sheet, a per-tile preview, and alignment marks. A separate `print-cut`
-   command outputs artwork with three printable registration/alignment marks, but it does
-   not send sensor commands or calibrate a cutter. Tilings are capped at 4096 sheets.
+   on them are not exported. Sheets can be stamped with corner registration brackets and
+   edge overlap guides (`--tile-marks`, `tile.run {marks}`), and `tile-preview`
+   (`tile.preview`) renders the whole tiling on one labelled page with cut lines in red and
+   engraving in blue. Still missing: overlap merge of the clipped halves into one
+   registered sheet — the marks make it possible to align two sheets by hand, but the
+   artwork is not re-joined for the machine. A separate `print-cut` command outputs
+   artwork with three printable registration/alignment marks, but it does not send sensor
+   commands or calibrate a cutter. Tilings are capped at 4096 sheets.
 4. **G-code**: fixed modal constants, no feed/speed profiles by machine or material,
    no first/last pass, no power ramp, no Z/laser mode switch.
 5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
@@ -34,12 +38,13 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
 8. **Agent surface**: the CLI offers MCP stdio tools and legacy JSON-lines control, including
    serde-tagged engine commands; the CLI session stays headless. The desktop `--control`
-   socket now queues each request onto the UI thread and runs it against the engine behind
-   the visible canvas, so agents edit the open document (undoable, with the window
-   repainting). Requests are handled between frames, one at a time. The wider command set is
-   not wrapped in dedicated tools, the JSON channel has no fuzz corpus, and a request can
-   only be answered while the window is alive. (The document reader does have a
-   malformed-input no-panic corpus now.)
+   socket queues each request onto the UI thread and runs it against the engine behind the
+   visible canvas, so agents edit the open document (undoable, with the window
+   repainting). Requests are handled between frames, one at a time. `stencilcraft-cli mcp
+   --control PORT` bridges an MCP client to that socket, so the same tool names drive the
+   open window. The wider command set is not wrapped in dedicated tools, the JSON channel
+   has no fuzz corpus, and a request can only be answered while the window is alive. (The
+   document reader does have a malformed-input no-panic corpus now.)
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.

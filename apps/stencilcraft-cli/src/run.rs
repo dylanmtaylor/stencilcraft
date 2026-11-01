@@ -1,5 +1,5 @@
 //! `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]
-//!      [--tile-prefix PREFIX] --export OUT`
+//!      [--tile-prefix PREFIX] [--tile-marks] --export OUT`
 
 use super::pipeline::{self, PipelineError, Tiling};
 use stencilcraft_gcode::GcodeSettings;
@@ -13,6 +13,8 @@ pub struct RunRequest {
     /// `--tile-prefix`, wherever it appears on the command line: the tiling block
     /// itself may be introduced before or after it.
     pub tile_prefix: Option<String>,
+    /// `--tile-marks`: stamp registration marks on every sheet.
+    pub tile_marks: bool,
 }
 
 impl Default for RunRequest {
@@ -24,6 +26,7 @@ impl Default for RunRequest {
             export: None,
             overlap: 0.0,
             tile_prefix: None,
+            tile_marks: false,
         }
     }
 }
@@ -41,7 +44,8 @@ impl RunRequest {
                     .map(String::as_str)
                     .ok_or_else(|| PipelineError::User(format!("{flag} needs a value")))
             };
-            let advance = 2;
+            // Most flags take a value; `--tile-marks` and `--help` do not.
+            let mut advance = 2;
             match flag {
                 "--in" => req.input = Some(value()?.to_string()),
                 "--apply-kerf" => {
@@ -55,15 +59,24 @@ impl RunRequest {
                     // Reuse the block if `--overlap`/`--tile-prefix` already made one,
                     // so flags stay order-independent.
                     let overlap = req.overlap;
+                    let marks = req.tile_marks;
                     let tiling = req.tiling.get_or_insert_with(|| Tiling {
                         sheet_w: w,
                         sheet_h: h,
                         overlap,
                         prefix: String::new(),
+                        marks,
                     });
                     tiling.sheet_w = w;
                     tiling.sheet_h = h;
                     tiling.overlap = overlap;
+                }
+                "--tile-marks" => {
+                    req.tile_marks = true;
+                    if let Some(t) = req.tiling.as_mut() {
+                        t.marks = true;
+                    }
+                    advance = 1;
                 }
                 "--overlap" => {
                     let v = value()?;
@@ -80,7 +93,7 @@ impl RunRequest {
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
                     println!(
-                        "flags: --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX"
+                        "flags: --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
                     );
                     std::process::exit(0);
                 }
@@ -119,6 +132,7 @@ impl RunRequest {
                 Some(prefix) => prefix,
                 None => req.export.clone().unwrap_or_else(|| "tile".to_string()),
             };
+            t.marks |= req.tile_marks;
         }
         Ok(req)
     }
@@ -164,6 +178,31 @@ mod tests {
     fn unknown_flag_rejected_calmly() {
         let r = RunRequest::parse(&args(&["--in", "a", "--export", "b", "--what"]));
         assert!(matches!(r, Err(PipelineError::User(ref m)) if m.contains("--what")));
+    }
+
+    #[test]
+    fn tile_marks_is_a_standalone_flag() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a.stencilcraft",
+            "--tile-sheet",
+            "400x600",
+            "--tile-marks",
+            "--export",
+            "tiles/out",
+        ]))
+        .unwrap();
+        assert!(ok.tiling.expect("tiling present").marks);
+        let plain = RunRequest::parse(&args(&[
+            "--in",
+            "a.stencilcraft",
+            "--tile-sheet",
+            "400x600",
+            "--export",
+            "tiles/out",
+        ]))
+        .unwrap();
+        assert!(!plain.tiling.expect("tiling present").marks);
     }
 
     #[test]

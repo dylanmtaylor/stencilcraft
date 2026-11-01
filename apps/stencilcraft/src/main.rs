@@ -1726,7 +1726,14 @@ impl StencilApp {
             }
             TopMenuAction::ExportTiledSvg => {
                 if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    match stencilcraft_tiling::tile_document(&self.engine.doc, 300.0, 300.0, 10.0) {
+                    // Sheets carry registration marks: tiled jobs are assembled by hand.
+                    let options = stencilcraft_tiling::SheetOptions {
+                        sheet_w: 300.0,
+                        sheet_h: 300.0,
+                        overlap_mm: 10.0,
+                        marks: true,
+                    };
+                    match stencilcraft_tiling::tile_document_with(&self.engine.doc, &options) {
                         Ok(sheets) => {
                             let mut saved = 0;
                             for (i, sheet_doc) in sheets.iter().enumerate() {
@@ -1737,8 +1744,31 @@ impl StencilApp {
                                     saved += 1;
                                 }
                             }
-                            self.status =
-                                format!("exported {saved} tiled sheets to {}", dir.display());
+                            // One page showing every sheet, so the job can be checked
+                            // without opening the sheets one by one.
+                            let preview_path = dir.join("preview.svg");
+                            let preview = stencilcraft_svg::export_tile_preview(
+                                &sheets,
+                                &stencilcraft_svg::TilePreviewOptions::default(),
+                            )
+                            .and_then(|svg| {
+                                std::fs::write(&preview_path, svg).map_err(|e| {
+                                    stencilcraft_svg::SvgError::Write(format!(
+                                        "{}: {e}",
+                                        preview_path.display()
+                                    ))
+                                })
+                            });
+                            self.status = match preview {
+                                Ok(()) => format!(
+                                    "exported {saved} tiled sheets and preview.svg to {}",
+                                    dir.display()
+                                ),
+                                Err(e) => format!(
+                                    "exported {saved} tiled sheets to {} (preview failed: {e})",
+                                    dir.display()
+                                ),
+                            };
                         }
                         Err(e) => self.status = format!("tiling error: {e}"),
                     }

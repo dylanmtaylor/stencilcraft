@@ -2,16 +2,20 @@
 //!
 //! Subcommands:
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
+//! - `tile-preview --in FILE --sheet WxH --out PAGE.svg` — every sheet on one page
 //! - `import-svg --in FILE.svg --out FILE.stencilcraft` — import SVG into the native document format
-//! - `mcp` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md)
+//! - `mcp [--control PORT]` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md);
+//!   with `--control`, requests are relayed to the running desktop app
 //! - `make-starter --out FILE` — write the canonical starter document
 //! - `cut --in FILE [--media …] [--bbox] [--device PATH]` — machine cut prep
 //! - `help`
 
 mod cut;
+mod mcp_proxy;
 mod pipeline;
 mod print_cut;
 mod run;
+mod tile_preview;
 mod trace;
 
 use run::RunRequest;
@@ -23,10 +27,11 @@ fn main() -> Result<(), String> {
             let req = RunRequest::parse(&args[1..]).map_err(|e| e.to_string())?;
             run::execute(req)
         }
+        Some("tile-preview") => tile_preview::execute(&args[1..]),
         Some("import-svg") => import_svg_command(&args[1..]),
         Some("trace-image") => trace_image_command(&args[1..]),
         Some("print-cut") => print_cut_command(&args[1..]),
-        Some("mcp") => mcp_loop(),
+        Some("mcp") => mcp_command(&args[1..]),
         Some("cut") => {
             cut::execute(&args[1..])?;
             Ok(())
@@ -47,6 +52,41 @@ fn main() -> Result<(), String> {
         Some(other) => Err(format!(
             "unknown command: {other} (try `stencilcraft-cli help`)"
         )),
+    }
+}
+
+/// `mcp [--control PORT]`: headless session by default, relay to the desktop window
+/// with `--control`.
+fn mcp_command(args: &[String]) -> Result<(), String> {
+    let mut port: Option<u16> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args.get(i).map(String::as_str).unwrap_or("") {
+            "--control" => {
+                i += 1;
+                let value = args.get(i).ok_or("mcp: --control needs a port")?;
+                port = Some(
+                    value
+                        .trim()
+                        .parse()
+                        .map_err(|_| format!("mcp: --control {value}: expected a port"))?,
+                );
+            }
+            "-h" | "--help" => {
+                println!("usage: stencilcraft-cli mcp [--control PORT]");
+                println!("      Without --control the server owns a headless session.");
+                println!(
+                    "      With --control PORT every request is relayed to the running app's\n      control socket, so agents drive the document that is open in the window."
+                );
+                return Ok(());
+            }
+            other => return Err(format!("mcp: unknown argument {other}")),
+        }
+        i += 1;
+    }
+    match port {
+        Some(port) => mcp_proxy::run(port),
+        None => mcp_loop(),
     }
 }
 
@@ -200,12 +240,14 @@ fn print_help() {
     println!("stencilcraft-cli — StencilCraft headless tools");
     println!();
     println!("  run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]");
-    println!("      [--tile-prefix PREFIX] --export OUT");
+    println!("      [--tile-prefix PREFIX] [--tile-marks] --export OUT");
     println!("      Export is .svg, .dxf or .gcode; with --tile-sheet the tiles go");
-    println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).",);
+    println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).");
+    println!("      --tile-marks stamps registration brackets and overlap guides on each sheet.");
+    println!("  tile-preview --in FILE --sheet WxH --out PAGE.svg");
+    println!("      [--overlap MM] [--columns N] [--scale N] [--marks]");
+    println!("      Every sheet of the tiling on one framed page, for inspection before cutting.");
     println!("  import-svg --in FILE.svg --out FILE.stencilcraft");
-    println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
-    println!("  print-cut --in FILE.stencilcraft --out SHEET.svg");
     println!("      Import common SVG shapes/groups/transforms into the native format.");
     println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
     println!("      Trace dark raster silhouettes into closed cut contours at 96 dpi.");
@@ -213,7 +255,9 @@ fn print_help() {
     println!(
         "      Export artwork and three registration marks for a manually aligned print/cut workflow."
     );
-    println!("  mcp            MCP and legacy JSON-lines control on stdio (docs/mcp.md)");
+    println!("  mcp [--control PORT]");
+    println!("      MCP and legacy JSON-lines control on stdio (docs/mcp.md).");
+    println!("      With --control, requests drive the document open in the desktop app.");
     println!("  cut --in FILE [--media …] [--bbox] [--device PATH]");
     println!("      Machine sensor registration and automatic alignment are not implemented.");
     println!("      Encode + send to a cutting machine; dry-run transcript by default.");

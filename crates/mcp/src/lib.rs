@@ -274,9 +274,20 @@ impl Session {
                     .get("overlap")
                     .and_then(serde_json::Value::as_f64)
                     .unwrap_or(0.0);
-                let pieces =
-                    stencilcraft_tiling::tile_document(&self.engine.doc, sheet_w, sheet_h, overlap)
-                        .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                let marks = params
+                    .get("marks")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let pieces = stencilcraft_tiling::tile_document_with(
+                    &self.engine.doc,
+                    &stencilcraft_tiling::SheetOptions {
+                        sheet_w,
+                        sheet_h,
+                        overlap_mm: overlap,
+                        marks,
+                    },
+                )
+                .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 let count = pieces.len();
                 for (i, piece) in pieces.iter().enumerate() {
                     let tile_path = format!("{path}-{i:02}.svg");
@@ -286,6 +297,46 @@ impl Session {
                         .map_err(|e| ProtocolError::Bad(format!("{tile_path}: {e}")))?;
                 }
                 Ok(serde_json::json!({ "tiles": count }))
+            }
+            "tile.preview" => {
+                let path = str_param(params, "path")?;
+                let sheet_w = f64_param(params, "sheet_w")?;
+                let sheet_h = f64_param(params, "sheet_h")?;
+                let overlap = params
+                    .get("overlap")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(0.0);
+                let marks = params
+                    .get("marks")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(true);
+                let columns = params
+                    .get("columns")
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|n| usize::try_from(n).ok())
+                    .unwrap_or(stencilcraft_svg::TilePreviewOptions::default().columns);
+                let scale = params
+                    .get("scale")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(stencilcraft_svg::TilePreviewOptions::default().scale);
+                let pieces = stencilcraft_tiling::tile_document_with(
+                    &self.engine.doc,
+                    &stencilcraft_tiling::SheetOptions {
+                        sheet_w,
+                        sheet_h,
+                        overlap_mm: overlap,
+                        marks,
+                    },
+                )
+                .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                let text = stencilcraft_svg::export_tile_preview(
+                    &pieces,
+                    &stencilcraft_svg::TilePreviewOptions { columns, scale },
+                )
+                .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                std::fs::write(&path, text)
+                    .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
+                Ok(serde_json::json!({ "path": path, "tiles": pieces.len() }))
             }
             "command.execute" => {
                 let command: Command = serde_json::from_value(params.clone())
@@ -314,6 +365,7 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "export_dxf" => Some("export.dxf"),
         "export_gcode" => Some("export.gcode"),
         "tile_run" => Some("tile.run"),
+        "tile_preview" => Some("tile.preview"),
         "command_execute" => Some("command.execute"),
         _ => None,
     }
@@ -368,8 +420,14 @@ fn mcp_tools() -> Vec<serde_json::Value> {
         ),
         (
             "tile_run",
-            "Export tiled SVGs using a filename prefix and sheet dimensions in millimetres.",
-            json!({"path": path, "sheet_w": number, "sheet_h": number, "overlap": number}),
+            "Export tiled SVGs using a filename prefix and sheet dimensions in millimetres. Set marks to true to stamp registration marks on each sheet.",
+            json!({"path": path, "sheet_w": number, "sheet_h": number, "overlap": number, "marks": json!({"type": "boolean"})}),
+            json!(["path", "sheet_w", "sheet_h"]),
+        ),
+        (
+            "tile_preview",
+            "Write one SVG page showing every sheet of the tiling, each in a framed cell, so the whole job can be inspected before cutting.",
+            json!({"path": path, "sheet_w": number, "sheet_h": number, "overlap": number, "columns": json!({"type": "integer"}), "scale": number, "marks": json!({"type": "boolean"})}),
             json!(["path", "sheet_w", "sheet_h"]),
         ),
         (

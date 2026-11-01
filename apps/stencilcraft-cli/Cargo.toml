@@ -11,6 +11,7 @@ name = "stencilcraft-cli"
 path = "src/main.rs"
 
 [dependencies]
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 stencilcraft-doc = { workspace = true }

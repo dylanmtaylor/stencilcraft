@@ -29,12 +29,14 @@ impl ExportKind {
     }
 }
 
-/// Tile geometry, parsed from `WxH` with an independent overlap request.
+/// Tile geometry, parsed from `WxH` with an independent overlap request and an
+/// optional registration-mark stamp.
 pub struct Tiling {
     pub sheet_w: f64,
     pub sheet_h: f64,
     pub overlap: f64,
     pub prefix: String,
+    pub marks: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -77,9 +79,14 @@ pub fn run_pipeline(
         )]);
     };
 
-    let pieces =
-        stencilcraft_tiling::tile_document(working, tiling.sheet_w, tiling.sheet_h, tiling.overlap)
-            .map_err(|e| PipelineError::User(e.to_string()))?;
+    let options = stencilcraft_tiling::SheetOptions {
+        sheet_w: tiling.sheet_w,
+        sheet_h: tiling.sheet_h,
+        overlap_mm: tiling.overlap,
+        marks: tiling.marks,
+    };
+    let pieces = stencilcraft_tiling::tile_document_with(working, &options)
+        .map_err(|e| PipelineError::User(e.to_string()))?;
     let mut reports = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let tile_name = format!("{}-{i:02}.svg", tiling.prefix);
@@ -196,6 +203,7 @@ mod tests {
             sheet_h: 300.0,
             overlap: 10.0,
             prefix: dir.join("t").to_string_lossy().into_owned(),
+            marks: false,
         };
         let reports = run_pipeline(
             &tk::big_diagonal(),

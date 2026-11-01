@@ -89,6 +89,163 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
     Ok(svg)
 }
 
+/// How to lay tiled sheets out on one preview page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TilePreviewOptions {
+    /// Cells per row; clamped to the number of sheets.
+    pub columns: usize,
+    /// Page millimetres per sheet millimetre. 0.25 is a comfortable overview.
+    pub scale: f64,
+}
+
+impl Default for TilePreviewOptions {
+    fn default() -> Self {
+        Self {
+            columns: 3,
+            scale: 0.25,
+        }
+    }
+}
+
+/// Space between preview cells and around the page, millimetres.
+pub const TILE_PREVIEW_GAP_MM: f64 = 6.0;
+
+/// Largest preview page this will build, millimetres per side.
+pub const TILE_PREVIEW_MAX_MM: f64 = 100_000.0;
+
+/// Render every sheet of a tiling onto one preview page.
+///
+/// Unlike a cut export, a preview is for looking at: paths are stroked, not filled
+/// (cut lines red, engrave/marks blue), and each sheet sits in a framed cell with a
+/// `sheet N of M` label so it is obvious where one sheet ends and the next begins.
+/// Cells follow the tiling order (first sheet top-left of the board) but rows are
+/// placed bottom-up and sheet content is flipped, because SVG y grows downwards while
+/// documents are y-up: the preview reads the way the assembled board does.
+pub fn export_tile_preview(
+    pieces: &[Document],
+    options: &TilePreviewOptions,
+) -> Result<String, SvgError> {
+    if pieces.is_empty() {
+        return Err(SvgError::Model(
+            "preview: the tiling produced no sheets to show".to_string(),
+        ));
+    }
+    if options.columns == 0 {
+        return Err(SvgError::Model(
+            "preview: columns must be at least 1".to_string(),
+        ));
+    }
+    if !options.scale.is_finite() || options.scale <= 0.0 {
+        return Err(SvgError::Model(format!(
+            "preview: scale {} is not a positive number",
+            options.scale
+        )));
+    }
+    let columns = options.columns.min(pieces.len());
+    let rows = pieces.len().div_ceil(columns);
+    let mut cell_w: f64 = 0.0;
+    let mut cell_h: f64 = 0.0;
+    for piece in pieces {
+        let (w, h) = (piece.board.width_mm, piece.board.height_mm);
+        if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+            return Err(SvgError::Model(format!(
+                "preview: sheet {w}×{h} mm is not a usable size"
+            )));
+        }
+        cell_w = cell_w.max(w * options.scale);
+        cell_h = cell_h.max(h * options.scale);
+    }
+    let gap = TILE_PREVIEW_GAP_MM;
+    let page_w = columns as f64 * cell_w + (columns as f64 + 1.0) * gap;
+    let page_h = rows as f64 * cell_h + (rows as f64 + 1.0) * gap;
+    if !(page_w.is_finite() && page_h.is_finite())
+        || page_w > TILE_PREVIEW_MAX_MM
+        || page_h > TILE_PREVIEW_MAX_MM
+    {
+        return Err(SvgError::Model(format!(
+            "preview: a {page_w:.0}×{page_h:.0} mm page is too big; use a smaller scale or fewer sheets"
+        )));
+    }
+
+    let mut svg = String::with_capacity(2048 + pieces.len() * 512);
+    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let _ = writeln!(
+        svg,
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_w:.3}mm\" height=\"{page_h:.3}mm\" viewBox=\"0 0 {page_w:.3} {page_h:.3}\">"
+    );
+    let _ = writeln!(
+        svg,
+        "  <title>StencilCraft tiling preview: {} sheets, {} × {} cells</title>",
+        pieces.len(),
+        columns,
+        rows
+    );
+    // A preview shows outlines, not filled artwork: fill would hide the very detail
+    // the preview exists to show. Colours follow cutting-software convention.
+    svg.push_str("  <style>\n");
+    svg.push_str("    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n");
+    svg.push_str("    .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n");
+    svg.push_str("    .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n");
+    svg.push_str(
+        "    .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }\n",
+    );
+    svg.push_str("  </style>\n");
+    for (index, piece) in pieces.iter().enumerate() {
+        let col = index % columns;
+        let row = index / columns;
+        let x = gap + col as f64 * (cell_w + gap);
+        // SVG y grows downwards while documents are y-up: the tiling's first row is
+        // the bottom of the board, so it belongs at the bottom of the page.
+        let y = gap + (rows - 1 - row) as f64 * (cell_h + gap);
+        let cell_height = piece.board.height_mm * options.scale;
+        let _ = writeln!(
+            svg,
+            "  <g class=\"sheet\" data-sheet=\"{}\" data-size=\"{:.1}x{:.1}\">",
+            index, piece.board.width_mm, piece.board.height_mm
+        );
+        let _ = writeln!(
+            svg,
+            "    <text class=\"preview-label\" x=\"{x:.3}\" y=\"{:.3}\">sheet {} of {} · {:.0}×{:.0} mm</text>",
+            y - 1.6,
+            index + 1,
+            pieces.len(),
+            piece.board.width_mm,
+            piece.board.height_mm
+        );
+        let _ = writeln!(
+            svg,
+            "    <rect class=\"preview-frame\" x=\"{x:.3}\" y=\"{y:.3}\" width=\"{:.3}\" height=\"{cell_height:.3}\"/>",
+            piece.board.width_mm * options.scale
+        );
+        // Flip the sheet's y-up millimetres into the page's y-down space, so each cell
+        // reads the same way the sheet does on the mat.
+        let _ = writeln!(
+            svg,
+            "    <g transform=\"translate({x:.3} {:.3}) scale({:.4} {:.4})\">",
+            y + cell_height,
+            options.scale,
+            -options.scale
+        );
+        for layer in &piece.layers {
+            if !layer.visible {
+                continue;
+            }
+            for shape in &layer.shapes {
+                let d = path_to_svg_d(&shape.path)?;
+                let _ = writeln!(
+                    svg,
+                    "      <path class=\"{}\" d=\"{}\"/>",
+                    class_for(shape.style),
+                    d
+                );
+            }
+        }
+        svg.push_str("    </g>\n  </g>\n");
+    }
+    svg.push_str("</svg>\n");
+    Ok(svg)
+}
+
 /// Export a physical-size Print & Cut SVG sheet with three high-contrast
 /// registration marks (top-left origin square, top-right and bottom-left L-corners)
 /// around the document board.
@@ -1735,6 +1892,121 @@ mod tests {
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(svg.contains("class=\"stencilcraft-cut\""));
+    }
+
+    fn preview_piece(w: f64, h: f64, style: CutStyle) -> Document {
+        let mut doc = Document {
+            board: stencilcraft_doc::Board {
+                width_mm: w,
+                height_mm: h,
+            },
+            ..Document::default()
+        };
+        doc.layers.clear();
+        doc.layers.push(stencilcraft_doc::Layer::new("cut", style));
+        doc.push_shape(0, rect(0.0, 0.0, w, h), style).unwrap();
+        doc
+    }
+
+    #[test]
+    fn tile_preview_pages_every_sheet_with_stroked_frames() {
+        let pieces = vec![
+            preview_piece(60.0, 80.0, CutStyle::Cut),
+            preview_piece(60.0, 80.0, CutStyle::Engrave),
+        ];
+        let svg = export_tile_preview(
+            &pieces,
+            &TilePreviewOptions {
+                columns: 2,
+                scale: 0.5,
+            },
+        )
+        .unwrap();
+        // Side by side: 2 cells of 30 × 40 mm plus three 6 mm gaps across, two 6 mm
+        // gaps down.
+        assert!(svg.contains("width=\"78.000mm\""), "{svg}");
+        assert!(svg.contains("height=\"52.000mm\""), "{svg}");
+        assert_eq!(svg.matches("class=\"sheet\"").count(), 2, "{svg}");
+        assert_eq!(svg.matches("class=\"preview-frame\"").count(), 2, "{svg}");
+        // One cut sheet and one engrave sheet, each drawn with its own class.
+        assert_eq!(svg.matches("class=\"stencilcraft-cut\"").count(), 1);
+        assert_eq!(svg.matches("class=\"stencilcraft-engrave\"").count(), 1);
+        // Outlines, not fills: the whole point of the preview is to show the detail.
+        assert!(svg.contains(".preview-frame { fill: none;"), "{svg}");
+        assert!(svg.contains(".stencilcraft-cut { fill: none;"), "{svg}");
+        // Content is flipped into the page's y-down space and anchored to the cell's
+        // bottom edge: 6 mm gap + 40 mm cell = 46 mm.
+        assert!(
+            svg.contains("translate(6.000 46.000) scale(0.5000 -0.5000)"),
+            "{svg}"
+        );
+        assert!(svg.contains("data-sheet=\"1\""), "{svg}");
+    }
+
+    #[test]
+    fn tile_preview_labels_each_sheet() {
+        let pieces = vec![
+            preview_piece(60.0, 80.0, CutStyle::Cut),
+            preview_piece(60.0, 80.0, CutStyle::Cut),
+        ];
+        let svg = export_tile_preview(
+            &pieces,
+            &TilePreviewOptions {
+                columns: 1,
+                scale: 0.5,
+            },
+        )
+        .unwrap();
+        assert!(svg.contains(">sheet 1 of 2 · 60×80 mm</text>"), "{svg}");
+        assert!(svg.contains(">sheet 2 of 2 · 60×80 mm</text>"), "{svg}");
+        // Column-major tiling stacks the first sheet at the bottom of the page.
+        let first = svg.find("data-sheet=\"0\"").unwrap();
+        let second = svg.find("data-sheet=\"1\"").unwrap();
+        let first_y = &svg[first..second];
+        assert!(
+            first_y.contains("y=\"52.000\""),
+            "sheet 0 should sit below sheet 1: {svg}"
+        );
+    }
+
+    #[test]
+    fn tile_preview_refuses_impossible_pages() {
+        let pieces = vec![preview_piece(60.0, 80.0, CutStyle::Cut)];
+        assert!(matches!(
+            export_tile_preview(&[], &TilePreviewOptions::default()),
+            Err(SvgError::Model(_))
+        ));
+        assert!(matches!(
+            export_tile_preview(
+                &pieces,
+                &TilePreviewOptions {
+                    columns: 0,
+                    scale: 1.0
+                }
+            ),
+            Err(SvgError::Model(_))
+        ));
+        assert!(matches!(
+            export_tile_preview(
+                &pieces,
+                &TilePreviewOptions {
+                    columns: 1,
+                    scale: 0.0
+                }
+            ),
+            Err(SvgError::Model(_))
+        ));
+        let huge = vec![preview_piece(200_000.0, 200_000.0, CutStyle::Cut)];
+        assert!(matches!(
+            export_tile_preview(
+                &huge,
+                &TilePreviewOptions {
+                    columns: 1,
+                    scale: 1.0
+                }
+            ),
+            Err(SvgError::Model(_))
+        ));
     }
 
     #[test]

@@ -8,6 +8,9 @@
 //! pieces meet on the machine. Alignment marks are still to come (`docs/gaps.md` 3).
 
 mod clip;
+mod marks;
+
+pub use marks::{MARKS_LAYER, add_marks};
 
 use kurbo::Rect;
 use stencilcraft_doc::Document;
@@ -140,6 +143,18 @@ fn transform_path(path: &kurbo::BezPath, affine: kurbo::Affine) -> kurbo::BezPat
     out
 }
 
+/// A tiling request: sheet size, shared overlap and whether each sheet should carry
+/// registration marks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SheetOptions {
+    pub sheet_w: f64,
+    pub sheet_h: f64,
+    pub overlap_mm: f64,
+    /// Stamp the three corner brackets and the neighbour-edge guide ticks on every
+    /// sheet (`marks`).
+    pub marks: bool,
+}
+
 /// Tile a whole document: one output document per physical sheet. Each output
 /// keeps the source kerf settings and contains the visible geometry that lies on
 /// the tile, clipped to the tile rectangle and translated so the tile origin is the
@@ -151,11 +166,31 @@ pub fn tile_document(
     sheet_h: f64,
     overlap_mm: f64,
 ) -> Result<Vec<Document>, TilingError> {
+    tile_document_with(
+        doc,
+        &SheetOptions {
+            sheet_w,
+            sheet_h,
+            overlap_mm,
+            marks: false,
+        },
+    )
+}
+
+/// `tile_document` with explicit options: the same tiling, optionally with
+/// registration marks on each sheet so the assembled sheets can be lined up.
+pub fn tile_document_with(
+    doc: &Document,
+    options: &SheetOptions,
+) -> Result<Vec<Document>, TilingError> {
     if doc.shape_count() == 0 {
         return Err(TilingError::Model(
             "tiling: nothing to tile, document has no shapes".to_string(),
         ));
     }
+    let sheet_w = options.sheet_w;
+    let sheet_h = options.sheet_h;
+    let overlap_mm = options.overlap_mm;
     let tiles = layout(
         doc.board.width_mm,
         doc.board.height_mm,
@@ -217,6 +252,9 @@ pub fn tile_document(
         // than sending an empty cut job to the machine.
         if piece.layers.is_empty() {
             continue;
+        }
+        if options.marks {
+            marks::add_marks(&mut piece, &tile, overlap_mm)?;
         }
         out.push(piece);
     }
@@ -396,6 +434,196 @@ mod tests {
                 piece.board.height_mm
             );
         }
+    }
+
+    /// Is every sampled point of the board inside at least one sheet?
+    fn board_is_covered(tiles: &[Tile], board_w: f64, board_h: f64) -> bool {
+        for yi in 0..=8 {
+            for xi in 0..=8 {
+                let x = board_w * xi as f64 / 8.0;
+                let y = board_h * yi as f64 / 8.0;
+                let hit = tiles.iter().any(|tile| {
+                    x >= tile.rect.x0 - 1e-9
+                        && x <= tile.rect.x1 + 1e-9
+                        && y >= tile.rect.y0 - 1e-9
+                        && y <= tile.rect.y1 + 1e-9
+                });
+                if !hit {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Small deterministic generator: the crate has no rand dependency, and a fixed
+    /// seed keeps a failure reproducible.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn next_in(&mut self, low: f64, high: f64) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let unit = (self.0 >> 11) as f64 / (1u64 << 53) as f64;
+            low + unit * (high - low)
+        }
+    }
+
+    #[test]
+    fn every_tiling_covers_the_board_and_stays_inside_it() {
+        let mut rng = Lcg(0x5EED_1234_ABCD_0001);
+        let boards = [
+            (100.0, 100.0),
+            (300.0, 200.0),
+            (511.0, 397.0),
+            (1000.0, 50.0),
+        ];
+        let sheets: [(f64, f64); 3] = [(100.0, 100.0), (150.0, 90.0), (300.0, 300.0)];
+        let mut checked = 0;
+        for (board_w, board_h) in boards {
+            for (sheet_w, sheet_h) in sheets {
+                for overlap in [0.0, 5.0, 12.0] {
+                    if overlap >= sheet_w.min(sheet_h) {
+                        continue;
+                    }
+                    checked += check_tiling(board_w, board_h, sheet_w, sheet_h, overlap);
+                }
+            }
+        }
+        // Plus awkward, random-but-seeded sizes, including overlaps close to the sheet.
+        for _ in 0..24 {
+            let sheet_w = rng.next_in(40.0, 320.0);
+            let sheet_h = rng.next_in(40.0, 320.0);
+            let overlap = rng.next_in(0.0, sheet_w.min(sheet_h) * 0.95);
+            let board_w = rng.next_in(1.0, 1400.0);
+            let board_h = rng.next_in(1.0, 1400.0);
+            checked += check_tiling(board_w, board_h, sheet_w, sheet_h, overlap);
+        }
+        assert!(checked > 30, "the sweep actually ran: {checked}");
+    }
+
+    /// Asserts one tiling's invariants and returns how many valid tilings it saw
+    /// (0 for the intentionally refused ones, so the caller can count coverage).
+    fn check_tiling(board_w: f64, board_h: f64, sheet_w: f64, sheet_h: f64, overlap: f64) -> usize {
+        let tiles = match layout(board_w, board_h, sheet_w, sheet_h, overlap) {
+            Ok(tiles) => tiles,
+            Err(TilingError::TooManyTiles { .. }) => return 0,
+            Err(e) => panic!(
+                "unexpected tiling error for {board_w}×{board_h} on {sheet_w}×{sheet_h}+{overlap}: {e}"
+            ),
+        };
+        assert!(!tiles.is_empty(), "a tiling always has at least one sheet");
+        for tile in &tiles {
+            let r = tile.rect;
+            assert!(r.width() > 0.0 && r.height() > 0.0, "empty sheet: {r:?}");
+            assert!(r.x0 >= -1e-9 && r.y0 >= -1e-9, "sheet off the board: {r:?}");
+            assert!(
+                r.x1 <= board_w + 1e-9 && r.y1 <= board_h + 1e-9,
+                "sheet runs past the board: {r:?} on {board_w}×{board_h}"
+            );
+            assert!(
+                r.width() <= sheet_w + 1e-9 && r.height() <= sheet_h + 1e-9,
+                "sheet bigger than the material: {r:?} on {sheet_w}×{sheet_h}"
+            );
+        }
+        assert!(
+            board_is_covered(&tiles, board_w, board_h),
+            "uncovered board point: {board_w}×{board_h} on {sheet_w}×{sheet_h}+{overlap}"
+        );
+        1
+    }
+
+    #[test]
+    fn tiled_geometry_never_leaves_its_sheet() {
+        use stencilcraft_doc::Layer as DocLayer;
+        let mut doc = Document {
+            board: Board {
+                width_mm: 420.0,
+                height_mm: 310.0,
+            },
+            kerf: stencilcraft_doc::KerfSettings::default(),
+            layers: vec![DocLayer::new("cut", CutStyle::Cut)],
+            next_shape_id: 1,
+        };
+        // A rectangle around the whole board, a diagonal and a curve: all three cross
+        // sheet edges at some point in this sweep.
+        let mut border = kurbo::BezPath::new();
+        border.move_to(Point::new(3.0, 3.0));
+        border.line_to(Point::new(417.0, 3.0));
+        border.line_to(Point::new(417.0, 307.0));
+        border.line_to(Point::new(3.0, 307.0));
+        border.close_path();
+        doc.push_shape(0, border, CutStyle::Cut).unwrap();
+        let mut diagonal = kurbo::BezPath::new();
+        diagonal.move_to(Point::new(0.0, 0.0));
+        diagonal.line_to(Point::new(420.0, 310.0));
+        doc.push_shape(0, diagonal, CutStyle::Cut).unwrap();
+        let mut curve = kurbo::BezPath::new();
+        curve.move_to(Point::new(30.0, 300.0));
+        curve.curve_to(
+            Point::new(150.0, 20.0),
+            Point::new(280.0, 330.0),
+            Point::new(400.0, 40.0),
+        );
+        doc.push_shape(0, curve, CutStyle::Cut).unwrap();
+
+        for (sheet_w, sheet_h, overlap) in [
+            (300.0, 300.0, 0.0),
+            (200.0, 150.0, 10.0),
+            (90.0, 120.0, 30.0),
+        ] {
+            let pieces = tile_document(&doc, sheet_w, sheet_h, overlap).unwrap();
+            assert!(!pieces.is_empty());
+            for piece in &pieces {
+                let (w, h) = (piece.board.width_mm, piece.board.height_mm);
+                for (_, shape) in piece.shapes() {
+                    let b = shape.bounds().unwrap();
+                    assert!(
+                        b.x0 >= -1e-6 && b.y0 >= -1e-6 && b.x1 <= w + 1e-6 && b.y1 <= h + 1e-6,
+                        "geometry {b:?} escapes its {w}×{h} sheet"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn marks_option_stamps_every_sheet() {
+        let doc = cross_doc(500.0, 400.0);
+        let options = SheetOptions {
+            sheet_w: 300.0,
+            sheet_h: 300.0,
+            overlap_mm: 10.0,
+            marks: true,
+        };
+        let pieces = tile_document_with(&doc, &options).unwrap();
+        assert_eq!(pieces.len(), 3);
+        for piece in &pieces {
+            let marks = piece
+                .layers
+                .iter()
+                .find(|l| l.name == MARKS_LAYER)
+                .expect("marks layer on every sheet");
+            assert_eq!(marks.kind, CutStyle::Engrave);
+            assert!(!marks.shapes.is_empty());
+            for shape in &marks.shapes {
+                let b = shape.bounds().unwrap();
+                assert!(b.x0 >= -1e-9 && b.y0 >= -1e-9, "mark off the sheet: {b:?}");
+                assert!(
+                    b.x1 <= piece.board.width_mm + 1e-9 && b.y1 <= piece.board.height_mm + 1e-9,
+                    "mark off the sheet: {b:?}"
+                );
+            }
+        }
+        // Marks are opt-in: the default tiling leaves the sheets bare.
+        let plain = tile_document(&doc, 300.0, 300.0, 10.0).unwrap();
+        assert!(
+            !plain
+                .iter()
+                .any(|p| p.layers.iter().any(|l| l.name == MARKS_LAYER))
+        );
     }
 
     #[test]

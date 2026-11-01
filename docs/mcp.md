@@ -14,13 +14,19 @@ The stdio server's session is headless. The desktop app's `--control` socket is 
 queues each request onto the UI thread and handles it against the engine behind the visible
 canvas, so `doc.summary` reports the open document, edits are undoable in the app, and the
 window repaints. Requests are answered between frames, and only while the window is running.
-File paths refer to the server's filesystem; tools can read and write files accessible to the
-process. The control socket listens on `127.0.0.1` only, but it has no authentication: keep it
+`stencilcraft-cli mcp --control 7979` runs the same server as a bridge: tool calls are
+forwarded to the app's `--control` socket instead of a private headless session, so an agent
+opening `stencilcraft-cli mcp --control …` in an MCP client edits the document the user can
+see. File paths refer to the server's filesystem; tools can read and write files accessible
+to the process. The control socket listens on `127.0.0.1` only, but it has no authentication: keep it
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, and `command_execute`. Their arguments correspond
-to the legacy method parameters below. For example, `command_execute` accepts
+`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, and `command_execute`. Their
+arguments correspond to the legacy method parameters below. `tile_run` takes an optional
+`marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
+`tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
+`marks`) so a client can look at the sheets before anything is cut. For example, `command_execute` accepts
 `{"command":"shape.add-rect","params":{"x":0,"y":0,"width":5,"height":5}}`;
 see `crates/engine/src/lib.rs` for the complete serde-tagged command set. Undo and redo
 accept `{"command":"edit.undo"}` and `{"command":"edit.redo"}`.
@@ -61,6 +67,7 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `export.svg` | `{path}` | `{path}` |
 | `export.dxf` | `{path}` | `{path}` |
 | `export.gcode` | `{path}` | `{path}` |
-| `tile.run` | `{path, sheet_w, sheet_h, overlap}` | `{tiles: n}` |
+| `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
+| `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 

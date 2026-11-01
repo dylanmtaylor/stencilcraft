@@ -7,7 +7,7 @@
 // helpers are not #[test] annotated). This file never ships.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::ok_expect)]
 
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
@@ -130,6 +130,170 @@ fn run_tiles_the_poster_into_sheets() {
         let p = std::path::PathBuf::from(format!("{base_str}{suffix}"));
         assert!(p.is_file(), "tile file {} exists", p.display());
     }
+}
+
+#[test]
+fn mcp_control_proxy_relays_to_the_desktop_socket() {
+    use std::net::TcpListener;
+
+    // Stand in for the desktop app: answer each request line with a JSON-RPC result
+    // carrying the same id, and ignore the connection a notification opens.
+    let listener = TcpListener::bind("127.0.0.1:0").ok().expect("bind a port");
+    let port = listener.local_addr().ok().expect("port").port();
+    let server = std::thread::spawn(move || {
+        let mut seen: Vec<String> = Vec::new();
+        for _ in 0..3 {
+            let Ok((stream, _)) = listener.accept() else {
+                return seen;
+            };
+            let mut reader = std::io::BufReader::new(stream.try_clone().expect("clone"));
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_err() {
+                return seen;
+            }
+            let value: serde_json::Value =
+                serde_json::from_str(line.trim()).unwrap_or(serde_json::Value::Null);
+            seen.push(line.trim().to_string());
+            let mut out = stream;
+            if let Some(id) = value.get("id") {
+                let reply = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": { "proxied": true },
+                });
+                let _ = writeln!(out, "{reply}");
+            }
+        }
+        seen
+    });
+
+    let mut child = bin()
+        .args(["mcp", "--control", &port.to_string()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()
+        .expect("proxy starts");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        for line in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        ] {
+            writeln!(stdin, "{line}").ok().expect("write request");
+        }
+    }
+    let out = child.wait_with_output().ok().expect("proxy exits");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    expect_exit0(&out, &stdout);
+    let replies: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(replies.len(), 2, "one reply per request: {stdout}");
+    assert!(replies[0].contains("\"id\":1"), "{stdout}");
+    assert!(replies[0].contains("\"proxied\":true"), "{stdout}");
+    assert!(replies[1].contains("\"id\":2"), "{stdout}");
+    let seen = server.join().ok().expect("server thread");
+    assert_eq!(seen.len(), 3, "all three lines were relayed");
+    assert!(seen[1].contains("notifications/initialized"), "{seen:?}");
+}
+
+#[test]
+fn mcp_control_proxy_reports_a_dead_socket() {
+    // Nothing is listening on this port: a request must come back as an error rather
+    // than leaving the client waiting.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .expect("bind");
+    let port = listener.local_addr().ok().expect("port").port();
+    drop(listener);
+    let mut child = bin()
+        .args(["mcp", "--control", &port.to_string()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .ok()
+        .expect("proxy starts");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        writeln!(stdin, r#"{{"jsonrpc":"2.0","id":5,"method":"ping"}}"#)
+            .ok()
+            .expect("write");
+    }
+    let out = child.wait_with_output().ok().expect("proxy exits");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    expect_exit0(&out, &stdout);
+    assert!(
+        stdout.contains("\"error\"") && stdout.contains("not reachable"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("-32000"), "{stdout}");
+}
+
+#[test]
+fn run_tile_marks_are_engraved_on_each_sheet() {
+    let dir = fresh_out_dir();
+    let base = dir.join("marked");
+    let mut cmd = bin();
+    cmd.args([
+        "run",
+        "--in",
+        &example("poster.stencilcraft"),
+        "--tile-sheet",
+        "400x600",
+        "--overlap",
+        "10",
+        "--tile-marks",
+        "--export",
+        &base.to_string_lossy(),
+    ]);
+    let out = cmd.output().ok().expect("child spawns");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    expect_exit0(&out, &stdout);
+    let sheet = std::path::PathBuf::from(format!("{}-00.svg", base.to_string_lossy()));
+    let svg = std::fs::read_to_string(&sheet)
+        .ok()
+        .expect("first sheet exists");
+    assert!(
+        svg.contains("stencilcraft-engrave"),
+        "marks are engraved, not cut: {svg}"
+    );
+}
+
+#[test]
+fn tile_preview_puts_every_sheet_on_one_page() {
+    let dir = fresh_out_dir();
+    let page = dir.join("page.svg");
+    let mut cmd = bin();
+    cmd.args([
+        "tile-preview",
+        "--in",
+        &example("poster.stencilcraft"),
+        "--sheet",
+        "400x600",
+        "--overlap",
+        "10",
+        "--columns",
+        "2",
+        "--scale",
+        "0.5",
+        "--marks",
+        "--out",
+        &page.to_string_lossy(),
+    ]);
+    let out = cmd.output().ok().expect("child spawns");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    expect_exit0(&out, &stdout);
+    assert!(stdout.contains("previewed 2 sheets"), "{stdout}");
+    let svg = std::fs::read_to_string(&page)
+        .ok()
+        .expect("preview written");
+    assert!(svg.contains("stencilcraft-cut"), "artwork is shown");
+    assert!(
+        svg.contains("stencilcraft-engrave"),
+        "frames and marks are shown"
+    );
 }
 
 #[test]

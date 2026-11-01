@@ -131,6 +131,10 @@ Register the MCP server with Claude Code:
 claude mcp add stencilcraft -- /path/to/stencilcraft-cli mcp
 ```
 
+To drive the window that is already open, start the app with `--control 7979` and point
+the same server at it; every tool then runs against the document on screen
+(`mcp --control 7979`).
+
 The full method list and the equivalent MCP tools are in [`docs/mcp.md`](docs/mcp.md).
 
 ## Status
@@ -150,7 +154,7 @@ real-hardware transport is the next step).
 - SVG features beyond common paths/shapes/groups/transforms/styles (advanced CSS,
   external `<use>`, text conversion, clipping/masks/filters);
 - drawing tools (pen, node editing) and selection refinements (box/lasso now exist, but are basic);
-- bridge generation so counters stay attached, plus overlap merge and alignment marks for tiled sheets; print-and-cut has printable marks but no automatic sensor alignment;
+- bridge generation so counters stay attached, plus overlap merge of tiled sheets (registration and overlap marks are stamped, and `tile-preview` shows the whole tiling on one labelled page); print-and-cut has printable marks but no automatic sensor alignment;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).
 
 **Where we're going:** next is broader SVG import (CSS, `<use>`, text conversion,

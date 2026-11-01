@@ -89,6 +89,19 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-01 — Cut profiles and canvas auto-fit. G-code export takes feed, cut and
+  engrave power, repeated passes with an optional power ramp, and the `M4`/`M3` mode
+  switch; rapids are emitted with the beam off (they used to travel with the laser on),
+  and closed contours return to their start. DXF layers now carry operation colours
+  (red cut, blue engrave, negative index for a hidden layer). Changing the board size
+  re-frames the canvas instead of leaving the old zoom/pan pointing at the previous
+  sheet.
+
+- 2026-11-01 — Tile alignment marks (corner brackets plus overlap guides) and
+  `tile-preview`/`tile.preview`, which renders every sheet on one labelled page with
+  cut lines red and engraving blue; `mcp --control PORT` bridges MCP clients to the
+  open window.
+
 - 2026-11-01 — Tiling clips geometry to each sheet instead of copying whole shapes (empty
   sheets are skipped, tilings capped at 4096 sheets); kerf decides hole vs solid by nesting
   depth; `--tile-prefix` is honoured; the desktop `--control` socket now runs requests against

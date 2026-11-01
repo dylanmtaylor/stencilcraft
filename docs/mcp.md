@@ -26,7 +26,11 @@ The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `exp
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
-`marks`) so a client can look at the sheets before anything is cut. For example, `command_execute` accepts
+`marks`) so a client can look at the sheets before anything is cut. `export_gcode` takes
+the cut profile: `feed` (mm/min), `power` and `engrave_power` (0–1000), `passes` (1–10),
+`ramp` (power climbs to the last pass) and `mode` (`dynamic` for `M4`, `constant` for
+`M3`). Unset knobs keep the documented defaults; out-of-range values come back as a normal
+tool error naming the knob. For example, `command_execute` accepts
 `{"command":"shape.add-rect","params":{"x":0,"y":0,"width":5,"height":5}}`;
 see `crates/engine/src/lib.rs` for the complete serde-tagged command set. Undo and redo
 accept `{"command":"edit.undo"}` and `{"command":"edit.redo"}`.
@@ -66,7 +70,7 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `kerf.apply` | `{width_mm}` | `{width_mm}` |
 | `export.svg` | `{path}` | `{path}` |
 | `export.dxf` | `{path}` | `{path}` |
-| `export.gcode` | `{path}` | `{path}` |
+| `export.gcode` | `{path, feed?, power?, engrave_power?, passes?, ramp?, mode?}` | `{path}` |
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |

@@ -3,6 +3,10 @@
 //! Coordinates are model-space millimetres; `$INSUNITS` = 4 (millimetres) so
 //! readers that respect AutoCAD units land at true size either way. Curves are
 //! flattened — the DXF subset here has no arc/spline entities (`docs/gaps.md` 5).
+//! Each layer carries a colour index so CAM tools that key operations off layer
+//! colour (cut vs score) read the file the way it was meant: cut red, engrave blue.
+//! A hidden layer is written with a negative colour index, the DXF way of saying
+//! "layer off".
 //! Group codes one per line, values one per line, exactly as the DXF reference's
 //! ASCII layout.
 
@@ -54,7 +58,15 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
         pair(&mut out, 0, "LAYER")?;
         pair(&mut out, 2, &layer_name(&layer.name))?;
         pair(&mut out, 70, "0")?;
-        pair(&mut out, 62, if layer.visible { "7" } else { "8" })?;
+        // Colour index: 1 red for cut, 5 blue for engrave. Negative means the layer
+        // is off, which is how a hidden document layer should arrive.
+        let aci = layer_color(layer.kind);
+        let value = if layer.visible {
+            aci.to_string()
+        } else {
+            format!("-{aci}")
+        };
+        pair(&mut out, 62, &value)?;
         pair(&mut out, 6, "CONTINUOUS")?;
     }
     pair(&mut out, 0, "ENDTAB")?;
@@ -76,6 +88,15 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
     pair(&mut out, 0, "ENDSEC")?;
     pair(&mut out, 0, "EOF")?;
     Ok(out)
+}
+
+/// AutoCAD colour index for an operation: red cuts, blue scores. Distinct colours
+/// let a CAM tool sort operations without a convention document.
+fn layer_color(kind: CutStyle) -> i32 {
+    match kind {
+        CutStyle::Cut => 1,
+        CutStyle::Engrave => 5,
+    }
 }
 
 /// DXF layer names: uppercase, ASCII, no spaces per common practice, prefix-stamped
@@ -165,6 +186,20 @@ mod tests {
         assert!(dxf.contains("LWPOLYLINE"));
         assert!(dxf.contains("\n70\n1\n"), "closed flag: {dxf}");
         assert!(dxf.contains("STENCILCRAFT-CUT"));
+    }
+
+    #[test]
+    fn layers_carry_operation_colours() {
+        let mut doc = Document::default();
+        doc.layers
+            .push(stencilcraft_doc::Layer::new("score", CutStyle::Engrave));
+        doc.layers[1].visible = false;
+        let dxf = export(&doc).unwrap();
+        // Layer table: red cut layer, then the hidden engrave layer written negative.
+        assert!(dxf.contains("STENCILCRAFT-CUT\n70\n0\n62\n1\n"), "{dxf}");
+        assert!(dxf.contains("STENCILCRAFT-SCORE\n70\n0\n62\n-5\n"), "{dxf}");
+        assert_eq!(layer_color(CutStyle::Cut), 1);
+        assert_eq!(layer_color(CutStyle::Engrave), 5);
     }
 
     #[test]

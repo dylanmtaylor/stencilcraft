@@ -15,6 +15,8 @@ pub struct RunRequest {
     pub tile_prefix: Option<String>,
     /// `--tile-marks`: stamp registration marks on every sheet.
     pub tile_marks: bool,
+    /// Cut profile for `.gcode` exports; other formats ignore it.
+    pub gcode: GcodeSettings,
 }
 
 impl Default for RunRequest {
@@ -27,6 +29,7 @@ impl Default for RunRequest {
             overlap: 0.0,
             tile_prefix: None,
             tile_marks: false,
+            gcode: GcodeSettings::default(),
         }
     }
 }
@@ -89,11 +92,44 @@ impl RunRequest {
                     }
                 }
                 "--tile-prefix" => req.tile_prefix = Some(value()?.to_string()),
+                "--feed" => {
+                    let v = value()?;
+                    req.gcode.feed_mm_per_min = v.trim().parse().map_err(|_| {
+                        PipelineError::User(format!("--feed {v}: expected mm per minute"))
+                    })?;
+                }
+                "--power" => {
+                    let v = value()?;
+                    req.gcode.power = parse_count("--power", v)?;
+                }
+                "--engrave-power" => {
+                    let v = value()?;
+                    req.gcode.engrave_power = Some(parse_count("--engrave-power", v)?);
+                }
+                "--passes" => {
+                    let v = value()?;
+                    req.gcode.passes = parse_count("--passes", v)?;
+                }
+                "--ramp" => {
+                    req.gcode.ramp_power = true;
+                    advance = 1;
+                }
+                "--laser-mode" => {
+                    let v = value()?;
+                    req.gcode.mode = stencilcraft_gcode::LaserMode::parse(v).ok_or_else(|| {
+                        PipelineError::User(format!(
+                            "--laser-mode {v}: expected dynamic or constant"
+                        ))
+                    })?;
+                }
                 "--export" => req.export = Some(value()?.to_string()),
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
                     println!(
                         "flags: --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
+                    );
+                    println!(
+                        "       --feed MM_PER_MIN --power S --engrave-power S --passes N --ramp --laser-mode dynamic|constant"
                     );
                     std::process::exit(0);
                 }
@@ -138,19 +174,22 @@ impl RunRequest {
     }
 }
 
+/// Parses a small non-negative integer flag, naming it in the error.
+fn parse_count(flag: &str, value: &str) -> Result<u32, PipelineError> {
+    value
+        .trim()
+        .parse()
+        .map_err(|_| PipelineError::User(format!("{flag} {value}: expected a whole number")))
+}
+
 /// Executes a parsed request: returns the process message or a printable error.
 pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
     let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
-    let reports = pipeline::run_pipeline(
-        &doc,
-        req.kerf_mm,
-        req.tiling.as_ref(),
-        &export,
-        &GcodeSettings::default(),
-    )
-    .map_err(|e| e.to_string())?;
+    let reports =
+        pipeline::run_pipeline(&doc, req.kerf_mm, req.tiling.as_ref(), &export, &req.gcode)
+            .map_err(|e| e.to_string())?;
     for r in reports {
         println!("{r}");
     }
@@ -203,6 +242,55 @@ mod tests {
         ]))
         .unwrap();
         assert!(!plain.tiling.expect("tiling present").marks);
+    }
+
+    #[test]
+    fn gcode_profile_flags_parse() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a.stencilcraft",
+            "--export",
+            "out.gcode",
+            "--feed",
+            "1200",
+            "--power",
+            "800",
+            "--engrave-power",
+            "150",
+            "--passes",
+            "3",
+            "--ramp",
+            "--laser-mode",
+            "constant",
+        ]))
+        .unwrap();
+        assert_eq!(ok.gcode.feed_mm_per_min, 1200.0);
+        assert_eq!(ok.gcode.power, 800);
+        assert_eq!(ok.gcode.engrave_power, Some(150));
+        assert_eq!(ok.gcode.passes, 3);
+        assert!(ok.gcode.ramp_power);
+        assert_eq!(ok.gcode.mode, stencilcraft_gcode::LaserMode::Constant);
+        // Defaults otherwise: a bare run keeps the documented profile.
+        let plain = RunRequest::parse(&args(&["--in", "a", "--export", "b.gcode"])).unwrap();
+        assert_eq!(plain.gcode, GcodeSettings::default());
+    }
+
+    #[test]
+    fn bad_gcode_profile_flags_are_named() {
+        for flags in [
+            vec!["--passes", "many"],
+            vec!["--power", "-5"],
+            vec!["--laser-mode", "blinky"],
+            vec!["--feed", "fast"],
+        ] {
+            let mut argv = args(&["--in", "a", "--export", "b.gcode"]);
+            argv.extend(flags.iter().map(|s| s.to_string()));
+            let err = match RunRequest::parse(&argv) {
+                Ok(_) => panic!("accepted {flags:?}"),
+                Err(err) => err.to_string(),
+            };
+            assert!(err.contains(flags[0]), "{flags:?} -> {err}");
+        }
     }
 
     #[test]

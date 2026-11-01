@@ -259,7 +259,7 @@ impl Session {
             }
             "export.gcode" => {
                 let path = str_param(params, "path")?;
-                let settings = stencilcraft_gcode::GcodeSettings::default();
+                let settings = gcode_settings(params)?;
                 let text = stencilcraft_gcode::export(&self.engine.doc, &settings)
                     .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 std::fs::write(&path, text)
@@ -414,8 +414,16 @@ fn mcp_tools() -> Vec<serde_json::Value> {
         ),
         (
             "export_gcode",
-            "Export the current document as G-code using default settings.",
-            json!({"path": path}),
+            "Export the current document as G-code. Optional profile knobs: feed (mm/min), power and engrave_power (0-1000), passes (1-10), ramp (boolean), mode (\"dynamic\" for M4 or \"constant\" for M3).",
+            json!({
+                "path": path,
+                "feed": number,
+                "power": json!({"type": "integer"}),
+                "engrave_power": json!({"type": "integer"}),
+                "passes": json!({"type": "integer"}),
+                "ramp": json!({"type": "boolean"}),
+                "mode": json!({"type": "string", "enum": ["dynamic", "constant"]}),
+            }),
             json!(["path"]),
         ),
         (
@@ -465,6 +473,49 @@ fn f64_param(params: &serde_json::Value, key: &str) -> Result<f64, ProtocolError
         .get(key)
         .and_then(serde_json::Value::as_f64)
         .ok_or_else(|| ProtocolError::Bad(format!("missing parameter `{key}` (a number)")))
+}
+
+fn u32_param(params: &serde_json::Value, key: &str) -> Result<Option<u32>, ProtocolError> {
+    match params.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| ProtocolError::Bad(format!("`{key}` must be a non-negative integer"))),
+    }
+}
+
+/// G-code profile knobs from a request, with every unset one at its default. Ranges
+/// are the exporter's business, so an out-of-range value comes back as a normal
+/// tool error naming the knob.
+fn gcode_settings(
+    params: &serde_json::Value,
+) -> Result<stencilcraft_gcode::GcodeSettings, ProtocolError> {
+    let mut settings = stencilcraft_gcode::GcodeSettings::default();
+    if let Some(feed) = params.get("feed").and_then(serde_json::Value::as_f64) {
+        settings.feed_mm_per_min = feed;
+    }
+    if let Some(power) = u32_param(params, "power")? {
+        settings.power = power;
+    }
+    if let Some(power) = u32_param(params, "engrave_power")? {
+        settings.engrave_power = Some(power);
+    }
+    if let Some(passes) = u32_param(params, "passes")? {
+        settings.passes = passes;
+    }
+    if let Some(ramp) = params.get("ramp").and_then(serde_json::Value::as_bool) {
+        settings.ramp_power = ramp;
+    }
+    if let Some(mode) = params.get("mode").and_then(serde_json::Value::as_str) {
+        settings.mode = stencilcraft_gcode::LaserMode::parse(mode).ok_or_else(|| {
+            ProtocolError::Bad(format!(
+                "export.gcode: mode `{mode}` is neither dynamic nor constant"
+            ))
+        })?;
+    }
+    Ok(settings)
 }
 
 fn ok_response(id: Option<serde_json::Value>, result: serde_json::Value) -> String {

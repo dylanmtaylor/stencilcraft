@@ -244,6 +244,8 @@ fn print_help() {
     println!("      Export is .svg, .dxf or .gcode; with --tile-sheet the tiles go");
     println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).");
     println!("      --tile-marks stamps registration brackets and overlap guides on each sheet.");
+    println!("      G-code profile: --feed MM_PER_MIN --power S --engrave-power S");
+    println!("      --passes N --ramp --laser-mode dynamic|constant.");
     println!("  tile-preview --in FILE --sheet WxH --out PAGE.svg");
     println!("      [--overlap MM] [--columns N] [--scale N] [--marks]");
     println!("      Every sheet of the tiling on one framed page, for inspection before cutting.");

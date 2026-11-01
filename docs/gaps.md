@@ -27,10 +27,18 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    artwork is not re-joined for the machine. A separate `print-cut` command outputs
    artwork with three printable registration/alignment marks, but it does not send sensor
    commands or calibrate a cutter. Tilings are capped at 4096 sheets.
-4. **G-code**: fixed modal constants, no feed/speed profiles by machine or material,
-   no first/last pass, no power ramp, no Z/laser mode switch.
-5. **DXF**: no layer colour assignment, no arc entities (export flattens curves into
-   line segments), no reader.
+4. **G-code**: feed, cut and engrave power, repeated passes with an optional power
+   ramp, and the `M4`/`M3` laser-mode switch are settable (`--feed`, `--power`,
+   `--engrave-power`, `--passes`, `--ramp`, `--laser-mode`, and the same knobs on
+   `export.gcode`); rapids are always emitted with the beam off, and closed contours
+   return to their start point. Missing: a material/machine preset table (the right
+   numbers for a diode on 3 mm ply are the operator's, not a guess), separate
+   first/last-pass settings, Z-based knife/plotter mode with per-pass depth, lead-in
+   and lead-out, and corner power compensation on acceleration-limited machines.
+5. **DXF**: layers carry operation colours (red cut, blue engrave; hidden layers are
+   written with a negative index, the DXF "layer off" convention) so CAM tools that
+   sort by colour do the right thing. Missing: arc entities (export flattens curves
+   into line segments), block/INSERT reuse, and a reader.
 6. **Engine**: VectorCraft backs StencilCraft shape creation, transforms, Pathfinder,
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
    document and metadata snapshots. The model still has no explicit persistent selection,

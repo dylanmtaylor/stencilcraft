@@ -28,13 +28,11 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    document and metadata snapshots. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
 7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
-8. **Agent surface**: `command.execute` exposes the serde-tagged engine commands through
-   the CLI JSON-lines process. Despite the `mcp` subcommand name, it is not yet a Model
-   Context Protocol server: JSON-RPC initialization, tool discovery and tool calls are not
-   implemented. The desktop control socket creates an independent session per connection,
-   so it cannot inspect or change the visible document. The wider command set is not wrapped
-   in dedicated control methods, and the JSON channel has no fuzz corpus. (The document
-   reader does have a malformed-input no-panic corpus now.)
+8. **Agent surface**: the CLI offers MCP stdio tools and legacy JSON-lines control, including
+   serde-tagged engine commands. Both operate on a headless session; the desktop control socket
+   also creates an independent session per connection and cannot inspect or change the visible
+   document. The wider command set is not wrapped in dedicated tools, and the JSON channel has
+   no fuzz corpus. (The document reader does have a malformed-input no-panic corpus now.)
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.

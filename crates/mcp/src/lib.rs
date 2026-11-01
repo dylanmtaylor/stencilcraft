@@ -37,6 +37,122 @@ impl Session {
         }
     }
 
+    /// Handle an MCP stdio message, or a legacy control request for compatibility.
+    pub fn handle_stdio_line(&mut self, line: &str) -> Result<Option<String>, ProtocolError> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(value) => value,
+            Err(_) => {
+                return Ok(Some(
+                    rpc_error(serde_json::Value::Null, -32700, "Parse error").to_string(),
+                ));
+            }
+        };
+        if value.is_object() && value.get("jsonrpc").is_none() {
+            return self.handle_line(line);
+        }
+        let response = if let Some(batch) = value.as_array() {
+            if batch.is_empty() {
+                Some(rpc_error(
+                    serde_json::Value::Null,
+                    -32600,
+                    "Invalid Request",
+                ))
+            } else {
+                let responses: Vec<_> = batch
+                    .iter()
+                    .filter_map(|request| self.handle_rpc(request))
+                    .collect();
+                if responses.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::Value::Array(responses))
+                }
+            }
+        } else {
+            self.handle_rpc(&value)
+        };
+        Ok(response.map(|value| value.to_string()))
+    }
+
+    fn handle_rpc(&mut self, request: &serde_json::Value) -> Option<serde_json::Value> {
+        let id = request.get("id").cloned();
+        let valid_id = id
+            .as_ref()
+            .is_none_or(|id| id.is_string() || id.is_i64() || id.is_u64() || id.is_null());
+        let method = request.get("method").and_then(serde_json::Value::as_str);
+        if !request.is_object()
+            || request.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0")
+            || method.is_none()
+            || !valid_id
+        {
+            return Some(rpc_error(
+                serde_json::Value::Null,
+                -32600,
+                "Invalid Request",
+            ));
+        }
+        // Notifications must not receive a response or invoke a tool.
+        let id = id?;
+        let method = method?;
+        let params = request
+            .get("params")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if !params.is_object() {
+            return Some(rpc_error(id, -32602, "Invalid params"));
+        }
+        let result = match method {
+            "initialize" => {
+                let version = params
+                    .get("protocolVersion")
+                    .and_then(serde_json::Value::as_str);
+                if version.is_none()
+                    || !params
+                        .get("capabilities")
+                        .is_some_and(serde_json::Value::is_object)
+                    || !params
+                        .get("clientInfo")
+                        .is_some_and(serde_json::Value::is_object)
+                {
+                    return Some(rpc_error(id, -32602, "Invalid initialize parameters"));
+                }
+                let version = "2025-03-26";
+                serde_json::json!({"protocolVersion": version, "capabilities": {"tools": {}}, "serverInfo": {"name": "stencilcraft", "version": env!("CARGO_PKG_VERSION")}})
+            }
+            "ping" => serde_json::json!({}),
+            "tools/list" => serde_json::json!({"tools": mcp_tools()}),
+            "tools/call" => {
+                let Some(name) = params.get("name").and_then(serde_json::Value::as_str) else {
+                    return Some(rpc_error(id, -32602, "Missing tool name"));
+                };
+                let Some(method) = tool_method(name) else {
+                    return Some(rpc_error(id, -32602, "Unknown tool"));
+                };
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if !arguments.is_object() {
+                    return Some(rpc_error(id, -32602, "Tool arguments must be an object"));
+                }
+                match self.dispatch(method, &arguments) {
+                    Ok(value) => {
+                        serde_json::json!({"content": [{"type": "text", "text": value.to_string()}], "isError": false})
+                    }
+                    Err(error) => {
+                        serde_json::json!({"content": [{"type": "text", "text": error.to_string()}], "isError": true})
+                    }
+                }
+            }
+            _ => return Some(rpc_error(id, -32601, "Method not found")),
+        };
+        Some(serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}))
+    }
+
     /// Interpret one request line and produce the response line, if the request
     /// carried a parseable envelope. Returns `Ok(None)` on blank lines.
     pub fn handle_line(&mut self, line: &str) -> Result<Option<String>, ProtocolError> {
@@ -170,6 +286,96 @@ impl Session {
     }
 }
 
+fn rpc_error(id: serde_json::Value, code: i32, message: &str) -> serde_json::Value {
+    serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+fn tool_method(name: &str) -> Option<&'static str> {
+    match name {
+        "doc_open" => Some("doc.open"),
+        "doc_save" => Some("doc.save"),
+        "doc_summary" => Some("doc.summary"),
+        "kerf_apply" => Some("kerf.apply"),
+        "export_svg" => Some("export.svg"),
+        "export_dxf" => Some("export.dxf"),
+        "export_gcode" => Some("export.gcode"),
+        "tile_run" => Some("tile.run"),
+        "command_execute" => Some("command.execute"),
+        _ => None,
+    }
+}
+
+fn mcp_tools() -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let path = json!({"type": "string", "description": "File path on the server's filesystem"});
+    let number = json!({"type": "number"});
+    let specs = [
+        (
+            "doc_open",
+            "Open a native StencilCraft document, replacing the current document.",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "doc_save",
+            "Save the current document to a native StencilCraft file.",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "doc_summary",
+            "Summarize the current document.",
+            json!({}),
+            json!([]),
+        ),
+        (
+            "kerf_apply",
+            "Set the kerf width in millimetres.",
+            json!({"width_mm": number}),
+            json!(["width_mm"]),
+        ),
+        (
+            "export_svg",
+            "Export the current document as SVG.",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "export_dxf",
+            "Export the current document as DXF.",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "export_gcode",
+            "Export the current document as G-code using default settings.",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "tile_run",
+            "Export tiled SVGs using a filename prefix and sheet dimensions in millimetres.",
+            json!({"path": path, "sheet_w": number, "sheet_h": number, "overlap": number}),
+            json!(["path", "sheet_w", "sheet_h"]),
+        ),
+        (
+            "command_execute",
+            "Execute an engine command. For example, command shape.add-rect uses params x, y, width, height in millimetres. See docs/mcp.md for the command format.",
+            json!({"command": {"type": "string"}, "params": {"type": ["object", "null"]}}),
+            json!(["command"]),
+        ),
+    ];
+    specs
+        .into_iter()
+        .map(|(name, description, properties, required)| {
+            json!({
+                "name": name, "description": description,
+                "inputSchema": {"type": "object", "properties": properties, "required": required}
+            })
+        })
+        .collect()
+}
+
 fn stencilcraft_effect_json(effect: stencilcraft_engine::Effect) -> serde_json::Value {
     serde_json::to_value(effect).unwrap_or(serde_json::Value::Null)
 }
@@ -211,6 +417,28 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, content).unwrap();
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn json_rpc_errors_notifications_and_batches() {
+        let mut session = Session::default();
+        let parse: serde_json::Value =
+            serde_json::from_str(&session.handle_stdio_line("{").unwrap().unwrap()).unwrap();
+        assert_eq!(parse["error"]["code"], -32700);
+        assert!(
+            session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+                .unwrap()
+                .is_none()
+        );
+        let batch: serde_json::Value = serde_json::from_str(&session.handle_stdio_line(r#"[{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":"a","method":"ping"},{"jsonrpc":"2.0","id":2,"method":"unknown"}]"#).unwrap().unwrap()).unwrap();
+        assert_eq!(batch.as_array().unwrap().len(), 2);
+        assert_eq!(batch[0]["id"], "a");
+        assert_eq!(batch[1]["error"]["code"], -32601);
+        let bad_tool: serde_json::Value = serde_json::from_str(&session.handle_stdio_line(r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"doc_open","arguments":{}}}"#).unwrap().unwrap()).unwrap();
+        assert_eq!(bad_tool["result"]["isError"], true);
+        let bad_params: serde_json::Value = serde_json::from_str(&session.handle_stdio_line(r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"doc_summary","arguments":[]}}"#).unwrap().unwrap()).unwrap();
+        assert_eq!(bad_params["error"]["code"], -32602);
     }
 
     #[test]

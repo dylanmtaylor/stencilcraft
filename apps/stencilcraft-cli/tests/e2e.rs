@@ -329,6 +329,70 @@ fn print_cut_cli_writes_registration_sheet() {
 }
 
 #[test]
+fn mcp_stdio_interactive_handshake_and_tools() {
+    use std::io::{BufRead, BufReader};
+    let mut child = bin()
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start MCP");
+    let mut input = child.stdin.take().expect("stdin");
+    let mut output = BufReader::new(child.stdout.take().expect("stdout"));
+    fn request(
+        input: &mut impl Write,
+        output: &mut impl BufRead,
+        message: serde_json::Value,
+    ) -> serde_json::Value {
+        writeln!(input, "{message}").expect("write request");
+        input.flush().expect("flush request");
+        let mut line = String::new();
+        output.read_line(&mut line).expect("read response");
+        serde_json::from_str(&line).expect("JSON response")
+    }
+    let init = request(
+        &mut input,
+        &mut output,
+        serde_json::json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{"protocolVersion":"2025-03-26", "capabilities":{}, "clientInfo":{"name":"test", "version":"1"}}}),
+    );
+    assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+    writeln!(
+        input,
+        "{}",
+        serde_json::json!({"jsonrpc":"2.0", "method":"notifications/initialized"})
+    )
+    .unwrap();
+    let list = request(
+        &mut input,
+        &mut output,
+        serde_json::json!({"jsonrpc":"2.0", "id":2, "method":"tools/list"}),
+    );
+    assert!(
+        list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "command_execute")
+    );
+    let add = request(
+        &mut input,
+        &mut output,
+        serde_json::json!({"jsonrpc":"2.0", "id":3, "method":"tools/call", "params":{"name":"command_execute", "arguments":{"command":"shape.add-rect", "params":{"x":0,"y":0,"width":5,"height":5}}}}),
+    );
+    assert_eq!(add["result"]["isError"], false);
+    let summary = request(
+        &mut input,
+        &mut output,
+        serde_json::json!({"jsonrpc":"2.0", "id":4, "method":"tools/call", "params":{"name":"doc_summary", "arguments":{}}}),
+    );
+    let text = summary["result"]["content"][0]["text"].as_str().unwrap();
+    let doc: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(doc["shapes"], 1);
+    drop(input);
+    assert!(child.wait().expect("MCP exits").success());
+}
+
+#[test]
 fn mcp_process_executes_vectorcraft_primitives_and_undo_redo() {
     let requests = [
         serde_json::json!({

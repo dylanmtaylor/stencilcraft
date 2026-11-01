@@ -15,7 +15,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
 | UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
-| Agent surface | preliminary | CLI `run`/`mcp`, JSON-lines control hooks; command set small |
+| Agent surface | preliminary | CLI `run`/MCP tools and legacy JSON-lines control; desktop session is separate |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
 | Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
@@ -89,6 +89,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-01 — MCP stdio JSON-RPC initialization, tool discovery and calls for the existing
+  headless session, preserving legacy JSON-lines control; desktop integration remains separate.
+
 - 2026-10-29 — M0 scaffold: workspace (11 crates, 2 apps, xtask), document model v1,
   kerf offsetting, sheet tiling, SVG/DXF/G-code exporters, desktop shell with kerf
   preview, CLI `run`/`mcp`, `cargo xtask` quality gates.
@@ -121,7 +124,7 @@ Completed items should be marked here only when behavior is usable end-to-end.
   recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
 - 2026-11-01 — shared desktop controls moved to `aiongg/craft-libs` design-system
   revision `7ca77f6a`; the existing VectorCraft-style shell builds against that revision.
-  MCP compatibility and control of the visible desktop document remain open gaps.
+  Control of the visible desktop document remains an open gap.
 - 2026-10-31 — CI/CD and multi-platform packaging parity: wired shared release, gate CI, packaging-lint, SonarCloud, FreeBSD, and Windows ARM64 workflows via craft-common-actions@main; added macOS, Windows (WiX MSI), FreeBSD, Web, and Linux (deb/rpm via nfpm, AppImage, Flatpak OCI) packaging pipelines; added cargo xtask version subcommand.
 - 2026-10-31 — Flatpak OCI distribution: added `--oci` export support to
   `packaging/linux/flatpak-bundle.sh` and `packaging/linux/flatpak-oci.sh` publishing helper

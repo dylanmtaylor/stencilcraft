@@ -2,13 +2,27 @@
 
 Two agent-facing surfaces share one core (`crates/mcp`):
 
-- a **JSON-lines control protocol** on stdio (`stencilcraft-cli mcp`),
-- the same session object used by the desktop app's `--control` socket.
+- an **MCP stdio server** (`stencilcraft-cli mcp`), also accepting legacy JSON-lines requests;
+- the legacy JSON-lines protocol on the desktop app's `--control` socket.
 
-One request per line, on stdin; one response per line, on stdout. Logging, if any, goes to
-stderr only, never stdout.
+The MCP server supports protocol version `2025-03-26`, initialization, ping, tool discovery,
+and tool calls. Add it to an MCP client with `stencilcraft-cli mcp` as the server command.
+Messages are newline-delimited JSON-RPC; notifications receive no response. Tool results
+are JSON encoded as text content, and operation errors are returned with `isError: true`.
+The server's session is headless and independent of any visible desktop document. File paths
+refer to the server's filesystem; tools can read and write files accessible to the process.
+Only connect trusted clients and review their file operations.
 
-## Envelope
+The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
+`export_dxf`, `export_gcode`, `tile_run`, and `command_execute`. Their arguments correspond
+to the legacy method parameters below. For example, `command_execute` accepts
+`{"command":"shape.add-rect","params":{"x":0,"y":0,"width":5,"height":5}}`;
+see `crates/engine/src/lib.rs` for the complete serde-tagged command set. Undo and redo
+accept `{"command":"edit.undo"}` and `{"command":"edit.redo"}`.
+
+Legacy requests use one line in and one line out; logging goes to stderr only.
+
+## Legacy envelope
 
 ```json
 {"id": 1, "method": "doc.open", "params": {"path": "examples/starter.stencilcraft"}}
@@ -43,11 +57,5 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `export.dxf` | `{path}` | `{path}` |
 | `export.gcode` | `{path}` | `{path}` |
 | `tile.run` | `{path, sheet_w, sheet_h, overlap}` | `{tiles: n}` |
-| `command.execute` | `{command: <engine command as JSON>}` | engine result |
+| `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 
-## MCP equivalence
-
-The stdio loop is a subset of the Model Context Protocol tool surface: a later milestone
-exposes each method above as an MCP tool with a JSON-schema parameter description, backed
-by the same session type, so the CLI (`stencilcraft-cli mcp`) is the server process —
-the same server process used by the command-line tools.

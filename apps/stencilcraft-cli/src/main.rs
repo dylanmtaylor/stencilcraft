@@ -3,7 +3,7 @@
 //! Subcommands:
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
 //! - `import-svg --in FILE.svg --out FILE.stencilcraft` — import SVG into the native document format
-//! - `mcp` — JSON-lines control on stdio (see docs/mcp.md)
+//! - `mcp` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md)
 //! - `make-starter --out FILE` — write the canonical starter document
 //! - `cut --in FILE [--media …] [--bbox] [--device PATH]` — machine cut prep
 //! - `help`
@@ -58,10 +58,11 @@ fn mcp_loop() -> Result<(), String> {
     let mut session = stencilcraft_mcp::Session::default();
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| format!("mcp: read: {e}"))?;
-        match session.handle_line(&line) {
+        match session.handle_stdio_line(&line) {
             Ok(None) => continue,
             Ok(Some(response)) => {
                 writeln!(out, "{response}").map_err(|e| format!("mcp: write: {e}"))?;
+                out.flush().map_err(|e| format!("mcp: flush: {e}"))?;
             }
             Err(e) => return Err(format!("mcp: {e}")),
         }
@@ -212,7 +213,7 @@ fn print_help() {
     println!(
         "      Export artwork and three registration marks for a manually aligned print/cut workflow."
     );
-    println!("  mcp            JSON-lines control protocol on stdio (docs/mcp.md)");
+    println!("  mcp            MCP and legacy JSON-lines control on stdio (docs/mcp.md)");
     println!("  cut --in FILE [--media …] [--bbox] [--device PATH]");
     println!("      Machine sensor registration and automatic alignment are not implemented.");
     println!("      Encode + send to a cutting machine; dry-run transcript by default.");

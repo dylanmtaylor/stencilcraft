@@ -545,8 +545,8 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
         match panel {
             WorkspacePanel::Canvas => "Canvas",
             WorkspacePanel::Tools => "Tools",
-            WorkspacePanel::Inspector => "Design Inspector",
-            WorkspacePanel::Layers => "Layers & Objects",
+            WorkspacePanel::Inspector => "Properties",
+            WorkspacePanel::Layers => "Layers",
         }
         .to_owned()
     }
@@ -669,10 +669,10 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
             second: Box::new(Node::Dock {
                 side: Side::End,
                 columns: vec![Column::new(
-                    vec![
-                        Group::new(vec![WorkspacePanel::Inspector], 0),
-                        Group::new(vec![WorkspacePanel::Layers], 0),
-                    ],
+                    vec![Group::new(
+                        vec![WorkspacePanel::Inspector, WorkspacePanel::Layers],
+                        0,
+                    )],
                     280.0,
                 )],
             }),
@@ -1893,6 +1893,7 @@ impl StencilApp {
         let mut undo_clicked = false;
         let mut redo_clicked = false;
         let mut switch_theme_clicked = false;
+        let mut reset_workspace_clicked = false;
 
         let frame = self.window_frame.clone();
         let can_undo = self.engine.can_undo();
@@ -1917,16 +1918,34 @@ impl StencilApp {
                     .show_titled(
                         ui,
                         |ui, _| {
+                            if ui
+                                .add(IconButton::new(Icon::Home, "Home / Fit View"))
+                                .clicked()
+                            {
+                                chosen_action = Some(TopMenuAction::FitView);
+                            }
                             let mb = MenuBar::new(&menus)
                                 .id(egui::Id::unique("stencilcraft-menubar"))
                                 .shrink_to_fit(f32::INFINITY)
                                 .help_search(menus.len() - 1)
                                 .show(ui);
-                            chosen_action = mb.chosen;
+                            chosen_action = chosen_action.or(mb.chosen);
                             LeadingEnd::from_ui(ui)
                         },
                         |ui, _| {
                             ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt("workspace-switcher")
+                                    .selected_text("Essentials")
+                                    .width(88.0)
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_label(true, "Essentials").clicked() {
+                                            reset_workspace_clicked = true;
+                                        }
+                                        if ui.selectable_label(false, "Reset Workspace").clicked() {
+                                            reset_workspace_clicked = true;
+                                        }
+                                    });
+                                ui.separator();
                                 if ui
                                     .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
                                     .clicked()
@@ -1954,6 +1973,10 @@ impl StencilApp {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
+
+        if reset_workspace_clicked {
+            self.reset_workspace();
+        }
 
         if undo_clicked {
             let _ = self.engine.undo();
@@ -2700,7 +2723,6 @@ impl StencilApp {
             if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
                 zoom_delta = 1.0;
             }
-            ui.small("F fit · C center · Space+drag or middle-drag to pan · wheel to zoom");
         });
         ui.separator();
 
@@ -3197,6 +3219,8 @@ impl StencilApp {
                         StatusBar::message(ui, &status_msg, false);
                     });
                     bar.trailing(|ui| {
+                        ui.small("F fit · C center · Space+drag to pan");
+                        ui.separator();
                         ui.label(format!("Tool: {}", self.active_tool.label()));
                     });
                 });
@@ -3317,9 +3341,12 @@ mod tests {
         app.workspace
             .apply_all(
                 [Action::Move {
-                    panel: WorkspacePanel::Inspector,
-                    anchor: WorkspacePanel::Layers,
-                    placement: Placement::Tab { before: None },
+                    panel: WorkspacePanel::Layers,
+                    anchor: WorkspacePanel::Inspector,
+                    placement: Placement::Group {
+                        below: true,
+                        height: None,
+                    },
                 }],
                 |panel| {
                     if *panel == WorkspacePanel::Canvas {

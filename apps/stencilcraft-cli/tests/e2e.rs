@@ -133,6 +133,39 @@ fn run_tiles_the_poster_into_sheets() {
 }
 
 #[test]
+fn run_tile_prefix_names_the_sheets() {
+    let dir = fresh_out_dir();
+    let prefix = dir.join("sheets");
+    let ignored = dir.join("ignored");
+    let mut cmd = bin();
+    cmd.args([
+        "run",
+        "--in",
+        &example("poster.stencilcraft"),
+        "--tile-sheet",
+        "400x600",
+        "--overlap",
+        "10",
+        "--tile-prefix",
+        &prefix.to_string_lossy(),
+        "--export",
+        &ignored.to_string_lossy(),
+    ]);
+    let out = cmd.output().ok().expect("child spawns");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    expect_exit0(&out, &stdout);
+    let prefix_str = prefix.to_string_lossy().into_owned();
+    assert!(
+        std::path::PathBuf::from(format!("{prefix_str}-00.svg")).is_file(),
+        "--tile-prefix decides the sheet names: {stdout}"
+    );
+    assert!(
+        !std::path::PathBuf::from(format!("{}-00.svg", ignored.to_string_lossy())).exists(),
+        "--export must not override --tile-prefix"
+    );
+}
+
+#[test]
 fn cut_dry_run_prints_a_valid_transcript() {
     let mut cmd = bin();
     cmd.args(["cut", "--in", &example("starter.stencilcraft")]);

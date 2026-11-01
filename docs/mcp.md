@@ -3,15 +3,20 @@
 Two agent-facing surfaces share one core (`crates/mcp`):
 
 - an **MCP stdio server** (`stencilcraft-cli mcp`), also accepting legacy JSON-lines requests;
-- the legacy JSON-lines protocol on the desktop app's `--control` socket.
+- the desktop app's `--control` socket, which accepts both envelopes and runs each request
+  against the document on screen.
 
 The MCP server supports protocol version `2025-03-26`, initialization, ping, tool discovery,
 and tool calls. Add it to an MCP client with `stencilcraft-cli mcp` as the server command.
 Messages are newline-delimited JSON-RPC; notifications receive no response. Tool results
 are JSON encoded as text content, and operation errors are returned with `isError: true`.
-The server's session is headless and independent of any visible desktop document. File paths
-refer to the server's filesystem; tools can read and write files accessible to the process.
-Only connect trusted clients and review their file operations.
+The stdio server's session is headless. The desktop app's `--control` socket is different: it
+queues each request onto the UI thread and handles it against the engine behind the visible
+canvas, so `doc.summary` reports the open document, edits are undoable in the app, and the
+window repaints. Requests are answered between frames, and only while the window is running.
+File paths refer to the server's filesystem; tools can read and write files accessible to the
+process. The control socket listens on `127.0.0.1` only, but it has no authentication: keep it
+on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
 `export_dxf`, `export_gcode`, `tile_run`, and `command_execute`. Their arguments correspond

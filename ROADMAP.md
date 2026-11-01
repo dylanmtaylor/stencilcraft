@@ -11,11 +11,11 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Document & format | working | Document/Layer/Shape model, `.stencilcraft` JSON v1, roundtrip-tested |
 | Import (SVG) | working subset | paths + common basic shapes; groups/transforms/styles; physical units/viewBox; unsupported drawable elements fail closed |
 | Kerf compensation | working | polygon offsetting with miter join; convex shapes exact |
-| Tiling | working | sheet grid with overlap; shapes not yet clipped at tile edges |
+| Tiling | working | sheet grid with overlap; geometry clipped per sheet, empty sheets skipped, 4096-sheet cap |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
 | UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
-| Agent surface | preliminary | CLI `run`/MCP tools and legacy JSON-lines control; desktop session is separate |
+| Agent surface | working | CLI `run`/MCP tools and legacy JSON-lines control; desktop `--control` drives the visible document |
 | Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
 | Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
@@ -28,9 +28,9 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
   of round trips; `.stencilcraft` v1 frozen.
 - **M2: kerf 2.0.** Self-intersection-robust offsetting (sweep-based), per-layer and
   per-object kerf overrides, inlet/pressure presets by material, kerf preview overlay.
-- **M3: cutting output.** Digital-bridge generation so counters stay attached, tile-edge
-  clipping with overlap merge, multiply-aligned SVG/PDF sheets, machine-specific G-code
-  profiles (Grbl, Marlin/Creality, diode-laser).
+- **M3: cutting output.** Digital-bridge generation so counters stay attached, overlap
+  merge of clipped tiles plus alignment marks, multiply-aligned SVG/PDF sheets,
+  machine-specific G-code profiles (Grbl, Marlin/Creality, diode-laser).
 - **M4: editing tools.** Pen, direct selection, box/lasso select, node editing; SVG path
   tools on par with the import set; undo structural sharing.
 - **M5: web.** Same UI in the browser via WASM; file open/export parity.
@@ -43,8 +43,8 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 2. Property tests: kerf invariants (area monotonic in kerf width on convex shapes),
    tiling coverage (every point of the board interior lies within `overlap/2` of a tile
    cut path), format fuzz.
-3. Kerf: counter detection hardened to proper nesting (every subpath tested against every
-   other, not bbox equal); miter-limit fallback to bevel on spikes.
+3. Kerf: sweep-based offset for self-intersecting contours; nesting depth is counted now,
+   but containment still tests flattened vertices.
 4. Bridge generation prototype (M3 early): algorithm notes in `docs/bridges.md`.
 5. G-code profiles: material presets, first/last pass, power ramp.
 6. Machine control (docs/machine.md): USB-bulk `nusb` transport for the `0b4d` device
@@ -89,8 +89,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-01 — Tiling clips geometry to each sheet instead of copying whole shapes (empty
+  sheets are skipped, tilings capped at 4096 sheets); kerf decides hole vs solid by nesting
+  depth; `--tile-prefix` is honoured; the desktop `--control` socket now runs requests against
+  the visible document.
+
 - 2026-11-01 — MCP stdio JSON-RPC initialization, tool discovery and calls for the existing
-  headless session, preserving legacy JSON-lines control; desktop integration remains separate.
+  headless session, preserving legacy JSON-lines control.
 
 - 2026-10-29 — M0 scaffold: workspace (11 crates, 2 apps, xtask), document model v1,
   kerf offsetting, sheet tiling, SVG/DXF/G-code exporters, desktop shell with kerf

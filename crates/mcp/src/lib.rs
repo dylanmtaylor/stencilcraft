@@ -37,6 +37,20 @@ impl Session {
         }
     }
 
+    /// Wrap an engine the caller already owns, so a host (the desktop app) can run
+    /// requests against the document it is displaying.
+    pub fn with_engine(engine: Engine) -> Self {
+        Self {
+            engine,
+            last_path: None,
+        }
+    }
+
+    /// Take the engine back out after handling requests.
+    pub fn into_engine(self) -> Engine {
+        self.engine
+    }
+
     /// Handle an MCP stdio message, or a legacy control request for compatibility.
     pub fn handle_stdio_line(&mut self, line: &str) -> Result<Option<String>, ProtocolError> {
         let trimmed = line.trim();

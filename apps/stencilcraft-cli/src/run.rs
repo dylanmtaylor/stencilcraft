@@ -10,6 +10,9 @@ pub struct RunRequest {
     pub tiling: Option<Tiling>,
     pub export: Option<String>,
     pub overlap: f64,
+    /// `--tile-prefix`, wherever it appears on the command line: the tiling block
+    /// itself may be introduced before or after it.
+    pub tile_prefix: Option<String>,
 }
 
 impl Default for RunRequest {
@@ -20,6 +23,7 @@ impl Default for RunRequest {
             tiling: None,
             export: None,
             overlap: 0.0,
+            tile_prefix: None,
         }
     }
 }
@@ -48,13 +52,18 @@ impl RunRequest {
                 }
                 "--tile-sheet" => {
                     let (w, h) = pipeline::parse_sheet_size(value()?)?;
-                    let prefix = req.export.clone().unwrap_or_else(|| "tile".to_string());
-                    req.tiling = Some(Tiling {
-                        overlap: req.overlap,
-                        prefix,
+                    // Reuse the block if `--overlap`/`--tile-prefix` already made one,
+                    // so flags stay order-independent.
+                    let overlap = req.overlap;
+                    let tiling = req.tiling.get_or_insert_with(|| Tiling {
                         sheet_w: w,
                         sheet_h: h,
+                        overlap,
+                        prefix: String::new(),
                     });
+                    tiling.sheet_w = w;
+                    tiling.sheet_h = h;
+                    tiling.overlap = overlap;
                 }
                 "--overlap" => {
                     let v = value()?;
@@ -66,12 +75,7 @@ impl RunRequest {
                         t.overlap = req.overlap;
                     }
                 }
-                "--tile-prefix" => {
-                    let v = value()?.to_string();
-                    if let Some(t) = req.tiling.as_mut() {
-                        t.prefix = v;
-                    }
-                }
+                "--tile-prefix" => req.tile_prefix = Some(value()?.to_string()),
                 "--export" => req.export = Some(value()?.to_string()),
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
@@ -109,7 +113,12 @@ impl RunRequest {
             ));
         }
         if let Some(t) = req.tiling.as_mut() {
-            t.prefix = req.export.clone().unwrap_or_else(|| "tile".to_string());
+            // An explicit `--tile-prefix` wins; otherwise tile names hang off the
+            // export path, which is what a bare `--tile-sheet` run expects.
+            t.prefix = match req.tile_prefix.clone() {
+                Some(prefix) => prefix,
+                None => req.export.clone().unwrap_or_else(|| "tile".to_string()),
+            };
         }
         Ok(req)
     }
@@ -155,6 +164,42 @@ mod tests {
     fn unknown_flag_rejected_calmly() {
         let r = RunRequest::parse(&args(&["--in", "a", "--export", "b", "--what"]));
         assert!(matches!(r, Err(PipelineError::User(ref m)) if m.contains("--what")));
+    }
+
+    #[test]
+    fn tile_prefix_wins_over_export_path_in_any_order() {
+        for prefix_first in [true, false] {
+            let flags = if prefix_first {
+                args(&[
+                    "--in",
+                    "a.stencilcraft",
+                    "--tile-prefix",
+                    "sheets/poster",
+                    "--tile-sheet",
+                    "400x600",
+                    "--export",
+                    "out/ignored",
+                ])
+            } else {
+                args(&[
+                    "--in",
+                    "a.stencilcraft",
+                    "--tile-sheet",
+                    "400x600",
+                    "--export",
+                    "out/ignored",
+                    "--tile-prefix",
+                    "sheets/poster",
+                ])
+            };
+            let ok = RunRequest::parse(&flags).unwrap();
+            let tiling = ok.tiling.expect("tiling present");
+            assert_eq!(
+                tiling.prefix, "sheets/poster",
+                "prefix first: {prefix_first}"
+            );
+            assert_eq!(ok.export.as_deref(), Some("out/ignored"));
+        }
     }
 
     #[test]

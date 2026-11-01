@@ -109,10 +109,12 @@ cargo run --release -p stencilcraft-cli -- cut --in examples/starter.stencilcraf
 cargo xtask ci                                            # fmt, clippy, tests, layering
 ```
 
-Use the desktop app with a control channel in a second terminal:
+Use the desktop app with a control channel in a second terminal. Requests sent to
+`127.0.0.1:7979` act on the document that is open in the window, and can be undone there:
 
 ```sh
-cargo run -p stencilcraft -- --control 7979
+cargo run -p stencilcraft -- --control 7979 examples/starter.stencilcraft
+printf '%s\n' '{"id":1,"method":"doc.summary","params":{}}' | nc 127.0.0.1 7979
 ```
 
 `examples/` ships starter documents: `starter.stencilcraft` (the CLI round trip),
@@ -148,7 +150,7 @@ real-hardware transport is the next step).
 - SVG features beyond common paths/shapes/groups/transforms/styles (advanced CSS,
   external `<use>`, text conversion, clipping/masks/filters);
 - drawing tools (pen, node editing) and selection refinements (box/lasso now exist, but are basic);
-- tiling edge clipping and bridge generation so counters stay attached; print-and-cut has printable marks but no automatic sensor alignment;
+- bridge generation so counters stay attached, plus overlap merge and alignment marks for tiled sheets; print-and-cut has printable marks but no automatic sensor alignment;
 - machine transports beyond serial documented dry-run + opt-in serial (USB bulk, Bluetooth).
 
 **Where we're going:** next is broader SVG import (CSS, `<use>`, text conversion,

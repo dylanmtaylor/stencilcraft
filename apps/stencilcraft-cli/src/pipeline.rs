@@ -97,7 +97,7 @@ pub fn run_pipeline(
     reports.push(format!(
         "exported {} tiles: base {} (kerf {:.3} mm, overlap {:.1} mm)",
         pieces.len(),
-        export_base,
+        tiling.prefix,
         working.kerf.width_mm,
         tiling.overlap
     ));
@@ -205,7 +205,9 @@ mod tests {
             &GcodeSettings::default(),
         )
         .unwrap();
-        assert_eq!(reports.len(), 5); // 4 tiles + summary
+        // The diagonal misses the top-left sheet, which is not exported: 3 tiles
+        // plus the summary line.
+        assert_eq!(reports.len(), 4);
         assert!(
             std::fs::read_to_string(format!("{}-00.svg", tiling.prefix))
                 .unwrap()

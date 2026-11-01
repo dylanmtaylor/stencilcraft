@@ -134,10 +134,18 @@ fn offset_shape_path(
             moved.push(pl.clone());
             continue;
         }
-        let inside = lines.iter().enumerate().any(|(j, other)| {
-            i != j && other.closed && other.points.len() >= 3 && is_inside(pl, other)
-        });
-        let signed = if inside { -delta } else { delta };
+        // Nesting depth decides the side: a contour inside an odd number of other
+        // contours is a hole (material falls out, offset inward), at an even depth it
+        // is solid again (offset outward). Counting only "inside something" would
+        // push an island inside a hole the wrong way.
+        let depth = lines
+            .iter()
+            .enumerate()
+            .filter(|(j, other)| {
+                *j != i && other.closed && other.points.len() >= 3 && is_inside(pl, other)
+            })
+            .count();
+        let signed = if depth % 2 == 1 { -delta } else { delta };
         moved.push(Polyline {
             points: offset_closed_polygon(&pl.points, signed, miter_limit),
             closed: true,
@@ -331,6 +339,49 @@ mod tests {
         let inner = bounds_of_points(&polylines[1].points).unwrap();
         assert!((outer.width() - 100.4).abs() < 1e-6, "outer: {outer:?}");
         assert!((inner.width() - 39.6).abs() < 1e-6, "counter: {inner:?}");
+    }
+
+    #[test]
+    fn island_inside_a_counter_expands_again() {
+        // Three nesting levels: outline (solid), its hole, and an island inside the
+        // hole. The island is solid material again, so it grows even though it sits
+        // inside two other contours.
+        fn box_at(x0: f64, y0: f64, x1: f64, y1: f64) -> kurbo::BezPath {
+            let mut p = kurbo::BezPath::new();
+            p.move_to(Point::new(x0, y0));
+            p.line_to(Point::new(x1, y0));
+            p.line_to(Point::new(x1, y1));
+            p.line_to(Point::new(x0, y1));
+            p.close_path();
+            p
+        }
+        let mut doc = Document {
+            board: Board {
+                width_mm: 120.0,
+                height_mm: 120.0,
+            },
+            kerf: KerfSettings {
+                width_mm: 0.4,
+                apply_to_exports: true,
+            },
+            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            next_shape_id: 1,
+        };
+        let mut compound = box_at(0.0, 0.0, 100.0, 100.0);
+        compound.extend(box_at(20.0, 20.0, 80.0, 80.0).elements().iter().copied());
+        compound.extend(box_at(40.0, 40.0, 60.0, 60.0).elements().iter().copied());
+        doc.push_shape(0, compound, CutStyle::Cut).unwrap();
+
+        let compensated = apply(&doc, 4.0).unwrap();
+        let polylines = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        assert_eq!(polylines.len(), 3);
+        let widths: Vec<f64> = polylines
+            .iter()
+            .map(|pl| bounds_of_points(&pl.points).unwrap().width())
+            .collect();
+        assert!((widths[0] - 100.4).abs() < 1e-6, "outline: {widths:?}");
+        assert!((widths[1] - 59.6).abs() < 1e-6, "hole: {widths:?}");
+        assert!((widths[2] - 20.4).abs() < 1e-6, "island: {widths:?}");
     }
 
     #[test]

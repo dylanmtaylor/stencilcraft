@@ -481,10 +481,6 @@ fn main() -> Result<(), String> {
             other => open_path = Some(other.to_string()),
         }
     }
-    if let Some(port) = control_port {
-        control::serve(port);
-    }
-
     let decision = craft_window::policy::decide_for(
         craft_window::Prefix::new("STENCILCRAFT"),
         craft_window::policy::Backend::from_env(),
@@ -509,6 +505,7 @@ fn main() -> Result<(), String> {
 
     let mut app = StencilApp::new(open_path.as_deref());
     app.window_frame = decision.frame;
+    app.control_port = control_port;
 
     let options = eframe::NativeOptions {
         viewport,
@@ -621,6 +618,11 @@ pub struct StencilApp {
     pub prefs: UserPrefs,
     #[cfg(not(target_arch = "wasm32"))]
     pub settings_store: Option<SettingsStore<UserPrefs>>,
+    /// Port requested with `--control`; the socket starts once eframe hands us the
+    /// paint context, so requests can wake the window.
+    pub control_port: Option<u16>,
+    /// Queued control requests, handled on the UI thread against `engine`.
+    pub control_jobs: Option<control::Jobs>,
 }
 
 #[derive(Clone, Debug)]
@@ -757,10 +759,47 @@ impl StencilApp {
             prefs,
             #[cfg(not(target_arch = "wasm32"))]
             settings_store: None,
+            control_port: None,
+            control_jobs: None,
+        }
+    }
+
+    /// Run queued `--control` requests against the document on screen. The socket
+    /// hands work to the UI thread, so an agent edits what the user sees (and the
+    /// user can undo it) instead of a private copy of the file.
+    fn drain_control_requests(&mut self) {
+        let Some(jobs) = self.control_jobs.as_ref() else {
+            return;
+        };
+        let mut pending = Vec::new();
+        while let Some(job) = jobs.try_recv() {
+            pending.push(job);
+        }
+        for job in pending {
+            // The session owns the engine while it handles one request, then hands
+            // it back: the document, undo history and counters all survive.
+            let engine = std::mem::take(&mut self.engine);
+            let mut session = stencilcraft_mcp::Session::with_engine(engine);
+            let reply = match session.handle_stdio_line(&job.line) {
+                Ok(Some(response)) => response,
+                Ok(None) => String::new(),
+                Err(e) => {
+                    self.status = format!("control: {e}");
+                    r#"{"id":null,"ok":false,"error":"internal control error"}"#.to_string()
+                }
+            };
+            self.engine = session.into_engine();
+            self.retain_valid_selection();
+            self.kerf_preview_cache = None;
+            let _ = job.reply.send(reply);
         }
     }
 
     pub fn with_egui(mut self, cc: &eframe::CreationContext) -> Self {
+        if let Some(port) = self.control_port {
+            let ctx = cc.egui_ctx.clone();
+            self.control_jobs = control::serve(port, move || ctx.request_repaint());
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (store, _report) = SettingsStore::<UserPrefs>::open(Location::Auto);
@@ -3138,6 +3177,7 @@ impl eframe::App for StencilApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         craft_ui::theme::install(ui.ctx(), &craft_ui::theme::Base::suite_default());
+        self.drain_control_requests();
         ui.ctx().set_theme(match self.theme {
             stencilcraft_ui_egui::ColorTheme::Dark => egui::ThemePreference::Dark,
             stencilcraft_ui_egui::ColorTheme::Light => egui::ThemePreference::Light,

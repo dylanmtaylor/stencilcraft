@@ -1,11 +1,13 @@
 //! Tiling: split an oversized artboard into physical sheets.
 //!
 //! A grid of tiles covers the board; each tile becomes its own document holding
-//! every shape intersecting it, translated so the tile's origin is its own sheet
-//! origin. Overlap (`overlap_mm`) keeps tiles sharing edges joined, so a shape
-//! crossing a tile boundary appears on both sheets and the two pieces meet on the
-//! machine. Later milestones replace overlap with true clipping plus alignment
-//! marks (`docs/gaps.md` 3).
+//! the part of every shape that lies on that sheet, translated so the tile's origin
+//! is its own sheet origin. Shapes are clipped to the sheet (`clip`), so no cut path
+//! runs past the material edge. Overlap (`overlap_mm`) keeps neighbouring tiles
+//! sharing a strip, so a shape crossing a boundary is cut on both sheets and the
+//! pieces meet on the machine. Alignment marks are still to come (`docs/gaps.md` 3).
+
+mod clip;
 
 use kurbo::Rect;
 use stencilcraft_doc::Document;
@@ -17,9 +19,18 @@ pub enum TilingError {
     BadSheet { w: f64, h: f64 },
     #[error("tiling: overlap {0} mm must be ≥ 0 and smaller than the sheet")]
     BadOverlap(f64),
+    #[error(
+        "tiling: {count} sheets exceeds the {limit}-sheet limit (use a bigger sheet or a smaller overlap)"
+    )]
+    TooManyTiles { count: usize, limit: usize },
     #[error("tiling: {0}")]
     Model(String),
 }
+
+/// Hard ceiling on the sheets one tiling may produce. A tiny sheet, or an overlap
+/// almost as wide as the sheet, would otherwise ask for millions of sheets and run
+/// the machine out of memory before the user notices a bad flag.
+pub const MAX_TILES: usize = 4096;
 
 /// One physical sheet of a tiling.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,9 +74,18 @@ pub fn layout(
     // (resp. bottom) neighbour.
     let adv_x = sheet_w - overlap_mm;
     let adv_y = sheet_h - overlap_mm;
-    let cols = ((board_w / adv_x).ceil() as usize).max(1);
-    let rows = ((board_h / adv_y).ceil() as usize).max(1);
-    let mut tiles = Vec::with_capacity(cols * rows);
+    let cols = axis_tiles(board_w, sheet_w, adv_x);
+    let rows = axis_tiles(board_h, sheet_h, adv_y);
+    // `cols`/`rows` saturate at `usize::MAX` for absurd inputs, so the product is
+    // checked before anything is allocated.
+    let count = cols.saturating_mul(rows);
+    if count > MAX_TILES {
+        return Err(TilingError::TooManyTiles {
+            count,
+            limit: MAX_TILES,
+        });
+    }
+    let mut tiles = Vec::with_capacity(count);
     for row in 0..rows {
         for col in 0..cols {
             let x0 = col as f64 * adv_x;
@@ -82,6 +102,20 @@ pub fn layout(
         }
     }
     Ok(tiles)
+}
+
+/// Sheets needed to span `span` millimetres: the last sheet must still reach the
+/// far edge, so tiles that would start past the board are not emitted.
+fn axis_tiles(span: f64, sheet: f64, advance: f64) -> usize {
+    if span <= sheet || sheet <= 0.0 || advance <= 0.0 {
+        return 1;
+    }
+    let extra = ((span - sheet) / advance).ceil();
+    if !extra.is_finite() || extra <= 0.0 {
+        return 1;
+    }
+    // `as` saturates, which is exactly what the caller's limit check wants.
+    (extra as usize).saturating_add(1)
 }
 
 /// Do the two rectangles share interior area? A shape partly covering a tile
@@ -107,9 +141,10 @@ fn transform_path(path: &kurbo::BezPath, affine: kurbo::Affine) -> kurbo::BezPat
 }
 
 /// Tile a whole document: one output document per physical sheet. Each output
-/// keeps the source kerf settings and contains every visible shape whose bounds
-/// intersect the tile, translated so the tile origin is the sheet origin.
-/// Hidden layers are skipped. Output order is row-major, matching `layout`.
+/// keeps the source kerf settings and contains the visible geometry that lies on
+/// the tile, clipped to the tile rectangle and translated so the tile origin is the
+/// sheet origin. Hidden layers are skipped, and sheets that end up with nothing to
+/// cut are not emitted. Output order is row-major, matching `layout`.
 pub fn tile_document(
     doc: &Document,
     sheet_w: f64,
@@ -151,9 +186,25 @@ pub fn tile_document(
                 if !rects_touch(b, tile.rect) {
                     continue;
                 }
+                // Only geometry that crosses the sheet edge needs clipping; a shape
+                // wholly on the sheet keeps its curves instead of being flattened.
+                let on_sheet = b.x0 >= tile.rect.x0 - 1e-9
+                    && b.y0 >= tile.rect.y0 - 1e-9
+                    && b.x1 <= tile.rect.x1 + 1e-9
+                    && b.y1 <= tile.rect.y1 + 1e-9;
+                let clipped;
+                let source = if on_sheet {
+                    &shape.path
+                } else {
+                    clipped = clip::clip_path_to_rect(&shape.path, tile.rect);
+                    &clipped
+                };
+                if source.elements().is_empty() {
+                    continue;
+                }
                 let mut translated = shape.clone();
                 translated.path = transform_path(
-                    &shape.path,
+                    source,
                     kurbo::Affine::translate((-tile.rect.x0, -tile.rect.y0)),
                 );
                 piece_layer.shapes.push(translated);
@@ -162,48 +213,27 @@ pub fn tile_document(
                 piece.layers.push(piece_layer);
             }
         }
+        // A tile the artwork never reaches needs no material: skip the sheet rather
+        // than sending an empty cut job to the machine.
         if piece.layers.is_empty() {
-            return Err(TilingError::Model(format!(
-                "tiling: sheet {}×{} holds no shapes",
-                tile.col, tile.row
-            )));
+            continue;
         }
         out.push(piece);
     }
     Ok(out)
 }
 
-/// Convenience: shape count per tile in row-major order (used by the CLI's tile
-/// summary and tests).
+/// Convenience: shape count of each exported sheet, in the same order
+/// `tile_document` returns them.
 pub fn tile_shape_counts(
     doc: &Document,
     sheet_w: f64,
     sheet_h: f64,
     overlap_mm: f64,
 ) -> Result<Vec<usize>, TilingError> {
-    let tiles = layout(
-        doc.board.width_mm,
-        doc.board.height_mm,
-        sheet_w,
-        sheet_h,
-        overlap_mm,
-    )?;
-    Ok(tiles
+    Ok(tile_document(doc, sheet_w, sheet_h, overlap_mm)?
         .iter()
-        .map(|tile| {
-            doc.layers
-                .iter()
-                .filter(|l| l.visible)
-                .map(|l| {
-                    l.shapes
-                        .iter()
-                        .filter(|s| {
-                            bounds_of_shape(&s.path).is_some_and(|b| rects_touch(b, tile.rect))
-                        })
-                        .count()
-                })
-                .sum()
-        })
+        .map(Document::shape_count)
         .collect())
 }
 
@@ -313,22 +343,77 @@ mod tests {
     }
 
     #[test]
-    fn every_tile_gets_the_traversing_shape() {
+    fn every_sheet_gets_only_its_part_of_the_traversing_shape() {
         let doc = cross_doc(500.0, 400.0);
         let counts = tile_shape_counts(&doc, 300.0, 300.0, 10.0).unwrap();
-        assert_eq!(counts.len(), 4);
-        assert!(
-            counts.iter().all(|c| *c == 1),
-            "diagonal crosses every tile: {counts:?}"
-        );
+        // The diagonal never reaches the top-left sheet, which is therefore not
+        // exported at all; the other three sheets each carry one piece of it.
+        assert_eq!(counts, vec![1, 1, 1], "counts per sheet");
         let pieces = tile_document(&doc, 300.0, 300.0, 10.0).unwrap();
-        assert_eq!(pieces.len(), 4);
+        assert_eq!(pieces.len(), 3);
         for piece in &pieces {
             assert_eq!(piece.shape_count(), 1);
             assert_eq!(piece.layers[0].kind, CutStyle::Cut);
             // Kerf settings travel with each sheet.
             assert_eq!(piece.kerf, doc.kerf);
         }
+    }
+
+    #[test]
+    fn clipped_cut_paths_stay_on_their_sheet() {
+        // A rectangle far larger than one sheet: every sheet must receive the
+        // intersection, never the whole rectangle.
+        let mut doc = Document {
+            board: Board {
+                width_mm: 600.0,
+                height_mm: 600.0,
+            },
+            kerf: stencilcraft_doc::KerfSettings::default(),
+            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            next_shape_id: 1,
+        };
+        let mut p = kurbo::BezPath::new();
+        p.move_to(Point::new(5.0, 5.0));
+        p.line_to(Point::new(595.0, 5.0));
+        p.line_to(Point::new(595.0, 595.0));
+        p.line_to(Point::new(5.0, 595.0));
+        p.close_path();
+        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+
+        // 3 × 3 sheets cover the board, but the middle one holds nothing of the
+        // outline and must not be exported.
+        assert_eq!(layout(600.0, 600.0, 300.0, 300.0, 10.0).unwrap().len(), 9);
+        let pieces = tile_document(&doc, 300.0, 300.0, 10.0).unwrap();
+        assert_eq!(pieces.len(), 8, "the middle sheet is empty and skipped");
+        for piece in &pieces {
+            assert_eq!(piece.shape_count(), 1);
+            let b = bounds_of_shape(&piece.layers[0].shapes[0].path).unwrap();
+            assert!(b.x0 >= -1e-6 && b.y0 >= -1e-6, "off the sheet: {b:?}");
+            assert!(
+                b.x1 <= piece.board.width_mm + 1e-6 && b.y1 <= piece.board.height_mm + 1e-6,
+                "off the sheet: {b:?} on {}×{}",
+                piece.board.width_mm,
+                piece.board.height_mm
+            );
+        }
+    }
+
+    #[test]
+    fn overlap_almost_as_wide_as_the_sheet_still_needs_one_sheet() {
+        // 299 mm of overlap on a 300 mm sheet advances 1 mm per tile: counting
+        // advances instead of sheets would ask for 90 000 sheets.
+        let tiles = layout(300.0, 300.0, 300.0, 300.0, 299.0).unwrap();
+        assert_eq!(tiles.len(), 1);
+    }
+
+    #[test]
+    fn absurd_tilings_are_refused() {
+        // A 100 mm sheet with a 99.9 mm overlap advances 0.1 mm: this would want
+        // ~100 000 sheets per axis.
+        assert!(matches!(
+            layout(10_000.0, 10_000.0, 100.0, 100.0, 99.9),
+            Err(TilingError::TooManyTiles { .. })
+        ));
     }
 
     #[test]
@@ -344,10 +429,16 @@ mod tests {
     fn tile_origin_translates_shapes_to_sheet_space() {
         let doc = cross_doc(500.0, 400.0);
         let pieces = tile_document(&doc, 300.0, 300.0, 10.0).unwrap();
-        // The top-right tile starts at (290, 290); its shape must sit at
-        // roughly (−289, −289) in sheet space.
-        let top_right_shape = &pieces[3].layers[0].shapes[0];
-        let b = bounds_of_shape(&top_right_shape.path).unwrap();
-        assert!(b.x0.abs() - 289.0 < 1.0, "shape origin: {b:?}");
+        // The top-right sheet starts at (290, 290) and holds the diagonal from
+        // (363, 290) to (499, 399), i.e. roughly (73, 0) to (209, 109) in sheet space.
+        let top_right = pieces.last().expect("sheets are never empty");
+        assert_eq!(top_right.board.width_mm, 210.0);
+        let b = bounds_of_shape(&top_right.layers[0].shapes[0].path).unwrap();
+        assert!((b.x0 - 72.6).abs() < 1.0, "shape origin: {b:?}");
+        assert!(
+            b.y0.abs() < 1.0,
+            "shape touches the sheet's bottom edge: {b:?}"
+        );
+        assert!(b.x1 <= 210.0 + 1e-6 && b.y1 <= 110.0 + 1e-6, "{b:?}");
     }
 }

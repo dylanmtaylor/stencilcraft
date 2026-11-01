@@ -143,8 +143,8 @@ Completed items should be marked here only when behavior is usable end-to-end.
   fields retain their keys; compensated kerf geometry is cached until shape geometry
   or kerf width changes; a persisted, bounded Recent menu reopens the eight most
   recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
-- 2026-11-01 — shared desktop controls moved to `aiongg/craft-libs` design-system
-  revision `7ca77f6a`; the existing VectorCraft-style shell builds against that revision.
+- 2026-11-01 — shared desktop controls pinned to `storytold/craft-libs` design-system
+  revision `053c0043`; the existing VectorCraft-style shell builds cleanly against that revision.
   Control of the visible desktop document remains an open gap.
 - 2026-10-31 — CI/CD and multi-platform packaging parity: wired shared release, gate CI, packaging-lint, SonarCloud, FreeBSD, and Windows ARM64 workflows via craft-common-actions@main; added macOS, Windows (WiX MSI), FreeBSD, Web, and Linux (deb/rpm via nfpm, AppImage, Flatpak OCI) packaging pipelines; added cargo xtask version subcommand.
 - 2026-10-31 — Flatpak OCI distribution: added `--oci` export support to

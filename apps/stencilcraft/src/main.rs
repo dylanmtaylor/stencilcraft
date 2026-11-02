@@ -572,6 +572,8 @@ pub struct StencilApp {
     pub engine: stencilcraft_engine::Engine,
     pub view: stencilcraft_ui_egui::View,
     pub pending_view_command: Option<CanvasViewCommand>,
+    /// Apply status-bar zoom changes at the canvas center once its bounds are known.
+    pub pending_zoom: Option<f32>,
     pub kerf_preview: bool,
     pub kerf_preview_cache: Option<KerfPreviewCache>,
     pub kerf_draft: Option<f64>,
@@ -715,6 +717,7 @@ impl StencilApp {
             engine,
             view: stencilcraft_ui_egui::View::default(),
             pending_view_command: None,
+            pending_zoom: None,
             kerf_preview: false,
             kerf_preview_cache: None,
             kerf_draft: None,
@@ -2695,37 +2698,6 @@ impl StencilApp {
             doc.kerf.width_mm = width_mm;
         }
         let backdrop = mat_backdrop(self.mat);
-        let mut zoom_delta = 0.0_f32;
-        let mut requested_zoom = None;
-        let mut zoom_value = f64::from((self.view.zoom * 100.0).round().clamp(5.0, 40000.0));
-        let mut fit_clicked = false;
-        let mut center_clicked = false;
-        ui.horizontal(|ui| {
-            if ui.add(Button::new("Fit")).clicked() {
-                fit_clicked = true;
-            }
-            if ui.add(Button::new("Center")).clicked() {
-                center_clicked = true;
-            }
-            if ui.add(IconButton::new(Icon::Minus, "Zoom out")).clicked() {
-                zoom_delta = -1.0;
-            }
-            let slider_width = (ui.available_width() - 112.0).clamp(56.0, 180.0);
-            let edit = Slider::new("canvas-zoom", "Zoom", zoom_value, 5.0..=40000.0)
-                .scale(SliderScale::Log)
-                .step(1.0)
-                .width(slider_width)
-                .show(ui);
-            if apply_edit(&mut zoom_value, &mut self.zoom_before, edit.event) {
-                requested_zoom = Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
-            }
-            ui.small(format!("{zoom_value:.0}%"));
-            if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
-                zoom_delta = 1.0;
-            }
-        });
-        ui.separator();
-
         let full_rect = ui.available_rect_before_wrap();
         let tokens = <craft_ui::theme::Tokens as craft_ui::theme::TokensOf>::of(ui);
         let clip = if self.prefs.show_rulers {
@@ -2740,11 +2712,6 @@ impl StencilApp {
         if self.note_board_size(doc.board.width_mm, doc.board.height_mm) && self.view_initialized {
             view_command = Some(CanvasViewCommand::Fit);
         }
-        if fit_clicked {
-            view_command = Some(CanvasViewCommand::Fit);
-        } else if center_clicked {
-            view_command = Some(CanvasViewCommand::Center);
-        }
         let extent_width = backdrop.width_mm.max(doc.board.width_mm);
         let extent_height = backdrop.height_mm.max(doc.board.height_mm);
         if !self.view_initialized {
@@ -2755,11 +2722,8 @@ impl StencilApp {
         if let Some(command) = view_command {
             apply_canvas_view_command(&mut self.view, command, extent_width, extent_height, clip);
         }
-        if let Some(zoom) = requested_zoom {
+        if let Some(zoom) = self.pending_zoom.take() {
             self.view.zoom_at(zoom / self.view.zoom, clip.center());
-        }
-        if zoom_delta != 0.0 {
-            self.view.zoom_at(1.2_f32.powf(zoom_delta), clip.center());
         }
 
         let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
@@ -3204,7 +3168,7 @@ impl StencilApp {
             self.engine.doc.shape_count()
         );
         let status_msg = self.status.clone();
-        let zoom_pct = (self.view.zoom * 100.0).round();
+        let mut zoom_value = f64::from((self.view.zoom * 100.0).round().clamp(5.0, 40000.0));
 
         egui::Panel::bottom("status")
             .frame(egui::Frame::NONE)
@@ -3212,16 +3176,45 @@ impl StencilApp {
             .show(parent, |ui| {
                 StatusBar::new("stencilcraft-status").show(ui, |bar| {
                     bar.leading(|ui| {
-                        StatusBar::field(ui, |ui| {
-                            ui.label(format!("{zoom_pct:.0}%"));
+                        ui.horizontal_centered(|ui| {
+                            if ui
+                                .add(Button::new("Fit").size(ControlSize::Sm))
+                                .on_hover_text("Fit the mat and board (F)")
+                                .clicked()
+                            {
+                                self.pending_view_command = Some(CanvasViewCommand::Fit);
+                            }
+                            if ui
+                                .add(Button::new("Center").size(ControlSize::Sm))
+                                .on_hover_text("Center the mat and board (C)")
+                                .clicked()
+                            {
+                                self.pending_view_command = Some(CanvasViewCommand::Center);
+                            }
+                            if ui.add(IconButton::new(Icon::Minus, "Zoom out")).clicked() {
+                                self.pending_zoom = Some((self.view.zoom / 1.2).clamp(0.05, 400.0));
+                            }
+                            let edit =
+                                Slider::new("canvas-zoom", "Zoom", zoom_value, 5.0..=40000.0)
+                                    .scale(SliderScale::Log)
+                                    .step(1.0)
+                                    .width(100.0)
+                                    .show(ui);
+                            if apply_edit(&mut zoom_value, &mut self.zoom_before, edit.event) {
+                                self.pending_zoom =
+                                    Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
+                            }
+                            ui.label(format!("{zoom_value:.0}%"));
+                            if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
+                                self.pending_zoom = Some((self.view.zoom * 1.2).clamp(0.05, 400.0));
+                            }
                         });
                         StatusBar::info(ui, &info);
                         StatusBar::message(ui, &status_msg, false);
                     });
                     bar.trailing(|ui| {
-                        ui.small("F fit · C center · Space+drag to pan");
-                        ui.separator();
-                        ui.label(format!("Tool: {}", self.active_tool.label()));
+                        ui.label(format!("Tool: {}", self.active_tool.label()))
+                            .on_hover_text("Space+drag or middle-drag to pan · wheel to zoom");
                     });
                 });
             });
@@ -3966,15 +3959,19 @@ mod tests {
         ctx.enable_accesskit();
         craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
         let mut app = StencilApp::new(None);
-        let out = frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
+        frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         let old_zoom = app.view.zoom;
+        let out = frame(&ctx, &mut app, vec![], StencilApp::status_bar);
         click(
             &ctx,
             &mut app,
-            StencilApp::canvas_body,
+            StencilApp::status_bar,
             node_center(&out, "Zoom"),
         );
+        assert!(app.pending_zoom.is_some());
+        frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         assert_ne!(app.view.zoom, old_zoom);
+        assert!(app.pending_zoom.is_none());
     }
 
     #[test]

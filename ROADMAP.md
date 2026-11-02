@@ -88,6 +88,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-02 — Canvas navigation uses the shared status bar: Fit, Center and zoom
+  controls move below the canvas, leaving more room for the artwork. The zoom slider
+  remains anchored at the canvas center and is covered by a desktop UI test.
+
 - 2026-11-01 — Kerf invariants: convex contours must grow in area with every kerf width
   (triangles through 64-gons, 5–120 mm), a hairline kerf must add perimeter × kerf/2
   of area within 5%, and mitered vertices must land at the geometric miter distance.

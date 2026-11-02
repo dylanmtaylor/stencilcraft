@@ -63,8 +63,8 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 12. **Packaging**: window icon wired from embedded PNG asset (`APP_ICON_PNG`); Linux packaging tarball and Flatpak scripts (`packaging/linux/package.sh`, `flatpak-bundle.sh`) with `.desktop` and metainfo established.
 13. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the `storytold/craft-libs` design-system revision `053c0043`, with `craft-draw` supplying the Bezier/pen path editing. The app uses shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Layout and visual parity with VectorCraft remain incomplete.
 14. **Typing and dialog behaviour on the new head**: `TextField` buffers typing until Enter, focus loss or commit, and a plain field passes Escape through instead of clearing. The text-dialog test encodes this; any UI that assumed per-keystroke updates should commit explicitly.
-15. **Visual parity with VectorCraft (checked on Xvfb, 1600x1000)**: both apps share the craft-libs `suite_default` theme and chrome.
-    - Top bar: StencilCraft now features a Home button beside the menu bar and an `Essentials` workspace switcher in the title bar trailing section matching VectorCraft.
-    - Right dock: unified into clean `Properties` and `Layers` tabs within a single dock column group.
-    - Canvas & status: removed redundant hint text row from above the canvas, relocating navigation shortcuts to the bottom status bar beside active tool info.
-    - Remaining parity: tool rail grouping flyout markers and bottom status bar render/fps readouts.
+15. **Visual parity with VectorCraft**: both apps share the craft-libs `suite_default` theme and chrome.
+    - Top bar: StencilCraft has a Home button and an `Essentials` workspace switcher.
+    - Right dock: `Properties` and `Layers` tabs share a dock group; VectorCraft also has an icon strip and Libraries tab.
+    - Canvas navigation uses the shared bottom status bar; VectorCraft also shows render and fps stats.
+    - Remaining differences include tool rail grouping and flyout markers, and the production controls in StencilCraft's top toolbar.

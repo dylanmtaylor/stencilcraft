@@ -76,7 +76,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     outward/inward offset as a new shape. Also missing: round corners (kerf only mitres)
     and the option to weld the offset outlines into one.
 17. **Groups, stacking and layer control**: no group/ungroup, no reordering
-    (forward/back), no locking of objects or layers, no rename, no moving objects
+    (forward/back, with shortcuts), no locking of objects or layers, no rename, no moving objects
     between layers. Attach (keep positions on the mat) and Contour (turn off single
     sub-paths) build on these.
 18. **Snapping and guides**: there is a grid display but no snapping to the grid,
@@ -107,7 +107,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     break/join/close path, release compound path, simplify, flip/mirror buttons, a
     clipboard, Paste in Front, Select by Color, Detach Lines, a rotation handle on the
     selection, a reference-point picker for the X/Y fields, a preference for what a tool
-    does after use, and warp.
+    does after use, a node-count readout, and warp.
 24. **Trace**: threshold silhouette only. Missing: image filters, outer-edge-only trace,
     trace & detach, background removal, a live preview of the trace area, and
     multi-colour trace to layers.

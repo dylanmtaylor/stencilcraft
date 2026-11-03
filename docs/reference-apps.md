@@ -102,7 +102,7 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | Smart snapping (to objects) | SS | Snap to other objects' edges and centres while moving | missing | replicate | 2026-11-02, SS 5.0.539: View › Enable Smart Snapping, on by default |
 | Zoom, pan, fit | both | Zoom tools, hand pan, fit to page/selection | have: Hand, Zoom, Fit (F), Center (C), status-bar zoom | replicate | 2026-11-02, SS 5.0.539: full toolbar has zoom in/out, zoom to fit, zoom to selection and a pan hand; View menu has a Zoom submenu. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Live dimension callouts while drawing | SS | Width and height labels follow the shape as you drag, and stay on the selection | missing | replicate | 2026-11-02, SS 5.0.539: width shown below and height on the left, in inches; they update during an offset preview; Show Dimensions is a preference (on) |
-| Measure | SS | Measure a distance on the canvas | missing | replicate | pending |
+| Measure | SS | Measure a distance on the canvas | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
 | Units | both | Choose inches or millimetres; the default is inches | partial: everything is millimetres; no inch display option | replicate (display-only conversion at the UI boundary) | 2026-11-02, SS 5.0.539: default units are inches (preference set to Auto (Inches)); page size, dimension callouts and offset distances all show inches. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Kerf/compensation preview | — | Not a reference-app feature; StencilCraft's own | have | — | — |
 | Oversized design tiling | SS (Business) | Split a design larger than the media into tiles that are cut separately | have: `tiling` crate, `tile-preview`, overlap and marks | replicate | 2026-11-02, SS 5.0.539: not present in Basic; needs a paid edition to observe |
@@ -147,8 +147,9 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | Duplicate, cut/copy/paste | both | Copy objects; paste in place | partial: `shapes.duplicate`; no clipboard | replicate | 2026-11-02, SS 5.0.539: Cut/Copy/Paste and Duplicate (Ctrl+D) in the Edit menu; Paste in Front is its own row. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Group/ungroup | both | Treat objects as one unit | missing: the document has layers, but no groups | replicate | 2026-11-02, SS 5.0.539: Group and Ungroup in the Object menu, the toolbar and the selection options bar. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Compound path make/release | SS | Join paths into one shape with holes | partial: Pathfinder Merge/Union makes compound shapes; no release | replicate | 2026-11-02, SS 5.0.539: Make/Release Compound Path in the Object menu and the Modify panel |
-| Point editing | both | Move, add and delete points; change smooth/corner points | partial: `BezierOverlay` direct select and convert-point | replicate | 2026-11-02, SS 5.0.539: point edit tool in the rail; Bezier control handles show for selected points only by default (a preference). DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
-| Break/join path, close path | SS | Split a path at a point; join two endpoints | missing | replicate | pending |
+| Point editing | both | Move, add and delete points; change smooth/corner points | partial: `BezierOverlay` direct select and convert-point | replicate | 2026-11-02, SS 5.0.539: point edit tool in the rail; Bezier control handles show for selected points only by default (a preference); Point Editing panel: delete point, break path, corner, smooth, make a segment flat or curved, simplify, convert to path. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Node count readout | SS | Counts for the selection: shapes, contours, nodes, straight and curved nodes | missing | replicate (cheap, helps judge cut complexity) | 2026-11-02, SS 5.0.539: shown in the Point Editing panel |
+| Break/join path, close path | SS | Split a path at a point; join two endpoints | missing | replicate | 2026-11-02, SS 5.0.539: the Point Editing panel has Break Path; no join-path command was found in Basic |
 | Simplify / reduce points | SS | Remove extra points within a tolerance | missing | replicate | 2026-11-02, SS 5.0.539: Object menu has Simplify (Ctrl+J) |
 | Warp / distort | SS (Designer), DS | Bend a shape with an envelope or perspective | missing | reimagine, low priority | 2026-11-02, SS 5.0.539: not present in Basic. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Undo/redo history | both | Multi-step undo | have: journal-based undo/redo | replicate | 2026-11-02, SS 5.0.539: Undo/Redo in the Edit menu and the toolbar. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
@@ -159,7 +160,7 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | Tool shortcuts | SS | Single-letter keys switch tools | have: rail tools have single-key shortcuts | replicate | 2026-11-02, SS 5.0.539: typing on the canvas changes the active tool |
 | Action after tool use | SS | Whether a tool stays active or returns to Select after use | missing: no preference | replicate as a preference | 2026-11-02, SS 5.0.539: Tools preferences: shape tools keep drawing; freehand, eraser and knife stay active; zoom and eyedropper return to Select; right-click on later shapes selects them |
 | Drag-select mode (touching vs enclosed) | SS | Whether a drag box selects shapes it touches or only those inside it | have: left-to-right selects enclosed, right-to-left selects touching | reimagine (by drag direction, not a preference) | 2026-11-02, SS 5.0.539: a Tools preference, defaulting to shapes touching the box |
-| Lock objects | SS | Stop an object from being selected or moved | missing | replicate | pending |
+| Lock objects | SS | Stop an object from being selected or moved | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
 
 ## Offset
 
@@ -219,17 +220,18 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Align to page/mat | SS | Align against the media instead of the selection | have: `to_board` | replicate | 2026-11-02, SS 5.0.539: centre to page in the Align tab and the options bar |
 | Distribute horizontally/vertically | both | Even spacing | have: `shapes.distribute` | replicate | 2026-11-02, SS 5.0.539: Distribute horizontally/vertically in the Align tab. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Centre to page | SS | Put the selection in the middle of the media | have (align to board, both axes) | replicate | 2026-11-02, SS 5.0.539: centre to page and centre on each other in the Align tab |
-| Spacing by a set value | SS | Exact gap between objects | missing | replicate | pending |
+| Spacing by a set value | SS | Exact gap between objects | missing | replicate | 2026-11-02, SS 5.0.539: Basic has only even distribution (Space Horizontally / Space Vertically); no spacing-by-value control |
 
 ## Layers and objects
 
 | Feature | App | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
 | Layers panel: add/remove/show/hide | both | List of layers or objects with visibility toggles | have: `layer.add/remove/set-visible`, Layers & Objects panel | replicate | 2026-11-02, SS 5.0.539: no layers panel in Basic's panel column (vendor docs list layers as a Designer feature). DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
-| Reorder (bring forward/send back, drag in list) | both | Change the stacking order | missing | replicate | 2026-11-02, SS 5.0.539: Object menu has an Arrange submenu; the options bar has arrange too. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
-| Lock layer | SS | Stop a layer from being edited | missing | replicate | pending |
+| Reorder (bring forward/send back, drag in list) | both | Change the stacking order | missing | replicate | 2026-11-02, SS 5.0.539: Object menu has an Arrange submenu; the options bar has arrange too; Arrange: bring to front, send to back, bring forward, send backward, each with a shortcut. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Arrange shortcuts | SS | Keyboard shortcuts for bring to front/forward and send to back/backward | missing (no reorder command yet) | replicate with the reorder command | 2026-11-02, SS 5.0.539: Ctrl+Shift+] / Ctrl+Shift+[ for front/back, Ctrl+] / Ctrl+[ for one step |
+| Lock layer | SS | Stop a layer from being edited | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
 | Rename layer/object | both | Give a layer or object a label | partial: layers have names; there is no rename command | replicate | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
-| Move object between layers | SS | Drag an object to another layer | missing | replicate | pending |
+| Move object between layers | SS | Drag an object to another layer | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
 | Colour Sync | DS | Merge layers of similar colours so fewer mats are used | missing | reimagine (merge by operation/material) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
 
 ## Fill and line styles
@@ -275,7 +277,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Test cut | both | Cut a small test shape first | missing | replicate | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Overcut / line segment overcut | SS | Cut a little past corners or ends so pieces lift cleanly | missing | replicate | 2026-11-02, SS 5.0.539: a Line Segment Overcut checkbox per material; kraft blade adds loop overcut; Preferences › Advanced has Software Overcut (on) |
 | Cut order / path sorting | SS | Cut inner shapes first and keep travel short | missing | replicate | 2026-11-02, SS 5.0.539: an Intelligent Path checkbox per material; its behaviour not tested yet |
-| Mat-free (carrier sheet free) cutting strategy | SS | Path ordering that lets material be cut without a mat | missing | replicate | pending |
+| Mat-free (carrier sheet free) cutting strategy | SS | Path ordering that lets material be cut without a mat | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
 | Weed lines and weed borders | SS (Business) | Extra cut lines that make weeding easier | missing | replicate | 2026-11-02, SS 5.0.539: not present in Basic |
 | Laser/G-code profiles | — | Not in these apps; StencilCraft's own | partial | — | — |
 
@@ -365,7 +367,7 @@ These are the rows marked **missing** above. Rows marked partial are not listed.
 - **Drawing**: freehand, arc, knife, eraser, parametric shapes, rhinestone/cross-stitch/puzzle.
 - **Text**: typography controls, text on path / curve text, glyphs panel, spelling check.
 - **Editing**: group/ungroup, break/join/close path, simplify, warp, lock, rotation knob,
-  Paste in Front, Select by Color, action-after-tool-use preference.
+  Paste in Front, Select by Color, action-after-tool-use preference, node count readout.
 - **Offset**: weld offsets / per-letter offsets.
 - **Trace**: image filters, outer-edge-only trace and trace & detach, background removal,
   live preview, multi-colour trace, image effects.
@@ -373,7 +375,7 @@ These are the rows marked **missing** above. Rows marked partial are not listed.
 - **Replicate**: directional duplicate, row/column presets, radial copies, fill page,
   mirror copy, nesting.
 - **Alignment**: spacing by a set value.
-- **Layers**: reorder, lock, move between layers, Colour Sync.
+- **Layers**: reorder and arrange shortcuts, lock, move between layers, Colour Sync.
 - **Styles**: dashed lines and joins/caps, fill/gradient/pattern, print cut lines,
   sketch and stipple fills, specialty (emboss/deboss/foil) tools, pop-up card generator.
 - **Print & Cut**: mark options, show print border, printing from the app, bleed, sensor

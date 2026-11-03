@@ -4966,6 +4966,7 @@ dependencies = [
  "stencilcraft-kerf",
  "stencilcraft-machine",
  "stencilcraft-mcp",
+ "stencilcraft-studio",
  "stencilcraft-svg",
  "stencilcraft-testkit",
  "stencilcraft-tiling",
@@ -5085,9 +5086,19 @@ dependencies = [
  "stencilcraft-geom",
  "stencilcraft-kerf",
  "stencilcraft-machine",
+ "stencilcraft-studio",
  "stencilcraft-svg",
  "stencilcraft-testkit",
  "stencilcraft-tiling",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "stencilcraft-studio"
+version = "0.1.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "stencilcraft-doc",
  "thiserror 2.0.21",
 ]
 

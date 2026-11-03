@@ -716,3 +716,24 @@ fn unknown_flag_fails_with_a_message_naming_the_flag() {
     );
     assert!(all.contains("--wednesday"), "flag named: {all}");
 }
+
+#[test]
+fn import_rejects_a_non_studio_file_with_a_clear_message() {
+    let dir = fresh_out_dir();
+    let input = dir.join("fake.studio");
+    std::fs::write(&input, b"PK\x03\x04 not a studio file").unwrap();
+    let out = bin()
+        .args([
+            "import",
+            "--in",
+            &input.to_string_lossy(),
+            "--out",
+            &dir.join("x.stencilcraft").to_string_lossy(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("not a Silhouette Studio document"), "{err}");
+    assert!(!err.contains("panicked"), "{err}");
+}

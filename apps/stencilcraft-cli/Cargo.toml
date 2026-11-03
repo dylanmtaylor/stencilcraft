@@ -23,6 +23,7 @@ stencilcraft-gcode = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-mcp = { workspace = true }
 stencilcraft-svg = { workspace = true }
+stencilcraft-studio = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 stencilcraft-testkit = { workspace = true }
 

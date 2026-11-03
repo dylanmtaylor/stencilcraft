@@ -226,9 +226,7 @@ fn parse_count(flag: &str, value: &str) -> Result<u32, PipelineError> {
 pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
-    let mut engine = stencilcraft_engine::Engine::new(
-        stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?,
-    );
+    let mut engine = stencilcraft_engine::Engine::new(crate::load_document(&input)?);
     for command in req.commands {
         let effect = engine.run(command).map_err(|e| format!("--command: {e}"))?;
         println!("{}", serde_json::to_string(&effect).unwrap_or_default());

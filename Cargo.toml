@@ -44,6 +44,7 @@ stencilcraft-generate = { path = "crates/generate" }
 stencilcraft-engine = { path = "crates/engine" }
 stencilcraft-machine = { path = "crates/machine" }
 stencilcraft-mcp = { path = "crates/mcp" }
+stencilcraft-studio = { path = "crates/studio" }
 stencilcraft-ui-egui = { path = "crates/ui-egui" }
 stencilcraft-testkit = { path = "crates/testkit" }
 

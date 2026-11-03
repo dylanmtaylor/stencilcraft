@@ -81,7 +81,7 @@ pub fn execute(args: &[String]) -> Result<(), String> {
     let (sheet_w, sheet_h) = sheet.ok_or(
         "tile-preview: --sheet WxH is required (the same size you would cut on; see `run --tile-sheet`)",
     )?;
-    let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
+    let doc = crate::load_document(&input)?;
     let pieces = stencilcraft_tiling::tile_document_with(
         &doc,
         &SheetOptions {

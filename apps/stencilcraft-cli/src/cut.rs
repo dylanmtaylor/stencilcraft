@@ -395,8 +395,9 @@ pub fn execute(args: &[String]) -> Result<(), String> {
         Err(e) => return Err(e.to_string()),
     };
     let input = req.input.clone().unwrap_or_default();
-    let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
-    for line in run(&req, &doc).map_err(|e| e.to_string())? {
+    let doc = crate::load_document(&input)?;
+    let lines = run(&req, &doc).map_err(|e| e.to_string())?;
+    for line in lines {
         println!("{line}");
     }
     Ok(())

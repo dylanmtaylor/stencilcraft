@@ -4,6 +4,9 @@
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
 //! - `tile-preview --in FILE --sheet WxH --out PAGE.svg` — every sheet on one page
 //! - `import-svg --in FILE.svg --out FILE.stencilcraft` — import SVG into the native document format
+//! - `import --in FILE[.svg|.studio|.studio3] --out FILE.stencilcraft` — import by extension
+//!
+//! Every `--in FILE` also opens Silhouette Studio `.studio` / `.studio3` documents.
 //! - `mcp [--control PORT]` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md);
 //!   with `--control`, requests are relayed to the running desktop app
 //! - `make-starter --out FILE` — write the canonical starter document
@@ -30,6 +33,7 @@ fn main() -> Result<(), String> {
         }
         Some("tile-preview") => tile_preview::execute(&args[1..]),
         Some("import-svg") => import_svg_command(&args[1..]),
+        Some("import") => import_svg_command(&args[1..]),
         Some("trace-image") => trace_image_command(&args[1..]),
         Some("print-cut") => print_cut_command(&args[1..]),
         Some("mcp") => mcp_command(&args[1..]),
@@ -140,9 +144,13 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
     }
     let input = input.ok_or("import-svg: --in FILE.svg is required")?;
     let output = output.ok_or("import-svg: --out FILE.stencilcraft is required")?;
-    let contents =
-        std::fs::read_to_string(&input).map_err(|e| format!("{input}: could not read SVG: {e}"))?;
-    let doc = stencilcraft_svg::import(&contents, &input).map_err(|e| e.to_string())?;
+    let doc = if input.to_ascii_lowercase().ends_with(".svg") {
+        let contents = std::fs::read_to_string(&input)
+            .map_err(|e| format!("{input}: could not read SVG: {e}"))?;
+        stencilcraft_svg::import(&contents, &input).map_err(|e| e.to_string())?
+    } else {
+        load_document(&input)?
+    };
     stencilcraft_doc::save_to(&doc, &output).map_err(|e| e.to_string())?;
     println!(
         "imported {} shapes on {} layers ({} × {} mm): {output}",
@@ -152,6 +160,20 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
         doc.board.height_mm
     );
     Ok(())
+}
+
+/// Opens a native document, or imports a Silhouette Studio `.studio` / `.studio3`
+/// document (warnings about skipped records go to stderr).
+pub(crate) fn load_document(path: &str) -> Result<stencilcraft_doc::Document, String> {
+    match stencilcraft_doc::format::read_path(&[&stencilcraft_studio::StudioHandler], path)? {
+        Some(read) => {
+            for warning in &read.warnings {
+                eprintln!("{path}: {warning}");
+            }
+            Ok(read.value)
+        }
+        None => stencilcraft_doc::load_from(path).map_err(|e| e.to_string()),
+    }
 }
 
 fn trace_image_command(args: &[String]) -> Result<(), String> {
@@ -232,7 +254,7 @@ fn print_cut_command(args: &[String]) -> Result<(), String> {
     }
     let input = input.ok_or("print-cut: --in FILE.stencilcraft is required")?;
     let output = output.ok_or("print-cut: --out SHEET.svg is required")?;
-    let doc = stencilcraft_doc::load_from(&input).map_err(|error| error.to_string())?;
+    let doc = load_document(&input)?;
     let svg = print_cut::export_sheet(&doc)?;
     std::fs::write(&output, svg).map_err(|error| format!("{output}: {error}"))?;
     println!("wrote printable registration sheet: {output}");
@@ -253,6 +275,8 @@ fn print_help() {
     println!("      [--overlap MM] [--columns N] [--scale N] [--marks]");
     println!("      Every sheet of the tiling on one framed page, for inspection before cutting.");
     println!("  import-svg --in FILE.svg --out FILE.stencilcraft");
+    println!("  import --in FILE[.svg|.studio|.studio3] --out FILE.stencilcraft");
+    println!("      Any --in FILE also opens Silhouette Studio .studio/.studio3 documents.");
     println!("      Import common SVG shapes/groups/transforms into the native format.");
     println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
     println!("      Trace dark raster silhouettes into closed cut contours at 96 dpi.");

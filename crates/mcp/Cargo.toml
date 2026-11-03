@@ -17,6 +17,7 @@ stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-machine = { workspace = true }
 stencilcraft-svg = { workspace = true }
+stencilcraft-studio = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 
 [dev-dependencies]

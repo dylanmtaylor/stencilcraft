@@ -18,34 +18,37 @@ fn block(payload: &[u8]) -> Vec<u8> {
     out
 }
 
-fn path_record(points: &[(f32, f32)]) -> Vec<u8> {
-    let mut list = vec![1];
-    list.extend_from_slice(&(points.len() as u32 - 1).to_le_bytes());
-    for (i, &(x, y)) in points.iter().enumerate() {
-        let mut p = Vec::new();
-        p.extend_from_slice(&x.to_le_bytes());
-        p.extend_from_slice(&y.to_le_bytes());
-        p.extend_from_slice(&[0, 0, u8::from(i == 0), 0, 0]);
-        list.extend(block(&p));
+/// One object outline in the page-coordinate (compact) layout the reader reads.
+fn path_record(contours: &[(bool, &[(f32, f32)])]) -> Vec<u8> {
+    let mut outer = (contours.len() as u32 - 1).to_le_bytes().to_vec();
+    for &(closed, points) in contours {
+        let mut c = vec![u8::from(closed)];
+        c.extend_from_slice(&(points.len() as u32 - 1).to_le_bytes());
+        for &(x, y) in points {
+            c.extend_from_slice(&x.to_le_bytes());
+            c.extend_from_slice(&y.to_le_bytes());
+            c.extend_from_slice(&[0, 0]);
+        }
+        outer.extend_from_slice(&(c.len() as u32 + 4).to_le_bytes());
+        outer.extend(c);
     }
-    let mut outer = 0u32.to_le_bytes().to_vec();
-    outer.extend(block(&list));
-    let mut out = block(&outer);
-    for v in [1f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
-    out
+    block(&outer)
 }
 
 /// A v2 body: header, root record holding a filler record, the page record and paths.
 fn v2(page: (f32, f32), paths: &[&[(f32, f32)]]) -> Vec<u8> {
+    let records: Vec<_> = paths.iter().map(|p| path_record(&[(true, p)])).collect();
+    v2_records(page, &records)
+}
+
+fn v2_records(page: (f32, f32), records: &[Vec<u8>]) -> Vec<u8> {
     let mut page_payload = vec![0u8; 0x29];
     page_payload.extend_from_slice(&page.0.to_le_bytes());
     page_payload.extend_from_slice(&page.1.to_le_bytes());
     let mut root = block(&[0u8; 8]);
     root.extend(block(&page_payload));
-    for p in paths {
-        root.extend(path_record(p));
+    for r in records {
+        root.extend_from_slice(r);
     }
     let mut out = b"silhouette04;".to_vec();
     out.extend(block(&root));
@@ -101,6 +104,27 @@ fn v3_container_reads_section_zero() {
     assert_eq!(got.version, Version::V3);
     assert_eq!(got.doc.shape_count(), 2);
     assert!((got.doc.board.height_mm - 279.4).abs() < 1e-3);
+}
+
+#[test]
+fn open_paths_stay_open_and_compound_contours_stay_one_shape() {
+    let line = path_record(&[(false, &[(25.4, 25.4), (76.2, 50.8)])]);
+    let compound = path_record(&[(true, RECT), (true, &[(1.0, 1.0), (2.0, 1.0), (2.0, 2.0)])]);
+    let doc = import(&v2_records((304.8, 304.8), &[line, compound]), "t")
+        .unwrap()
+        .doc;
+    assert_eq!(doc.shape_count(), 2);
+    let shapes = &doc.layers[0].shapes;
+    let closes = |i: usize| {
+        shapes[i]
+            .path
+            .elements()
+            .iter()
+            .filter(|e| matches!(e, kurbo::PathEl::ClosePath))
+            .count()
+    };
+    assert_eq!(closes(0), 0, "a line is open");
+    assert_eq!(closes(1), 2, "both contours of the compound path close");
 }
 
 #[test]
@@ -195,12 +219,74 @@ fn bit_flips_never_panic() {
 
 /// Samples checked on screen in Silhouette Studio before saving: name, shape count,
 /// and the bounding box X, Y, W, H in inches from the Transform panel.
-const VERIFIED: &[(&str, usize, [f64; 4])] = &[
-    ("empty-v3.studio3", 0, [0.0; 4]),
-    ("rect-1in-at-1-1", 1, [1.0, 1.0, 1.0, 1.0]),
-    ("rect-1in-at-2-1", 1, [2.0, 1.0, 1.0, 1.0]),
-    ("rect-2x1in-at-1-1", 1, [1.0, 1.0, 2.0, 1.0]),
-    ("ellipse-2x1in-at-1-1", 1, [1.0, 1.0, 2.0, 1.0]),
+/// Samples checked on screen: page (in), shape count, and the bounds the app showed
+/// (X, Y from the page top, W, H in inches; `None` where only the count was checked).
+type Verified = (&'static str, (f64, f64), usize, Option<[f64; 4]>);
+const VERIFIED: &[Verified] = &[
+    ("empty-v3.studio3", (12.0, 12.0), 0, None),
+    (
+        "rect-1in-at-1-1",
+        (12.0, 12.0),
+        1,
+        Some([1.0, 1.0, 1.0, 1.0]),
+    ),
+    (
+        "rect-1in-at-2-1",
+        (12.0, 12.0),
+        1,
+        Some([2.0, 1.0, 1.0, 1.0]),
+    ),
+    (
+        "rect-2x1in-at-1-1",
+        (12.0, 12.0),
+        1,
+        Some([1.0, 1.0, 2.0, 1.0]),
+    ),
+    (
+        "ellipse-2x1in-at-1-1",
+        (12.0, 12.0),
+        1,
+        Some([1.0, 1.0, 2.0, 1.0]),
+    ),
+    // 2026-11-03 samples (SS 5.0.539, Tiny11 VM).
+    (
+        "rect-1in-rot45",
+        (12.0, 12.0),
+        1,
+        Some([0.793, 0.793, 1.414, 1.414]),
+    ),
+    (
+        "rect-1in-line-b87c1b-fill-54a923",
+        (12.0, 12.0),
+        1,
+        Some([1.0, 1.0, 1.0, 1.0]),
+    ),
+    (
+        "line-1-1-to-3-2",
+        (12.0, 12.0),
+        1,
+        Some([1.0, 1.0, 2.0, 1.0]),
+    ),
+    ("page-10x7in-empty", (10.0, 7.0), 0, None),
+    (
+        "two-rects",
+        (10.0, 7.0),
+        2,
+        Some([2.097, 0.706, 1.924, 0.7]),
+    ),
+    (
+        "two-rects-grouped",
+        (10.0, 7.0),
+        2,
+        Some([2.097, 0.706, 1.924, 0.7]),
+    ),
+    (
+        "two-rects-compound",
+        (10.0, 7.0),
+        1,
+        Some([2.097, 0.706, 1.924, 0.7]),
+    ),
+    ("text-A-arial-72pt", (10.0, 7.0), 1, None),
 ];
 
 /// The flip, on an asymmetric sample: 1 in from the left and 1 in from the TOP.
@@ -220,7 +306,7 @@ fn rect_1in_at_1_1_is_one_inch_from_the_page_top_in_y_up() {
 #[test]
 fn real_samples_decode_when_present() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/silhouette");
-    for &(stem, shapes, [x, y, w, h]) in VERIFIED {
+    for &(stem, (page_w, page_h), shapes, bounds) in VERIFIED {
         let names = if stem.contains('.') {
             vec![stem.to_string()]
         } else {
@@ -231,10 +317,16 @@ fn real_samples_decode_when_present() {
                 continue;
             };
             let got = import(&bytes, &name).unwrap();
-            assert!((got.doc.board.width_mm - 304.8).abs() < 1e-3, "{name}");
-            assert!((got.doc.board.height_mm - 304.8).abs() < 1e-3, "{name}");
+            assert!(
+                (got.doc.board.width_mm - page_w * 25.4).abs() < 1e-3,
+                "{name}"
+            );
+            assert!(
+                (got.doc.board.height_mm - page_h * 25.4).abs() < 1e-3,
+                "{name}"
+            );
             assert_eq!(got.doc.shape_count(), shapes, "{name}");
-            let Some(r) = got.doc.layers[0].bounds() else {
+            let (Some([x, y, w, h]), Some(r)) = (bounds, got.doc.layers[0].bounds()) else {
                 continue;
             };
             // Documents are y-up: Silhouette's Y (from the page top) is page height - y1.

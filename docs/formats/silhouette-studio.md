@@ -7,8 +7,10 @@ in one thing, then compare the bytes. We did not disassemble, decompile or debug
 We did not read any other project's code for these formats. Posture:
 [`docs/reference-apps.md`](../reference-apps.md) (branch `docs/reference-apps`).
 
-Reader: [`crates/studio`](../../crates/studio/src/lib.rs). Status: **read, lossy** (outlines,
-both straight and Bézier, with each object's transform applied, plus page size). Writing is not done yet (see [Writing](#writing)).
+Reader: [`crates/studio`](../../crates/studio/src/lib.rs). Status: **read, lossy**. It reads every
+object's outline in page coordinates: open and closed paths, straight and Bézier segments,
+compound paths, and text as glyph outlines. It also reads the page size. Colours, groups and live text
+are not kept. Writing is not done yet (see [Writing](#writing)).
 
 ## Protected designs
 
@@ -33,6 +35,24 @@ thumbnail. Keep them locally under `corpora/silhouette/`, where the corpus tests
 | `rect-1in-at-2-1.studio` / `.studio3` | `1188097c…05f2e1` / `dcf11d30…dcda3f` | the same rectangle at X 2 (only X differs) |
 | `rect-2x1in-at-1-1.studio` / `.studio3` | `77ebadc4…203c3e` / `3f0c9b51…19e416` | W 2 H 1 at X 1 Y 1 (only W differs) |
 | `ellipse-2x1in-at-1-1.studio` / `.studio3` | `aa73e855…d6be6a` / `70abbfb1…277b4b` | ellipse W 2 H 1 at X 1 Y 1 |
+
+The samples above (2026-11-02) were lost with a deleted worktree. The 2026-11-03 set below
+was saved again in SS 5.0.539 on a Tiny11 VM, each one checked on screen before saving:
+
+| File | sha256 | Document |
+| --- | --- | --- |
+| `rect-1in-at-1-1.studio3` | `e3f0bdb7…6e0ea6` | rectangle W 1 H 1 at X 1 Y 1 in, 12 × 12 in page |
+| `rect-1in-rot45.studio3` | `800e5703…556ab7` | the same, Object › Rotate › 45° clockwise (bar shows X = Y = 0.793) |
+| `rect-1in-line-b87c1b-fill-54a923.studio3` | `443ef256…67f333` | the same, line #b87c1b, fill #54a923 |
+| `line-1-1-to-3-2.studio3` | `e6e5d0e0…f54fe9` | one straight line from (1, 1) to (3, 2) in |
+| `page-10x7in-empty.studio3` | `b6abd77e…c4322a` | empty custom 10 × 7 in page (landscape) |
+| `two-rects.studio3` | `bcb3d3e5…8e6c79` | two 0.7 in squares, 10 × 7 in page, selection X 2.097 Y 0.706 W 1.924 |
+| `two-rects-grouped.studio3` | `1f0a8ac1…0ca5fe` | the same, grouped |
+| `two-rects-compound.studio3` | `56b542b3…7cf6f0` | the same, made one compound path |
+| `text-A-arial-72pt.studio3` | `7196f437…b99e44` | live text "A", Arial, 72 pt |
+
+Tags for the 2026-11-03 set: **O** = line vs rect (open vs closed); **K** = compound vs
+two-rects (contour count); **T** = text sample; **P** = 10 × 7 page; **Q** = rot45 vs rect.
 
 Pair tags used below: **R2/R3** = rect-v2 vs rect-v3; **E3/R3** = empty-v3 vs rect-v3;
 **R** = seen in both rect files, with values checked against the known geometry;
@@ -106,6 +126,39 @@ f32 × 6                    cx cy a b c d: the on-page frame. Centre plus the ha
 "Rectangle"/"Ellipse", 32-hex id, "create_rectangle" (the tool used), …
 ```
 
+### Page-coordinate outline (what the reader reads)
+
+Every drawable object also stores its outline **already on the page** (mm, y down), and
+text stores *only* this form. This is the "second node list" above, now understood in full:
+
+```text
+01 L                       record, L counts itself
+u32 k                      number of contours - 1                         (K: 1, others 0)
+k+1 × contour:
+   u32 Lc                  contour length, counts itself
+   u8 closed               1 closed, 0 open                               (O: line 0, rect 1)
+   u32 m                   number of nodes - 1                            (O: line 1, rect 3)
+   m+1 × node:
+      f32 x, f32 y         page position (mm)
+      in handle            00 | 01 f32 dx f32 dy
+      out handle           same
+```
+
+- The drawing-frame form (`01 L1 …`, node records of 17 or 33 bytes with 3 trailing bytes,
+  then the matrix) uses the same `u32 k` and the same per-contour `closed`, `m` prefix. In
+  the line its prefix is `00 01 00 00 00`, in the rectangle `01 03 00 00 00`. (O, K)
+- Rotation: the rot45 page outline holds the rotated corners (1.5, 0.793), (0.793, 1.5) …
+  in, so readers need no matrix. (Q)
+- Groups add a "Group" object after their members; the members' page outlines are
+  unchanged. (two-rects vs grouped)
+- A compound path is one object, class name "Polygon", with one contour per member. (K)
+- Text (class "Text", tool "create_textshape") stores its font name ("Arial"), its size as
+  mm (25.4 = 72 pt), the character codes (u32 0x41), the baseline origin, and then the glyph
+  outlines in this form. "A" is two closed contours, the outer one with 8 nodes and the
+  counter with 5, and curved nodes carry handles. The text stays editable in Silhouette; we
+  import its outlines. (T)
+- Page record: width comes before height (P: 254 × 177.8).
+
 - Rectangle nodes run (x0,y0) → (x0,y1) → (x1,y1) → (x1,y0). There is no repeated closing
   node. (R)
 - Ellipse: 4 nodes (right, bottom, left, top), each with both handles. The handle length is
@@ -156,26 +209,24 @@ with no table) is also accepted.
 
 ## What the reader imports
 
-- Every path record as a closed path (lines and cubics) on one `cut` layer, after its object
-  matrix is applied.
+- Every page-coordinate outline record as one shape on a `cut` layer: one subpath per
+  contour, open contours left open, closed ones closed. Matching needs every length and
+  count to agree, so stray bytes are not read as shapes (no false match in any sample).
   It is then flipped into StencilCraft's y-up document space: `y_doc = page_height - y_file`.
-  A shape 1 in from the page's top therefore has its top edge at `page_height - 25.4` mm. This is a **shortcut**: open paths are not yet told apart (see below).
 - Page width and height, rounded to 1 µm. If they are missing or not plausible, the
   default sheet is used and a warning is returned.
 - Caps: 64 MiB input, 100,000 shapes, 2,000,000 points.
 
 ## Unknowns
 
-- The 3 trailing node bytes, and the `01 u32 3` list prefix.
-- Open versus closed paths: needs the line and open-polyline samples.
-- Rotation: which matrix entries a rotation changes (needs the rotated-rectangle sample).
-- Where rect-v2/rect-v3 really sat on the page (see the puzzle above).
+- The 3 trailing bytes of drawing-frame nodes (not needed by the reader).
+- Where line and fill colour are stored (sample in hand: `rect-1in-line-b87c1b-fill-54a923`).
+- Group membership and nesting, layers, live-text parameters beyond font, size and characters.
 - v3 embeds precomputed cut data ("Include Cut Data", on by default). Which section holds it
   is not yet identified; section 4's bounding box may be part of it.
-- Line and fill colour, layer membership, multiple layers, groups, compound paths, text.
-- Page width versus height order (only a square page so far). Letter-page sample needed.
 - Sections 1, 3, 5, 6, 7, 8 of v3.
 - What protected store designs look like (we have none and will not seek a way to read one).
+- v2 (`.studio`) copies of the 2026-11-03 set have not been saved yet.
 
 ## Writing
 

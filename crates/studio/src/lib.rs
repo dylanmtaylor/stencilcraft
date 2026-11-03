@@ -129,7 +129,8 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
         if doc.shape_count() >= MAX_SHAPES {
             return Err(bad("more than 100,000 shapes"));
         }
-        points_total = points_total.saturating_add(path.nodes.len());
+        let nodes: usize = path.contours.iter().map(|c| c.nodes.len()).sum();
+        points_total = points_total.saturating_add(nodes);
         if points_total > MAX_POINTS {
             return Err(bad("more than 2,000,000 points"));
         }
@@ -216,20 +217,24 @@ fn block(d: &[u8], at: usize) -> Option<Block> {
     (end <= d.len()).then_some(Block { start: at + 5, end })
 }
 
-/// A path record, as seen around every shape in our samples:
+/// An object's outline in page coordinates, as every drawable object (shape, line,
+/// compound path, text) stores it after its drawing-frame nodes and matrix:
 ///
 /// ```text
-/// 01 L1  u32(?)  01 L2  01 u32(?)  n × node      L1 == L2 + 9
-/// node:  01 len  f32 x  f32 y  in-handle  out-handle  3 bytes(?)
-/// handle: 00 (none) | 01 f32 dx f32 dy (relative to the node)
+/// 01 L  u32 contours-1  contours × contour
+/// contour: u32 Lc  u8 closed  u32 nodes-1  nodes × node      (Lc counts itself)
+/// node:    f32 x  f32 y  in-handle  out-handle
+/// handle:  00 (none) | 01 f32 dx f32 dy (relative to the node)
 /// ```
-/// followed by the object's 3 × 3 transform (f32, row-major). Every length must
-/// agree before we accept it, so a false match on unrelated bytes is vanishingly
-/// unlikely.
+/// Every length and count must agree before a match is accepted.
 struct PathRecord {
-    nodes: Vec<Node>,
-    transform: Affine,
+    contours: Vec<Contour>,
     end: usize,
+}
+
+struct Contour {
+    closed: bool,
+    nodes: Vec<Node>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -257,68 +262,64 @@ fn path_at(d: &[u8], at: usize, limit: usize) -> Option<PathRecord> {
     if outer.end > limit {
         return None;
     }
-    let inner = block(d, outer.start + 4)?;
-    if inner.end != outer.end || *d.get(inner.start)? != 1 {
-        return None;
-    }
-    let mut nodes = Vec::new();
-    let mut p = inner.start + 5;
-    while p < inner.end {
-        let node = block(d, p)?;
-        if node.end > inner.end {
+    let count = usize::try_from(u32_at(d, outer.start)?)
+        .ok()?
+        .checked_add(1)?;
+    let mut contours = Vec::new();
+    let mut p = outer.start + 4;
+    while p < outer.end {
+        if contours.len() >= count {
             return None;
         }
-        nodes.push(parse_node(d, node)?);
-        p = node.end;
+        let (contour, end) = contour_at(d, p, outer.end)?;
+        contours.push(contour);
+        p = end;
     }
-    if nodes.is_empty() {
-        return None;
-    }
-    Some(PathRecord {
-        nodes,
-        transform: transform_at(d, outer.end)?,
+    (p == outer.end && contours.len() == count).then_some(PathRecord {
+        contours,
         end: outer.end,
     })
 }
 
-fn parse_node(d: &[u8], b: Block) -> Option<Node> {
-    let at = point_at(d, b.start)?;
-    let mut o = b.start + 8;
-    let mut handle = || -> Option<Option<Vec2>> {
-        let flag = *d.get(o)?;
-        o += 1;
-        match flag {
-            0 => Some(None),
-            1 => {
-                let v = point_at(d, o)?.to_vec2();
-                o += 8;
-                Some(Some(v))
-            }
-            _ => None,
-        }
+fn contour_at(d: &[u8], at: usize, limit: usize) -> Option<(Contour, usize)> {
+    let end = at.checked_add(usize::try_from(u32_at(d, at)?).ok()?)?;
+    let closed = match *d.get(at + 4)? {
+        0 => false,
+        1 => true,
+        _ => return None,
     };
-    let handle_in = handle()?;
-    let handle_out = handle()?;
-    // Three trailing bytes of unknown meaning close every node record.
-    (o + 3 == b.end).then_some(Node {
-        at,
-        handle_in,
-        handle_out,
-    })
-}
-
-/// The 3 × 3 row-major matrix after a path; only affine ones (last row 0 0 1) pass.
-fn transform_at(d: &[u8], at: usize) -> Option<Affine> {
-    let mut m = [0f64; 9];
-    for (i, v) in m.iter_mut().enumerate() {
-        let f = f32_at(d, at + 4 * i)?;
-        if !f.is_finite() || f.abs() > MAX_COORD_MM {
-            return None;
-        }
-        *v = f64::from(f);
+    let count = usize::try_from(u32_at(d, at + 5)?).ok()?.checked_add(1)?;
+    // Each node takes at least 10 bytes: refuse counts the bytes cannot hold.
+    if end > limit || count > (end - at) / 10 {
+        return None;
     }
-    let [a, b, c, dd, e, f, g, h, i] = m;
-    (g == 0.0 && h == 0.0 && i == 1.0).then_some(Affine::new([a, dd, b, e, c, f]))
+    let mut nodes = Vec::with_capacity(count);
+    let mut p = at + 9;
+    for _ in 0..count {
+        let point = point_at(d, p)?;
+        p += 8;
+        let mut handle = || -> Option<Option<Vec2>> {
+            let flag = *d.get(p)?;
+            p += 1;
+            match flag {
+                0 => Some(None),
+                1 => {
+                    let v = point_at(d, p)?.to_vec2();
+                    p += 8;
+                    Some(Some(v))
+                }
+                _ => None,
+            }
+        };
+        let handle_in = handle()?;
+        let handle_out = handle()?;
+        nodes.push(Node {
+            at: point,
+            handle_in,
+            handle_out,
+        });
+    }
+    (p == end).then_some((Contour { closed, nodes }, end))
 }
 
 fn point_at(d: &[u8], at: usize) -> Option<Point> {
@@ -327,33 +328,35 @@ fn point_at(d: &[u8], at: usize) -> Option<Point> {
     (ok(x) && ok(y)).then(|| Point::new(f64::from(x), f64::from(y)))
 }
 
-/// Segments are cubic where either end has a handle, straight otherwise.
-/// shortcut: every path is closed, as in all samples so far (rectangle, ellipse);
-/// upgrade once the line/open-polyline samples show the open flag.
+/// One subpath per contour. A segment is cubic where either end has a handle,
+/// straight otherwise; a closed contour also joins its last node to its first.
 fn to_bez(path: &PathRecord) -> BezPath {
     let mut bez = BezPath::new();
-    let Some(first) = path.nodes.first() else {
-        return bez;
-    };
-    bez.move_to(first.at);
-    let next = path.nodes.iter().skip(1).chain(std::iter::once(first));
-    let last = path.nodes.len() - 1;
-    for (i, (from, to)) in path.nodes.iter().zip(next).enumerate() {
-        if from.handle_out.is_none() && to.handle_in.is_none() {
-            // The closing straight edge is the close itself.
-            if i != last {
-                bez.line_to(to.at);
+    for contour in &path.contours {
+        let Some(first) = contour.nodes.first() else {
+            continue;
+        };
+        bez.move_to(first.at);
+        let closing = contour.closed.then_some(first);
+        let next = contour.nodes.iter().skip(1).chain(closing);
+        let last = contour.nodes.len() - 1;
+        for (i, (from, to)) in contour.nodes.iter().zip(next).enumerate() {
+            match (from.handle_out, to.handle_in) {
+                // A straight closing edge is the close itself.
+                (None, None) if contour.closed && i == last => {}
+                (None, None) => bez.line_to(to.at),
+                (out, inn) => bez.curve_to(
+                    from.at + out.unwrap_or_default(),
+                    to.at + inn.unwrap_or_default(),
+                    to.at,
+                ),
             }
-        } else {
-            bez.curve_to(
-                from.at + from.handle_out.unwrap_or_default(),
-                to.at + to.handle_in.unwrap_or_default(),
-                to.at,
-            );
+        }
+        if contour.closed {
+            bez.close_path();
         }
     }
-    bez.close_path();
-    path.transform * bez
+    bez
 }
 
 /// Page width and height (mm): the root's second record, 0x29 bytes into its payload.
@@ -406,7 +409,7 @@ impl FormatHandler for StudioHandler {
             read: Fidelity::Lossy,
             write: Fidelity::None,
             notes: &[
-                "Reads outlines (lines and Bézier curves, as closed paths) with each object's transform, and the page size.",
+                "Reads every object's outline in page coordinates (open and closed paths, lines and Bézier curves, compound paths, text as outlines) and the page size.",
                 "Open paths, text, colours, layers and cut settings are not read yet.",
                 "Protected or encrypted store designs are rejected, never decrypted.",
             ],

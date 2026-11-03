@@ -99,6 +99,12 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Silhouette Studio documents: the reader now reads each object's
+  page-coordinate outline, which brings in open paths (lines), compound paths and text
+  (as glyph outlines), and rotated and grouped objects at their on-page positions. This
+  was learned from 9 new samples saved on screen in SS 5.0.539. The table of verified
+  samples now checks page size (10 × 7 in confirms width before height). Measured: 8 of the 9
+  samples present decode to the bounds the app showed; the text sample is checked by count only.
 - 2026-11-03 — Reconciled the standing gaps list with merged command and desktop
   coverage. Engine-only features remain marked as incomplete desktop workflows.
 - 2026-11-03 — DXF export reflects canvas Y coordinates at the board height, preserving

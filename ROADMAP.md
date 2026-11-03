@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: documented Pop-out Cut behavior and unresolved channel
+  positioning and protocol requirements; matless through-cut is not implemented.
+
 - 2026-11-03 — M4: Delete and Backspace remove selected shapes in Make as
   well as the canvas, while text input keeps keyboard focus.
 

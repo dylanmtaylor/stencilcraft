@@ -316,3 +316,9 @@ Make filters loaded-mat choices by the selected model; an incompatible previous 
 
 USB validation, submission outcomes and errors appear at the top of Make after
 communication. A quick return without a success message does not confirm a cut.
+
+## Pop-out cutting
+
+Pop-out cutting of cardstock without a mat is not implemented. The **no mat**
+setting alone does not enable it. See [Pop-out cutting research](pop-out-cut.md)
+for the documented behavior and remaining protocol and validation work.

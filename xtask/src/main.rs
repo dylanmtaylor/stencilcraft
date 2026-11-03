@@ -114,6 +114,7 @@ fn layers() -> Result<(), String> {
         "crates/mcp",
         "crates/testkit",
         "crates/machine",
+        "crates/generate",
     ] {
         let text = std::fs::read_to_string(format!("{manifest}/Cargo.toml"))
             .map_err(|e| format!("xtask layers: {manifest}: {e}"))?;

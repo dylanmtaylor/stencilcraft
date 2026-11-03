@@ -5011,6 +5011,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stencilcraft-doc",
+ "stencilcraft-generate",
  "stencilcraft-geom",
  "stencilcraft-kerf",
  "thiserror 2.0.21",
@@ -5027,6 +5028,18 @@ dependencies = [
  "stencilcraft-doc",
  "stencilcraft-geom",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "stencilcraft-generate"
+version = "0.1.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
 ]
 
 [[package]]

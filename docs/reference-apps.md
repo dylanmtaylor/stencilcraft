@@ -120,15 +120,15 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | Rectangle, rounded rectangle | both | Drag to draw; the corner radius can be changed | have: `shape.add-rect`, `shape.add-rounded-rect` | replicate | 2026-11-02, SS 5.0.539: Shape flyout has rectangle and rounded rectangle; width and height callouts follow the drag. DS: docs only (sign-in required) |
 | Ellipse/circle | both | Drag to draw; hold a modifier for a circle | have: `shape.add-ellipse` | replicate | 2026-11-02, SS 5.0.539: ellipse in the Shape flyout. DS: docs only (sign-in required) |
 | Polygon, star | both | Regular polygon or star; the number of sides or points can be changed | have: `shape.add-polygon`, `shape.add-star` | replicate | 2026-11-02, SS 5.0.539: polygon in the Shape flyout; no star tool was seen. DS: docs only (sign-in required) |
-| Basic shape palette (heart, triangle, score line, …) | DS | A panel of ready-made shapes | partial: geometric primitives only | reimagine with shapes generated in code; never copy their shape artwork | docs only (sign-in required) |
+| Basic shape palette (heart, triangle, score line, …) | DS | A panel of ready-made shapes | have (engine/MCP, no UI yet): `generate.shape` heart, triangle, arrow, banner and more; `generate.score-line` | reimagine with shapes generated in code; never copy their shape artwork | docs only (sign-in required) |
 | Line | SS | Straight line tool | partial: the pen draws open paths | replicate | 2026-11-02, SS 5.0.539: Line Tools flyout: line, polyline, curve, arc |
 | Polyline/Bezier pen | both | Click to place points, drag for curves | have: `PenDraft` → `shape.add-path` | replicate | 2026-11-02, SS 5.0.539: polyline and curve (Bezier) tools in the Line Tools flyout. DS: docs only (sign-in required) |
 | Freehand draw and smooth freehand | SS | Draw by hand, with optional smoothing | missing | replicate | 2026-11-02, SS 5.0.539: Freehand Tools flyout: freehand and smooth freehand; the tool stays active after a stroke |
 | Arc | SS | Draw an arc segment | missing | replicate | 2026-11-02, SS 5.0.539: arc in the Line Tools flyout |
 | Knife | both | Cut a shape apart along a drawn line | missing | replicate | 2026-11-02, SS 5.0.539: knife tool at the bottom of the tool rail; the tool stays active after use. DS: docs only (sign-in required) |
 | Eraser | SS | Erase part of a closed shape with a brush | missing | replicate | 2026-11-02, SS 5.0.539: eraser tool in the tool rail; the tool stays active after use |
-| Flexishapes | SS (Designer Plus) | Parametric shape presets you can edit | missing | reimagine (parametric shapes) | 2026-11-02, SS 5.0.539: not present in Basic |
-| Rhinestone, cross-stitch, puzzle generator | SS (Designer+) | Special pattern generators | missing | reimagine later, low priority | 2026-11-02, SS 5.0.539: not present in Basic (Sketch and Stipple are in Basic: see the Fill and line styles rows) |
+| Flexishapes | SS (Designer Plus) | Parametric shape presets you can edit | have (engine/MCP, no UI yet): `generate.shape` with editable params (`replace`) | reimagine (parametric shapes) | 2026-11-02, SS 5.0.539: not present in Basic |
+| Rhinestone, cross-stitch, puzzle generator | SS (Designer+) | Special pattern generators | partial (engine/MCP): `generate.rhinestone`, `generate.puzzle`; no cross-stitch | reimagine later, low priority | 2026-11-02, SS 5.0.539: not present in Basic (Sketch and Stipple are in Basic: see the Fill and line styles rows) |
 
 ## Text
 
@@ -157,7 +157,7 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | Node count readout | SS | Counts for the selection: shapes, contours, nodes, straight and curved nodes | missing | replicate (cheap, helps judge cut complexity) | 2026-11-02, SS 5.0.539: shown in the Point Editing panel |
 | Break/join path, close path | SS | Split a path at a point; join two endpoints | missing | replicate | 2026-11-02, SS 5.0.539: the Point Editing panel has Break Path; no join-path command was found in Basic |
 | Simplify / reduce points | SS | Remove extra points within a tolerance | missing | replicate | 2026-11-02, SS 5.0.539: Object menu has Simplify (Ctrl+J) |
-| Warp / distort | SS (Designer), DS | Bend a shape with an envelope or perspective | missing | reimagine, low priority | 2026-11-02, SS 5.0.539: not present in Basic. DS: docs only (sign-in required) |
+| Warp / distort | SS (Designer), DS | Bend a shape with an envelope or perspective | partial (engine/MCP): `generate.warp`, 15 envelope styles and perspective; no conical | reimagine, low priority | 2026-11-02, SS 5.0.539: not present in Basic. DS: docs only (sign-in required) |
 | Undo/redo history | both | Multi-step undo | have: journal-based undo/redo | replicate | 2026-11-02, SS 5.0.539: Undo/Redo in the Edit menu and the toolbar. DS: docs only (sign-in required) |
 | Selection options bar (W/H with aspect lock, X/Y with reference point) | SS | Size and position fields for the selection above the canvas | partial: position and size (mm) fields in Properties and an aspect-link setting; no reference-point picker | replicate | 2026-11-02, SS 5.0.539: fill/line swatches and line width, then W/H with an aspect lock and X/Y with a reference-point picker, then align, group, arrange, weld, offset, replicate and delete |
 | Rotation knob on the selection | SS | A handle above the bounding box to rotate by dragging | missing (rotate fields and ±15° actions only) | replicate | 2026-11-02, SS 5.0.539: a green round handle above the 8-handle box |
@@ -248,9 +248,9 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Line style (dashed, perforated) | SS | Solid or dashed lines, with thickness, corner joins, end caps and stroke position | missing | replicate (perforation as a cut setting) | 2026-11-02, SS 5.0.539: solid/dash style, thickness (pt), corners miter/round/bevel, end caps butt/round/square, position centre or inside |
 | Fill colour, gradient, pattern fill | both | Fill shapes for Print & Cut | missing | replicate colour/gradient fill for printing; user-supplied patterns only | 2026-11-02, SS 5.0.539: Fill panel tabs Solid/Gradient/Pattern; swatch grid with a no-fill swatch, recent colours, eyedropper, named custom palettes, transparency %, colour spectrum and a hex field. DS: docs only (sign-in required) |
 | Print cut lines | SS | Print the outlines of chosen shapes too (zero-width lines print as hairlines) | missing | replicate | 2026-11-02, SS 5.0.539: a Line Style option to print lines of the selected shapes; 0 pt lines print as 0.1 pt, also in SVG/PDF exports |
-| Sketch and Stipple fills | SS | Fill a shape with hatch lines or dots for pens | missing | replicate (hatch fills for pen/engrave) | 2026-11-02, SS 5.0.539: Sketch fill patterns: cross-hatch, grid, lines, concentric, spiral; spacing and angle; Release Effects; Stipple on its own tab |
-| Specialty tools (emboss/deboss, foil) | SS | Patterns and settings for emboss, deboss and foil tools | missing | replicate the hatch patterns; tool support follows the machine work | 2026-11-02, SS 5.0.539: a panel with tabs per tool type; deboss/emboss toggle; the same five hatch patterns; spacing, angle, Release Effects |
-| Pop-up card generator | SS | Generate the struts for a pop-up card from a design | missing | reimagine later, low priority | 2026-11-02, SS 5.0.539: on/off with base width %, strut width and dash pitch |
+| Sketch and Stipple fills | SS | Fill a shape with hatch lines or dots for pens | have (engine/MCP, no UI yet): `generate.fill`, `generate.release` | replicate (hatch fills for pen/engrave) | 2026-11-02, SS 5.0.539: Sketch fill patterns: cross-hatch, grid, lines, concentric, spiral; spacing and angle; Release Effects; Stipple on its own tab |
+| Specialty tools (emboss/deboss, foil) | SS | Patterns and settings for emboss, deboss and foil tools | partial (engine/MCP): `generate.fill`/`generate.tool-lines` tool tags; machine output not wired | replicate the hatch patterns; tool support follows the machine work | 2026-11-02, SS 5.0.539: a panel with tabs per tool type; deboss/emboss toggle; the same five hatch patterns; spacing, angle, Release Effects |
+| Pop-up card generator | SS | Generate the struts for a pop-up card from a design | partial (engine/MCP): `generate.popup`, a standalone card with struts (not fitted to a design) | reimagine later, low priority | 2026-11-02, SS 5.0.539: on/off with base width %, strut width and dash pitch |
 | Vendor pattern libraries | both | Store pattern artwork | out of scope | won't do: licensed assets | 2026-11-02, SS 5.0.539: a Pattern tab exists in the Fill panel; where its patterns come from was not checked. DS: docs only (sign-in required) |
 | Operation type (cut, draw/pen, score, deboss, engrave, wave, perforate, foil, print then cut) | DS | Each layer says what the machine does with it | partial: cut and engrave only | replicate the common ones (cut, pen, score, perforate) | docs only (sign-in required) |
 
@@ -284,7 +284,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Overcut / line segment overcut | SS | Cut a little past corners or ends so pieces lift cleanly | missing | replicate | 2026-11-02, SS 5.0.539: a Line Segment Overcut checkbox per material; kraft blade adds loop overcut; Preferences › Advanced has Software Overcut (on) |
 | Cut order / path sorting | SS | Cut inner shapes first and keep travel short | missing | replicate | 2026-11-02, SS 5.0.539: an Intelligent Path checkbox per material; its behaviour not tested yet |
 | Mat-free (carrier sheet free) cutting strategy | SS | Path ordering that lets material be cut without a mat | missing | replicate | not present in Basic (2026-11-02, SS 5.0.539) |
-| Weed lines and weed borders | SS (Business) | Extra cut lines that make weeding easier | missing | replicate | 2026-11-02, SS 5.0.539: not present in Basic |
+| Weed lines and weed borders | SS (Business) | Extra cut lines that make weeding easier | have (engine/MCP, no UI yet): `generate.weed` | replicate | 2026-11-02, SS 5.0.539: not present in Basic |
 | Laser/G-code profiles | — | Not in these apps; StencilCraft's own | partial | — | — |
 
 ## Send panel and machine connection
@@ -462,8 +462,8 @@ repeat a row in the area tables above, so this table can be read on its own.
 | PDF import | Designer | Open the vector content of PDF files | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Layers panel | Designer | Create, rename, reorder, hide and lock layers; move objects between layers | partial: `layer.add/remove/set-visible` only | replicate | not present in Basic; from vendor docs (not observed) |
 | Cut by layer | Designer (to confirm) | Send settings and cut order chosen per layer | missing | replicate | not present in Basic; from vendor docs (not observed) |
-| Rhinestone tool | Designer | Place stones along a line, around an outline or as a fill; stone size, spacing and shape | missing | replicate (stone templates are just circles we generate) | not present in Basic; from vendor docs (not observed) |
-| Sketch effect | Designer (a Sketch panel was also visible in Basic 5.0.539) | Turn fills into hatch lines a pen can draw | missing | replicate | vendor docs list it as Designer; a Sketch panel was visible in Basic 5.0.539 (2026-11-02) |
+| Rhinestone tool | Designer | Place stones along a line, around an outline or as a fill; stone size, spacing and shape | have (engine/MCP, no UI yet): `generate.rhinestone` | replicate (stone templates are just circles we generate) | not present in Basic; from vendor docs (not observed) |
+| Sketch effect | Designer (a Sketch panel was also visible in Basic 5.0.539) | Turn fills into hatch lines a pen can draw | have (engine/MCP, no UI yet): `generate.fill` | replicate | vendor docs list it as Designer; a Sketch panel was visible in Basic 5.0.539 (2026-11-02) |
 | Custom gradient and pattern fills | Designer | Edit gradients, scale and rotate patterns, add your own pattern images (Basic has solid fill and transparency) | missing | replicate with user-supplied patterns only | not present in Basic; from vendor docs (not observed) |
 | Eraser and knife options | Designer (to confirm) | Eraser size and shape, knife in straight, curved or polyline mode | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Eyedropper tool | Designer (to confirm) | Copy fill and line style from one shape to another | missing | replicate | not present in Basic; from vendor docs (not observed) |
@@ -477,8 +477,8 @@ repeat a row in the area tables above, so this table can be read on its own.
 | Cross-stitch patterns | Designer (to confirm) | Turn a design into a cross-stitch pattern for pens | missing | replicate, low priority | not present in Basic; from vendor docs (not observed) |
 | Embroidery import (PES, DST, EXP, JEF, XXX) | Designer Plus | Open embroidery files as outlines | missing | replicate (outline only) | not present in Basic; from vendor docs (not observed) |
 | Advanced warp (conical, perspective) | Designer Plus | Warp onto a cone (cups, tumblers) or into perspective | missing | replicate | not present in Basic; from vendor docs (not observed) |
-| Flexishapes | Designer Plus | Parametric shapes with handles you can drag | missing | replicate | not present in Basic; from vendor docs (not observed) |
-| Puzzle generator | Designer Plus | Cut a design or photo into jigsaw pieces | missing | replicate, low priority | not present in Basic; from vendor docs (not observed) |
+| Flexishapes | Designer Plus | Parametric shapes with handles you can drag | have (engine/MCP, no UI yet): `generate.shape` with editable params (`replace`) | replicate | not present in Basic; from vendor docs (not observed) |
+| Puzzle generator | Designer Plus | Cut a design or photo into jigsaw pieces | have (engine/MCP, no UI yet): `generate.puzzle` (over a shape, not a photo) | replicate, low priority | not present in Basic; from vendor docs (not observed) |
 | SVG export | Business | Save as SVG | have | replicate | not present in Basic; from vendor docs (not observed) |
 | PDF export | Business | Save as PDF | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | PNG/JPG export | Business | Save as an image | missing | replicate | not present in Basic; from vendor docs (not observed) |
@@ -486,7 +486,7 @@ repeat a row in the area tables above, so this table can be read on its own.
 | Multi-cutter support | Business | Drive several machines from one app, each with its own job | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Nesting | Business | Pack shapes tightly onto the media to save material | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Tiling | Business | Split a design larger than the media into tiles | have: `tiling` crate | replicate | not present in Basic; from vendor docs (not observed) |
-| Weed lines and borders | Business | Add cut lines around and between shapes so waste lifts in pieces | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Weed lines and borders | Business | Add cut lines around and between shapes so waste lifts in pieces | have (engine/MCP, no UI yet): `generate.weed` | replicate | not present in Basic; from vendor docs (not observed) |
 | Job queue / batch | Business (to confirm) | Queue several designs or copies as one production run | missing | replicate | not present in Basic; from vendor docs (not observed) |
 
 ## Cricut Design Space, full inventory
@@ -564,7 +564,7 @@ against the engine command set on main (2026-11-02).
 | Rotate | Edit bar | Exact angle, 1° steps ([library](cricut-design-space/edit-bar.md#rotate)) | have: `shape.rotate`, `shapes.transform` | replicate | docs only (sign-in required) |
 | Position | Edit bar | Exact X/Y ([library](cricut-design-space/edit-bar.md#position)) | have: `shape.set-bounds` | replicate | docs only (sign-in required) |
 | Offset | Edit bar | Outline at a distance; round/sharp corners; weld offsets ([library](cricut-design-space/edit-bar.md#offset)) | partial: engine `shapes.offset` (join style, miter limit); no UI; no weld-offsets option | replicate | docs only (sign-in required) |
-| Warp (30 styles) | Edit bar | Preset warps with a strength slider (Access) ([library](cricut-design-space/edit-bar.md#warp)) | missing | replicate | docs only (sign-in required) |
+| Warp (30 styles) | Edit bar | Preset warps with a strength slider (Access) ([library](cricut-design-space/edit-bar.md#warp)) | partial (engine/MCP): `generate.warp`, 15 styles with bend and distortion | replicate | docs only (sign-in required) |
 | Create Sticker (die/kiss cut, border) | Edit bar | One-step sticker: flatten, border, die or kiss cut (Access) ([library](cricut-design-space/edit-bar.md#create-sticker)) | missing | replicate (offset + flatten + cut depth) | docs only (sign-in required) |
 | Group / ungroup | Layers panel | Move and size together ([library](cricut-design-space/layers-panel.md#group--ungroup)) | missing | replicate | docs only (sign-in required) |
 | Duplicate | Layers panel | Copy the selection ([library](cricut-design-space/layers-panel.md#duplicate)) | have: `shapes.duplicate` | replicate | docs only (sign-in required) |

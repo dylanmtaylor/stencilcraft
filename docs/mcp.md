@@ -400,6 +400,15 @@ cannot (legacy envelope only):
 | `app.select` | `{ids}` | `{selected}`: sets the canvas selection (unknown ids are dropped) |
 | `app.view` | `{kerf_preview?, theme?}` | `{kerf_preview, theme}`: turns the kerf preview on or off and sets the theme (`light`/`dark`) |
 
+Every socket request is handed to the window, which runs it on its next frame. With the
+screen locked or the window minimized or covered no frames run, so the socket waits at most
+10 s and then answers `{"id":…,"ok":false,"error":"the window is not drawing frames (screen
+locked, minimized or covered); try again when it is visible"}` (the request's `id` is kept;
+the request is discarded, never applied later). `app.screenshot` instead falls back to a
+headless render of the document as of the last drawn frame (board and shapes, as
+`export_image`, 96 dpi, no window chrome) and answers `{path, size, source: "render", dpi:
+96}`; a frame capture has no `source` field.
+
 A successful `doc.open` or `doc.save` through the socket also updates the window title and
 the recent-files list, as File › Open and Save do.
 

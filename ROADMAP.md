@@ -233,6 +233,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
   fields retain their keys; compensated kerf geometry is cached until shape geometry
   or kerf width changes; a persisted, bounded Recent menu reopens the eight most
   recently saved/opened documents. App regressions and full `cargo xtask ci` pass.
+- 2026-11-03 — control socket without frames: requests the window does not pick up
+  within 10 s answer a "not drawing frames" error (id kept, request discarded) and
+  `app.screenshot` falls back to a headless 96 dpi document render. Unit-tested.
 - 2026-11-01 — VectorCraft visual parity pass: added Home button and Essentials workspace switcher dropdown to title bar, unified right dock into Properties and Layers tab group, and relocated canvas navigation shortcuts hint to status bar. Full quality gates and desktop tests pass.
 - 2026-11-01 — shared desktop controls pinned to `storytold/craft-libs` design-system
   revision `053c0043`; the existing VectorCraft-style shell builds cleanly against that revision.

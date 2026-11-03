@@ -111,6 +111,17 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
         layers: vec![Layer::new("cut", CutStyle::Cut)],
         ..Document::default()
     };
+    match page_size(body, &root) {
+        Some((w, h)) => {
+            doc.board.width_mm = w;
+            doc.board.height_mm = h;
+        }
+        None => {
+            warnings.push("page size not found; using the default sheet".to_string());
+        }
+    }
+    // Silhouette is y-down from the page's top-left; documents are y-up.
+    let to_doc = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, doc.board.height_mm]);
     let mut points_total = 0usize;
     let mut cursor = root.start;
     while let Some((at, path)) = find_path(body, cursor, root.end) {
@@ -122,7 +133,7 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
         if points_total > MAX_POINTS {
             return Err(bad("more than 2,000,000 points"));
         }
-        let bez = to_bez(&path);
+        let bez = to_doc * to_bez(&path);
         let limit = f64::from(MAX_COORD_MM);
         let wild = |p: Point| !p.is_finite() || p.x.abs() > limit || p.y.abs() > limit;
         if bez
@@ -139,15 +150,6 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
             .map_err(|e| bad(&e.to_string()))?;
     }
 
-    match page_size(body, &root) {
-        Some((w, h)) => {
-            doc.board.width_mm = w;
-            doc.board.height_mm = h;
-        }
-        None => {
-            warnings.push("page size not found; using the default sheet".to_string());
-        }
-    }
     doc.validate().map_err(|e| bad(&e.to_string()))?;
     Ok(Imported {
         doc,

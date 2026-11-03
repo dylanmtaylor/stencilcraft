@@ -86,8 +86,9 @@ fn v2_rectangle_decodes_in_page_millimetres() {
     assert_eq!(got.doc.shape_count(), 1);
     assert!((got.doc.board.width_mm - 304.8).abs() < 1e-3);
     let (x0, y0, x1, y1) = bounds(&file);
-    assert!((x0 - 62.38).abs() < 1e-3 && (y0 - 58.21).abs() < 1e-3);
-    assert!((x1 - 201.3).abs() < 1e-3 && (y1 - 169.35).abs() < 1e-3);
+    // y-up: file y 58.21..169.35 from the top of a 304.8 mm page.
+    assert!((x0 - 62.38).abs() < 1e-3 && (y0 - (304.8 - 169.35)).abs() < 1e-3);
+    assert!((x1 - 201.3).abs() < 1e-3 && (y1 - (304.8 - 58.21)).abs() < 1e-3);
 }
 
 #[test]
@@ -202,6 +203,20 @@ const VERIFIED: &[(&str, usize, [f64; 4])] = &[
     ("ellipse-2x1in-at-1-1", 1, [1.0, 1.0, 2.0, 1.0]),
 ];
 
+/// The flip, on an asymmetric sample: 1 in from the left and 1 in from the TOP.
+#[test]
+fn rect_1in_at_1_1_is_one_inch_from_the_page_top_in_y_up() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/silhouette");
+    let Ok(bytes) = std::fs::read(format!("{dir}/rect-1in-at-1-1.studio3")) else {
+        return;
+    };
+    let doc = import(&bytes, "rect").unwrap().doc;
+    let r = doc.layers[0].bounds().unwrap();
+    assert!((r.x0 - 25.4).abs() < 0.05, "{r:?}");
+    assert!((r.y1 - (304.8 - 25.4)).abs() < 0.05, "top edge {r:?}");
+    assert!((r.y0 - (304.8 - 50.8)).abs() < 0.05, "bottom edge {r:?}");
+}
+
 #[test]
 fn real_samples_decode_when_present() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/silhouette");
@@ -222,7 +237,9 @@ fn real_samples_decode_when_present() {
             let Some(r) = got.doc.layers[0].bounds() else {
                 continue;
             };
-            let got_in = [r.x0, r.y0, r.width(), r.height()].map(|v| v / 25.4);
+            // Documents are y-up: Silhouette's Y (from the page top) is page height - y1.
+            let top = got.doc.board.height_mm - r.y1;
+            let got_in = [r.x0, top, r.width(), r.height()].map(|v| v / 25.4);
             for (g, want) in got_in.iter().zip([x, y, w, h]) {
                 assert!((g - want).abs() < 0.002, "{name}: {got_in:?}");
             }

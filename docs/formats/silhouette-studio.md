@@ -26,7 +26,7 @@ thumbnail. Keep them locally under `corpora/silhouette/`, where the corpus tests
 
 | File | sha256 | Document |
 | --- | --- | --- |
-| `rect-v2.studio` | `7304b266…0210f7` | one rectangle 5.469 × 4.375 in at X 2.456, Y 2.292 in; 12 × 12 in CAMEO 5 page; saved as v2 |
+| `rect-v2.studio` | `7304b266…0210f7` | (position unverified) one rectangle 5.469 × 4.375 in at X 2.456, Y 2.292 in; 12 × 12 in CAMEO 5 page; saved as v2 |
 | `rect-v3.studio3` | `8d74c1aa…daacbd` | the same document saved as v3 |
 | `empty-v3.studio3` | `51b60e87…41f70` | empty 12 × 12 in page, same app session, v3 |
 | `rect-1in-at-1-1.studio` / `.studio3` | `bebfc1b0…4e0739` / `ff4315a1…c24291` | rectangle W 1 H 1 at X 1 Y 1 in, checked on screen |
@@ -120,10 +120,12 @@ f32 × 6                    cx cy a b c d: the on-page frame. Centre plus the ha
   their handle flags), every coordinate is finite and within ±1 km, and the matrix is affine.
   It finds paths by scanning the root record for this nested pattern and applies the matrix.
 
-**rect-v2/rect-v3 puzzle.** Applying their matrix puts the rectangle at about (−144.9, −146.3)
+**rect-v2/rect-v3 puzzle (pair marked unverified).** Applying their matrix puts the rectangle at about (−144.9, −146.3)
 mm, which is off the page. Their raw nodes, by contrast, match the X 2.456, Y 2.292 in we were
 told. The later on-screen-verified samples follow the matrix rule exactly, so the reader
-follows it. The first pair needs re-checking in the VM (it was not verified on screen).
+follows it. The first pair's position was read from the options bar right after drawing, not
+from the Transform panel, so it is **unverified**. The reader is not bent to fit it, and the
+tests check only its size.
 
 ## .studio3 (v3) layout
 
@@ -155,7 +157,9 @@ with no table) is also accepted.
 ## What the reader imports
 
 - Every path record as a closed path (lines and cubics) on one `cut` layer, after its object
-  matrix is applied. This is a **shortcut**: open paths are not yet told apart (see below).
+  matrix is applied.
+  It is then flipped into StencilCraft's y-up document space: `y_doc = page_height - y_file`.
+  A shape 1 in from the page's top therefore has its top edge at `page_height - 25.4` mm. This is a **shortcut**: open paths are not yet told apart (see below).
 - Page width and height, rounded to 1 µm. If they are missing or not plausible, the
   default sheet is used and a warning is returned.
 - Caps: 64 MiB input, 100,000 shapes, 2,000,000 points.

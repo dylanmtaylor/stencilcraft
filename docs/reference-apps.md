@@ -358,6 +358,48 @@ Sources: [Silhouette, *File Types and Features*](https://silhouetteamerica.fresh
 | Mobile apps | both | Phone and tablet clients | missing | reimagine as the WASM/browser build (M5) | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Machine registration | both | Register a machine to an account | out of scope | won't do: account system | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 
+## Silhouette Studio paid editions
+
+Features the paid editions (Designer, Designer Plus, Business) add over Basic, from
+the [edition comparison](https://www.silhouetteamerica.com/software), the
+[file types and features](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000282776-file-types-and-features)
+and [Designer Edition features](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000273383-designer-edition-features)
+pages. "to confirm" means the public pages do not settle which edition adds it. Some rows
+repeat a row in the area tables above, so this table can be read on its own.
+
+| Feature | Edition | Description | Status | Posture | Observed |
+| --- | --- | --- | --- | --- | --- |
+| SVG import | Designer | Open SVG files | partial: a tested subset (see `gaps.md` 1) | replicate | not present in Basic; from vendor docs (not observed) |
+| PDF import | Designer | Open the vector content of PDF files | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Layers panel | Designer | Create, rename, reorder, hide and lock layers; move objects between layers | partial: `layer.add/remove/set-visible` only | replicate | not present in Basic; from vendor docs (not observed) |
+| Cut by layer | Designer (to confirm) | Send settings and cut order chosen per layer | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Rhinestone tool | Designer | Place stones along a line, around an outline or as a fill; stone size, spacing and shape | missing | replicate (stone templates are just circles we generate) | not present in Basic; from vendor docs (not observed) |
+| Sketch effect | Designer (a Sketch panel was also visible in Basic 5.0.539) | Turn fills into hatch lines a pen can draw | missing | replicate | vendor docs list it as Designer; a Sketch panel was visible in Basic 5.0.539 (2026-11-02) |
+| Custom gradient and pattern fills | Designer | Edit gradients, scale and rotate patterns, add your own pattern images (Basic has solid fill and transparency) | missing | replicate with user-supplied patterns only | not present in Basic; from vendor docs (not observed) |
+| Eraser and knife options | Designer (to confirm) | Eraser size and shape, knife in straight, curved or polyline mode | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Eyedropper tool | Designer (to confirm) | Copy fill and line style from one shape to another | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Rulers and measure tool | Designer | Measure distances and angles on the canvas | partial: rulers only | replicate | not present in Basic; from vendor docs (not observed) |
+| Shear and distort | Designer | Slant a shape or drag its corners freely | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Lattice | Designer (to confirm) | Turn a shape into a lattice of cut-out holes | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Font creator | Designer (to confirm) | Draw your own font, one glyph at a time, including single-line fonts | missing | replicate (writes a user font file; nothing bundled) | not present in Basic; from vendor docs (not observed) |
+| Glyphs panel | Designer | Insert special characters of the current font | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Weld on cut | paid (edition to confirm) | Merge overlapping shapes automatically when sending, so overlaps are not cut twice | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Roll feed / mat-free cutting | paid (edition to confirm) | Cut long jobs straight from a roll without a mat, with path ordering that keeps the material steady | partial: model tables carry roll lengths; no roll-feed choice or mat-free ordering | replicate | not present in Basic; from vendor docs (not observed) |
+| Cross-stitch patterns | Designer (to confirm) | Turn a design into a cross-stitch pattern for pens | missing | replicate, low priority | not present in Basic; from vendor docs (not observed) |
+| Embroidery import (PES, DST, EXP, JEF, XXX) | Designer Plus | Open embroidery files as outlines | missing | replicate (outline only) | not present in Basic; from vendor docs (not observed) |
+| Advanced warp (conical, perspective) | Designer Plus | Warp onto a cone (cups, tumblers) or into perspective | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Flexishapes | Designer Plus | Parametric shapes with handles you can drag | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Puzzle generator | Designer Plus | Cut a design or photo into jigsaw pieces | missing | replicate, low priority | not present in Basic; from vendor docs (not observed) |
+| SVG export | Business | Save as SVG | have | replicate | not present in Basic; from vendor docs (not observed) |
+| PDF export | Business | Save as PDF | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| PNG/JPG export | Business | Save as an image | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| AI, EPS and CDR import | Business | Open Illustrator, EPS and CorelDRAW files | missing | replicate AI (its PDF-compatible content) and EPS (a PostScript subset); CDR only if its structure can be learned clean-room | not present in Basic; from vendor docs (not observed) |
+| Multi-cutter support | Business | Drive several machines from one app, each with its own job | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Nesting | Business | Pack shapes tightly onto the media to save material | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Tiling | Business | Split a design larger than the media into tiles | have: `tiling` crate | replicate | not present in Basic; from vendor docs (not observed) |
+| Weed lines and borders | Business | Add cut lines around and between shapes so waste lifts in pieces | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Job queue / batch | Business (to confirm) | Queue several designs or copies as one production run | missing | replicate | not present in Basic; from vendor docs (not observed) |
+
 ## Missing items, by area
 
 These are the rows marked **missing** above. Rows marked partial are not listed. The ranked order is in [`gaps.md`](gaps.md).

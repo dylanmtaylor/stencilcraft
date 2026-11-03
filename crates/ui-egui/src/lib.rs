@@ -422,7 +422,7 @@ fn mat_feed_arrow(view: &View, backdrop: &MatBackdrop) -> ([egui::Pos2; 3], egui
             point(center + 3.0, -4.5),
             point(center - 3.0, -4.5),
         ],
-        egui::Rect::from_min_max(point(center - 1.0, -4.5), point(center + 1.0, -2.0)),
+        egui::Rect::from_min_max(point(center - 1.8, -4.5), point(center + 1.8, -2.5)),
     )
 }
 

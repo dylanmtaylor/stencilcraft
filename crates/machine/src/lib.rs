@@ -32,8 +32,9 @@ pub mod transport;
 pub use capabilities::{Capabilities, Dialect, ProtocolId, Range, Support};
 pub use driver::{MachineDriver, dry_run};
 pub use job::{
-    BBoxMm, CutJob, MAX_BLADE_DIAMETER_MM, MAX_OPERATIONS, MAX_OVERCUT_MM, MAX_PASSES, MAX_POINTS,
-    OpKind, OpSettings, Operation, Registration, find_bbox, validate,
+    BBoxMm, CutJob, CutOrder, MAX_BLADE_DIAMETER_MM, MAX_CLOSED_OVERCUT_MM, MAX_OPERATIONS,
+    MAX_OVERCUT_MM, MAX_PASSES, MAX_POINTS, MAX_SORT_PATHS, OpKind, OpSettings, Operation,
+    Registration, apply_job_settings, extend_closed, find_bbox, order_paths, validate,
 };
 pub use protocol::{
     DriverEvent, MachineStatus, NoHooks, Protocol, SendReport, SessionHooks, WaitFn,
@@ -816,6 +817,7 @@ impl CutSettings {
             track_enhancing: self.track_enhancing,
             media_id: self.media_id,
             bbox_only,
+            ..CutJob::default()
         }
     }
 }
@@ -1030,7 +1032,9 @@ pub fn encode_cut(
     s.pressure = clamp(s.pressure, &caps.force);
     s.speed = clamp(s.speed, &caps.speed);
     s.passes = s.passes.clamp(1, MAX_PASSES);
-    protocol_for(caps.protocol).encode(caps, &s.to_job(paths, opts, bbox_only))
+    let job = s.to_job(paths, opts, bbox_only);
+    let job = apply_job_settings(caps, &job).unwrap_or(job);
+    protocol_for(caps.protocol).encode(caps, &job)
 }
 
 /// How a program's commands are framed on the wire.

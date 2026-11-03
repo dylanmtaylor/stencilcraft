@@ -2,12 +2,18 @@
 //! a `CutJob` to hardware, and it validates before any byte goes out.
 
 use crate::protocol::{MachineStatus, Protocol, SendReport, SessionHooks, protocol_for};
-use crate::{Capabilities, CutJob, CutProgram, MachineError, Transport, validate};
+use crate::{
+    Capabilities, CutJob, CutProgram, MachineError, Transport, apply_job_settings, validate,
+};
 
-/// Validate and encode without a transport: the dry run.
+/// Validate, apply the job settings (order, overcut, mirror), validate the
+/// result again (a mirrored design must still fit) and encode, without a
+/// transport: the dry run.
 pub fn dry_run(caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
     validate(caps, job)?;
-    Ok(protocol_for(caps.protocol).encode(caps, job))
+    let job = apply_job_settings(caps, job)?;
+    validate(caps, &job)?;
+    Ok(protocol_for(caps.protocol).encode(caps, &job))
 }
 
 pub struct MachineDriver {

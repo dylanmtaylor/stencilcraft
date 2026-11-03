@@ -318,3 +318,119 @@ fn probing_identifies_a_machine_over_any_transport() {
     assert_eq!(found.map(|c| c.id.as_str()), Some("cameo-5-alpha-plus"));
     assert_eq!(mock.written, b"\x1b\x04FG\x03".to_vec());
 }
+
+fn rect(x: f64, y: f64, w: f64, h: f64) -> Vec<(f64, f64)> {
+    vec![(x, y), (x + w, y), (x + w, y + h), (x, y + h), (x, y)]
+}
+
+fn travel(paths: &[Vec<(f64, f64)>]) -> f64 {
+    let mut head = (0.0, 0.0);
+    let mut total = 0.0;
+    for p in paths {
+        let (Some(&a), Some(&b)) = (p.first(), p.last()) else {
+            continue;
+        };
+        total += (a.0 - head.0).hypot(a.1 - head.1);
+        head = b;
+    }
+    total
+}
+
+#[test]
+fn interior_contours_are_cut_before_their_outline() {
+    let outer = rect(0.0, 0.0, 100.0, 100.0);
+    let hole = rect(40.0, 40.0, 20.0, 20.0);
+    let dot = rect(45.0, 45.0, 5.0, 5.0);
+    for order in [CutOrder::None, CutOrder::Speed, CutOrder::Roller] {
+        let got = order_paths(vec![outer.clone(), hole.clone(), dot.clone()], order, true);
+        assert_eq!(
+            got,
+            vec![dot.clone(), hole.clone(), outer.clone()],
+            "{order:?}"
+        );
+    }
+    // Off + no sort keeps document order.
+    let got = order_paths(vec![outer.clone(), hole.clone()], CutOrder::None, false);
+    assert_eq!(got, vec![outer, hole]);
+}
+
+#[test]
+fn roller_order_is_monotonic_in_the_feed_axis() {
+    let paths: Vec<_> = [70.0, 10.0, 50.0, 30.0, 90.0]
+        .iter()
+        .enumerate()
+        .map(|(i, &y)| rect(i as f64 * 15.0, y, 10.0, 5.0))
+        .collect();
+    let got = order_paths(paths, CutOrder::Roller, true);
+    let tops: Vec<f64> = got.iter().map(|p| p[0].1).collect();
+    assert_eq!(tops, vec![10.0, 30.0, 50.0, 70.0, 90.0]);
+}
+
+#[test]
+fn speed_order_reduces_travel_versus_no_sort() {
+    // A scattered grid in a deliberately bad document order.
+    let paths: Vec<_> = (0..25)
+        .map(|i| {
+            let k = (i * 7) % 25;
+            rect(f64::from(k % 5) * 30.0, f64::from(k / 5) * 30.0, 5.0, 5.0)
+        })
+        .collect();
+    let none = order_paths(paths.clone(), CutOrder::None, true);
+    let speed = order_paths(paths, CutOrder::Speed, true);
+    assert_eq!(none.len(), speed.len());
+    assert!(
+        travel(&speed) < travel(&none) * 0.5,
+        "{} vs {}",
+        travel(&speed),
+        travel(&none)
+    );
+}
+
+#[test]
+fn closed_overcut_extends_past_the_start_by_its_length() {
+    let sq = rect(0.0, 0.0, 10.0, 10.0);
+    let ext = extend_closed(&sq, 2.5);
+    assert_eq!(ext.len(), sq.len() + 1);
+    assert_eq!(ext.last(), Some(&(2.5, 0.0)));
+    // Longer than the first segment: wraps onto the next one.
+    assert_eq!(extend_closed(&sq, 12.0).last(), Some(&(10.0, 2.0)));
+    // Open paths are untouched.
+    let open = vec![(0.0, 0.0), (10.0, 0.0)];
+    assert_eq!(extend_closed(&open, 2.0), open);
+    // Bounded at validation.
+    let caps = reg().by_id("cameo-4").unwrap();
+    let mut job = vinyl_job(caps);
+    for bad in [f64::NAN, -1.0, MAX_CLOSED_OVERCUT_MM + 0.1] {
+        job.closed_overcut_mm = bad;
+        assert!(dry_run(caps, &job).is_err(), "{bad}");
+    }
+    job.closed_overcut_mm = 1.0;
+    let with = dry_run(caps, &job).unwrap();
+    job.closed_overcut_mm = 0.0;
+    let without = dry_run(caps, &job).unwrap();
+    assert_eq!(with.transcript().len(), without.transcript().len() + 1);
+}
+
+#[test]
+fn mirror_flips_about_the_media_centre_at_job_build_time() {
+    let caps = reg().by_id("cameo-4").unwrap();
+    let mut job = vinyl_job(caps);
+    job.media_size_mm = Some((200.0, 300.0));
+    job.mirror = true;
+    let built = apply_job_settings(caps, &job).unwrap();
+    let xs: Vec<f64> = built.operations[0].paths[0].iter().map(|p| p.0).collect();
+    assert_eq!(xs, vec![200.0, 190.0, 190.0, 200.0, 200.0]);
+    // The job itself (and so the document) is untouched.
+    assert_eq!(job.operations[0].paths, square_paths());
+    dry_run(caps, &job).unwrap();
+    // Mirroring with print-and-cut marks is refused.
+    job.registration = Some(Registration {
+        width_mm: 150.0,
+        length_mm: 150.0,
+        origin_right_mm: 0.0,
+        origin_down_mm: 0.0,
+        search: false,
+        quad: false,
+    });
+    assert!(dry_run(caps, &job).is_err());
+}

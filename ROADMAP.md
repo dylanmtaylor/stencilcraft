@@ -102,6 +102,12 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
   each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
   Measured: the default blue and the #b87c1b sample come back as their own layers.
+- 2026-11-03 — Cut job settings in the machine job layer, for every protocol: cut order
+  (No Sort / Maximize Speed / Minimize Roller Movement, default roller), interior contours
+  first (default on), closed-contour overcut (0–5 mm) and mirror on mat for heat-transfer
+  vinyl, as `stencilcraft-cli cut` flags and `machine.dry_run` params (gaps 21, 30;
+  behaviour from our Send-preferences observation notes, measured by unit tests only, no
+  hardware run).
 - 2026-11-03 — Silhouette Studio documents: the reader now reads each object's
   page-coordinate outline, which brings in open paths (lines), compound paths and text
   (as glyph outlines), and rotated and grouped objects at their on-page positions. This

@@ -32,6 +32,9 @@ craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
 vectorcraft-geom = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 vectorcraft-pathops = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+# Font database, shaping and glyph outlines for live text (already in the build through
+# vectorcraft-engine); its bundled fonts stay off, so no font ships with StencilCraft.
+vectorcraft-text = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
 # internal
 stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }

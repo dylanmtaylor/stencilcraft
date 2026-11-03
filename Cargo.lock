@@ -4976,6 +4976,7 @@ dependencies = [
  "vectorcraft-engine",
  "vectorcraft-geom",
  "vectorcraft-pathops",
+ "vectorcraft-text",
 ]
 
 [[package]]
@@ -5944,6 +5945,7 @@ dependencies = [
  "vectorcraft-geom",
  "vello_cpu",
  "windows-registry",
+ "write-fonts",
 ]
 
 [[package]]

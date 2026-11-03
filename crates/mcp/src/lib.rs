@@ -416,6 +416,45 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             json!({"ids": ids, "distance_mm": number, "join": {"type": "string", "enum": ["miter", "round", "bevel"]}, "miter_limit": number}),
             json!(["ids", "distance_mm"]),
         ),
+        "text.add" | "text.edit" => {
+            let string = json!({"type": "string"});
+            let boolean = json!({"type": "boolean"});
+            let mut fields = json!({
+                "text": string,
+                "font": {"type": "object", "properties": {"family": string, "style": string, "file": string}},
+                "size": number, "x": number, "y": number,
+                "alignment": {"type": "string", "enum": ["left", "centre", "right", "justify"]},
+                "letter_spacing": number, "line_spacing": number,
+                "kerning": boolean, "vertical": boolean, "weld": boolean,
+                "flow": {"type": "object", "properties": {
+                    "kind": {"type": "string", "enum": ["straight", "curve", "on-path"]},
+                    "diameter_mm": number, "shape": {"type": "integer"}, "start": number,
+                    "offset_mm": number, "flip": boolean}},
+                "letters": {"type": "array", "items": {"type": "object", "properties": {
+                    "index": {"type": "integer"}, "dx_mm": number, "dy_mm": number, "rotate_deg": number}}},
+            });
+            if command == "text.add" {
+                fields["style"] = json!({"type": "string", "enum": ["cut", "engrave"]});
+                (fields, json!(["text", "font", "size", "x", "y"]))
+            } else {
+                fields["id"] = json!({"type": "integer"});
+                (fields, json!(["id"]))
+            }
+        }
+        "text.to-outlines" => (json!({"ids": ids}), json!(["ids"])),
+        "text.ungroup" => (
+            json!({"id": {"type": "integer"}, "to": {"type": "string", "enum": ["lines", "letters"]}}),
+            json!(["id", "to"]),
+        ),
+        "text.fonts" => (json!({"query": {"type": "string"}}), json!([])),
+        "text.monogram" => (
+            json!({"initials": {"type": "string"},
+                   "font": {"type": "object", "properties": {"family": {"type": "string"}, "style": {"type": "string"}, "file": {"type": "string"}}},
+                   "size": number, "x": number, "y": number,
+                   "frame": {"type": "string", "enum": ["none", "circle", "square", "diamond", "scallop"]},
+                   "padding_mm": number}),
+            json!(["initials", "font", "x", "y"]),
+        ),
         _ => (json!({}), json!([])),
     }
 }
@@ -552,6 +591,36 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "shapes_offset",
         "shapes.offset",
         "Add an offset outline of each shape: positive `distance_mm` grows, negative is an internal offset. Optional `join` (miter, round, bevel; default miter) and `miter_limit` (corner limit, >= 1, default 4).",
+    ),
+    (
+        "text_add",
+        "text.add",
+        "Add live, editable text. Args: text, font {family, style?, file?} (\"StencilCraft Single Line\" is the built-in pen font), size (pt), x, y (mm, first baseline), alignment? (left, centre, right, justify), letter_spacing? (% of em, 0 normal), line_spacing? (%, 100 normal), kerning? (default true), vertical?, weld?, flow? ({kind: straight} | {kind: curve, diameter_mm} | {kind: on-path, shape or path, start (0-1), offset_mm, flip}), letters? [{index, dx_mm, dy_mm, rotate_deg}], style? (cut, engrave).",
+    ),
+    (
+        "text_edit",
+        "text.edit",
+        "Change a text object's parameters and lay it out again (moves and turns made since are kept). Args: id, then any text_add field.",
+    ),
+    (
+        "text_to_outlines",
+        "text.to-outlines",
+        "Keep text shapes as plain cut paths (no longer editable). Args: ids.",
+    ),
+    (
+        "text_ungroup",
+        "text.ungroup",
+        "Split a text object in place into one text object per line or per letter. Args: id, to (lines, letters).",
+    ),
+    (
+        "text_fonts",
+        "text.fonts",
+        "List font families with their styles: the built-in single-line font, installed fonts and loaded font files. Args: query? (name contains).",
+    ),
+    (
+        "text_monogram",
+        "text.monogram",
+        "Add a monogram: 1-4 initials centred on x, y with a frame. Args: initials, font, size? (pt, default 72), x, y, frame? (none, circle, square, diamond, scallop; default circle), padding_mm? (default 3).",
     ),
 ];
 

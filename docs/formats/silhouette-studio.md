@@ -159,6 +159,23 @@ k+1 × contour:
   import its outlines. (T)
 - Page record: width comes before height (P: 254 × 177.8).
 
+### Colours
+
+Diff of `rect-1in-at-1-1` against `rect-1in-line-b87c1b-fill-54a923` (tag **C2**):
+
+- In the object's style record, before its outline, the line colour is four f32 in
+  **B, G, R, A** order: `0.1059 0.4863 0.7216 1.0` for #b87c1b. The default line
+  colour is blue. (C2)
+- After the corner-style strings (`"rounded"`), a byte `00` (no fill) becomes `01`, then
+  four f32 B, G, R, A follow: `0.1373 0.6627 0.3294 1.0` for #54a923. (C2)
+- The cut-settings key table names colours as hex strings, also BGR: `@line:FF0000`
+  (the default blue line) becomes `@line:1B7CB8`, and `@fill:none` becomes
+  `@fill:23A954`. These keys are what Send › "Cut by Line/Fill Color" rows refer to. (C2)
+- This BGR order matches the app's own Select by Color labels, which print B, G, R.
+
+The reader does not import colours yet. Mapping them to StencilCraft layers (one layer per
+line colour, like Send by Line Color) is the planned next step.
+
 - Rectangle nodes run (x0,y0) → (x0,y1) → (x1,y1) → (x1,y0). There is no repeated closing
   node. (R)
 - Ellipse: 4 nodes (right, bottom, left, top), each with both handles. The handle length is
@@ -220,7 +237,7 @@ with no table) is also accepted.
 ## Unknowns
 
 - The 3 trailing bytes of drawing-frame nodes (not needed by the reader).
-- Where line and fill colour are stored (sample in hand: `rect-1in-line-b87c1b-fill-54a923`).
+- How the colour floats are tied to an object when several objects share a file (one sample has one object).
 - Group membership and nesting, layers, live-text parameters beyond font, size and characters.
 - v3 embeds precomputed cut data ("Include Cut Data", on by default). Which section holds it
   is not yet identified; section 4's bounding box may be part of it.

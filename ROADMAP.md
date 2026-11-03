@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: USB outcomes and errors are shown at the top of Make
+  and scrolled into view after communication; hardware cutting remains unverified.
+
 - 2026-11-03 — M3: Make displays the detected USB cutter model without a
   conflicting model selector; offline preparation retains manual selection.
 

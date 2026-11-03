@@ -3028,6 +3028,7 @@ impl StencilApp {
             .lock()
             .ok()
             .and_then(|mut slot| slot.take());
+        let has_new_result = result.is_some();
         if let Some(result) = result {
             self.send.busy = false;
             match result {
@@ -3079,6 +3080,24 @@ impl StencilApp {
                 "Communicating with cutter… Use the machine's controls to stop motion.",
             ));
             return;
+        }
+        if let Some(summary) = &self.send.summary {
+            let response = ui
+                .group(|ui| {
+                    ui.add(Text::new("Cutter result").role(TypeRole::BodyStrong));
+                    egui::ScrollArea::vertical()
+                        .id_salt("cutter-result")
+                        .max_height(160.0)
+                        .show(ui, |ui| {
+                            for line in summary {
+                                ui.add(Text::new(line).role(TypeRole::Mono));
+                            }
+                        });
+                })
+                .response;
+            if has_new_result {
+                response.scroll_to_me(Some(egui::Align::TOP));
+            }
         }
         if ui.add(Button::new("Find USB cutters")).clicked() {
             self.start_hardware(
@@ -3179,14 +3198,6 @@ impl StencilApp {
 
         if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
-        }
-        if let Some(summary) = &self.send.summary {
-            Divider::horizontal().show(ui);
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for line in summary {
-                    ui.add(Text::new(line).role(TypeRole::Mono));
-                }
-            });
         }
     }
 

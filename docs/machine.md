@@ -313,3 +313,6 @@ the USB workflow; see [development](development.md#flatpak-usb-access).
 The catalog and generated rule cover known USB IDs only, not all manufacturers.
 
 Make filters loaded-mat choices by the selected model; an incompatible previous mat resets to no mat, so select the mat actually loaded.
+
+USB validation, submission outcomes and errors appear at the top of Make after
+communication. A quick return without a success message does not confirm a cut.

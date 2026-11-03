@@ -145,7 +145,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     corners).
 22. **Machine connection**: CLI supports serial/CDC and feature-gated USB bulk, device
     discovery and status queries; USB and registration-mark sessions need real hardware
-    validation. Bluetooth, a desktop machine status card, interactive mat preview,
+    validation. Desktop discovery and explicit USB submission are available; live status, Bluetooth, interactive mat preview,
     multi-cutter output and batch jobs remain open. Cricut hardware control is out of
     scope without a public protocol.
 23. **Path editing tools**: missing freehand and smoothed freehand, arc, knife, eraser,

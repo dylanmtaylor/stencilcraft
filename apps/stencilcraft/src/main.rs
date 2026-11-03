@@ -662,6 +662,9 @@ pub struct KerfPreviewCache {
     pub preview: Result<stencilcraft_doc::Document, String>,
 }
 
+type HardwareResult =
+    std::sync::Arc<std::sync::Mutex<Option<Result<stencilcraft_engine::Effect, String>>>>;
+
 #[derive(Debug, Clone)]
 pub struct SendTab {
     pub media_index: usize,
@@ -670,6 +673,10 @@ pub struct SendTab {
     pub speed_override: u8,
     pub bbox_only: bool,
     pub summary: Option<Vec<String>>,
+    pub devices: Vec<(String, String, String)>,
+    pub device: String,
+    pub hardware_result: HardwareResult,
+    pub busy: bool,
 }
 
 impl Default for SendTab {
@@ -681,6 +688,10 @@ impl Default for SendTab {
             speed_override: 5,
             bbox_only: false,
             summary: None,
+            devices: Vec::new(),
+            device: String::new(),
+            hardware_result: Default::default(),
+            busy: false,
         }
     }
 }
@@ -2660,7 +2671,7 @@ impl StencilApp {
     pub fn inspector_panel(&mut self, ui: &mut egui::Ui) {
         let (header, target) = if self.send_mode {
             (
-                InspectorHeader::new(Icon::Scissors, "Make").kind("Dry run"),
+                InspectorHeader::new(Icon::Scissors, "Make").kind("USB cutter"),
                 0,
             )
         } else {
@@ -2979,13 +2990,132 @@ impl StencilApp {
         }
     }
 
+    fn start_hardware(
+        &mut self,
+        command: stencilcraft_engine::HardwareCommand,
+        ctx: egui::Context,
+    ) {
+        if self.send.busy {
+            return;
+        }
+        self.send.busy = true;
+        let result = self.send.hardware_result.clone();
+        let doc = self.engine.doc.clone();
+        let spawned = std::thread::Builder::new()
+            .name("cutter-usb".into())
+            .spawn(move || {
+                let outcome = stencilcraft_engine::Engine::new(doc)
+                    .run(Command::Hardware(command))
+                    .map_err(|e| e.to_string());
+                if let Ok(mut slot) = result.lock() {
+                    *slot = Some(outcome);
+                }
+                ctx.request_repaint();
+            });
+        if let Err(error) = spawned {
+            self.send.busy = false;
+            self.send.summary = Some(vec![error.to_string()]);
+        }
+    }
+
     pub fn send_tab(&mut self, ui: &mut egui::Ui) {
+        let result = self
+            .send
+            .hardware_result
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take());
+        if let Some(result) = result {
+            self.send.busy = false;
+            match result {
+                Ok(stencilcraft_engine::Effect::Hardware(value)) => {
+                    if let Some(devices) = value.as_array() {
+                        self.send.devices = devices
+                            .iter()
+                            .filter_map(|d| {
+                                Some((
+                                    d["location"].as_str()?.to_owned(),
+                                    d["model"].as_str()?.to_owned(),
+                                    d["name"].as_str()?.to_owned(),
+                                ))
+                            })
+                            .collect();
+                        self.send.device.clear();
+                        let unsupported: Vec<_> = devices.iter().filter(|d| d["model"].is_null()).map(|d| format!("{}: direct cutting unsupported; export SVG for the manufacturer software.", d["product"].as_str().unwrap_or("Unknown USB cutter"))).collect();
+                        self.send.summary = Some(vec![format!(
+                            "{} recognized USB cutters. Select your cutter below.",
+                            self.send.devices.len()
+                        )]);
+                        if let Some(summary) = &mut self.send.summary {
+                            summary.extend(unsupported);
+                        }
+                    } else {
+                        self.send.summary = Some(vec![
+                            value.to_string(),
+                            "Submission is not confirmation that cutting has finished.".into(),
+                        ]);
+                    }
+                }
+                Err(error) => self.send.summary = Some(vec![error]),
+                _ => {}
+            }
+        }
+        if self.send.busy {
+            ui.add(Text::new(
+                "Communicating with cutter… Use the machine's controls to stop motion.",
+            ));
+            return;
+        }
+        if ui.add(Button::new("Find USB cutters")).clicked() {
+            self.start_hardware(
+                stencilcraft_engine::HardwareCommand::Devices,
+                ui.ctx().clone(),
+            );
+        }
+        let mut device_select =
+            Select::new("usb-device", "Connected cutter", &mut self.send.device);
+        for (location, _, name) in &self.send.devices {
+            device_select = device_select.option(location.clone(), format!("{name} ({location})"));
+        }
+        let _ = device_select.show(ui);
+        if let Some((_, model, _)) = self.send.devices.iter().find(|d| d.0 == self.send.device)
+            && let Some(model) = stencilcraft_machine::Model::by_id(model)
+        {
+            self.send.model = model;
+        }
+        if !self.send.device.is_empty() && !self.send.bbox_only {
+            ui.add(Text::new("Load the mat and set blade depth on the cutter. Send cuts all visible paths with holder 1."));
+            for (label, send) in [
+                ("Validate USB cut", false),
+                ("Send cut to selected USB cutter", true),
+            ] {
+                if ui.add(Button::new(label)).clicked() {
+                    self.start_hardware(
+                        stencilcraft_engine::HardwareCommand::Cut {
+                            model: self.send.model.id().into(),
+                            location: self.send.device.clone(),
+                            mat: self.mat,
+                            force: u32::from(self.send.pressure_override),
+                            speed: u32::from(self.send.speed_override),
+                            send,
+                        },
+                        ui.ctx().clone(),
+                    );
+                }
+            }
+        }
+
         ui.add(Text::new("Model"));
         let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
         for (model, label) in MODEL_CHOICES {
             model_select = model_select.option(*model, *label);
         }
         let _ = model_select.show(ui);
+        let mut mat_select = Select::new("send-mat", "Loaded mat", &mut self.mat);
+        for (mat, label) in MAT_CHOICES {
+            mat_select = mat_select.option(*mat, *label);
+        }
+        let _ = mat_select.show(ui);
         ui.add(Text::new("Material"));
         let mut media_select = Select::new("send-material", "Material", &mut self.send.media_index);
         for (i, _) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {

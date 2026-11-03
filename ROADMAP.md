@@ -99,6 +99,12 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Desktop USB submission: discover catalogued cutters, select a device,
+  validate visible paths and submit through the existing machine session on a worker
+  thread. USB enabled by default in desktop builds. Hardware testing pending (Cameo 4
+  on Linux); Cricut remains export-only. Validation: `cargo xtask ci` passed.
+  Additional WASM check blocked by local toolchain/dependency resolution.
+
 - 2026-11-03 — View aids (M4, gaps 18/36): Zoom to Selection (Ctrl+Alt+0) and the 25–400 %
   presets, Rotate Page 0/90/180/270 (view state: rulers, overlays and drags follow the
   turn), canvas guides from the rulers (`guide.add/move/remove`) plus Show/Lock/Make/

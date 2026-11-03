@@ -11,6 +11,7 @@ kurbo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+stencilcraft-machine = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-raster = { workspace = true }
@@ -22,6 +23,9 @@ vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }
 vectorcraft-text = { workspace = true }
+
+[features]
+usb = ["stencilcraft-machine/usb"]
 
 [dev-dependencies]
 image = { workspace = true }

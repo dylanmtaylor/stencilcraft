@@ -35,5 +35,9 @@ stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 
+[features]
+default = ["usb"]
+usb = ["stencilcraft-engine/usb"]
+
 [lints]
 workspace = true

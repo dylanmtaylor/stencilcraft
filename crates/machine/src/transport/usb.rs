@@ -29,7 +29,15 @@ pub fn list_usb_devices() -> Result<Vec<UsbIds>, MachineError> {
         .wait()
         .map_err(err("list usb devices"))?;
     Ok(devices
-        .filter(|d| USB_VENDORS.contains(&d.vendor_id()))
+        .filter(|d| {
+            USB_VENDORS.contains(&d.vendor_id())
+                || d.product_string().is_some_and(|p| {
+                    let name = p.to_ascii_lowercase();
+                    ["cricut", "graphtec", "silhouette", "roland", "uscutter"]
+                        .iter()
+                        .any(|brand| name.contains(brand))
+                })
+        })
         .map(|d| UsbIds {
             vendor_id: d.vendor_id(),
             product_id: d.product_id(),

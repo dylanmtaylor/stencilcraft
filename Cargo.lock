@@ -5022,6 +5022,7 @@ dependencies = [
  "stencilcraft-geom",
  "stencilcraft-kerf",
  "stencilcraft-layout",
+ "stencilcraft-machine",
  "stencilcraft-raster",
  "stencilcraft-svg",
  "thiserror 2.0.21",

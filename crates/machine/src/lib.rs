@@ -47,7 +47,7 @@ pub use transport::SerialTransport;
 pub use transport::{
     FileTransport, MockTransport, RecordingTransport, TcpTransport, Transport, TransportSpec,
 };
-#[cfg(feature = "usb")]
+#[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use transport::{UsbTransport, list_usb_devices};
 
 use stencilcraft_geom::Point;

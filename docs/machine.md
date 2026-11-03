@@ -12,8 +12,8 @@ architecture (CutJob, Capabilities, Protocol, Transport, DeviceRegistry) is in
 ## Safety contract
 
 - **Dry run by default.** `cut` prints a transcript; `--out FILE` writes the byte
-  stream to a file. Neither touches hardware. Only `--device …` sends, and only
-  from the CLI: MCP has no send method.
+  stream to a file. Neither touches hardware. Only `--device …` sends, or the explicit desktop USB Send action moves hardware. The engine also exposes
+  `hardware.cut` with `send: true`; control clients must treat this as a physical action.
 - **Reject, never clamp.** `encode_job` checks every value against the model's
   catalog row and returns `MachineError::Limit` naming the knob and the allowed
   range: force, speed, tool holder, tool, AutoBlade depth (0–10, holder 1), passes
@@ -279,3 +279,22 @@ vendor binaries is not. The full clean-room posture is in
 
 No GPL code was ported; the Rust implementation is written from these facts and
 StencilCraft stays MIT OR Apache-2.0.
+
+## Desktop USB cutting (hardware validation pending)
+
+Desktop builds enable USB by default. In Make, use **Find USB cutters**, select
+your connected cutter, choose its supported mat and material settings, and use
+**Validate USB cut** before **Send cut to selected USB cutter**. Discovery does not
+move hardware. Selection uses catalog USB identifiers; submission checks the model
+again before opening the transport. USB work runs outside the UI thread.
+
+Load material first and set blade depth on the machine. This initial workflow cuts
+visible, non-hidden paths with holder 1; it does not apply kerf compensation or
+per-layer operations. Bounding-box preview disables real submission. Submission
+reports bytes, not physical completion. Use the machine controls to stop motion.
+On Linux the user must have permission to open the USB device; permission failures
+appear in Make. No broad USB permission rules are installed by the application.
+
+Cricut remains SVG export to Design Space, not direct USB control. Public connection
+instructions describe Design Space but do not specify cut-command bytes:
+https://help.cricut.com/hc/en-us/articles/6581830148759-Bluetooth-and-USB-Connection-Help

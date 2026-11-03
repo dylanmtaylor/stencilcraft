@@ -8,6 +8,8 @@
 //! API is already the one the actors use, so swapping in a shared-structure
 //! stack later must not touch any caller.
 
+pub mod hardware;
+pub use hardware::HardwareCommand;
 pub mod document;
 pub mod generate;
 mod path_edit;
@@ -454,6 +456,9 @@ pub enum Command {
     /// use the same `command`/`params` envelope.
     #[serde(untagged)]
     Production(ProductionCommand),
+    /// USB discovery and explicit validated hardware submission.
+    #[serde(untagged)]
+    Hardware(HardwareCommand),
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -578,6 +583,7 @@ pub enum Effect {
     Document(document::DocumentEffect),
     /// A production query's result: machines, mat layout, cut job or print sheets.
     Production(ProductionEffect),
+    Hardware(serde_json::Value),
 }
 
 /// Undo/redo snapshots StencilCraft's production document; VectorCraft still owns the reusable
@@ -710,6 +716,7 @@ impl Engine {
             | Command::SelectSameFill { .. }
             | Command::SelectSameStroke { .. }
             | Command::SelectInverse { .. } => return self.query(&command),
+            Command::Hardware(ref c) => return hardware::run(&self.doc, c),
             Command::TextFonts { .. } => return text::run(self, command),
             Command::Document(command) => return document::run(self, command),
             Command::Production(ref c) if c.is_query() => return production::query(&self.doc, c),
@@ -925,6 +932,7 @@ impl Engine {
                 self.redo();
                 Ok(Effect::HistoryChanged)
             }
+            Command::Hardware(c) => hardware::run(&self.doc, &c),
             Command::Production(c) => production::execute(&mut self.doc, c),
             Command::ShapeRemove { id } => self.remove_shapes(&[id], "shape.remove"),
             Command::ShapesRemove { ids } => self.remove_shapes(&ids, "shapes.remove"),

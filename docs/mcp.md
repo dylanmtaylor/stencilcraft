@@ -477,3 +477,11 @@ all reachable through `command_execute` too.
 images are not written yet). `export_image` renders the board, images included, to PNG or
 JPEG at `dpi` (render capped at 64 million pixels).
 
+
+### Explicit hardware engine commands
+
+`hardware.devices` enumerates connected cutter-vendor USB descriptors.
+`hardware.cut` takes `model` (catalog id), `location` (from discovery), `mat`,
+`force`, `speed`, and `send` (defaults false). False validates visible document
+paths; **true physically submits the cut**. These commands do not change document
+history. USB requires the engine `usb` feature (enabled by the desktop).

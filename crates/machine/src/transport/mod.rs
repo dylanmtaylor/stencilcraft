@@ -17,13 +17,13 @@ use crate::MachineError;
 mod net;
 #[cfg(feature = "serial")]
 mod serial;
-#[cfg(feature = "usb")]
+#[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 mod usb;
 
 pub use net::TcpTransport;
 #[cfg(feature = "serial")]
 pub use serial::SerialTransport;
-#[cfg(feature = "usb")]
+#[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use usb::{UsbTransport, list_usb_devices};
 
 /// Default read timeout for interactive transports.
@@ -272,12 +272,12 @@ impl TransportSpec {
     }
 }
 
-#[cfg(feature = "usb")]
+#[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 fn open_usb(location: Option<&str>) -> Result<Box<dyn Transport>, MachineError> {
     Ok(Box::new(UsbTransport::open(location)?))
 }
 
-#[cfg(not(feature = "usb"))]
+#[cfg(not(all(feature = "usb", not(target_arch = "wasm32"))))]
 fn open_usb(_location: Option<&str>) -> Result<Box<dyn Transport>, MachineError> {
     Err(MachineError::Config(
         "USB support is not built in: rebuild with --features usb".to_string(),

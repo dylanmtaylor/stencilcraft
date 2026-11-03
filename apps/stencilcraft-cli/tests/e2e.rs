@@ -688,23 +688,69 @@ fn import_trace_and_raster_pdf_exports() {
         expect_exit0(&out, &String::from_utf8_lossy(&out.stdout));
     };
     let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
-    run(&["import", "--in", &s(&image_path), "--out", &s(&placed), "--dpi", "254"]);
+    run(&[
+        "import",
+        "--in",
+        &s(&image_path),
+        "--out",
+        &s(&placed),
+        "--dpi",
+        "254",
+    ]);
     let doc = stencilcraft_doc::load_from(&s(&placed)).expect("placed document");
     assert_eq!(doc.images.len(), 1);
-    run(&["trace", "--in", &s(&placed), "--out", &s(&traced), "--mode", "outer"]);
+    run(&[
+        "trace",
+        "--in",
+        &s(&placed),
+        "--out",
+        &s(&traced),
+        "--mode",
+        "outer",
+    ]);
     let doc = stencilcraft_doc::load_from(&s(&traced)).expect("traced document");
     assert_eq!(doc.shape_count(), 1, "outer-edge mode drops the hole");
     for name in ["traced.pdf", "traced.png", "traced.jpg", "traced.dxf"] {
         let target = dir.join(name);
-        run(&["run", "--in", &s(&traced), "--export", &s(&target), "--dpi", "600"]);
-        assert!(std::fs::metadata(&target).expect("export written").len() > 0, "{name}");
+        run(&[
+            "run",
+            "--in",
+            &s(&traced),
+            "--export",
+            &s(&target),
+            "--dpi",
+            "600",
+        ]);
+        assert!(
+            std::fs::metadata(&target).expect("export written").len() > 0,
+            "{name}"
+        );
     }
     // The DXF comes back in through `import` as one closed outline.
     let back = dir.join("back.stencilcraft");
-    run(&["import", "--in", &s(&dir.join("traced.dxf")), "--out", &s(&back)]);
-    assert_eq!(stencilcraft_doc::load_from(&s(&back)).expect("dxf import").shape_count(), 1);
+    run(&[
+        "import",
+        "--in",
+        &s(&dir.join("traced.dxf")),
+        "--out",
+        &s(&back),
+    ]);
+    assert_eq!(
+        stencilcraft_doc::load_from(&s(&back))
+            .expect("dxf import")
+            .shape_count(),
+        1
+    );
     let bad = bin()
-        .args(["trace", "--in", &s(&placed), "--out", &s(&traced), "--threshold", "500"])
+        .args([
+            "trace",
+            "--in",
+            &s(&placed),
+            "--out",
+            &s(&traced),
+            "--threshold",
+            "500",
+        ])
         .output()
         .expect("starts");
     assert!(!bad.status.success());

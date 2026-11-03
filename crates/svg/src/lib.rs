@@ -34,7 +34,7 @@ fn class_for(style: CutStyle) -> &'static str {
 /// document (the export must always be plottable in a viewbox).
 fn view_bounds(doc: &Document) -> kurbo::Rect {
     let mut acc = kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm);
-    for layer in &doc.layers {
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
         if let Some(b) = layer.bounds() {
             acc = acc.union(b);
         }
@@ -62,7 +62,9 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
     svg.push_str(">\n");
     let title = svg_title(doc);
     svg.push_str(&title);
-    for layer in &doc.layers {
+    let parents = doc.group_parent_map();
+    // Template (guide) layers are canvas-only: never exported.
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
         let vis = if layer.visible { "visible" } else { "hidden" };
         let _ = writeln!(
             svg,
@@ -74,7 +76,27 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
             },
             vis
         );
+        // Groups nest inside the layer as `<g class="group" data-group="id">`; a group
+        // whose shapes are not adjacent in stacking order appears more than once.
+        let mut open: Vec<u64> = Vec::new();
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+            let chain = stencilcraft_doc::canvas::group_chain_in(
+                &parents,
+                stencilcraft_doc::GroupChild::Shape(shape.id),
+            );
+            let common = open
+                .iter()
+                .zip(&chain)
+                .take_while(|(a, b)| a == b)
+                .count();
+            for _ in common..open.len() {
+                svg.push_str("    </g>\n");
+            }
+            open.truncate(common);
+            for id in chain.iter().skip(common) {
+                let _ = writeln!(svg, "    <g class=\"group\" data-group=\"{id}\">");
+                open.push(*id);
+            }
             let d = path_to_svg_d(&shape.path)?;
             let _ = writeln!(
                 svg,
@@ -82,6 +104,9 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
                 class_for(shape.style),
                 d
             );
+        }
+        for _ in &open {
+            svg.push_str("    </g>\n");
         }
         svg.push_str("  </g>\n");
     }
@@ -227,7 +252,7 @@ pub fn export_tile_preview(
             -options.scale
         );
         for layer in &piece.layers {
-            if !layer.visible {
+            if !layer.is_output() {
                 continue;
             }
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {

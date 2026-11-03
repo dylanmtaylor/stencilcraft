@@ -12,6 +12,7 @@ fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> Layer {
         kind,
         visible: true,
         shapes,
+        ..Layer::new("", kind)
     }
 }
 
@@ -53,6 +54,7 @@ fn base_document(board: Board, kerf: KerfSettings, layers: Vec<Layer>) -> Docume
         kerf,
         layers,
         next_shape_id: id_top + 1,
+        ..Document::default()
     }
 }
 

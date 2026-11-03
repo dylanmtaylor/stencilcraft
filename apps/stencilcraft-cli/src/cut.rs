@@ -209,7 +209,7 @@ pub fn resolve_settings(req: &CutRequest) -> Result<(Media, CutSettings), CutErr
 pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
     let mut paths = Vec::new();
     for layer in &doc.layers {
-        if !layer.visible {
+        if !layer.is_output() {
             continue;
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {

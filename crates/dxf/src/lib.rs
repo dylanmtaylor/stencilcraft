@@ -54,7 +54,8 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
     pair(&mut out, 2, "TABLES")?;
     pair(&mut out, 0, "TABLE")?;
     pair(&mut out, 2, "LAYER")?;
-    for layer in &doc.layers {
+    // Template (guide) layers are canvas-only: never exported.
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
         pair(&mut out, 0, "LAYER")?;
         pair(&mut out, 2, &layer_name(&layer.name))?;
         pair(&mut out, 70, "0")?;
@@ -75,7 +76,7 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
     // Entities.
     pair(&mut out, 0, "SECTION")?;
     pair(&mut out, 2, "ENTITIES")?;
-    for layer in &doc.layers {
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
         let dxf_layer = layer_name(&layer.name);
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let closed = match (shape.style, layer.kind) {

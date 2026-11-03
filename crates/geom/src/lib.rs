@@ -154,9 +154,88 @@ pub fn bounds_of_shape(path: &BezPath) -> Option<Rect> {
     path.bounding_box().as_rect()
 }
 
+/// Display units. The document is always millimetres; convert only where a value meets
+/// the user (fields, rulers, callouts), through these helpers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Unit {
+    #[default]
+    Mm,
+    Cm,
+    In,
+    Pt,
+}
+
+impl Unit {
+    pub const ALL: [Unit; 4] = [Unit::Mm, Unit::Cm, Unit::In, Unit::Pt];
+
+    /// Millimetres in one of this unit.
+    pub fn mm_per_unit(self) -> f64 {
+        match self {
+            Unit::Mm => 1.0,
+            Unit::Cm => 10.0,
+            Unit::In => 25.4,
+            Unit::Pt => 25.4 / 72.0,
+        }
+    }
+
+    pub fn to_mm(self, value: f64) -> f64 {
+        value * self.mm_per_unit()
+    }
+
+    pub fn from_mm(self, mm: f64) -> f64 {
+        mm / self.mm_per_unit()
+    }
+
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Unit::Mm => "mm",
+            Unit::Cm => "cm",
+            Unit::In => "in",
+            Unit::Pt => "pt",
+        }
+    }
+
+    /// `mm` shown in this unit with `decimals` places and the suffix, e.g. `1.000 in`.
+    pub fn format(self, mm: f64, decimals: usize) -> String {
+        format!("{:.*} {}", decimals.min(9), self.from_mm(mm), self.suffix())
+    }
+
+    /// Parses `12.5`, `12.5mm`, `1 in`, `3cm`, `72 pt` or `2"` into millimetres; a bare
+    /// number is in this unit. `None` for anything else or a non-finite result.
+    pub fn parse_to_mm(self, text: &str) -> Option<f64> {
+        let text = text.trim();
+        let (number, unit) = Unit::ALL
+            .iter()
+            .find_map(|u| text.strip_suffix(u.suffix()).map(|n| (n, *u)))
+            .or_else(|| text.strip_suffix('"').map(|n| (n, Unit::In)))
+            .unwrap_or((text, self));
+        let value: f64 = number.trim().parse().ok()?;
+        let mm = unit.to_mm(value);
+        mm.is_finite().then_some(mm)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn units_convert_format_and_parse() {
+        assert_eq!(Unit::In.to_mm(1.0), 25.4);
+        assert!((Unit::Pt.from_mm(25.4) - 72.0).abs() < 1e-12);
+        assert_eq!(Unit::Cm.from_mm(15.0), 1.5);
+        assert_eq!(Unit::In.format(25.4, 3), "1.000 in");
+        assert_eq!(Unit::Mm.parse_to_mm("12.5"), Some(12.5));
+        assert_eq!(Unit::In.parse_to_mm("2"), Some(50.8));
+        assert_eq!(Unit::Mm.parse_to_mm(" 1 in "), Some(25.4));
+        assert_eq!(Unit::Mm.parse_to_mm("2\""), Some(50.8));
+        assert_eq!(Unit::Mm.parse_to_mm("3cm"), Some(30.0));
+        assert_eq!(Unit::Mm.parse_to_mm("abc"), None);
+        assert_eq!(Unit::Mm.parse_to_mm("1e400"), None);
+        for unit in Unit::ALL {
+            assert!((unit.to_mm(unit.from_mm(123.4)) - 123.4).abs() < 1e-9);
+        }
+    }
 
     fn square(side: f64) -> BezPath {
         let mut p = BezPath::new();

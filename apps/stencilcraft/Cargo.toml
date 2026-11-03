@@ -25,6 +25,7 @@ stencilcraft-doc = { workspace = true }
 stencilcraft-dxf = { workspace = true }
 stencilcraft-engine = { workspace = true }
 stencilcraft-gcode = { workspace = true }
+stencilcraft-import = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-machine = { workspace = true }

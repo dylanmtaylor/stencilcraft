@@ -844,6 +844,9 @@ impl StencilApp {
             }
             let _ = job.reply.send(reply);
         }
+        if let Some(jobs) = self.control_jobs.as_ref() {
+            jobs.publish(&self.engine.doc);
+        }
     }
 
     pub fn with_egui(mut self, cc: &eframe::CreationContext) -> Self {

@@ -216,10 +216,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 49. **Silhouette fills, groups and live text**: the `.studio` reader maps line colours to
     layers but drops fill colours, groups and live-text parameters (text comes in as
     outlines); no writer.
-50. **Control channel while the window gets no frames**: with the screen locked or the
-    window hidden, control requests (including `app.screenshot`) wait forever because
-    they are drained once per frame. They should time out with an error (VectorCraft
-    answers "no frame was presented") and screenshots need a headless render fallback.
+50. **Control channel while the window gets no frames**: requests now time out after 10 s
+    and `app.screenshot` falls back to a 96 dpi document render, but that render has no
+    window chrome, selection or kerf preview, and edits still cannot be applied until the
+    window draws again (the headless session could run them off the UI thread).
 
 The menu-bar placement and proposed engine command for each of these is in
 [`menu-map.md`](menu-map.md).

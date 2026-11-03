@@ -58,8 +58,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    document and metadata snapshots. Node-level path commands (break, join, close,
    average/merge, delete, corner/smooth, line/curve segment), simplify, outline stroke,
    compound make/release, Subtract All, lock/hide flags and selection/node-count queries
-   exist as engine commands and MCP tools (`docs/mcp.md`); the desktop menus do not call
-   them yet. Shapes carry one operation colour, so "same fill" and "same stroke" differ
+   exist as engine commands and MCP tools (`docs/mcp.md`); desktop menus and panels
+   expose a subset, while complete node-editing workflows remain unfinished. Shapes carry one operation colour, so "same fill" and "same stroke" differ
    only by open vs closed paths. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
 7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Node editing (move points, convert smooth/corner) via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
@@ -95,24 +95,24 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     - Right dock: `Properties` and `Layers` tabs share a dock group; VectorCraft also has an icon strip and Libraries tab.
     - Canvas navigation uses the shared bottom status bar; VectorCraft also shows render and fps stats.
     - Remaining differences include tool rail grouping and flyout markers, and the production controls in StencilCraft's top toolbar.
-16. **User offset**: kerf offsetting exists, but there is no command that adds an
-    outward/inward offset as a new shape. Also missing: round corners (kerf only mitres)
-    and the option to weld the offset outlines into one.
+16a. **User offset**: `shapes.offset` creates outward or inward outlines with miter,
+    round or bevel joins; the desktop Offset panel provides a preview and Apply. Welding
+    multiple offset results into one remains missing.
 17. **Groups, stacking and layer control**: engine commands support groups,
     reordering, object and layer locks, renaming and moving objects between layers.
-    Desktop controls and shortcuts remain incomplete. Attach (keep positions on the mat)
-    and Contour (turn off single sub-paths) still need work.
+    Desktop controls and shortcuts remain incomplete. Attach and Contour commands exist
+    in the production engine; their desktop workflows still need integration.
 18. **Snapping and guides**: the document and command layer supports guides, grid
     and snap settings, snapping queries and measurements. Desktop gesture integration,
     smart guides and live width/height callouts remain incomplete; display-unit support
     also needs integration in the desktop UI.
-19. **Text**: the Text tool places built-in single-line bitmap lettering only. Missing:
-    user/system fonts (through `CRAFT_FONTS_DIR`, never bundled), size and spacing
-    controls, text that can be edited after placing, text on a path or arc, and a
-    glyphs panel.
-20. **Replicate and nesting**: only duplicate in place exists. Missing: copies in a
-    direction, row/column and radial arrays, mirrored copies, fill page and automatic
-    nesting.
+19. **Text**: the desktop Text tool places bitmap-derived outlines. Engine and MCP
+    provide editable text with user/system fonts, single-line lettering, size and spacing,
+    text on a path or arc, and conversion to outlines. The desktop does not yet expose
+    those live-text controls or a glyphs panel.
+20. **Replicate and nesting**: engine commands and desktop panels cover directional,
+    mirrored, array, radial and fill-page copies. Production mat planning has nesting;
+    an integrated desktop mat preview and hardware validation remain open.
 21. **Cut job settings**: missing test cut, overcut, cut order/path sorting, custom saved
     materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
     Also missing: weed lines and borders, and more operation types (pen, score,
@@ -120,26 +120,27 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     colour, assigning lines to tool holder 1 or 2 (or skipping them) on the cut preview,
     and advanced material settings (acceleration, track enhancing, kraft-blade loop
     corners).
-22. **Machine connection**: the only transport is serial/CDC, and only from the CLI.
-    Missing: USB bulk (`nusb`), Bluetooth, device discovery, live status, load/unload,
-    pause and cancel, a Make-screen mat preview, a machine card with firmware and status
-    in the app, a packet-size setting, multi-cutter output and batch jobs.
-    Driving Cricut machines is out of scope (no public specification).
+22. **Machine connection**: CLI supports serial/CDC and feature-gated USB bulk, device
+    discovery and status queries; USB and registration-mark sessions need real hardware
+    validation. Bluetooth, a desktop machine status card, interactive mat preview,
+    multi-cutter output and batch jobs remain open. Cricut hardware control is out of
+    scope without a public protocol.
 23. **Path editing tools**: missing freehand and smoothed freehand, arc, knife, eraser,
     break/join/close path, release compound path, simplify, flip/mirror buttons, a
     clipboard, Paste in Front, Select by Color, Detach Lines, a rotation handle on the
     selection, a reference-point picker for the X/Y fields, a preference for what a tool
     does after use, a node-count readout, and warp.
-24. **Trace**: threshold silhouette only. Missing: image filters, outer-edge-only trace,
-    trace & detach, background removal, a live preview of the trace area, and
-    multi-colour trace to layers.
+24. **Trace**: engine/MCP support filtering, outer-edge and detach modes and background
+    removal; the desktop trace workflow still needs these controls and a live preview.
+    Multi-colour tracing to layers remains missing.
 25. **Print & Cut, beyond item 3**: missing printing from the app (resolution, preview),
     a printable-area border on the canvas, mark size and position options, bleed,
     printing cut lines, fill colour/gradient for printed artwork, Flatten, print size checks
     and calibration. Scan-to-cut is low priority.
-26. **Formats**: missing DXF import (see item 5), PDF import, PDF/PNG/JPG export and
-    placed raster images for printing. There is no autosave or crash recovery. Proprietary `.studio`/`.studio3` and AI/CDR
-    formats are out of scope.
+26. **Formats**: DXF, PDF and EPS/AI vector import, PDF/PNG/JPEG export and placed
+    raster images are available with the fidelity limits in items 5, 11 and 12. The
+    `.studio`/`.studio3` reader imports a limited, lossy subset; writing, GSD and CDR
+    remain unsupported. Recovery helpers exist but automatic desktop recovery is not wired.
 27. **Documents and preferences**: one board per document and one document per window,
     with no tabs. File › New opens a New Document dialog with size/mat/laser presets and
     recent sizes, but presets add no starter geometry yet (card fold score, tag hole,
@@ -167,12 +168,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 33. **Transform power tools**: missing Transform Again, Transform Each, shear, align to a
     key object and distribute spacing by a set value.
 34. **More cutters and formats** (see the Cutters and File formats tables in
-    [`reference-apps.md`](reference-apps.md)):
-    - Cutters: Silhouette SD, CAMEO 1/2, CAMEO 5 Alpha, Portrait 1/2, Curio 1/2, Craft
-      ROBO and Graphtec CE/CB are not in the `Model` table.
-    - Formats: PDF/AI/EPS/BMP/GIF/TIFF/HEIC import and PDF/PNG/JPEG export are missing.
-      `.studio3`/GSD import waits on an owner decision.
-    - Cricut machines are pending the owner's decision and a legal review.
+    [`reference-apps.md`](reference-apps.md)): the model catalog and USB transport have
+    expanded but need hardware validation, and not every model is supported. The readers
+    and exporters in items 5, 11, 12 and 26 cover subsets; HEIC, GSD and CDR remain
+    unsupported. Cricut hardware control lacks a public protocol.
 35. **Multiple boards**: the document model supports extra pages and the command
     layer can create a document from templates. Desktop multi-page editing, a fully
     integrated template wizard and Save Selection As remain incomplete.
@@ -180,8 +179,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     outline view, Show Print/Cut Border, rotated page view and zoom to selection.
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.
     Missing: Select Same operation, next object above/below, and saved selections.
-38. **Rhinestone, lattice and other generators**: rhinestone layouts, lattice cut-outs,
-    Flexishapes, puzzle and cross-stitch generators, and a font creator.
+38. **Rhinestone, lattice and other generators**: engine/MCP include rhinestone, puzzle
+    and other geometric generators. Complete desktop controls, lattice, Flexishapes,
+    cross-stitch and a font creator remain open.
 39. **Colour tools**: missing swatches, recolour, graphic styles (saved
     line/fill/operation sets) and an eyedropper.
 40. **Automation**: missing recorded actions and batch replay inside the app. MCP and the
@@ -190,16 +190,15 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     the Make screen, a favourite-materials list, an uploaded-images library and project
     collections (as local folders).
 
-42. **Sticker workflow** (Design Space Create Sticker): no one-step sticker that flattens
-    the art, adds a border offset, and picks die cut (through the backing) or kiss cut
-    (top layer only). Kiss-cut versus die-cut depth is not modelled at all. See the
+42. **Sticker workflow** (Design Space Create Sticker): engine/MCP provide a sticker
+    command with a welded border and kiss-cut or die-cut operation metadata. Desktop
+    creation, print rendering and hardware depth validation remain open. See the
     [Cricut library](cricut-design-space/edit-bar.md#create-sticker).
-43. **Live (non-destructive) shape operations**: Design Space's Combine keeps Unite,
-    Subtract, Intersect and Exclude editable after they are applied. StencilCraft's
-    Pathfinder is destructive (undo only).
-44. **Offset UI**: the engine has `shapes.offset` (join style, miter limit), but there is
-    no panel with a live preview and no weld-offsets option (one merged offset versus one
-    per piece).
+43. **Live (non-destructive) shape operations**: engine/MCP Combine retains source
+    shapes for Unite, Subtract, Intersect and Exclude and can uncombine them; the
+    desktop Pathfinder remains destructive and needs a live-combine workflow.
+44. **Offset UI**: the desktop Offset panel previews and applies `shapes.offset` with
+    join style and miter limit. A weld-offsets option remains missing.
 45. **Templates and Guide layers**: missing sizing backgrounds that are shown but never
     cut, a Guide operation, and document presets ("base type").
 46. **Make-screen validation**: missing checks for each machine's limits: Smart Materials
@@ -209,9 +208,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 47. **Upload cleanup**: missing Select (same-colour areas), Erase/Restore brushes,
     despeckle, smooth, reduce colours, preview as a single layer, and saving an upload as a
     printable image rather than an outline. User pattern uploads are also missing.
-48. **Monogram and text conveniences**: missing a monogram builder (up to four initials,
-    frame, style) using user fonts, ungroup to lines/letters, and curved text by
-    diameter.
+48. **Monogram and text conveniences**: engine/MCP provide a monogram command, ungroup
+    to lines or letters, and curved text by diameter. Desktop builders and editing controls
+    are not yet wired.
 
 The menu-bar placement and proposed engine command for each of these is in
 [`menu-map.md`](menu-map.md).

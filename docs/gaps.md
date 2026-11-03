@@ -135,16 +135,18 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     sketch (hatch) and stipple fills for pens, and emboss/deboss/foil patterns. Low
     priority: a pop-up card strut generator, a spelling check for text, and image
     effects on placed rasters.
-29. **Outline Stroke and Expand**: no way to turn a stroked line or open path into a
-    closed outline that can be cut. This is the usual way to make stencil lettering and
-    line art cuttable.
+29. **Outline Stroke and Expand**: the engine now has `path.outline-stroke`, which turns
+    a stroked or open path into a closed cuttable outline. Missing: its menu/UI wiring and
+    a general Expand. This is the usual way to make stencil lettering and line art
+    cuttable.
 30. **Mirror on mat and load type**: no per-job mirror for heat-transfer vinyl, which is
     cut face down. No choice between on-mat, without-mat (Smart Materials) and roll feed,
     no project copies, and no arranging pieces on a mat preview.
 31. **Weld on cut and cut by layer**: overlapping shapes are cut twice unless welded by
     hand, and there is no per-layer cut order or per-layer settings at send time.
-32. **Path construction**: missing Join, Average, Break at Point, Close Path, clipping
-    masks (make/release), and Release Compound Path.
+32. **Path construction**: the engine now has `path.join`, `path.average-nodes`,
+    `path.break`, `path.close`, `shapes.make-compound` and `shapes.release-compound`.
+    Missing: clipping masks (make/release) and menu/UI wiring for the path commands.
 33. **Transform power tools**: missing Transform Again, Transform Each, shear, align to a
     key object and distribute spacing by a set value.
 34. **More cutters and formats** (see the Cutters and File formats tables in
@@ -158,8 +160,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     a template-based new document, and Save Selection As.
 36. **View aids**: missing smart guides, snap to point, guides (make, release, lock),
     outline view, Show Print/Cut Border, rotated page view and zoom to selection.
-37. **Select menu**: missing Select Inverse, Select Same (fill, stroke, operation, layer),
-    next object above/below, and saved selections.
+37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.
+    Missing: Select Same operation, next object above/below, and saved selections.
 38. **Rhinestone, lattice and other generators**: rhinestone layouts, lattice cut-outs,
     Flexishapes, puzzle and cross-stitch generators, and a font creator.
 39. **Colour tools**: missing swatches, recolour, graphic styles (saved
@@ -169,6 +171,29 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 41. **Design Space conveniences**: missing a history panel, tool and accessory prompts on
     the Make screen, a favourite-materials list, an uploaded-images library and project
     collections (as local folders).
+
+42. **Sticker workflow** (Design Space Create Sticker): no one-step sticker that flattens
+    the art, adds a border offset, and picks die cut (through the backing) or kiss cut
+    (top layer only). Kiss-cut versus die-cut depth is not modelled at all. See the
+    [Cricut library](cricut-design-space/edit-bar.md#create-sticker).
+43. **Live (non-destructive) shape operations**: Design Space's Combine keeps Unite,
+    Subtract, Intersect and Exclude editable after they are applied. StencilCraft's
+    Pathfinder is destructive (undo only).
+44. **Offset UI**: the engine has `shapes.offset` (join style, miter limit), but there is
+    no panel with a live preview and no weld-offsets option (one merged offset versus one
+    per piece).
+45. **Templates and Guide layers**: missing sizing backgrounds that are shown but never
+    cut, a Guide operation, and document presets ("base type").
+46. **Make-screen validation**: missing checks for each machine's limits: Smart Materials
+    minimum and maximum lengths, card mats (2×2, 1×2, Joy), Print Then Cut usable area
+    and page size, and roller margins. Also missing: per-machine default load type and
+    page size, and remembering the material between mats.
+47. **Upload cleanup**: missing Select (same-colour areas), Erase/Restore brushes,
+    despeckle, smooth, reduce colours, preview as a single layer, and saving an upload as a
+    printable image rather than an outline. User pattern uploads are also missing.
+48. **Monogram and text conveniences**: missing a monogram builder (up to four initials,
+    frame, style) using user fonts, ungroup to lines/letters, and curved text by
+    diameter.
 
 The menu-bar placement and proposed engine command for each of these is in
 [`menu-map.md`](menu-map.md).

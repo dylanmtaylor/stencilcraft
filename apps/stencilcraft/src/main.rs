@@ -29,7 +29,7 @@ use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
 use craft_ui::list::{ListRow, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::menu::{MenuBar, MenuEntry, MenuItem, PressMenu};
+use craft_ui::menu::{MenuBar, MenuItem};
 use craft_ui::patterns::{
     AlignAction, AlignBar, Inspector, InspectorHeader, LastUsed, OptionsBar, Panel, RailTool,
     StatusBar, ToolRail, ToolSlot,
@@ -1444,10 +1444,22 @@ impl StencilApp {
         let result = std::fs::read_to_string(&path)
             .map_err(|error| format!("{name}: could not read SVG: {error}"))
             .and_then(|svg| {
-                stencilcraft_svg::import(&svg, &name).map_err(|error| error.to_string())
+                stencilcraft_svg::import_with_warnings(&svg, &name)
+                    .map_err(|error| error.to_string())
             });
         match result {
-            Ok(imported) => self.add_imported_shapes(imported, &name),
+            Ok(imported) => {
+                self.add_imported_shapes(imported.document, &name);
+                // Skipped text, masks and filters must reach the user, not vanish.
+                if let Some(first) = imported.warnings.first() {
+                    let more = imported.warnings.len() - 1;
+                    self.status = if more == 0 {
+                        format!("{}; warning: {first}", self.status)
+                    } else {
+                        format!("{}; warning: {first} (+{more} more)", self.status)
+                    };
+                }
+            }
             Err(error) => self.status = error,
         }
     }
@@ -2181,7 +2193,6 @@ impl StencilApp {
         let mut undo_clicked = false;
         let mut redo_clicked = false;
         let mut switch_theme_clicked = false;
-        let mut reset_workspace_clicked = false;
 
         let frame = self.window_frame.clone();
         let can_undo = self.engine.can_undo();
@@ -2221,32 +2232,8 @@ impl StencilApp {
                             LeadingEnd::from_ui(ui)
                         },
                         |ui, _| {
-                            // The trailing slot lays out right to left: the switcher comes first
-                            // so it sits at the window edge, then Redo before Undo.
+                            // The trailing slot lays out right to left: Redo before Undo.
                             ui.horizontal(|ui| {
-                                let workspaces = [
-                                    MenuEntry::from(
-                                        MenuItem::new("Essentials", WorkspaceChoice::Essentials)
-                                            .radio(true),
-                                    ),
-                                    MenuEntry::Separator,
-                                    MenuItem::new("Reset Essentials", WorkspaceChoice::Reset)
-                                        .into(),
-                                ];
-                                let button = ui.add(
-                                    Button::new("Essentials")
-                                        .trailing_icon(Icon::ChevronDown)
-                                        .variant(ButtonVariant::Ghost)
-                                        .size(ControlSize::Sm),
-                                );
-                                if PressMenu::new(&workspaces)
-                                    .show(ui, &button)
-                                    .chosen
-                                    .is_some()
-                                {
-                                    reset_workspace_clicked = true;
-                                }
-                                Divider::vertical().show(ui);
                                 if ui
                                     .add(IconButton::new(Icon::Redo, "Redo").enabled(can_redo))
                                     .clicked()
@@ -2274,10 +2261,6 @@ impl StencilApp {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
-
-        if reset_workspace_clicked {
-            self.reset_workspace();
-        }
 
         if undo_clicked {
             let _ = self.engine.undo();
@@ -3654,7 +3637,7 @@ impl StencilApp {
         if response.hovered() {
             let scroll = ui.ctx().input(|input| input.smooth_scroll_delta.y);
             if scroll != 0.0 {
-                let pointer = response.interact_pointer_pos().unwrap_or(clip.center());
+                let pointer = response.hover_pos().unwrap_or(clip.center());
                 self.view.zoom_at((scroll / 400.0).exp(), pointer);
             }
         }
@@ -3770,13 +3753,6 @@ enum ToolsAction {
     Rectangle,
     Image,
     Text,
-}
-
-/// A row of the title bar's workspace switcher.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkspaceChoice {
-    Essentials,
-    Reset,
 }
 
 /// A quick transform button in the inspector's Transform section.

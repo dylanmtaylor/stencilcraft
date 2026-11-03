@@ -11,8 +11,8 @@ use stencilcraft_doc::Document;
 use stencilcraft_geom as geom;
 use stencilcraft_machine as machine;
 use stencilcraft_machine::{
-    Capabilities, CutJob, CutOrder, CutProgram, CutSettings, DeviceRegistry, MachineDriver, Mat,
-    Media, PlotOptions, Registration, ToolKind, TransportSpec,
+    Capabilities, CutJob, CutOrder, CutProgram, CutSettings, DeviceRegistry, LayerPaths,
+    LayerSettings, MachineDriver, Mat, Media, PlotOptions, Registration, ToolKind, TransportSpec,
 };
 
 /// Errors from the cut subcommand; printed to stderr as the process message.
@@ -74,6 +74,10 @@ pub struct CutRequest {
     pub closed_overcut_mm: Option<f64>,
     /// Mirror on the mat (heat-transfer vinyl).
     pub mirror: bool,
+    /// Weld overlapping closed contours before cutting.
+    pub weld: bool,
+    /// Per-layer send settings (`--layer NAME:skip|tool=2,passes=2,…`).
+    pub layers: Vec<LayerSettings>,
 }
 
 impl CutRequest {
@@ -108,6 +112,10 @@ impl CutRequest {
                 }
                 "--no-interior-first" => req.no_interior_first = true,
                 "--mirror" => req.mirror = true,
+                "--weld" => req.weld = true,
+                "--layer" => req
+                    .layers
+                    .push(LayerSettings::parse(take()?).map_err(user)?),
                 "--mat" => {
                     let v = take()?;
                     req.mat = Some(Mat::parse(v).ok_or_else(|| {
@@ -267,6 +275,7 @@ pub fn build_job(
     job.interior_first = !req.no_interior_first;
     job.closed_overcut_mm = req.closed_overcut_mm.unwrap_or(0.0);
     job.mirror = req.mirror;
+    job.weld = req.weld;
     // Force/speed go straight into the job: their units are machine-specific
     // and may exceed the Silhouette step range (laser power 0-1000, mm/min).
     for op in &mut job.operations {
@@ -281,19 +290,25 @@ pub fn build_job(
 }
 
 /// Flatten every visible shape into machine paths (document mm coordinates:
-/// x right, y down).
-pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
-    let mut paths = Vec::new();
+/// x right, y down), one entry per output layer.
+pub fn layer_paths(doc: &Document) -> Vec<LayerPaths> {
+    let mut out = Vec::new();
     for layer in &doc.layers {
         if !layer.is_output() {
             continue;
         }
+        let mut paths = Vec::new();
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let polylines = geom::path_to_polylines(&shape.cut_path(), geom::DEFAULT_FLATTEN_STEPS);
             paths.extend(machine::paths_from_polylines(&polylines));
         }
+        out.push(LayerPaths {
+            name: layer.name.clone(),
+            color: layer.color.clone(),
+            paths,
+        });
     }
-    paths
+    out
 }
 
 /// Validate and encode the request for its machine.
@@ -303,11 +318,13 @@ pub fn encode(
 ) -> Result<(CutProgram, Media, CutJob, Capabilities), CutError> {
     let reg = registry(req.machines_file.as_deref())?;
     let caps = resolve_machine(&reg, req.model_name.as_deref().unwrap_or("cameo-4-pro"))?;
-    let paths = flatten_document(doc);
+    let layers = layer_paths(doc);
+    let paths: Vec<Vec<(f64, f64)>> = layers.iter().flat_map(|l| l.paths.clone()).collect();
     if paths.is_empty() {
         return Err(user("document has no visible shapes to cut"));
     }
-    let (media, job) = build_job(req, &caps, &paths)?;
+    let (media, mut job) = build_job(req, &caps, &paths)?;
+    job.split_layers(layers, &req.layers).map_err(user)?;
     let program = machine::dry_run(&caps, &job).map_err(user)?;
     Ok((program, media, job, caps))
 }
@@ -366,13 +383,28 @@ fn header(program: &CutProgram, media: &Media, caps: &Capabilities, job: &CutJob
             op.settings.passes
         ));
     }
+    let on = |b: bool| if b { "on" } else { "off" };
     out.push(format!(
-        "order: {}, interior first: {}, closed overcut: {} mm, mirror: {}",
+        "order: {}, interior first: {}, closed overcut: {} mm, mirror: {}, weld: {}",
         job.order.id(),
-        if job.interior_first { "on" } else { "off" },
+        on(job.interior_first),
         job.closed_overcut_mm,
-        if job.mirror { "on" } else { "off" }
+        on(job.mirror),
+        on(job.weld)
     ));
+    if job.operations.len() > 1 {
+        for op in &job.operations {
+            out.push(format!(
+                "layer {}: holder {}, passes {}, force {:?}, speed {:?}, {} paths",
+                op.layer,
+                op.holder,
+                op.settings.passes,
+                op.settings.force,
+                op.settings.speed,
+                op.paths.len()
+            ));
+        }
+    }
     if let Some(bb) = program.bbox_mm {
         out.push(format!(
             "cut area: {:.1} x {:.1} mm — use --bbox for a preview rectangle",
@@ -402,6 +434,10 @@ fn print_cut_help() {
     );
     println!("  --no-interior-first  don't cut inner contours before their outline");
     println!("  --mirror          flip about the media centre (heat-transfer vinyl)");
+    println!("  --weld            unite overlapping closed shapes so overlaps are cut once");
+    println!("  --layer NAME:SET  per-layer send settings (repeatable); NAME is a layer name");
+    println!("                    or #rrggbb line colour; SET is skip, or tool=1|2,passes=N,");
+    println!("                    force=N,speed=N (comma-separated)");
     println!("  --mat MAT         none, 12x12, 12x24, 8x12, 15x15, 24x24, 8.5x12");
     println!("  --media-size WxL  loaded media in mm (required where the cut width is unknown)");
     println!("  --regmarks W,L,X,Y  print & cut: mark spacing and first-mark position, mm");
@@ -659,7 +695,10 @@ mod tests {
 
     #[test]
     fn starter_document_flattens_with_outline_paths() {
-        let paths = flatten_document(&starter());
+        let paths: Vec<_> = layer_paths(&starter())
+            .into_iter()
+            .flat_map(|l| l.paths)
+            .collect();
         assert!(!paths.is_empty(), "starter doc should yield cut paths");
         assert!(paths.iter().all(|p| p.len() >= 2));
     }
@@ -697,7 +736,7 @@ mod tests {
             lines
                 .iter()
                 .any(|l| l
-                    == "order: speed, interior first: off, closed overcut: 1.5 mm, mirror: on"),
+                    == "order: speed, interior first: off, closed overcut: 1.5 mm, mirror: on, weld: off"),
             "{lines:?}"
         );
         // Mirroring changes the cut coordinates, never the document.
@@ -717,6 +756,42 @@ mod tests {
             ..CutRequest::default()
         };
         assert!(run(&too_far, &starter()).is_err());
+    }
+
+    #[test]
+    fn weld_and_layer_flags_reach_the_transcript() {
+        let doc = stencilcraft_testkit::mixed_layers();
+        let req = CutRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--weld",
+            "--layer",
+            "engrave:tool=2,passes=2,force=5",
+        ]))
+        .expect("parses");
+        let lines = run(&req, &doc).expect("dry runs");
+        assert!(lines.iter().any(|l| l.ends_with("weld: on")), "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l
+                    == "layer engrave: holder 2, passes 2, force Some(5), speed Some(5), 1 paths"),
+            "{lines:?}"
+        );
+        assert!(lines.iter().any(|l| l == "J2"), "{lines:?}");
+        assert!(lines.iter().any(|l| l == "FX5,2"), "{lines:?}");
+        // Skipping a layer drops its paths.
+        let all = encode(&CutRequest::default(), &doc).expect("encodes").2;
+        let skip = CutRequest::parse(&args(&["--in", "a", "--layer", "engrave:skip"])).unwrap();
+        let some = encode(&skip, &doc).expect("encodes").2;
+        assert_eq!(all.operations[0].paths.len(), 2);
+        assert_eq!(some.operations[0].paths.len(), 1);
+        // Bad overrides and unknown layers are refused.
+        for spec in ["engrave:passes=50", "nope:skip"] {
+            let req = CutRequest::parse(&args(&["--in", "a", "--layer", spec])).unwrap();
+            assert!(run(&req, &doc).is_err(), "{spec}");
+        }
+        assert!(CutRequest::parse(&args(&["--in", "a", "--layer", "engrave:fast"])).is_err());
     }
 
     #[test]

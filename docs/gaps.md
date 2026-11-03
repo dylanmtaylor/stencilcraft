@@ -9,13 +9,28 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 1. **SVG import**: common shapes (`path`, basic shapes), groups, standard affine
    transforms, inherited presentation/inline display and production styles, physical
    units/viewBox/`preserveAspectRatio`, local `<use>` of supported shapes/groups, and
-   `<symbol>` templates with viewBox sizing are supported. A deterministic malformed-input
-   corpus is in place. Embedded CSS basic selectors, cascade, and inherited supported
-   properties now work. Remaining: advanced CSS selectors and at-rules, color model,
-   external `<use>`, text, clip paths, masks, and filters; unsupported drawable elements
-   fail explicitly rather than disappear. The parser has bounded XML/CSS bytes,
-   nodes/depth/coordinates, rejects duplicate IDs/reference cycles, and caps `<use>`
-   instancing at 10,000 instances. Coverage-guided fuzzing remains to be done.
+   `<symbol>` templates with viewBox sizing are supported. Embedded CSS covers type,
+   class, ID and attribute selectors (all six operators), descendant/child/`+`/`~`
+   combinators, `:not()` (one level), `:first-child`, `:last-child` and `:root`, with
+   specificity cascade. Stroke colours (all CSS Color 4 hex/`rgb()`/`hsl()`/named forms,
+   alpha dropped, `currentColor`, paint fallbacks) put shapes on one `Line #rrggbb`
+   layer per colour, as the Silhouette importer does. `clip-path: url(#id)` clips
+   geometry through the VectorCraft boolean engine (open paths are flattened and clipped
+   as polylines). `import_with_warnings` names what it skips — `<text>`, masks, filters,
+   `@media`/`@import`/`@supports` blocks, selectors outside the subset, clips it cannot
+   apply — and the strict `import` (import crate, MCP `import_file`) refuses such files.
+   `<image>`, `<foreignObject>` and unknown drawables still fail. Remaining: text to
+   outlines (the SVG crate cannot reach the engine's font layout; needs a font seam
+   below the engine), masks and filters (warned, never applied), `objectBoundingBox`
+   clip units, `clip-path` on a `<clipPath>`, `<use>`/text inside a clip path, CSS
+   basic-shape clips (`inset()`, `circle()`), external `<use>` and stylesheets,
+   `@media` evaluation, backtracking for long descendant/sibling selector chains, and
+   fill-only shapes are not coloured by fill. The desktop and MCP import paths flatten
+   layers, so per-colour layers survive only the CLI `import-svg` document. The parser
+   bounds XML/CSS bytes, nodes/depth/coordinates, warnings (64), clip nesting (16),
+   rejects duplicate IDs/reference cycles, and caps `<use>` instancing at 10,000; a
+   deterministic mutation corpus covers the colour/CSS/clip/text paths.
+   Coverage-guided fuzzing remains to be done.
 2. **Kerf robustness**: offsetting assumes simple contours; a self-intersecting subpath
    or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset.
    Counter detection counts nesting depth (outline, hole, island, …), but containment is
@@ -93,7 +108,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 14. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the `storytold/craft-libs` design-system revision `053c0043`, with `craft-draw` supplying the Bezier/pen path editing. The app uses shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Layout and visual parity with VectorCraft remain incomplete.
 15. **Typing and dialog behaviour on the new head**: `TextField` buffers typing until Enter, focus loss or commit, and a plain field passes Escape through instead of clearing. The text-dialog test encodes this; any UI that assumed per-keystroke updates should commit explicitly.
 16. **Visual parity with VectorCraft**: both apps share the craft-libs `suite_default` theme and chrome.
-    - Top bar: StencilCraft has a Home button and an `Essentials` workspace switcher.
+    - Top bar: StencilCraft has a Home button; the workspace switcher was removed (one layout only; Window › Reset Panels to Default restores it).
     - Right dock: `Properties` and `Layers` tabs share a dock group; VectorCraft also has an icon strip and Libraries tab.
     - Canvas navigation uses the shared bottom status bar; VectorCraft also shows render and fps stats.
     - Remaining differences include tool rail grouping and flyout markers, and the production controls in StencilCraft's top toolbar.
@@ -169,8 +184,13 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     flips about the media centre at job build time; the desktop Send panel doesn't offer it
     yet and no material preset turns it on. No choice between on-mat, without-mat (Smart Materials) and roll feed,
     no project copies, and no arranging pieces on a mat preview.
-31. **Weld on cut and cut by layer**: overlapping shapes are cut twice unless welded by
-    hand, and there is no per-layer cut order or per-layer settings at send time.
+31. **Weld on cut and cut by layer**: the job layer now has weld on cut (`cut --weld`,
+    MCP `weld`) and per-layer send settings (`cut --layer NAME:skip|tool=2,passes=…`,
+    MCP `layers`: skip, tool holder, passes, force, speed, by layer name or line
+    colour). Missing: the desktop Send panel doesn't offer either yet; no per-layer
+    material/media or tool type, no cut-by-fill-colour mode, no per-layer cut order (layers
+    cut in document order), and weld treats a shape lying wholly inside another as a
+    hole.
 32. **Path construction**: the engine now has `path.join`, `path.average-nodes`,
     `path.break`, `path.close`, `shapes.make-compound` and `shapes.release-compound`.
     Missing: clipping masks (make/release) and menu/UI wiring for the path commands.

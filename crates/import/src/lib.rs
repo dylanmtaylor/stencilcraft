@@ -151,7 +151,15 @@ fn read_format(
         Format::Svg => {
             let text =
                 std::str::from_utf8(bytes).map_err(|_| bad(name, "SVG is not UTF-8 text"))?;
-            stencilcraft_svg::import(text, name).map_err(|e| bad(name, e))?
+            // Unsupported features (text, masks, filters, some CSS) import without them.
+            // shortcut: warnings go to stderr; return them to MCP/desktop callers once
+            // `import_file` has a warnings channel.
+            let imported =
+                stencilcraft_svg::import_with_warnings(text, name).map_err(|e| bad(name, e))?;
+            for warning in &imported.warnings {
+                eprintln!("{name}: {warning}");
+            }
+            imported.document
         }
         Format::Dxf => {
             let imported =

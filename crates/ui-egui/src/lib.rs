@@ -1338,13 +1338,27 @@ mod tests {
 
     #[test]
     fn zoom_at_keeps_anchor_stationary() {
-        let mut view = View::default();
+        let mut view = View {
+            zoom: 3.0,
+            pan_mm: egui::vec2(-40.0, 25.0),
+            ..View::default()
+        };
         let anchor = egui::pos2(133.0, 77.0);
         let before = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
         view.zoom_at(2.0, anchor);
         let after = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
-        assert!((after.x - before.x).abs() < 1e-6, "{before:?} → {after:?}");
-        assert!((after.y - before.y).abs() < 1e-6);
+        assert!((after.x - before.x).abs() < 1e-4, "{before:?} → {after:?}");
+        assert!((after.y - before.y).abs() < 1e-4);
+        // Repeated wheel steps in and back out return to the same view.
+        for _ in 0..10 {
+            view.zoom_at(1.1, anchor);
+        }
+        for _ in 0..10 {
+            view.zoom_at(1.0 / 1.1, anchor);
+        }
+        let back = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
+        assert!((back.x - before.x).abs() < 1e-3 && (back.y - before.y).abs() < 1e-3);
+        assert!((view.zoom - 6.0).abs() < 1e-3);
     }
 
     #[test]

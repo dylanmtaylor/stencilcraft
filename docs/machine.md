@@ -166,6 +166,26 @@ CAMEO 3: the same mat block, then `J t`, `!s,t`, `FXp,t`, `FE`, `FF` pair,
   media size, else the mat, else the machine's cut width; with origin margins the
   flip is `x' = W − 2·margin − x`. Applied when the job is built, after ordering and
   overcut; the document is never touched. Refused with registration marks.
+- **Weld on cut** (`--weld`, MCP `weld`; off by default): before ordering, each
+  operation's overlapping closed contours are united with the same boolean engine as
+  Pathfinder/Weld, so a shared region is cut once (two 20 mm squares overlapping by
+  10 mm: 160 mm of cut becomes 100 mm). Contours are grouped into shapes by nesting
+  (inside an odd number of others = a hole of the innermost one), so counters stay
+  holes; open paths pass through. A small shape lying wholly inside another (not in a
+  hole) counts as a hole and is still cut. Skipped above 5000 paths per operation.
+  The document is untouched. Silhouette's Weld on Cut is a paid-edition vendor feature
+  (docs only, not observed).
+- **Cut by layer / by line colour** (`--layer NAME:SET`, repeatable; MCP `layers:
+  [{layer, skip, holder, passes, force, speed}]`): the reference's Send › Cut by Line
+  Color table (Tool No., On/Off, per-row settings), observed in
+  [`observations/silhouette-studio.md`](observations/silhouette-studio.md). `NAME` is a
+  layer name or a `#rrggbb` line colour (the Silhouette importer makes one `Line
+  #rrggbb` layer per colour); `SET` is `skip`, or comma-separated `tool=1|2` (alias
+  `holder=`), `passes=N`, `force=N`, `speed=N`. The job gets one operation per layer
+  (`CutJob::split_layers`); neighbouring layers whose settings end up equal merge, so
+  a job without overrides is one operation as before. Overrides are validated against
+  the machine like any job value (the error names the layer); an unknown layer is
+  refused. The dry run shows each operation's holder, passes, force and speed.
 - These job settings are applied by `apply_job_settings` in the job layer between
   two `validate` passes (the second checks the mirrored design still fits), so every
   protocol gets them; the desktop preview (`encode_cut`) applies them too.

@@ -143,6 +143,9 @@ impl Default for CutJob {
 /// Bounding box in mm `(down-min, right-min, down-max, right-max)`.
 pub type BBoxMm = (f64, f64, f64, f64);
 
+/// A list of polylines in mm, `(x right, y down)`.
+pub type Paths = Vec<Vec<(f64, f64)>>;
+
 /// Compute the mm bounding box of a path list, or `None` when empty.
 pub fn find_bbox(paths: &[Vec<(f64, f64)>]) -> Option<BBoxMm> {
     let mut bbox: Option<BBoxMm> = None;

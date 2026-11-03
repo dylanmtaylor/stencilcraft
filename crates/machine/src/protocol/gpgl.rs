@@ -3,7 +3,7 @@
 //! `docs/machine.md`.
 
 use super::{DriverEvent, MachineStatus, Protocol, SendReport, SessionHooks};
-use crate::job::{BBoxMm, bbox_rect, find_bbox, prepared_paths};
+use crate::job::{BBoxMm, Paths, bbox_rect, find_bbox, prepared_paths};
 use crate::{
     Capabilities, Command, CutJob, CutProgram, DeviceRegistry, DeviceStatus, ESC_INIT, Framing,
     MachineError, Operation, ProtocolId, Registration, ToolKind, Transport, parse_status,
@@ -286,7 +286,7 @@ impl Protocol for SilhouetteProtocol {
 
     fn encode(&self, caps: &Capabilities, job: &CutJob) -> CutProgram {
         let reg = job.registration.as_ref();
-        let ops: Vec<(&Operation, Vec<Vec<(f64, f64)>>)> = job
+        let ops: Vec<(&Operation, Paths)> = job
             .operations
             .iter()
             .map(|op| (op, prepared_paths(op, reg)))

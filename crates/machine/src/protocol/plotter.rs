@@ -3,7 +3,10 @@
 //! many Chinese plotters, Graphtec in HP-GL mode), plain GP-GL, and DMPL.
 
 use super::Protocol;
-use crate::job::{bbox_rect, find_bbox, prepared_paths};
+use crate::job::{Paths, bbox_rect, find_bbox, prepared_paths};
+
+/// (holder, speed, prepared paths) for one operation.
+type OpBody = (u8, Option<u32>, Paths);
 use crate::{Capabilities, Command, CutJob, CutProgram, Framing, ProtocolId};
 
 /// HP-GL plotter units per mm (1 plu = 0.025 mm).
@@ -19,9 +22,9 @@ fn units(mm: f64, per_mm: f64) -> i64 {
 
 /// Per-operation path lists (passes/overcut/registration applied), the bbox
 /// over all of them, and the bbox-only substitution.
-fn bodies(job: &CutJob) -> Option<(Vec<(u8, Option<u32>, Vec<Vec<(f64, f64)>>)>, crate::BBoxMm)> {
+fn bodies(job: &CutJob) -> Option<(Vec<OpBody>, crate::BBoxMm)> {
     let reg = job.registration.as_ref();
-    let mut ops: Vec<(u8, Option<u32>, Vec<Vec<(f64, f64)>>)> = job
+    let mut ops: Vec<OpBody> = job
         .operations
         .iter()
         .map(|op| (op.holder, op.settings.speed, prepared_paths(op, reg)))

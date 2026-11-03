@@ -9,7 +9,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Dimension | Stage | Notes |
 | --- | --- | --- |
 | Document & format | working | Document/Layer/Shape model, `.stencilcraft` JSON v1, roundtrip-tested |
-| Import (SVG) | working subset | paths + common basic shapes; groups/transforms/styles; physical units/viewBox; unsupported drawable elements fail closed |
+| Import (SVG) | working subset | paths + common basic shapes; groups/transforms/styles; physical units/viewBox; CSS selectors incl. :not/siblings; stroke-colour layers; clip paths; text/masks/filters warned; unsupported drawable elements fail closed |
 | Kerf compensation | working | polygon offsetting with miter join; convex shapes exact |
 | Tiling | working | sheet grid with overlap; geometry clipped per sheet, empty sheets skipped, 4096-sheet cap |
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
@@ -37,9 +37,9 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 
 ## What's next (ranked)
 
-1. SVG import completeness (M1): advanced CSS selectors/at-rules, external `<use>`,
-   text conversion, clip paths/masks and filters; run coverage-guided fuzzing on the
-   bounded XML/CSS parser.
+1. SVG import completeness (M1): text to outlines (needs a font seam below the
+   engine), masks/filters, external `<use>`, `@media`; run coverage-guided fuzzing on
+   the bounded XML/CSS parser.
 2. Property tests: convex kerf invariants and tiling coverage/bounds are in place; still
    open are containment-heavy kerf cases, format fuzz, and coverage-guided parsing.
 3. Kerf: sweep-based offset for self-intersecting contours; nesting depth is counted now,
@@ -74,8 +74,8 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - [x] Add image import and threshold silhouette trace-to-path workflow for PNG/JPEG, with a configurable threshold and geometry/resource limits; full-color tracing and embedded raster editing remain open.
 - [ ] Add text objects and text-to-path conversion without bundling fonts; define a user
   font/shaping integration point.
-- [ ] Expand SVG fidelity: advanced CSS/at-rules, external references, clipping, masks,
-  filters, and additional vector formats.
+- [ ] Expand SVG fidelity: external references, `@media`, masks, filters (clipping,
+  colours and advanced selectors are in), and additional vector formats.
 - [ ] Implement Print & Cut: printable SVG sheet export with three alignment marks is available; printer dialog support, machine sensor protocol, calibration and hardware end-to-end tests remain open.
 - [ ] Add production tools: weed lines, nesting, multi-cutter job assignment, batch and
   repeated-pass workflows.
@@ -99,6 +99,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — SVG import remainder (M1): CSS Color 4 colours in `crates/color` (148
+  names, `#rgba`/`#rrggbbaa`, `rgb()`/`hsl()` with percentages and alpha); stroke colours
+  become `Line #rrggbb` layers; `clip-path` clips geometry via VectorCraft booleans;
+  attribute operators, sibling combinators, `:not()`/`:first-child`/`:last-child`/`:root`;
+  `import_with_warnings` names skipped text, masks, filters and ignored CSS, and the CLI
+  `import-svg` and desktop import show them. Measured: 8 new SVG tests, 2-seed mutation
+  corpus; text to outlines still open (docs/gaps.md 1).
 - 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
   each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
   Measured: the default blue and the #b87c1b sample come back as their own layers.

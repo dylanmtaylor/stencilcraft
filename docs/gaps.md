@@ -9,13 +9,28 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 1. **SVG import**: common shapes (`path`, basic shapes), groups, standard affine
    transforms, inherited presentation/inline display and production styles, physical
    units/viewBox/`preserveAspectRatio`, local `<use>` of supported shapes/groups, and
-   `<symbol>` templates with viewBox sizing are supported. A deterministic malformed-input
-   corpus is in place. Embedded CSS basic selectors, cascade, and inherited supported
-   properties now work. Remaining: advanced CSS selectors and at-rules, color model,
-   external `<use>`, text, clip paths, masks, and filters; unsupported drawable elements
-   fail explicitly rather than disappear. The parser has bounded XML/CSS bytes,
-   nodes/depth/coordinates, rejects duplicate IDs/reference cycles, and caps `<use>`
-   instancing at 10,000 instances. Coverage-guided fuzzing remains to be done.
+   `<symbol>` templates with viewBox sizing are supported. Embedded CSS covers type,
+   class, ID and attribute selectors (all six operators), descendant/child/`+`/`~`
+   combinators, `:not()` (one level), `:first-child`, `:last-child` and `:root`, with
+   specificity cascade. Stroke colours (all CSS Color 4 hex/`rgb()`/`hsl()`/named forms,
+   alpha dropped, `currentColor`, paint fallbacks) put shapes on one `Line #rrggbb`
+   layer per colour, as the Silhouette importer does. `clip-path: url(#id)` clips
+   geometry through the VectorCraft boolean engine (open paths are flattened and clipped
+   as polylines). `import_with_warnings` names what it skips — `<text>`, masks, filters,
+   `@media`/`@import`/`@supports` blocks, selectors outside the subset, clips it cannot
+   apply — and the strict `import` (import crate, MCP `import_file`) refuses such files.
+   `<image>`, `<foreignObject>` and unknown drawables still fail. Remaining: text to
+   outlines (the SVG crate cannot reach the engine's font layout; needs a font seam
+   below the engine), masks and filters (warned, never applied), `objectBoundingBox`
+   clip units, `clip-path` on a `<clipPath>`, `<use>`/text inside a clip path, CSS
+   basic-shape clips (`inset()`, `circle()`), external `<use>` and stylesheets,
+   `@media` evaluation, backtracking for long descendant/sibling selector chains, and
+   fill-only shapes are not coloured by fill. The desktop and MCP import paths flatten
+   layers, so per-colour layers survive only the CLI `import-svg` document. The parser
+   bounds XML/CSS bytes, nodes/depth/coordinates, warnings (64), clip nesting (16),
+   rejects duplicate IDs/reference cycles, and caps `<use>` instancing at 10,000; a
+   deterministic mutation corpus covers the colour/CSS/clip/text paths.
+   Coverage-guided fuzzing remains to be done.
 2. **Kerf robustness**: offsetting assumes simple contours; a self-intersecting subpath
    or a miter spike on a hairpin can produce a bad polygon. No sweep-based offset.
    Counter detection counts nesting depth (outline, hole, island, …), but containment is

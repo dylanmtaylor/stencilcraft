@@ -8,8 +8,15 @@
 //! API is already the one the actors use, so swapping in a shared-structure
 //! stack later must not touch any caller.
 
-use std::collections::BTreeMap;
+mod path_edit;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+
+pub use path_edit::{
+    NodeAxis, NodeCount, NodeRef, NodeType, PathEnd, SegmentType, StrokeCap, StrokeJoin,
+};
+use vectorcraft_geom::PathData as AnchorPath;
 
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
@@ -233,6 +240,116 @@ pub enum Command {
     /// Clear the document to a fresh board.
     #[serde(rename = "document.new")]
     DocumentNew { width_mm: f64, height_mm: f64 },
+    /// Break a shape's path at one node: a closed contour opens there, an open one splits in
+    /// two (both pieces stay in the shape; `shapes.release-compound` separates them).
+    #[serde(rename = "path.break")]
+    PathBreak {
+        id: u64,
+        contour: usize,
+        node: usize,
+    },
+    /// Join two open contours end to end. `b` may be another shape (it is consumed) or another
+    /// contour of `a`. Ends default to the nearest pair; coincident ends merge into one node,
+    /// otherwise a straight segment joins them.
+    #[serde(rename = "path.join")]
+    PathJoin {
+        a: u64,
+        #[serde(default)]
+        a_contour: usize,
+        b: u64,
+        #[serde(default)]
+        b_contour: usize,
+        #[serde(default)]
+        a_end: Option<PathEnd>,
+        #[serde(default)]
+        b_end: Option<PathEnd>,
+    },
+    /// Close an open contour (coincident ends merge, otherwise a closing line is added).
+    #[serde(rename = "path.close")]
+    PathClose {
+        id: u64,
+        #[serde(default)]
+        contour: usize,
+    },
+    /// Move nodes to their average position along `axis`.
+    #[serde(rename = "path.average-nodes")]
+    PathAverageNodes {
+        id: u64,
+        nodes: Vec<NodeRef>,
+        axis: NodeAxis,
+    },
+    /// Move nodes to their centroid and fuse neighbouring ones on a contour into one node.
+    #[serde(rename = "path.merge-nodes")]
+    PathMergeNodes { id: u64, nodes: Vec<NodeRef> },
+    /// Delete nodes, refitting the neighbouring segments; contours left with fewer than two
+    /// nodes disappear. Deleting every node is an error (remove the shape instead).
+    #[serde(rename = "path.delete-nodes")]
+    PathDeleteNodes { id: u64, nodes: Vec<NodeRef> },
+    /// Convert nodes to corner (handles retracted) or smooth (collinear handles).
+    #[serde(rename = "path.set-node-type")]
+    PathSetNodeType {
+        id: u64,
+        nodes: Vec<NodeRef>,
+        kind: NodeType,
+    },
+    /// Make one segment (from node `segment` to the next) straight or curved.
+    #[serde(rename = "path.set-segment")]
+    PathSetSegment {
+        id: u64,
+        contour: usize,
+        segment: usize,
+        kind: SegmentType,
+    },
+    /// Refit paths with fewer nodes, staying within `tolerance_mm` of the original.
+    #[serde(rename = "path.simplify")]
+    PathSimplify { ids: Vec<u64>, tolerance_mm: f64 },
+    /// Replace each stroked path with the filled contour of a stroke `width_mm` wide.
+    #[serde(rename = "path.outline-stroke")]
+    PathOutlineStroke {
+        ids: Vec<u64>,
+        width_mm: f64,
+        #[serde(default)]
+        join: StrokeJoin,
+        #[serde(default)]
+        cap: StrokeCap,
+        /// Miter limit as a multiple of the stroke width (default 4, between 1 and 100).
+        #[serde(default)]
+        miter_limit: Option<f64>,
+    },
+    /// Convert live shapes (rectangle, ellipse, polygon, star primitives) to plain paths.
+    #[serde(rename = "shapes.to-path")]
+    ShapesToPath { ids: Vec<u64> },
+    /// Combine shapes into one compound path, kept in the bottom-most shape's id and style.
+    #[serde(rename = "shapes.make-compound")]
+    ShapesMakeCompound { ids: Vec<u64> },
+    /// Release Compound Path / Detach: split each shape into one shape per contour (the first
+    /// contour keeps the id).
+    #[serde(rename = "shapes.release-compound")]
+    ShapesReleaseCompound { ids: Vec<u64> },
+    /// Lock or unlock shapes. Locked shapes reject edits and are left out of selections.
+    #[serde(rename = "shapes.set-locked")]
+    ShapesSetLocked { ids: Vec<u64>, locked: bool },
+    /// Hide or show shapes. Hidden shapes are not exported or selected.
+    #[serde(rename = "shapes.set-hidden")]
+    ShapesSetHidden { ids: Vec<u64>, hidden: bool },
+    /// Query: shape, contour and node counts (all shapes when `ids` is empty). Not undoable.
+    #[serde(rename = "query.node-count")]
+    QueryNodeCount {
+        #[serde(default)]
+        ids: Vec<u64>,
+    },
+    /// Query: selectable shapes with the same fill as `id` (operation colour, closed or open).
+    #[serde(rename = "select.same-fill")]
+    SelectSameFill { id: u64 },
+    /// Query: selectable shapes with the same stroke (operation colour) as `id`.
+    #[serde(rename = "select.same-stroke")]
+    SelectSameStroke { id: u64 },
+    /// Query: every selectable shape not in `ids`.
+    #[serde(rename = "select.inverse")]
+    SelectInverse {
+        #[serde(default)]
+        ids: Vec<u64>,
+    },
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -249,6 +366,8 @@ pub enum BooleanOperation {
     Crop,
     Outline,
     MinusBack,
+    /// Subtract every other shape from the bottom-most one.
+    SubtractAll,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,19 +410,50 @@ const MAX_REPLICATED_SHAPES: usize = 10_000;
 /// The result of a command: what changed.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Effect {
-    ShapeAdded { id: u64 },
-    ShapesAdded { ids: Vec<u64> },
-    ShapeRemoved { id: u64 },
-    ShapesRemoved { ids: Vec<u64> },
-    ShapeTransformed { id: u64 },
-    ShapesStyled { ids: Vec<u64> },
+    ShapeAdded {
+        id: u64,
+    },
+    ShapesAdded {
+        ids: Vec<u64>,
+    },
+    ShapeRemoved {
+        id: u64,
+    },
+    ShapesRemoved {
+        ids: Vec<u64>,
+    },
+    ShapeTransformed {
+        id: u64,
+    },
+    ShapesStyled {
+        ids: Vec<u64>,
+    },
     HistoryChanged,
     LayerAdded,
-    LayerVisibilityChanged { index: usize, visible: bool },
-    LayerRemoved { index: usize },
-    KerfSet { width_mm: f64 },
-    BoardChanged { width_mm: f64, height_mm: f64 },
+    LayerVisibilityChanged {
+        index: usize,
+        visible: bool,
+    },
+    LayerRemoved {
+        index: usize,
+    },
+    KerfSet {
+        width_mm: f64,
+    },
+    BoardChanged {
+        width_mm: f64,
+        height_mm: f64,
+    },
     DocumentReset,
+    /// Shapes whose paths or flags changed in place.
+    ShapesEdited {
+        ids: Vec<u64>,
+    },
+    /// A query's matching shape ids, in document order.
+    Selection {
+        ids: Vec<u64>,
+    },
+    NodeCount(NodeCount),
 }
 
 /// Undo/redo snapshots StencilCraft's production document; VectorCraft still owns the reusable
@@ -430,7 +580,19 @@ impl Engine {
                 self.redo();
                 return Ok(Effect::HistoryChanged);
             }
+            Command::QueryNodeCount { .. }
+            | Command::SelectSameFill { .. }
+            | Command::SelectSameStroke { .. }
+            | Command::SelectInverse { .. } => return self.query(&command),
             _ => {}
+        }
+        if let Some(id) = edit_targets(&command)
+            .into_iter()
+            .find(|id| self.doc.get_shape(*id).is_some_and(|shape| shape.locked))
+        {
+            return Err(EngineError::Invalid(format!(
+                "shape {id} is locked; unlock it first"
+            )));
         }
 
         let rebuild_session = matches!(
@@ -441,6 +603,20 @@ impl Engine {
                 | Command::ShapesSetStyle { .. }
                 | Command::LayerSetVisible { .. }
                 | Command::LayerRemove { .. }
+                | Command::PathBreak { .. }
+                | Command::PathJoin { .. }
+                | Command::PathClose { .. }
+                | Command::PathAverageNodes { .. }
+                | Command::PathMergeNodes { .. }
+                | Command::PathDeleteNodes { .. }
+                | Command::PathSetNodeType { .. }
+                | Command::PathSetSegment { .. }
+                | Command::PathSimplify { .. }
+                | Command::PathOutlineStroke { .. }
+                | Command::ShapesMakeCompound { .. }
+                | Command::ShapesReleaseCompound { .. }
+                | Command::ShapesSetLocked { .. }
+                | Command::ShapesSetHidden { .. }
         );
         let before = self.capture_history_entry(false, false);
         let document_before = self.session.active().map(|state| Arc::clone(&state.doc));
@@ -1055,7 +1231,401 @@ impl Engine {
                 };
                 Ok(Effect::DocumentReset)
             }
+            Command::PathBreak { id, contour, node } => self.edit_anchors(id, "path.break", |p| {
+                path_edit::break_at(p, NodeRef { contour, node })
+            }),
+            Command::PathJoin {
+                a,
+                a_contour,
+                b,
+                b_contour,
+                a_end,
+                b_end,
+            } => self.join_paths((a, a_contour, a_end), (b, b_contour, b_end)),
+            Command::PathClose { id, contour } => {
+                self.edit_anchors(id, "path.close", |p| path_edit::close(p, contour))
+            }
+            Command::PathAverageNodes { id, nodes, axis } => {
+                self.edit_anchors(id, "path.average-nodes", |p| {
+                    path_edit::average(p, &nodes, axis)
+                })
+            }
+            Command::PathMergeNodes { id, nodes } => {
+                self.edit_anchors(id, "path.merge-nodes", |p| path_edit::merge(p, &nodes))
+            }
+            Command::PathDeleteNodes { id, nodes } => {
+                self.edit_anchors(id, "path.delete-nodes", |p| {
+                    path_edit::delete_nodes(p, &nodes)
+                })
+            }
+            Command::PathSetNodeType { id, nodes, kind } => {
+                self.edit_anchors(id, "path.set-node-type", |p| {
+                    path_edit::set_node_type(p, &nodes, kind)
+                })
+            }
+            Command::PathSetSegment {
+                id,
+                contour,
+                segment,
+                kind,
+            } => self.edit_anchors(id, "path.set-segment", |p| {
+                path_edit::set_segment(p, contour, segment, kind)
+            }),
+            Command::PathSimplify { ids, tolerance_mm } => {
+                if !(tolerance_mm.is_finite() && tolerance_mm > 0.0 && tolerance_mm <= 1000.0) {
+                    return Err(EngineError::Invalid(
+                        "path.simplify: tolerance_mm must be finite, positive and at most 1000"
+                            .to_string(),
+                    ));
+                }
+                self.edit_each(&ids, "path.simplify", |p| {
+                    *p = vectorcraft_pathops::simplify(p, tolerance_mm);
+                    Ok(())
+                })
+            }
+            Command::PathOutlineStroke {
+                ids,
+                width_mm,
+                join,
+                cap,
+                miter_limit,
+            } => {
+                let miter_limit = miter_limit.unwrap_or(4.0);
+                // Range checks reject NaN and infinities too.
+                if !((f64::MIN_POSITIVE..=1000.0).contains(&width_mm)
+                    && (1.0..=100.0).contains(&miter_limit))
+                {
+                    return Err(EngineError::Invalid("path.outline-stroke: width_mm must be finite, positive and at most 1000; miter_limit between 1 and 100".to_string()));
+                }
+                self.edit_each(&ids, "path.outline-stroke", |p| {
+                    *p = path_edit::outline_stroke(p, width_mm, join, cap, miter_limit);
+                    if p.is_empty() {
+                        return Err("the stroke outline is empty".to_string());
+                    }
+                    Ok(())
+                })
+            }
+            Command::ShapesToPath { ids } => self.shapes_to_path(&ids),
+            Command::ShapesMakeCompound { ids } => self.make_compound(&ids),
+            Command::ShapesReleaseCompound { ids } => self.release_compound(&ids),
+            Command::ShapesSetLocked { ids, locked } => {
+                self.set_flags(&ids, "shapes.set-locked", |shape| shape.locked = locked)
+            }
+            Command::ShapesSetHidden { ids, hidden } => {
+                self.set_flags(&ids, "shapes.set-hidden", |shape| shape.hidden = hidden)
+            }
+            Command::QueryNodeCount { .. }
+            | Command::SelectSameFill { .. }
+            | Command::SelectSameStroke { .. }
+            | Command::SelectInverse { .. } => self.query(&command),
         }
+    }
+
+    /// Read-only commands: answered without touching the document or history.
+    fn query(&self, command: &Command) -> Result<Effect, EngineError> {
+        match command {
+            Command::QueryNodeCount { ids } => {
+                let mut total = NodeCount::default();
+                if ids.is_empty() {
+                    for (_, shape) in self.doc.shapes() {
+                        path_edit::count(&AnchorPath::from_bezpath(&shape.path), &mut total);
+                    }
+                } else {
+                    for id in unique_ids(ids, "query.node-count")? {
+                        let shape = self.doc.get_shape(id).ok_or_else(|| {
+                            EngineError::Invalid(format!("query.node-count: no shape has id {id}"))
+                        })?;
+                        path_edit::count(&AnchorPath::from_bezpath(&shape.path), &mut total);
+                    }
+                }
+                Ok(Effect::NodeCount(total))
+            }
+            Command::SelectSameFill { id } | Command::SelectSameStroke { id } => {
+                let fill = matches!(command, Command::SelectSameFill { .. });
+                let name = if fill {
+                    "select.same-fill"
+                } else {
+                    "select.same-stroke"
+                };
+                let reference = self
+                    .doc
+                    .get_shape(*id)
+                    .ok_or_else(|| EngineError::Invalid(format!("{name}: no shape has id {id}")))?;
+                // Closed contours are filled regions; open paths only carry a stroke.
+                let filled = |path: &BezPath| {
+                    path.elements()
+                        .iter()
+                        .any(|el| matches!(el, kurbo::PathEl::ClosePath))
+                };
+                let ids = self
+                    .selectable_shapes()
+                    .filter(|shape| {
+                        shape.style == reference.style
+                            && (!fill || filled(&shape.path) == filled(&reference.path))
+                    })
+                    .map(|shape| shape.id)
+                    .collect();
+                Ok(Effect::Selection { ids })
+            }
+            Command::SelectInverse { ids } => {
+                if let Some(id) = ids.iter().find(|id| self.doc.get_shape(**id).is_none()) {
+                    return Err(EngineError::Invalid(format!(
+                        "select.inverse: no shape has id {id}"
+                    )));
+                }
+                let ids = self
+                    .selectable_shapes()
+                    .filter(|shape| !ids.contains(&shape.id))
+                    .map(|shape| shape.id)
+                    .collect();
+                Ok(Effect::Selection { ids })
+            }
+            _ => Err(EngineError::Internal("not a query command".to_string())),
+        }
+    }
+
+    /// Shapes a selection may contain: not hidden, not locked, on a visible layer.
+    fn selectable_shapes(&self) -> impl Iterator<Item = &stencilcraft_doc::Shape> {
+        self.doc
+            .layers
+            .iter()
+            .filter(|layer| layer.visible)
+            .flat_map(|layer| &layer.shapes)
+            .filter(|shape| !shape.hidden && !shape.locked)
+    }
+
+    /// Edits one shape's path as anchors; the result must stay finite and non-empty.
+    fn edit_anchors(
+        &mut self,
+        id: u64,
+        command: &str,
+        edit: impl FnOnce(&mut AnchorPath) -> Result<(), String>,
+    ) -> Result<Effect, EngineError> {
+        let shape = self
+            .doc
+            .get_shape_mut(id)
+            .ok_or_else(|| EngineError::Invalid(format!("{command}: no shape has id {id}")))?;
+        let mut path = AnchorPath::from_bezpath(&shape.path);
+        edit(&mut path).map_err(|e| EngineError::Invalid(format!("{command}: {e}")))?;
+        let bez = path.to_bezpath();
+        if bez.elements().is_empty() || !bez.elements().iter().all(path_element_is_finite) {
+            return Err(EngineError::Invalid(format!(
+                "{command}: the result has no finite geometry"
+            )));
+        }
+        shape.path = bez;
+        Ok(Effect::ShapesEdited { ids: vec![id] })
+    }
+
+    fn edit_each(
+        &mut self,
+        ids: &[u64],
+        command: &str,
+        edit: impl Fn(&mut AnchorPath) -> Result<(), String>,
+    ) -> Result<Effect, EngineError> {
+        let ids = unique_ids(ids, command)?;
+        for id in &ids {
+            self.edit_anchors(*id, command, &edit)?;
+        }
+        Ok(Effect::ShapesEdited { ids })
+    }
+
+    fn set_flags(
+        &mut self,
+        ids: &[u64],
+        command: &str,
+        set: impl Fn(&mut stencilcraft_doc::Shape),
+    ) -> Result<Effect, EngineError> {
+        let ids = unique_ids(ids, command)?;
+        for id in &ids {
+            let shape = self
+                .doc
+                .get_shape_mut(*id)
+                .ok_or_else(|| EngineError::Invalid(format!("{command}: no shape has id {id}")))?;
+            set(shape);
+        }
+        Ok(Effect::ShapesEdited { ids })
+    }
+
+    /// `path.join`: each side is (shape id, contour index, end).
+    fn join_paths(
+        &mut self,
+        (a, a_contour, a_end): (u64, usize, Option<PathEnd>),
+        (b, b_contour, b_end): (u64, usize, Option<PathEnd>),
+    ) -> Result<Effect, EngineError> {
+        const NAME: &str = "path.join";
+        let anchors = |engine: &Self, id: u64| {
+            engine
+                .doc
+                .get_shape(id)
+                .map(|shape| AnchorPath::from_bezpath(&shape.path))
+                .ok_or_else(|| EngineError::Invalid(format!("{NAME}: no shape has id {id}")))
+        };
+        let contour = |path: &AnchorPath, id: u64, c: usize| {
+            path.subpaths.get(c).cloned().ok_or_else(|| {
+                EngineError::Invalid(format!("{NAME}: shape {id} has no contour {c}"))
+            })
+        };
+        if a == b && a_contour == b_contour {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: pick two different contours (use path.close to close one)"
+            )));
+        }
+        let path_a = anchors(self, a)?;
+        let path_b = anchors(self, b)?;
+        let joined = path_edit::join(
+            contour(&path_a, a, a_contour)?,
+            a_end,
+            contour(&path_b, b, b_contour)?,
+            b_end,
+        )
+        .map_err(|e| EngineError::Invalid(format!("{NAME}: {e}")))?;
+        self.edit_anchors(a, NAME, |p| {
+            if let Some(slot) = p.subpaths.get_mut(a_contour) {
+                *slot = joined;
+            }
+            if a == b {
+                p.subpaths.remove(b_contour);
+            }
+            Ok(())
+        })?;
+        if a != b {
+            let mut rest = path_b;
+            rest.subpaths.remove(b_contour);
+            if rest.subpaths.is_empty() {
+                for layer in &mut self.doc.layers {
+                    layer.shapes.retain(|shape| shape.id != b);
+                }
+            } else if let Some(shape) = self.doc.get_shape_mut(b) {
+                shape.path = rest.to_bezpath();
+            }
+        }
+        Ok(Effect::ShapesEdited { ids: vec![a] })
+    }
+
+    fn make_compound(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.make-compound";
+        let requested: BTreeSet<u64> = unique_ids(ids, NAME)?.into_iter().collect();
+        if requested.len() < 2 {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: select at least two shapes"
+            )));
+        }
+        if let Some(id) = requested
+            .iter()
+            .find(|id| self.doc.get_shape(**id).is_none())
+        {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: no shape has id {id}"
+            )));
+        }
+        let ordered: Vec<(u64, BezPath)> = self
+            .doc
+            .shapes()
+            .filter(|(_, shape)| requested.contains(&shape.id))
+            .map(|(_, shape)| (shape.id, shape.path.clone()))
+            .collect();
+        let Some(&(base, _)) = ordered.first() else {
+            return Err(EngineError::Invalid(format!("{NAME}: nothing selected")));
+        };
+        let mut combined = BezPath::new();
+        for (_, path) in &ordered {
+            combined.extend(path.elements().iter().copied());
+        }
+        for layer in &mut self.doc.layers {
+            layer
+                .shapes
+                .retain(|shape| shape.id == base || !requested.contains(&shape.id));
+        }
+        if let Some(shape) = self.doc.get_shape_mut(base) {
+            shape.path = combined;
+        }
+        Ok(Effect::ShapesEdited { ids: vec![base] })
+    }
+
+    fn release_compound(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.release-compound";
+        let ids = unique_ids(ids, NAME)?;
+        let mut released = Vec::new();
+        for id in ids {
+            let shape = self
+                .doc
+                .get_shape(id)
+                .ok_or_else(|| EngineError::Invalid(format!("{NAME}: no shape has id {id}")))?;
+            let contours = AnchorPath::from_bezpath(&shape.path).subpaths;
+            if contours.len() < 2 {
+                continue;
+            }
+            let paths = contours
+                .into_iter()
+                .map(|sp| AnchorPath::single(sp).to_bezpath())
+                .collect();
+            released.extend(self.replace_shape_with(id, paths)?);
+        }
+        if released.is_empty() {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: no selected shape has more than one contour"
+            )));
+        }
+        Ok(Effect::ShapesAdded { ids: released })
+    }
+
+    /// Replaces shape `id` in place with `paths`: the first keeps the id, the rest get new ids
+    /// right above it with the same style and flags. Returns every resulting id.
+    fn replace_shape_with(
+        &mut self,
+        id: u64,
+        paths: Vec<BezPath>,
+    ) -> Result<Vec<u64>, EngineError> {
+        let mut next_id = self.doc.next_shape_id;
+        let (layer, si) = self
+            .doc
+            .layers
+            .iter_mut()
+            .find_map(|l| {
+                let si = l.shapes.iter().position(|s| s.id == id)?;
+                Some((l, si))
+            })
+            .ok_or_else(|| EngineError::Invalid(format!("no shape has id {id}")))?;
+        let mut paths = paths.into_iter();
+        let (Some(first), Some(template)) = (paths.next(), layer.shapes.get_mut(si)) else {
+            return Err(EngineError::Internal(format!(
+                "shape {id}: nothing to replace it with"
+            )));
+        };
+        template.path = first;
+        let template = template.clone();
+        let mut ids = vec![id];
+        let mut extra = Vec::new();
+        for path in paths {
+            ids.push(next_id);
+            extra.push(stencilcraft_doc::Shape {
+                id: next_id,
+                path,
+                ..template.clone()
+            });
+            next_id = next_id
+                .checked_add(1)
+                .ok_or_else(|| EngineError::Internal("shape ids exhausted".to_string()))?;
+        }
+        layer.shapes.splice(si + 1..si + 1, extra);
+        self.doc.next_shape_id = next_id;
+        Ok(ids)
+    }
+
+    fn shapes_to_path(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.to-path";
+        let ids = unique_ids(ids, NAME)?;
+        let nodes = ids
+            .iter()
+            .map(|id| self.node_for_shape(*id, NAME))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.select_nodes(&nodes)?;
+        self.session
+            .execute("object.expandShape", &json!({}))
+            .map_err(|error| EngineError::Invalid(format!("{NAME}: {error}")))?;
+        self.sync_doc_from_session()?;
+        Ok(Effect::ShapesEdited { ids })
     }
 
     fn apply_pathfinder(
@@ -1135,6 +1705,7 @@ impl Engine {
             BooleanOperation::Crop => "object.pathfinder.crop",
             BooleanOperation::Outline => "object.pathfinder.outline",
             BooleanOperation::MinusBack => "object.pathfinder.minusBack",
+            BooleanOperation::SubtractAll => "object.pathfinder.minusFront",
         };
         self.select_nodes(&vc_ids)?;
         let first_new_shape_id = self.doc.next_shape_id;
@@ -1654,6 +2225,13 @@ impl Engine {
                 .and_then(|name| name.strip_prefix("shape-"))
                 .and_then(|id| id.parse::<u64>().ok())
                 .and_then(|id| old_shapes.get(&id).map(|shape| shape.style));
+            let source_shape = source_name
+                .as_deref()
+                .and_then(|name| name.strip_prefix("shape-"))
+                .and_then(|id| id.parse::<u64>().ok())
+                .and_then(|id| old_shapes.get(&id))
+                .or_else(|| existing_shape_id.and_then(|id| old_shapes.get(&id)));
+            let flags = source_shape.map_or((false, false), |shape| (shape.hidden, shape.locked));
             let style = source_style
                 .or_else(|| {
                     existing_shape_id.and_then(|id| old_shapes.get(&id).map(|shape| shape.style))
@@ -1689,6 +2267,8 @@ impl Engine {
             new_shapes.push((
                 target_layer,
                 stencilcraft_doc::Shape {
+                    hidden: flags.0,
+                    locked: flags.1,
                     id: shape_id,
                     path: snap_mm_path(&transform_path(
                         &path,
@@ -1817,6 +2397,49 @@ impl Engine {
         };
         self.restore_history_entry(&next);
         true
+    }
+}
+
+/// Non-empty, duplicate-free shape ids, in the order given.
+fn unique_ids(ids: &[u64], command: &str) -> Result<Vec<u64>, EngineError> {
+    if ids.is_empty() || BTreeSet::from_iter(ids.iter().copied()).len() != ids.len() {
+        return Err(EngineError::Invalid(format!(
+            "{command}: expected one or more unique shape ids"
+        )));
+    }
+    Ok(ids.to_vec())
+}
+
+/// The shapes a command would change; a locked one makes the command fail.
+fn edit_targets(command: &Command) -> Vec<u64> {
+    match command {
+        Command::ShapeRemove { id }
+        | Command::ShapeMove { id, .. }
+        | Command::ShapeRotate { id, .. }
+        | Command::ShapeScale { id, .. }
+        | Command::ShapeSetBounds { id, .. }
+        | Command::ShapeSetPath { id, .. }
+        | Command::PathBreak { id, .. }
+        | Command::PathClose { id, .. }
+        | Command::PathAverageNodes { id, .. }
+        | Command::PathMergeNodes { id, .. }
+        | Command::PathDeleteNodes { id, .. }
+        | Command::PathSetNodeType { id, .. }
+        | Command::PathSetSegment { id, .. } => vec![*id],
+        Command::ShapeBoolean { a, b, .. } | Command::PathJoin { a, b, .. } => vec![*a, *b],
+        Command::ShapesRemove { ids }
+        | Command::ShapesSetStyle { ids, .. }
+        | Command::ShapePathfinder { ids, .. }
+        | Command::ShapesTransform { ids, .. }
+        | Command::ShapesAlign { ids, .. }
+        | Command::ShapesDistribute { ids, .. }
+        | Command::PathSimplify { ids, .. }
+        | Command::PathOutlineStroke { ids, .. }
+        | Command::ShapesToPath { ids }
+        | Command::ShapesMakeCompound { ids }
+        | Command::ShapesReleaseCompound { ids }
+        | Command::ShapesSetHidden { ids, .. } => ids.clone(),
+        _ => Vec::new(),
     }
 }
 

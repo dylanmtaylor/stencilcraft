@@ -65,6 +65,13 @@ left undocumented or unreproduced, and every format and cutter they support is c
 
 ## Progress log
 
+- 2026-11-02 — path editing engine commands (`docs/mcp.md`): break, join, close,
+  average/merge, delete nodes, corner/smooth, line/curve segment, simplify with a
+  tolerance (deviation tested ≤ 1.5× tolerance), outline stroke with join/cap, shape to
+  path, make/release compound, Pathfinder Subtract All, lock/hide flags (hidden shapes
+  skipped by every exporter), same-fill/same-stroke/inverse selection and node-count
+  queries; dedicated MCP tools and `run --command`. 14 engine tests (measured). Desktop
+  menus not wired yet.
 - 2026-11-02 — Reference-app inventory: `docs/reference-apps.md` lists Silhouette
   Studio and Cricut Design Space features area by area, with status and posture; it
   replaces the feature TODO list here. The clean-room posture now allows driving the

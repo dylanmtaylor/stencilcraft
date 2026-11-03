@@ -59,6 +59,13 @@ impl RunRequest {
             let mut advance = 2;
             match flag {
                 "--in" => req.input = Some(value()?.to_string()),
+                "--command" => {
+                    let v = value()?;
+                    req.commands.push(
+                        serde_json::from_str(v)
+                            .map_err(|e| PipelineError::User(format!("--command {v}: {e}")))?,
+                    );
+                }
                 "--apply-kerf" => {
                     let v = value()?;
                     req.kerf_mm = Some(v.trim().parse().map_err(|_| {
@@ -86,12 +93,6 @@ impl RunRequest {
                                 "--kerf-limit {v}: expected a number of at least 1"
                             ))
                         })?;
-                }
-                "--command" => {
-                    let v = value()?;
-                    req.commands.push(serde_json::from_str(v).map_err(|e| {
-                        PipelineError::User(format!("--command {v}: not an engine command: {e}"))
-                    })?);
                 }
                 "--tile-sheet" => {
                     let (w, h) = pipeline::parse_sheet_size(value()?)?;
@@ -229,7 +230,8 @@ pub fn execute(req: RunRequest) -> Result<(), String> {
         stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?,
     );
     for command in req.commands {
-        engine.run(command).map_err(|e| format!("--command: {e}"))?;
+        let effect = engine.run(command).map_err(|e| format!("--command: {e}"))?;
+        println!("{}", serde_json::to_string(&effect).unwrap_or_default());
     }
     let reports = pipeline::run_pipeline(
         &engine.doc,
@@ -261,6 +263,22 @@ mod tests {
         let ok =
             RunRequest::parse(&args(&["--in", "a.stencilcraft", "--export", "out.svg"])).unwrap();
         assert_eq!(ok.input.as_deref(), Some("a.stencilcraft"));
+    }
+
+    #[test]
+    fn engine_commands_parse_and_bad_ones_are_named() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--command",
+            r#"{"command":"path.simplify","params":{"ids":[1],"tolerance_mm":0.1}}"#,
+            "--export",
+            "b.svg",
+        ]))
+        .unwrap();
+        assert_eq!(ok.commands.len(), 1);
+        let bad = RunRequest::parse(&args(&["--in", "a", "--command", "{", "--export", "b"]));
+        assert!(matches!(bad, Err(PipelineError::User(ref m)) if m.contains("--command")));
     }
 
     #[test]

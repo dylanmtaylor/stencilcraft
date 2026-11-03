@@ -4,8 +4,10 @@
 explicitly, sends them. It covers the Silhouette/Graphtec family that speaks the
 ASCII GP-GL dialect over USB (vendor `0b4d`, plus `3844` for the CAMEO 5 Alpha
 line), professional Graphtec CE cutters, and any HP-GL or DMPL sign cutter (Roland,
-USCutter, Vinyl Express, …). Lasers and CNC knives use the G-code profiles
-(`export.gcode`). Cricut machines are export-only — see [Cricut](#cricut).
+USCutter, Vinyl Express, …), and Grbl G-code lasers/knife CNCs. Cricut machines
+have registry slots but are export-only — see [Cricut](#cricut). The driver
+architecture (CutJob, Capabilities, Protocol, Transport, DeviceRegistry) is in
+[`machine-architecture.md`](machine-architecture.md).
 
 ## Safety contract
 
@@ -32,8 +34,8 @@ USCutter, Vinyl Express, …). Lasers and CNC knives use the G-code profiles
 
 ## Machine catalog
 
-`stencilcraft-cli machines` (or `--json`, or MCP `machines_list`) prints this from
-`crates/machine/src/catalog.rs`. `?` = not publicly documented. Force/speed are
+`stencilcraft-cli machines` (or `--json`, `show ID`, or MCP `machines_list` /
+`machine_capabilities`) prints this from `crates/machine/machines.toml`. `?` = not publicly documented. Force/speed are
 device steps; "panel" means the encoder never sends them.
 
 | id | Model | Dialect | USB | Cut W × L (mm) | Holders | Force | Speed | BT |
@@ -63,6 +65,8 @@ device steps; "panel" means the encoder never sends them.
 | `generic-gpgl` | any GP-GL plotter | gpgl | — | `--media-size` | 1 | panel | 1–10 | — |
 | `generic-hpgl` | Roland, USCutter, Vinyl Express, … in HP-GL mode | hpgl | — | `--media-size` | 1 | panel | panel | — |
 | `generic-dmpl` | DMPL cutters (experimental) | dmpl | — | `--media-size` | 1 | panel | panel | — |
+| `grbl-laser` | Grbl laser / knife CNC | gcode | — | `--media-size` | 1 | S 0–1000 | 1–60000 mm/min | — |
+| `cricut-*` (7 rows) | Joy, Joy Xtra, Explore Air 2, Explore 3, Maker, Maker 3, Venture | unsupported | ? | public widths, unverified | | — | — | yes |
 
 \* community estimate. Published maximum force: CAMEO 3 210 gf, CAMEO 4 line
 5 kg (vendor marketing), CE7000 450 gf; every other figure is unknown.

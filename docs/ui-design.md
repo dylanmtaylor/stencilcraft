@@ -2,8 +2,11 @@
 
 StencilCraft uses a dark canvas, restrained two-accent palette, and hairline
 production strokes, while adopting the
-*structure* that made the commercial cutter apps usable. Structure is
-copied; skin is ours. Everything colours-wise comes from
+*structure* that made the commercial cutter apps usable. We learn that structure
+by driving the apps through their normal UI and from their public documentation.
+We then build it from our own design. Their icons, artwork, UI text and branding are
+never copied (see [`reference-apps.md`](reference-apps.md#clean-room-posture) for the
+clean-room posture and the full feature inventory). The structure is borrowed; the skin is ours. Everything colours-wise comes from
 `stencilcraft_ui_egui::Tokens`; nothing hard-codes hex inline.
 
 ## What these apps get right (and we adopt)
@@ -25,6 +28,12 @@ copied; skin is ours. Everything colours-wise comes from
   drag pan remain available.
 
 ## StencilCraft visual conventions
+
+- Chrome comes from craft-libs' design system (aiongg/craft-libs `design-system`): the
+  `stencilcraft.modern` theme file (`crates/ui-egui/src/stencilcraft-theme.json`, VectorCraft's
+  Modern slate greys with the coral accent) is resolved by `craft_ui::theme` and installed
+  every frame. Panels use `Inspector`, `SectionHeader`, `PropertyRow`, `AlignBar`, `ListRow`;
+  dialogs use `craft_ui::dialog::Dialog`; menus use `MenuBar`/`PressMenu` (`docs/menu-map.md`).
 
 - Slate canvas shared with the suite chrome (VectorCraft Modern Dark:
   canvas `101217`, mat `181B22`, board `272C36`; light: canvas `DFE3E9`,
@@ -57,6 +66,10 @@ copied; skin is ours. Everything colours-wise comes from
   the first program lines in a scroll area.
 - No hardware I/O in the app yet — real sends stay with the CLI
   (`stencilcraft-cli cut --device …`) until the transport story matures.
+
+## Menu bar
+
+The menu structure is in [`menu-map.md`](menu-map.md).
 
 ## Later passes (not now)
 

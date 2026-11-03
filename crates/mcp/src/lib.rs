@@ -143,9 +143,6 @@ impl Session {
                 let Some(name) = params.get("name").and_then(serde_json::Value::as_str) else {
                     return Some(rpc_error(id, -32602, "Missing tool name"));
                 };
-                let Some(method) = tool_method(name) else {
-                    return Some(rpc_error(id, -32602, "Unknown tool"));
-                };
                 let arguments = params
                     .get("arguments")
                     .cloned()
@@ -153,6 +150,17 @@ impl Session {
                 if !arguments.is_object() {
                     return Some(rpc_error(id, -32602, "Tool arguments must be an object"));
                 }
+                // Engine tools take the command's own params as their arguments.
+                let (method, arguments) = match ENGINE_TOOLS.iter().find(|t| t.0 == name) {
+                    Some((_, command, _)) => (
+                        "command.execute",
+                        serde_json::json!({"command": command, "params": arguments}),
+                    ),
+                    None => match tool_method(name) {
+                        Some(method) => (method, arguments),
+                        None => return Some(rpc_error(id, -32602, "Unknown tool")),
+                    },
+                };
                 match self.dispatch(method, &arguments) {
                     Ok(value) => {
                         serde_json::json!({"content": [{"type": "text", "text": value.to_string()}], "isError": false})
@@ -346,6 +354,16 @@ impl Session {
                     .map_err(|e: EngineError| ProtocolError::Bad(e.to_string()))
                     .map(stencilcraft_effect_json)
             }
+            command if ENGINE_TOOLS.iter().any(|(_, name, _)| *name == command) => {
+                let command: Command = serde_json::from_value(
+                    serde_json::json!({"command": command, "params": params}),
+                )
+                .map_err(|e| ProtocolError::Bad(format!("bad {command} parameters: {e}")))?;
+                self.engine
+                    .run(command)
+                    .map_err(|e: EngineError| ProtocolError::Bad(e.to_string()))
+                    .map(stencilcraft_effect_json)
+            }
             other => Err(ProtocolError::Bad(format!("unknown method: {other}"))),
         }
     }
@@ -367,9 +385,175 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "tile_run" => Some("tile.run"),
         "tile_preview" => Some("tile.preview"),
         "command_execute" => Some("command.execute"),
-        _ => None,
+        _ => ENGINE_TOOLS
+            .iter()
+            .find(|(tool, _, _)| *tool == name)
+            .map(|(_, command, _)| *command),
     }
 }
+
+fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
+    use serde_json::json;
+    let ids = json!({"type": "array", "items": {"type": "integer"}});
+    let number = json!({"type": "number"});
+    let side = json!({"type": "string", "enum": ["left", "right", "above", "below"]});
+    let count = json!({"type": "integer", "minimum": 2, "maximum": 1000});
+    match command {
+        "shapes.replicate-side" | "shapes.mirror-copy" => (
+            json!({"ids": ids, "side": side, "gap_mm": number}),
+            json!(["ids", "side", "gap_mm"]),
+        ),
+        "shapes.replicate-array" => (
+            json!({"ids": ids, "axis": {"type": "string", "enum": ["horizontal", "vertical"]}, "count": count, "gap_mm": number}),
+            json!(["ids", "axis", "count", "gap_mm"]),
+        ),
+        "shapes.replicate-fill" => (
+            json!({"ids": ids, "gap_mm": number}),
+            json!(["ids", "gap_mm"]),
+        ),
+        "shapes.rotate-copies" => (json!({"ids": ids, "count": count}), json!(["ids", "count"])),
+        "shapes.offset" => (
+            json!({"ids": ids, "distance_mm": number, "join": {"type": "string", "enum": ["miter", "round", "bevel"]}, "miter_limit": number}),
+            json!(["ids", "distance_mm"]),
+        ),
+        _ => (json!({}), json!([])),
+    }
+}
+
+/// Dedicated MCP tools for engine commands: (tool, command, description). Arguments are the
+/// command's params (`docs/mcp.md`); a node is `{"contour": c, "node": n}`.
+const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
+    (
+        "path_break",
+        "path.break",
+        "Break a shape's path at a node. Args: id, contour, node.",
+    ),
+    (
+        "path_join",
+        "path.join",
+        "Join two open contours end to end. Args: a, b (shape ids, may be equal), a_contour?, b_contour? (default 0), a_end?, b_end? (\"start\"/\"end\", default nearest).",
+    ),
+    (
+        "path_close",
+        "path.close",
+        "Close an open contour. Args: id, contour? (default 0).",
+    ),
+    (
+        "path_average_nodes",
+        "path.average-nodes",
+        "Average node positions. Args: id, nodes [{contour, node}], axis (\"horizontal\", \"vertical\", \"both\").",
+    ),
+    (
+        "path_merge_nodes",
+        "path.merge-nodes",
+        "Merge nodes into one at their centroid. Args: id, nodes [{contour, node}].",
+    ),
+    (
+        "path_delete_nodes",
+        "path.delete-nodes",
+        "Delete nodes. Args: id, nodes [{contour, node}].",
+    ),
+    (
+        "path_set_node_type",
+        "path.set-node-type",
+        "Convert nodes to corner or smooth. Args: id, nodes [{contour, node}], kind (\"corner\", \"smooth\").",
+    ),
+    (
+        "path_set_segment",
+        "path.set-segment",
+        "Make a segment straight or curved. Args: id, contour, segment (index of its first node), kind (\"line\", \"curve\").",
+    ),
+    (
+        "path_simplify",
+        "path.simplify",
+        "Simplify paths to fewer nodes within a tolerance. Args: ids, tolerance_mm.",
+    ),
+    (
+        "path_outline_stroke",
+        "path.outline-stroke",
+        "Convert stroked paths to filled cut contours. Args: ids, width_mm, join? (\"miter\", \"round\", \"bevel\"), cap? (\"butt\", \"round\", \"square\"), miter_limit?.",
+    ),
+    (
+        "shapes_to_path",
+        "shapes.to-path",
+        "Convert live shape primitives to plain paths. Args: ids.",
+    ),
+    (
+        "shapes_make_compound",
+        "shapes.make-compound",
+        "Make a compound path from shapes. Args: ids.",
+    ),
+    (
+        "shapes_release_compound",
+        "shapes.release-compound",
+        "Release compound paths / detach: one shape per contour. Args: ids.",
+    ),
+    (
+        "shape_pathfinder",
+        "shape.pathfinder",
+        "Pathfinder on shapes in document order. Args: ids, operation (union, difference, subtract-all, intersect, xor, divide, trim, merge, crop, outline, minus-back).",
+    ),
+    (
+        "shapes_set_locked",
+        "shapes.set-locked",
+        "Lock or unlock shapes. Args: ids, locked.",
+    ),
+    (
+        "shapes_set_hidden",
+        "shapes.set-hidden",
+        "Hide or show shapes (hidden shapes are not exported). Args: ids, hidden.",
+    ),
+    (
+        "query_node_count",
+        "query.node-count",
+        "Count shapes, contours, nodes, linear and bezier nodes. Args: ids? (default all).",
+    ),
+    (
+        "select_same_fill",
+        "select.same-fill",
+        "Ids of selectable shapes with the same fill as a shape. Args: id.",
+    ),
+    (
+        "select_same_stroke",
+        "select.same-stroke",
+        "Ids of selectable shapes with the same stroke as a shape. Args: id.",
+    ),
+    (
+        "select_inverse",
+        "select.inverse",
+        "Ids of selectable shapes not in the given selection. Args: ids.",
+    ),
+    (
+        "shapes_replicate_side",
+        "shapes.replicate-side",
+        "Copy the shapes `ids` once to the `side` (left, right, above, below), edge to edge with `gap_mm` between.",
+    ),
+    (
+        "shapes_replicate_array",
+        "shapes.replicate-array",
+        "Make a row (axis horizontal) or column (axis vertical) of `count` items (2-1000, the selection included), `gap_mm` apart.",
+    ),
+    (
+        "shapes_replicate_fill",
+        "shapes.replicate-fill",
+        "Fill the board with as many copies of the selection as fit whole on its grid, `gap_mm` apart.",
+    ),
+    (
+        "shapes_mirror_copy",
+        "shapes.mirror-copy",
+        "Add a mirrored copy of the selection on `side` (left/right flip horizontally, above/below vertically), `gap_mm` away.",
+    ),
+    (
+        "shapes_rotate_copies",
+        "shapes.rotate-copies",
+        "Radial array: `count` items (2-1000, the selection included) rotated evenly about the selection's centre.",
+    ),
+    (
+        "shapes_offset",
+        "shapes.offset",
+        "Add an offset outline of each shape: positive `distance_mm` grows, negative is an internal offset. Optional `join` (miter, round, bevel; default miter) and `miter_limit` (corner limit, >= 1, default 4).",
+    ),
+];
 
 fn mcp_tools() -> Vec<serde_json::Value> {
     use serde_json::json;
@@ -445,8 +629,13 @@ fn mcp_tools() -> Vec<serde_json::Value> {
             json!(["command"]),
         ),
     ];
+    let engine_specs = ENGINE_TOOLS.iter().map(|(name, command, description)| {
+        let (properties, required) = engine_tool_schema(command);
+        (*name, *description, properties, required)
+    });
     specs
         .into_iter()
+        .chain(engine_specs)
         .map(|(name, description, properties, required)| {
             json!({
                 "name": name, "description": description,
@@ -543,6 +732,50 @@ mod tests {
     }
 
     #[test]
+    fn engine_tools_are_listed_and_run_commands() {
+        let mut session = Session::default();
+        let call = |session: &mut Session, id: u32, name: &str, args: &str| -> serde_json::Value {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{name}","arguments":{args}}}}}"#
+            );
+            serde_json::from_str(&session.handle_stdio_line(&line).unwrap().unwrap()).unwrap()
+        };
+        let list: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["name"].as_str())
+            .collect();
+        for (tool, _, _) in ENGINE_TOOLS {
+            assert!(names.contains(tool), "{tool} not listed");
+        }
+        call(
+            &mut session,
+            2,
+            "command_execute",
+            r#"{"command":"shape.add-rect","params":{"x":0,"y":0,"width":5,"height":5}}"#,
+        );
+        let counted = call(&mut session, 3, "query_node_count", "{}");
+        assert_eq!(counted["result"]["isError"], false);
+        let text = counted["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"nodes\":4"), "{text}");
+        let bad = call(
+            &mut session,
+            4,
+            "path_break",
+            r#"{"id":1,"contour":9,"node":0}"#,
+        );
+        assert_eq!(bad["result"]["isError"], true);
+    }
+
+    #[test]
     fn json_rpc_errors_notifications_and_batches() {
         let mut session = Session::default();
         let parse: serde_json::Value =
@@ -625,6 +858,106 @@ mod tests {
             .unwrap();
         assert!(r.contains("\"ok\":true"), "{r}");
         assert_eq!(session.engine.doc.shape_count(), 1);
+    }
+
+    #[test]
+    fn replicate_and_offset_tools_run_engine_commands() {
+        let mut session = Session::default();
+        let call = |session: &mut Session, id: u32, name: &str, args: &str| {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{name}","arguments":{args}}}}}"#
+            );
+            let value: serde_json::Value =
+                serde_json::from_str(&session.handle_stdio_line(&line).unwrap().unwrap()).unwrap();
+            value["result"]["isError"].as_bool().unwrap()
+        };
+        let list: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        for (tool, _, _) in ENGINE_TOOLS {
+            assert!(names.contains(&tool), "{tool} listed");
+        }
+        session
+            .engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            })
+            .unwrap();
+        assert!(!call(
+            &mut session,
+            2,
+            "shapes_replicate_side",
+            r#"{"ids":[1],"side":"right","gap_mm":1}"#
+        ));
+        assert!(!call(
+            &mut session,
+            3,
+            "shapes_replicate_array",
+            r#"{"ids":[1],"axis":"vertical","count":3,"gap_mm":0}"#
+        ));
+        assert!(!call(
+            &mut session,
+            4,
+            "shapes_mirror_copy",
+            r#"{"ids":[1],"side":"left","gap_mm":0}"#
+        ));
+        assert!(!call(
+            &mut session,
+            5,
+            "shapes_rotate_copies",
+            r#"{"ids":[1],"count":6}"#
+        ));
+        assert!(!call(
+            &mut session,
+            6,
+            "shapes_offset",
+            r#"{"ids":[1],"distance_mm":-1,"join":"round"}"#
+        ));
+        assert!(!call(
+            &mut session,
+            7,
+            "shapes_replicate_fill",
+            r#"{"ids":[1],"gap_mm":50}"#
+        ));
+        let shapes = session.engine.doc.shape_count();
+        assert!(call(
+            &mut session,
+            8,
+            "shapes_rotate_copies",
+            r#"{"ids":[1],"count":0}"#
+        ));
+        assert!(call(
+            &mut session,
+            9,
+            "shapes_offset",
+            r#"{"ids":[1],"distance_mm":1,"join":"spiky"}"#
+        ));
+        assert!(call(
+            &mut session,
+            10,
+            "shapes_replicate_side",
+            r#"{"ids":[]}"#
+        ));
+        assert_eq!(session.engine.doc.shape_count(), shapes);
+        // The same commands answer as legacy methods.
+        let r = session
+            .handle_line(r#"{"id":11,"method":"shapes.replicate-side","params":{"ids":[1],"side":"below","gap_mm":0}}"#)
+            .unwrap()
+            .unwrap();
+        assert!(r.contains("\"ok\":true"), "{r}");
     }
 
     #[test]

@@ -22,7 +22,10 @@ to the process. The control socket listens on `127.0.0.1` only, but it has no au
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, and `command_execute`. Their
+`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `command_execute`, and the
+replicate/offset tools `shapes_replicate_side`, `shapes_replicate_array`,
+`shapes_replicate_fill`, `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset`
+(see [Replicate and offset](#replicate-and-offset)). Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -34,6 +37,47 @@ tool error naming the knob. For example, `command_execute` accepts
 `{"command":"shape.add-rect","params":{"x":0,"y":0,"width":5,"height":5}}`;
 see `crates/engine/src/lib.rs` for the complete serde-tagged command set. Undo and redo
 accept `{"command":"edit.undo"}` and `{"command":"edit.redo"}`.
+
+## Path editing, compound paths, flags and queries
+
+Each command below is also a dedicated MCP tool (the command name with `.`/`-` turned into
+`_`, e.g. `path_simplify`) whose arguments are the command's params, and can be applied
+headlessly with `stencilcraft-cli run --in IN --command '<json>' … --export OUT`
+(repeatable; each effect is printed as one JSON line). Every editing command is one undo
+step (`edit.undo`); queries are not recorded. Bad ids, indices or numbers return an error
+and leave the document unchanged. A shape that is locked rejects every editing command
+until `shapes.set-locked {locked: false}`.
+
+A node is addressed as `{"contour": c, "node": n}`: contour `c` of the shape's path and
+node `n` along it, counted as `query.node-count` counts them (a closed contour does not
+repeat its first node). Segment `s` runs from node `s` to the next.
+
+| Command / tool | Params | Effect |
+| --- | --- | --- |
+| `path.break` / `path_break` | `{id, contour, node}` | Closed contour opens at the node; open one splits in two (pieces stay in the shape). |
+| `path.join` / `path_join` | `{a, b, a_contour?, b_contour?, a_end?, b_end?}` | Joins two open contours (`b` consumed; may be another contour of `a`). Ends `start`/`end` default to the nearest pair; coincident ends merge, otherwise a line joins them. |
+| `path.close` / `path_close` | `{id, contour?}` | Closes an open contour. |
+| `path.average-nodes` / `path_average_nodes` | `{id, nodes, axis}` | `axis`: `horizontal` (same y), `vertical` (same x), `both`. |
+| `path.merge-nodes` / `path_merge_nodes` | `{id, nodes}` | Moves nodes to their centroid; neighbours on a contour fuse into one corner node. |
+| `path.delete-nodes` / `path_delete_nodes` | `{id, nodes}` | Removes nodes, refitting the neighbouring curve. Deleting the whole path is an error. |
+| `path.set-node-type` / `path_set_node_type` | `{id, nodes, kind}` | `corner` retracts handles; `smooth` makes collinear handles. |
+| `path.set-segment` / `path_set_segment` | `{id, contour, segment, kind}` | `line` or `curve` (handles placed on the line, so the shape is unchanged until edited). |
+| `path.simplify` / `path_simplify` | `{ids, tolerance_mm}` | Refits with fewer nodes within `tolerance_mm` (0 < t ≤ 1000) of the original. |
+| `path.outline-stroke` / `path_outline_stroke` | `{ids, width_mm, join?, cap?, miter_limit?}` | Replaces each path with the filled outline of its stroke. `join`: `miter` (default), `round`, `bevel`; `cap`: `butt` (default), `round`, `square`; miter limit 1–100 (default 4). |
+| `shapes.to-path` / `shapes_to_path` | `{ids}` | Live rectangle/ellipse/polygon/star primitives become plain paths. |
+| `shapes.make-compound` / `shapes_make_compound` | `{ids}` | One compound path in the bottom-most shape's id and style. |
+| `shapes.release-compound` / `shapes_release_compound` | `{ids}` | Release Compound Path / Detach: one shape per contour; returns `ShapesAdded` with every id. |
+| `shape.pathfinder` / `shape_pathfinder` | `{ids, operation}` | Adds `subtract-all` (every other shape subtracted from the bottom one) to `union`, `difference`, `intersect`, `xor` (exclude), `divide`, `trim`, `merge`, `crop`, `outline`, `minus-back`. |
+| `shapes.set-locked` / `shapes_set_locked` | `{ids, locked}` | Locked shapes reject edits and are left out of selections. |
+| `shapes.set-hidden` / `shapes_set_hidden` | `{ids, hidden}` | Hidden shapes are not exported (SVG, DXF, G-code, tiling, cut) or selected. |
+| `query.node-count` / `query_node_count` | `{ids?}` | `{"NodeCount": {shapes, contours, nodes, linear, bezier}}`; all shapes when `ids` is empty. A node with any handle counts as bezier. |
+| `select.same-fill` / `select_same_fill` | `{id}` | `{"Selection": {ids}}`: selectable shapes with the same operation colour that are likewise filled (closed) or open. |
+| `select.same-stroke` / `select_same_stroke` | `{id}` | Selectable shapes with the same operation colour (every outline is stroked in it). |
+| `select.inverse` / `select_inverse` | `{ids}` | Selectable shapes not in `ids`. |
+
+"Selectable" means not hidden, not locked, and on a visible layer. The document stores one
+operation colour (cut/engrave) per shape, so fill and stroke differ only in whether open
+paths count.
 
 Legacy requests use one line in and one line out; logging goes to stderr only.
 
@@ -74,4 +118,50 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
+| `shapes.replicate-side` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.replicate-array` | `{ids, axis, count, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.replicate-fill` | `{ids, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.mirror-copy` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.rotate-copies` | `{ids, count}` | `{ShapesAdded: {ids}}` |
+| `shapes.offset` | `{ids, distance_mm, join?, miter_limit?}` | `{ShapesAdded: {ids}}` |
+
+## Replicate and offset
+
+These are engine commands (`crates/engine/src/lib.rs`), so each is one undoable edit
+(`edit.undo` removes every copy it added). Each has a dedicated MCP tool whose arguments
+are the command's params, and can also be sent through `command_execute` or as a legacy
+method of the same name. Copies keep each shape's cut/engrave style. Documents are y-up,
+so `above` means larger y.
+
+| Command | Behaviour |
+| --- | --- |
+| `shapes.replicate-side` | One copy of the selection on `side` (`left`, `right`, `above`, `below`): its bounds touch the selection's bounds, `gap_mm` apart. |
+| `shapes.replicate-array` | A row (`axis: horizontal`, growing right) or column (`vertical`, growing up) of `count` items; the selection is the first, so `count - 1` copies are added. |
+| `shapes.replicate-fill` | Every cell of the selection's grid (pitch = selection size + `gap_mm`) that lies wholly on the board gets a copy; the selection keeps its own cell. |
+| `shapes.mirror-copy` | A mirrored copy on `side`: `left`/`right` copies flip horizontally, `above`/`below` vertically, then sit edge to edge `gap_mm` away. |
+| `shapes.rotate-copies` | A radial array of `count` items (the selection included) rotated in steps of 360°/`count` about the selection's bounds centre. |
+| `shapes.offset` | Adds an offset outline of each shape, keeping the original. Positive `distance_mm` grows the solid; negative is an internal offset (outlines shrink, holes grow). `join` is `miter` (default), `round` or `bevel`; `miter_limit` (default 4, at least 1) is the corner limit as a multiple of the distance. The outline is flattened to line segments. |
+
+Limits: `gap_mm` must be finite and non-negative; `count` is 2–1000; one command adds at
+most 10,000 shapes (a fill that would need more is refused — raise the gap); ids must be
+unique and exist; copies must stay within finite coordinates. A refused command changes
+nothing and adds no history.
+
+The CLI reaches the same commands with `stencilcraft-cli run --command JSON` (repeatable,
+run in order on the loaded document before kerf and export), for example
+`--command '{"command":"shapes.replicate-fill","params":{"ids":[1],"gap_mm":2}}'`. CLI
+kerf compensation takes `--kerf-join miter|round|bevel` and `--kerf-limit N` beside
+`--apply-kerf MM`; miter with limit 4 stays the default. The MCP `kerf_apply` tool only
+records the kerf width on the document; offsetting with a chosen join is `shapes_offset`.
+
+The desktop app's `--control` socket also answers two window methods the headless session
+cannot (legacy envelope only):
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `app.screenshot` | `{path}` | `{path, size: [w, h]}`: the next painted frame as a PNG |
+| `app.select` | `{ids}` | `{selected}`: sets the canvas selection (unknown ids are dropped) |
+
+A successful `doc.open` or `doc.save` through the socket also updates the window title and
+the recent-files list, as File › Open and Save do.
 

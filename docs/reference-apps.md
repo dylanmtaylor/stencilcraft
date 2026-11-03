@@ -400,6 +400,103 @@ repeat a row in the area tables above, so this table can be read on its own.
 | Weed lines and borders | Business | Add cut lines around and between shapes so waste lifts in pieces | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Job queue / batch | Business (to confirm) | Queue several designs or copies as one production run | missing | replicate | not present in Basic; from vendor docs (not observed) |
 
+## Cricut Design Space, full inventory
+
+Design Space features by screen, from the [Cricut help centre](https://help.cricut.com/hc/en-us)
+(notably the [Canvas screen guide](https://help.cricut.com/hc/en-us/articles/26751604105879-Canvas-screen-Design-Space-Guide),
+[Offset](https://help.cricut.com/hc/en-us/articles/360061650414-How-to-use-the-Offset-feature-in-Design-Space),
+[uploads](https://help.cricut.com/hc/en-us/articles/360009556313-How-to-upload-images-into-Design-Space) and
+[Print Then Cut](https://help.cricut.com/hc/en-us/articles/360009387274-How-to-Print-Then-Cut-in-Design-Space)).
+Some rows repeat a DS row in the area tables above, so this table can be read on its own.
+
+| Feature | Area | Description | Status | Posture | Observed |
+| --- | --- | --- | --- | --- | --- |
+| Home: new project, my projects, ready-to-make | Home | Start screen with recent projects and vendor projects | missing | reimagine: new/recent local files; vendor projects are store content (won't do) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Images panel (image library search) | Design panels | Search and insert images from the vendor library | out of scope | won't do: store content; reimagine as browsing the user's own folders | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Projects panel | Design panels | Open vendor ready-to-make projects | out of scope | won't do: store content | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Text panel (add text) | Design panels | Add a text object, then pick font and style in the edit bar | partial: built-in single-line lettering only | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Shapes panel | Design panels | Square, triangle, circle, heart, star, pentagon, hexagon, octagon and a score line | partial: rectangle, ellipse, polygon, star; no heart/triangle presets or score line | replicate (shapes generated in code) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Upload panel | Design panels | Upload raster or vector files to the canvas | partial: SVG import and PNG/JPEG trace | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Templates panel | Design panels | Mock-up backgrounds (shirts, mugs, cards) to size a design against | missing | reimagine with original, code-generated templates | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Smart Guides | Canvas | Alignment lines that appear while dragging near other objects | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Canvas grid and units | Canvas | Grid on/off, grid size, inches or cm | partial: grid toggle; mm only | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| History panel | Canvas | A list of past edits; jump back to any step | missing (undo/redo only) | replicate on the edit journal | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Undo/redo | Edit bar | Step back and forward | have | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Basic Cut | Edit bar | Cut the outline | have: `cut` style | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Pen / Draw | Edit bar | Draw the outline with a pen, with a pen colour | partial: `engrave` style traces without cutting; no pen colour | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Score | Edit bar | Fold line with a scoring stylus or wheel | partial: `engrave` style; no score tool | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Engrave | Edit bar | Engrave with an engraving tip | partial: `engrave` style; no engraving-tool settings | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Deboss | Edit bar | Press a line into the material | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Wave | Edit bar | Cut a wavy decorative line | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Perforate | Edit bar | Cut a dashed tear line | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Foil | Edit bar | Press foil with a foil tool (fine, medium, bold) | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Operation: Print Then Cut | Edit bar | Print the layer, then cut around it | partial: `print-cut` printable sheet; no sensor alignment | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Select all / deselect | Edit bar | Select every object or none | have | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Edit dropdown: cut, copy, paste | Edit bar | Clipboard actions | partial: duplicate only | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Align and distribute | Edit bar | Align left/centre/right/top/middle/bottom, distribute | have: `shapes.align`, `shapes.distribute` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Arrange: to back, backward, forward, to front | Edit bar | Change the stacking order | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Flip horizontal/vertical | Edit bar | Mirror the selection | partial: negative scale through `shapes.transform`; no button | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Size W/H with lock | Edit bar | Exact size with a proportion lock | partial: size fields and an aspect-link setting | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Rotate field | Edit bar | Exact rotation angle | have: `shape.rotate`, `shapes.transform` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Position X/Y | Edit bar | Exact position | have: `shape.set-bounds` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Font picker (system and vendor fonts, filters) | Edit bar (text) | Choose a font; filter by system, vendor, writing | missing | replicate for system/user fonts; vendor fonts are store content (won't do) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Font style (regular, bold, italic, writing) | Edit bar (text) | Style of the font, including single-line writing styles | partial: built-in single-line lettering | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Font size | Edit bar (text) | Text size | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Letter space | Edit bar (text) | Spacing between letters | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Line space | Edit bar (text) | Spacing between lines | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Text alignment | Edit bar (text) | Left, centre, right | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Curve text | Edit bar (text) | Bend text into an arc by a diameter value | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Advanced: ungroup to letters / lines | Edit bar (text) | Split text into one object per letter or line | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Linetype swatch / colour | Edit bar | Colour of a cut or draw layer, used to group mats | partial: cut/engrave only, fixed colours | reimagine: operation first, colour as a label | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Fill: no fill / print | Edit bar | Make a layer printable with a colour or pattern | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Patterns | Edit bar | Fill printable layers with a pattern; upload your own patterns | missing | replicate with user patterns; vendor patterns are store content (won't do) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Warp | Edit bar | Bend a shape or text with preset warps | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Offset | Edit bar | Outline at a distance, round or sharp corners, weld offsets | partial: kerf offset only | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Group / ungroup | Layers panel | Treat layers as one unit | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Duplicate | Layers panel | Copy the selection | have: `shapes.duplicate` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Delete | Layers panel | Remove the selection | have: `shapes.remove` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Hide layer | Layers panel | Hide a layer from canvas and mats | have: `layer.set-visible` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Slice | Layers panel | Split two overlapping shapes into pieces | have: Pathfinder `divide` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Combine: Weld | Layers panel | Merge into one outline | have: Pathfinder `union` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Combine: Unite | Layers panel | Join into one layer that keeps the overlapping outlines | partial: Pathfinder `merge` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Combine: Subtract | Layers panel | Cut the top shape out of the bottom one | have: Pathfinder `difference` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Combine: Intersect | Layers panel | Keep only the overlap | have: Pathfinder `intersect` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Combine: Exclude | Layers panel | Remove the overlap | have: Pathfinder `xor` | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Attach / detach | Layers panel | Keep positions together on the mat without merging | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Flatten / unflatten | Layers panel | Merge layers into one Print Then Cut image | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Contour | Layers panel | Hide single sub-paths so they are not cut | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Colour Sync | Layers panel | Merge layers of similar colours so fewer mats are needed | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Reorder layers by drag | Layers panel | Change stacking by dragging in the list | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Make It (go to Make screen) | Make screen | Leave the design and set up the cut | have: Design/Send split | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Mat preview | Make screen | One mat per colour/material with the pieces laid out | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Move, rotate, hide items on the mat; move to another mat | Make screen | Arrange pieces on each mat by hand | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Mirror per mat | Make screen | Mirror a mat's contents (for iron-on vinyl cut face down) | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Material size | Make screen | Pick the mat or sheet size (12×12, 12×24, small Joy sizes, large Venture sizes) | partial: `Mat` table for Silhouette mats | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Load type: on mat / without mat | Make screen | Cut on a mat or straight from Smart Materials without one | partial: `Mat::None` exists; no load-type choice | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Project copies | Make screen | Cut several copies of the project | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Material list, favourites and custom materials | Make screen | Browse and favourite materials, add your own | partial: 27 presets; no favourites or custom ones | replicate with our own numbers | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Pressure: default, more, less | Make screen | Quick pressure adjustment | partial: force override | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Tool and accessory prompts | Make screen | Tells you which blade/tool to load in which clamp | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Go, pause, unload | Make screen | Machine controls during the job | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Print Then Cut size limit | Make screen | Maximum printable area for Print Then Cut | missing | replicate (validation) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Print Then Cut flow: bleed, system dialog, printer | Make screen | Send to a printer with bleed on or off, optionally through the system dialog | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Machine calibration | Make screen | Print Then Cut, rotary blade and knife blade calibration | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut Joy / Joy Xtra | Machines | Small machines: Smart Materials without a mat, Card Mat, insert cards; Print Then Cut on Joy Xtra | missing | replicate once protocol facts are learned clean-room | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut Explore family | Machines | Mid-size machines with two clamps (blade plus pen/scoring stylus), Smart Materials on Explore 3 | missing | replicate once protocol facts are learned clean-room | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut Maker family | Machines | Adaptive tools: rotary blade, knife blade (multi-pass), scoring wheel, debossing, engraving, perforation, wave, foil | missing | replicate once protocol facts are learned clean-room | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut Venture | Machines | Large-format machine with a 24-inch mat and long rolls | missing | replicate once protocol facts are learned clean-room | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Remove background | Upload | Automatic background removal on uploaded photos | missing | reimagine (local, deterministic) | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Erase / restore cleanup | Upload | Brush to erase or restore parts of an uploaded image before cutting | missing | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Save as cut image vs Print Then Cut image | Upload | Choose whether an upload becomes an outline or a printable image | partial: uploads become cut outlines (trace) | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Vector upload (SVG, DXF) with ungroup | Upload | Upload vector files; their layers become separate layers | partial: SVG import; no DXF import | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Upload file types (JPG, GIF, PNG, BMP, SVG, DXF, HEIC) | Upload | Formats the upload accepts (no TIFF or PDF) | partial: PNG, JPEG, SVG | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Uploaded images library | Upload | Reuse earlier uploads | missing | reimagine: local folder of the user's images | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Project Collections | Projects | Organise saved projects into collections | missing | reimagine with local folders | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cloud save / sharing | Projects | Save and share projects through the vendor cloud | out of scope | won't do: account system | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut Access subscription | Account | Subscription for vendor images, fonts and projects | out of scope | won't do: proprietary store | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Offline mode (download fonts and images) | Account | Use downloaded content without a connection | have: StencilCraft is offline by design | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Settings: machine, canvas, load last project | Settings | Default machine, grid/units, reopen the last project at start | partial: theme and Recent; no default machine or reopen-last | replicate | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+
 ## Missing items, by area
 
 These are the rows marked **missing** above. Rows marked partial are not listed. The ranked order is in [`gaps.md`](gaps.md).

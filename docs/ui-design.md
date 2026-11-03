@@ -29,6 +29,12 @@ clean-room posture and the full feature inventory). The structure is borrowed; t
 
 ## StencilCraft visual conventions
 
+- Chrome comes from craft-libs' design system (aiongg/craft-libs `design-system`): the
+  `stencilcraft.modern` theme file (`crates/ui-egui/src/stencilcraft-theme.json`, VectorCraft's
+  Modern slate greys with the coral accent) is resolved by `craft_ui::theme` and installed
+  every frame. Panels use `Inspector`, `SectionHeader`, `PropertyRow`, `AlignBar`, `ListRow`;
+  dialogs use `craft_ui::dialog::Dialog`; menus use `MenuBar`/`PressMenu` (`docs/menu-map.md`).
+
 - Slate canvas shared with the suite chrome (VectorCraft Modern Dark:
   canvas `101217`, mat `181B22`, board `272C36`; light: canvas `DFE3E9`,
   mat `F3F5F8`, paper-white board), sober panel styling, no gradients, no

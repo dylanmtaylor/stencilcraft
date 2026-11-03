@@ -75,3 +75,14 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 
+The desktop app's `--control` socket also answers two window methods the headless session
+cannot (legacy envelope only):
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `app.screenshot` | `{path}` | `{path, size: [w, h]}`: the next painted frame as a PNG |
+| `app.select` | `{ids}` | `{selected}`: sets the canvas selection (unknown ids are dropped) |
+
+A successful `doc.open` or `doc.save` through the socket also updates the window title and
+the recent-files list, as File › Open and Save do.
+

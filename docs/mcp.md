@@ -79,6 +79,44 @@ repeat its first node). Segment `s` runs from node `s` to the next.
 operation colour (cut/engrave) per shape, so fill and stroke differ only in whether open
 paths count.
 
+## Generators and effects
+
+Pure geometry lives in `crates/generate`; the commands are in `crates/engine/src/generate.rs`.
+Each is also an MCP tool (the command name with `.`/`-` turned into `_`, e.g.
+`generate_fill`) and one undo step. Bad params, missing or locked ids, or results over the
+caps (20,000 stones/dots/dashes/lines/pieces, 500,000 points, 10,000 copies) return an error
+and change nothing. Shapes made by an effect are plain paths: one compound shape per source
+(a fill, a stone template, the punch points), which `generate.release` splits into one plain
+shape per contour with its tool tag cleared ("Release Effects"/"release fill"/"release
+copies"). Nothing stays live-linked to its source.
+
+Tool tags. A shape may carry `tool` (`{"op": ...}`) next to its cut/engrave style; a machine
+backend is meant to run that operation instead of a plain pass (exports and the machine
+crate do not read the tag yet; until they do, a tagged path goes out by its style):
+`score {tip: fine|wide, passes 1-10}`, `emboss {tip, passes, deboss: bool}`,
+`power-engrave`, `heat-pen` (foil), and `punch {diameter_mm}`. Tagged paths sit on an
+engrave layer except `punch`, whose path is the hole circle (shown and, without a punch
+tool, cut): a backend with a punch plunges once per contour at its bounds centre.
+
+| Command / tool | Params | Effect |
+| --- | --- | --- |
+| `generate.shape` | `{shape: {kind, ...}, x, y, width, height, replace?}` | Adds the shape fitted to the box (`ShapesAdded`); with `replace: id` regenerates that shape in place (`ShapesEdited`, same id), which is how its parameters are edited. Kinds and params: `heart`; `arrow {head_length 0.4, shaft_width 0.4}`; `speech-bubble {tail_height 0.25, tail_width 0.2, corner_radius 0.15}`; `ring {inner_ratio 0.6}`; `crescent {thickness 0.35}`; `gear {teeth 12, tooth_depth 0.15, hole_ratio 0}`; `spiral {turns 3}` (open); `banner {notch 0.12}`; `scallop-circle {scallops 12}`; `scallop-square {scallops 4}` (per side); `triangle {variant: isosceles\|right\|equilateral}`. Rectangle, rounded rectangle, ellipse, polygon and star are the existing `shape.add-*` primitives. |
+| `generate.score-line` | `{x0, y0, x1, y1, tip?, passes?}` | A score line (engrave, `score` tag). |
+| `generate.fill` | `{ids, pattern?, spacing_mm?, angle_deg?, inset_mm?, dot_mm?, seed?, tool?}` | Sketch fill of each closed shape (even-odd: holes stay empty), as engrave paths. `pattern`: `lines` (default), `cross-hatch` (angle ± 45°), `grid` (angle and angle + 90°), `concentric`, `spiral`, `stipple-grid`, `stipple-random` (seeded jitter). `spacing_mm` default 0.4064 (0.016 in), `angle_deg` 45, `dot_mm` 0.5. `tool` tags the result for power engraver, heat pen (foil) or emboss/deboss fills. |
+| `generate.tool-lines` | `{ids, tool, fill?}` | Score & emboss lines: each outline becomes an engrave path tagged `tool` (new id); `fill` (fill params) adds an interior fill with the same tool. |
+| `generate.rhinestone` | `{ids, size?, stone_mm?, spacing_mm?, layout?, lines?, pattern?}` | Stone-hole circles (cut). `size` `ss6` 2.0, `ss8` 2.4, `ss10` 2.8 (default), `ss12` 3.1, `ss16` 3.9, `ss20` 4.7, `ss30` 6.4 mm, or `stone_mm`; `spacing_mm` gap (default 1); `layout` `outline` (default), `fill`, `outline-fill`; `lines` 1–2; `pattern` `hex` (default) or `grid`. Stones never overlap. |
+| `generate.punch` | `{ids, spacing_mm?, diameter_mm?}` | Replaces each path with punch points every 3.5 mm (default) along it, `diameter_mm` 1, 3 (default) or 5 (0.5–20 accepted), tagged `punch`. |
+| `generate.popup` | `{x?, y?, width?, height?, struts?, strut_width_mm?, base_width_pct?, dash_pitch_mm?, outline?}` | A pop-up card spread (default 200 × 140 mm) with a vertical centre fold: card outline and two cuts per strut (cut shape), fold lines (score-tagged shape). `base_width_pct` is how far struts reach from the fold as a % of half the card; `dash_pitch_mm` > 0 dashes the scores. |
+| `generate.puzzle` | `{id, rows?, columns?, tab_size?, seed?}` | Jigsaw cut lines inside the shape (its outline is the border): rows × columns (default 4 × 5, up to 100 each), round knobs `tab_size` (0–0.35 of the smaller cell side, default 0.25) that never touch. |
+| `generate.weed` | `{ids, margin_mm?, spacing_mm?, direction?, clearance_mm?}` | A weeding box `margin_mm` (default 3) round the shapes, plus weed lines every `spacing_mm` (0 = none) `vertical`, `horizontal` or `both`, broken around the design and stopping `clearance_mm` (default 1) short of it. |
+| `generate.registration` | `{ids, margin_mm?, arm_mm?, mark?, style?}` | Alignment marks at the corners of the shapes' bounds grown by `margin_mm` (5): `corners` brackets or `crosshair`, arms `arm_mm` (8), `cut` (default) or `engrave`. |
+| `generate.warp` | `{ids, style?, bend?, horizontal?, vertical?}` | Warps each shape in place (same id) inside its bounds. Styles: `arc` (default), `arc-lower`, `arc-upper`, `arch`, `bulge`, `shell-lower`, `shell-upper`, `flag`, `wave`, `fish`, `rise`, `fisheye`, `inflate`, `squeeze`, `twist`, `none`; `bend` (0.5), `horizontal`, `vertical` (perspective) each −1…1. The result is a dense polyline (`path.simplify` refits it). Preview: call `stencilcraft_generate::warp::warp` directly, or run then `edit.undo`. |
+| `generate.perforate` | `{ids, cut_mm, gap_mm}` | Each path becomes dashes in place (perforated cut); closed contours get a whole number of dashes. |
+| `generate.wavy` | `{ids, amplitude_mm, wavelength_mm}` | Each path becomes a sine wave around itself in place; closed contours hold whole periods. |
+| `generate.object-on-path` | `{ids, path_id, perpendicular?, start_angle_deg?, increment_angle_deg?, start_position_mm?, section_length_mm?, count?, step_mm?}` | Copies of the shapes `ids` (as a group, by their bounds centre) along the first contour of `path_id`: rotated to the tangent when `perpendicular` (default true), plus `start_angle_deg` and `increment_angle_deg` per copy; from `start_position_mm` over `section_length_mm` (0 = the whole path); `count` copies (default 50) or one every `step_mm`. The copies are independent shapes. |
+| `generate.replicate` | `{ids, direction, angle_deg?, count?, gap_mm?}` | Advanced Replicate: `count` copies (1–10,000) `on-top` (stacked exactly), `left`, `right`, `above`, `below` or along `angle_deg` (`direction: angle`), each clearing the last by `gap_mm`. |
+| `generate.release` | `{ids}` | Splits each shape into one plain shape per contour and clears tool tags. |
+
 Legacy requests use one line in and one line out; logging goes to stderr only.
 
 ## Legacy envelope

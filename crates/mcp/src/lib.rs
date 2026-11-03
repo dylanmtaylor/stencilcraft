@@ -398,6 +398,10 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
     let number = json!({"type": "number"});
     let side = json!({"type": "string", "enum": ["left", "right", "above", "below"]});
     let count = json!({"type": "integer", "minimum": 2, "maximum": 1000});
+    let tip = json!({"type": "string", "enum": ["fine", "wide"]});
+    let passes = json!({"type": "integer", "minimum": 1, "maximum": 10});
+    let tool = json!({"type": "object", "description": "{op: score|emboss|power-engrave|heat-pen, tip?: fine|wide, passes?: 1-10, deboss?: bool}"});
+    let fill = json!({"pattern": {"type": "string", "enum": ["lines", "cross-hatch", "grid", "concentric", "spiral", "stipple-grid", "stipple-random"]}, "spacing_mm": number, "angle_deg": number, "inset_mm": number, "dot_mm": number, "seed": {"type": "integer"}});
     match command {
         "shapes.replicate-side" | "shapes.mirror-copy" => (
             json!({"ids": ids, "side": side, "gap_mm": number}),
@@ -416,6 +420,69 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             json!({"ids": ids, "distance_mm": number, "join": {"type": "string", "enum": ["miter", "round", "bevel"]}, "miter_limit": number}),
             json!(["ids", "distance_mm"]),
         ),
+        "generate.shape" => (
+            json!({"shape": {"type": "object", "description": "{kind: heart|arrow|speech-bubble|ring|crescent|gear|spiral|banner|scallop-circle|scallop-square|triangle, ...kind params}"}, "x": number, "y": number, "width": number, "height": number, "replace": {"type": "integer"}}),
+            json!(["shape", "x", "y", "width", "height"]),
+        ),
+        "generate.score-line" => (
+            json!({"x0": number, "y0": number, "x1": number, "y1": number, "tip": tip, "passes": passes}),
+            json!(["x0", "y0", "x1", "y1"]),
+        ),
+        "generate.fill" => {
+            let mut p = fill.clone();
+            p["ids"] = ids.clone();
+            p["tool"] = tool.clone();
+            (p, json!(["ids"]))
+        }
+        "generate.tool-lines" => (
+            json!({"ids": ids, "tool": tool, "fill": {"type": "object", "properties": fill}}),
+            json!(["ids", "tool"]),
+        ),
+        "generate.rhinestone" => (
+            json!({"ids": ids, "size": {"type": "string", "enum": ["ss6", "ss8", "ss10", "ss12", "ss16", "ss20", "ss30"]}, "stone_mm": number, "spacing_mm": number, "layout": {"type": "string", "enum": ["outline", "fill", "outline-fill"]}, "lines": {"type": "integer", "minimum": 1, "maximum": 2}, "pattern": {"type": "string", "enum": ["grid", "hex"]}}),
+            json!(["ids"]),
+        ),
+        "generate.punch" => (
+            json!({"ids": ids, "spacing_mm": number, "diameter_mm": number}),
+            json!(["ids"]),
+        ),
+        "generate.popup" => (
+            json!({"x": number, "y": number, "width": number, "height": number, "struts": {"type": "integer", "minimum": 1, "maximum": 50}, "strut_width_mm": number, "base_width_pct": number, "dash_pitch_mm": number, "outline": {"type": "boolean"}}),
+            json!([]),
+        ),
+        "generate.puzzle" => (
+            json!({"id": {"type": "integer"}, "rows": {"type": "integer"}, "columns": {"type": "integer"}, "tab_size": number, "seed": {"type": "integer"}}),
+            json!(["id"]),
+        ),
+        "generate.weed" => (
+            json!({"ids": ids, "margin_mm": number, "spacing_mm": number, "direction": {"type": "string", "enum": ["vertical", "horizontal", "both"]}, "clearance_mm": number}),
+            json!(["ids"]),
+        ),
+        "generate.registration" => (
+            json!({"ids": ids, "margin_mm": number, "arm_mm": number, "mark": {"type": "string", "enum": ["corners", "crosshair"]}, "style": {"type": "string", "enum": ["cut", "engrave"]}}),
+            json!(["ids"]),
+        ),
+        "generate.warp" => (
+            json!({"ids": ids, "style": {"type": "string", "enum": ["none", "arc", "arc-lower", "arc-upper", "arch", "bulge", "shell-lower", "shell-upper", "flag", "wave", "fish", "rise", "fisheye", "inflate", "squeeze", "twist"]}, "bend": number, "horizontal": number, "vertical": number}),
+            json!(["ids"]),
+        ),
+        "generate.perforate" => (
+            json!({"ids": ids, "cut_mm": number, "gap_mm": number}),
+            json!(["ids", "cut_mm", "gap_mm"]),
+        ),
+        "generate.wavy" => (
+            json!({"ids": ids, "amplitude_mm": number, "wavelength_mm": number}),
+            json!(["ids", "amplitude_mm", "wavelength_mm"]),
+        ),
+        "generate.object-on-path" => (
+            json!({"ids": ids, "path_id": {"type": "integer"}, "perpendicular": {"type": "boolean"}, "start_angle_deg": number, "increment_angle_deg": number, "start_position_mm": number, "section_length_mm": number, "count": {"type": "integer"}, "step_mm": number}),
+            json!(["ids", "path_id"]),
+        ),
+        "generate.replicate" => (
+            json!({"ids": ids, "direction": {"type": "string", "enum": ["on-top", "left", "right", "above", "below", "angle"]}, "angle_deg": number, "count": {"type": "integer", "minimum": 1, "maximum": 10000}, "gap_mm": number}),
+            json!(["ids", "direction"]),
+        ),
+        "generate.release" => (json!({"ids": ids}), json!(["ids"])),
         _ => (json!({}), json!([])),
     }
 }
@@ -552,6 +619,86 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "shapes_offset",
         "shapes.offset",
         "Add an offset outline of each shape: positive `distance_mm` grows, negative is an internal offset. Optional `join` (miter, round, bevel; default miter) and `miter_limit` (corner limit, >= 1, default 4).",
+    ),
+    (
+        "generate_shape",
+        "generate.shape",
+        "Add a parametric shape (heart, arrow, speech-bubble, ring, crescent, gear, spiral, banner, scallop-circle, scallop-square, triangle) fitted to a box; `replace: id` regenerates an existing shape in place to edit its parameters.",
+    ),
+    (
+        "generate_score_line",
+        "generate.score-line",
+        "Add a straight score (fold) line from (x0, y0) to (x1, y1); tip fine/wide, passes 1-10.",
+    ),
+    (
+        "generate_fill",
+        "generate.fill",
+        "Sketch/stipple/tool fill of closed shapes as engrave paths: pattern lines, cross-hatch, grid, concentric, spiral, stipple-grid, stipple-random; spacing_mm (default 0.4064), angle_deg, inset_mm, dot_mm, seed; optional tool tag (power-engrave, heat-pen, emboss, score).",
+    ),
+    (
+        "generate_tool_lines",
+        "generate.tool-lines",
+        "Convert outlines into score/emboss (or power-engrave/heat-pen) lines, optionally with an interior fill using the same tool.",
+    ),
+    (
+        "generate_rhinestone",
+        "generate.rhinestone",
+        "Rhinestone template: stone-sized holes along the outline (1 or 2 lines) and/or as a grid/hex fill. size ss6-ss30 or stone_mm, spacing_mm gap.",
+    ),
+    (
+        "generate_punch",
+        "generate.punch",
+        "Replace paths with leather punch points every spacing_mm (default 3.5) of diameter_mm (1, 3 or 5; default 3), tagged as punch operations.",
+    ),
+    (
+        "generate_popup",
+        "generate.popup",
+        "Pop-up card: card outline and box struts across a vertical centre fold (cuts) plus fold lines (scores). struts, strut_width_mm, base_width_pct (strut depth), dash_pitch_mm.",
+    ),
+    (
+        "generate_puzzle",
+        "generate.puzzle",
+        "Jigsaw puzzle cut lines over a shape: rows x columns, tab_size (0-0.35 of a cell), seed.",
+    ),
+    (
+        "generate_weed",
+        "generate.weed",
+        "Weeding box around shapes at margin_mm, with internal weed lines every spacing_mm (vertical, horizontal or both) stopping clearance_mm short of the design.",
+    ),
+    (
+        "generate_registration",
+        "generate.registration",
+        "Registration marks (corners or crosshair) around the shapes' bounds at margin_mm, arms arm_mm long.",
+    ),
+    (
+        "generate_warp",
+        "generate.warp",
+        "Warp shapes in place: style (arc, arc-lower, arc-upper, arch, bulge, shell-lower, shell-upper, flag, wave, fish, rise, fisheye, inflate, squeeze, twist, none), bend, horizontal, vertical (each -1..1).",
+    ),
+    (
+        "generate_perforate",
+        "generate.perforate",
+        "Turn paths into perforated cut lines in place: dashes cut_mm long, gap_mm apart.",
+    ),
+    (
+        "generate_wavy",
+        "generate.wavy",
+        "Turn paths into wavy lines in place: amplitude_mm either side, one period per wavelength_mm.",
+    ),
+    (
+        "generate_object_on_path",
+        "generate.object-on-path",
+        "Copies of the shapes `ids` along path_id's outline: perpendicular, start_angle_deg, increment_angle_deg, start_position_mm, section_length_mm (0 = whole), count (default 50) or step_mm.",
+    ),
+    (
+        "generate_replicate",
+        "generate.replicate",
+        "Advanced replicate: `count` copies on-top, left, right, above, below or along angle_deg, gap_mm apart.",
+    ),
+    (
+        "generate_release",
+        "generate.release",
+        "Release a generated effect (fill, punch points, stones, copies) into plain paths: one shape per contour, tool tags cleared.",
     ),
 ];
 
@@ -885,7 +1032,7 @@ mod tests {
             .filter_map(|tool| tool["name"].as_str())
             .collect();
         for (tool, _, _) in ENGINE_TOOLS {
-            assert!(names.contains(&tool), "{tool} listed");
+            assert!(names.contains(tool), "{tool} listed");
         }
         session
             .engine

@@ -8,6 +8,7 @@
 //! API is already the one the actors use, so swapping in a shared-structure
 //! stack later must not touch any caller.
 
+pub mod generate;
 mod path_edit;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -350,6 +351,39 @@ pub enum Command {
         #[serde(default)]
         ids: Vec<u64>,
     },
+    // Generators and effects: params and behaviour in `generate.rs` and `docs/mcp.md`.
+    #[serde(rename = "generate.shape")]
+    GenerateShape(generate::ShapeArgs),
+    #[serde(rename = "generate.score-line")]
+    GenerateScoreLine(generate::ScoreLineArgs),
+    #[serde(rename = "generate.fill")]
+    GenerateFill(generate::FillArgs),
+    #[serde(rename = "generate.tool-lines")]
+    GenerateToolLines(generate::ToolLinesArgs),
+    #[serde(rename = "generate.rhinestone")]
+    GenerateRhinestone(generate::RhinestoneArgs),
+    #[serde(rename = "generate.punch")]
+    GeneratePunch(generate::PunchArgs),
+    #[serde(rename = "generate.popup")]
+    GeneratePopup(stencilcraft_generate::popup::PopupParams),
+    #[serde(rename = "generate.puzzle")]
+    GeneratePuzzle(generate::PuzzleArgs),
+    #[serde(rename = "generate.weed")]
+    GenerateWeed(generate::WeedArgs),
+    #[serde(rename = "generate.registration")]
+    GenerateRegistration(generate::RegistrationArgs),
+    #[serde(rename = "generate.warp")]
+    GenerateWarp(generate::WarpArgs),
+    #[serde(rename = "generate.perforate")]
+    GeneratePerforate(generate::PerforateArgs),
+    #[serde(rename = "generate.wavy")]
+    GenerateWavy(generate::WavyArgs),
+    #[serde(rename = "generate.object-on-path")]
+    GenerateObjectOnPath(generate::ObjectOnPathArgs),
+    #[serde(rename = "generate.replicate")]
+    GenerateReplicate(generate::ReplicateArgs),
+    #[serde(rename = "generate.release")]
+    GenerateRelease(generate::IdsArgs),
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -1318,6 +1352,22 @@ impl Engine {
             | Command::SelectSameFill { .. }
             | Command::SelectSameStroke { .. }
             | Command::SelectInverse { .. } => self.query(&command),
+            Command::GenerateShape(_)
+            | Command::GenerateScoreLine(_)
+            | Command::GenerateFill(_)
+            | Command::GenerateToolLines(_)
+            | Command::GenerateRhinestone(_)
+            | Command::GeneratePunch(_)
+            | Command::GeneratePopup(_)
+            | Command::GeneratePuzzle(_)
+            | Command::GenerateWeed(_)
+            | Command::GenerateRegistration(_)
+            | Command::GenerateWarp(_)
+            | Command::GeneratePerforate(_)
+            | Command::GenerateWavy(_)
+            | Command::GenerateObjectOnPath(_)
+            | Command::GenerateReplicate(_)
+            | Command::GenerateRelease(_) => self.generate(command),
         }
     }
 
@@ -2232,6 +2282,7 @@ impl Engine {
                 .and_then(|id| old_shapes.get(&id))
                 .or_else(|| existing_shape_id.and_then(|id| old_shapes.get(&id)));
             let flags = source_shape.map_or((false, false), |shape| (shape.hidden, shape.locked));
+            let tool = source_shape.and_then(|shape| shape.tool.clone());
             let style = source_style
                 .or_else(|| {
                     existing_shape_id.and_then(|id| old_shapes.get(&id).map(|shape| shape.style))
@@ -2269,6 +2320,7 @@ impl Engine {
                 stencilcraft_doc::Shape {
                     hidden: flags.0,
                     locked: flags.1,
+                    tool,
                     id: shape_id,
                     path: snap_mm_path(&transform_path(
                         &path,

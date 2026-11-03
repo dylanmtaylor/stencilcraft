@@ -38,7 +38,7 @@ pub enum FillPattern {
 #[serde(default)]
 pub struct FillParams {
     pub pattern: FillPattern,
-    /// Distance between lines, rings, turns or dot centres (0.05–1000).
+    /// Distance between lines, rings, turns or dot centres (0.05–1000; default 0.016 in).
     pub spacing_mm: f64,
     pub angle_deg: f64,
     /// Keep the fill this far inside the outline (0–1000).
@@ -53,7 +53,7 @@ impl Default for FillParams {
     fn default() -> Self {
         Self {
             pattern: FillPattern::Lines,
-            spacing_mm: 1.0,
+            spacing_mm: 0.4064,
             angle_deg: 45.0,
             inset_mm: 0.0,
             dot_mm: 0.5,

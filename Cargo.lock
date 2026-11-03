@@ -4970,6 +4970,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stencilcraft-doc",
+ "stencilcraft-generate",
  "stencilcraft-geom",
  "stencilcraft-kerf",
  "thiserror 2.0.21",

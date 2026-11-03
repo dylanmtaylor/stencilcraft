@@ -143,6 +143,54 @@ pub struct Shape {
     /// Locked shapes cannot be selected or edited until unlocked.
     #[serde(default, skip_serializing_if = "is_false")]
     pub locked: bool,
+    /// A tool-specific operation for this path (score, emboss, engrave, foil, punch);
+    /// `None` is a plain cut or engrave pass by `style`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ToolOp>,
+}
+
+/// Score and emboss tool tip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Tip {
+    #[default]
+    Fine,
+    Wide,
+}
+
+fn one_pass() -> u32 {
+    1
+}
+
+/// A tool-specific operation a machine backend runs instead of a plain cut/engrave pass.
+/// Paths tagged with one live on an engrave layer (they must never be cut through), except
+/// `punch`, whose path is the hole outline for display and fallback cutting.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "kebab-case")]
+pub enum ToolOp {
+    /// Crease along the path (scoring stylus/wheel).
+    Score {
+        #[serde(default)]
+        tip: Tip,
+        #[serde(default = "one_pass")]
+        passes: u32,
+    },
+    /// Press the path into the material (emboss, or deboss from the other side).
+    Emboss {
+        #[serde(default)]
+        tip: Tip,
+        #[serde(default = "one_pass")]
+        passes: u32,
+        #[serde(default)]
+        deboss: bool,
+    },
+    /// Rotary/power engraving tool following the path.
+    PowerEngrave,
+    /// Heat pen pressing foil along the path.
+    HeatPen,
+    /// One punch per contour, at the contour's bounds centre: a backend with a punch tool
+    /// plunges there instead of cutting the circle.
+    Punch { diameter_mm: f64 },
 }
 
 fn is_false(value: &bool) -> bool {
@@ -229,6 +277,7 @@ impl Document {
             style,
             hidden: false,
             locked: false,
+            tool: None,
         };
         layer.shapes.push(shape.clone());
         Ok(shape)

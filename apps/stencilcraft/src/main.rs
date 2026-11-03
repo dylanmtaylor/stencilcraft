@@ -828,6 +828,17 @@ impl StencilApp {
             self.engine = session.into_engine();
             self.retain_valid_selection();
             self.kerf_preview_cache = None;
+            if let Some((method, path)) = document_path_request(&job.line, &reply) {
+                // An agent opened or saved the visible document: the title, recent files and
+                // framing follow it as they do for File › Open and Save.
+                if method == "doc.open" {
+                    self.set_selection([]);
+                    self.view_initialized = false;
+                    self.last_board = None;
+                }
+                self.open_path = Some(path.clone());
+                self.record_recent_file(path);
+            }
             let _ = job.reply.send(reply);
         }
     }
@@ -3123,6 +3134,34 @@ fn screenshot_request(line: &str) -> Option<String> {
     Some(value.get("params")?.get("path")?.as_str()?.to_string())
 }
 
+/// The method and path of a `doc.open` or `doc.save` request (legacy envelope or the MCP
+/// `doc_open`/`doc_save` tools) that `reply` answered successfully.
+fn document_path_request(line: &str, reply: &str) -> Option<(&'static str, String)> {
+    let request: serde_json::Value = serde_json::from_str(line).ok()?;
+    let reply: serde_json::Value = serde_json::from_str(reply).ok()?;
+    let (method, params) = match request.get("method")?.as_str()? {
+        "doc.open" => ("doc.open", request.get("params")?),
+        "doc.save" => ("doc.save", request.get("params")?),
+        "tools/call" => {
+            let params = request.get("params")?;
+            let method = match params.get("name")?.as_str()? {
+                "doc_open" => "doc.open",
+                "doc_save" => "doc.save",
+                _ => return None,
+            };
+            (method, params.get("arguments")?)
+        }
+        _ => return None,
+    };
+    let failed = reply.get("ok") == Some(&serde_json::Value::Bool(false))
+        || reply.get("error").is_some()
+        || reply.pointer("/result/isError") == Some(&serde_json::Value::Bool(true));
+    if failed {
+        return None;
+    }
+    Some((method, params.get("path")?.as_str()?.to_string()))
+}
+
 /// The request id and shape ids of an `app.select` control request
 /// (`{"method":"app.select","params":{"ids":[1,2]}}`); at most 10 000 ids are read.
 fn select_request(line: &str) -> Option<(serde_json::Value, Vec<u64>)> {
@@ -3262,6 +3301,30 @@ mod tests {
         assert_eq!((id, ids), (serde_json::json!(7), vec![1, 3]));
         assert_eq!(
             select_request(r#"{"method":"app.select","params":{}}"#),
+            None
+        );
+        let open = r#"{"id":1,"method":"doc.open","params":{"path":"a.stencilcraft"}}"#;
+        assert_eq!(
+            document_path_request(open, r#"{"id":1,"ok":true,"result":{}}"#),
+            Some(("doc.open", "a.stencilcraft".to_string()))
+        );
+        assert_eq!(
+            document_path_request(open, r#"{"id":1,"ok":false,"error":"x"}"#),
+            None
+        );
+        let tool = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_save","arguments":{"path":"b.stencilcraft"}}}"#;
+        assert_eq!(
+            document_path_request(
+                tool,
+                r#"{"jsonrpc":"2.0","id":2,"result":{"isError":false}}"#
+            ),
+            Some(("doc.save", "b.stencilcraft".to_string()))
+        );
+        assert_eq!(
+            document_path_request(
+                tool,
+                r#"{"jsonrpc":"2.0","id":2,"result":{"isError":true}}"#
+            ),
             None
         );
     }

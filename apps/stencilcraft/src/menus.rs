@@ -498,6 +498,9 @@ fn effect() -> Vec<MenuEntry<A>> {
     ]
 }
 
+/// View › Zoom presets (Silhouette Studio's list).
+const ZOOM_PRESETS: [u16; 8] = [25, 33, 50, 75, 100, 150, 200, 400];
+
 fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
     vec![
         sub(
@@ -518,12 +521,30 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("Actual Size", A::ActualSize)
                     .shortcut(kbd(CMD, Key::Num1))
                     .into(),
-                todo("Zoom to Selection"),
-            ],
+                item("Zoom to Selection", A::ZoomSelection)
+                    .shortcut(kbd(cmd_alt(), Key::Num0))
+                    .enabled(!app.selected_shapes.is_empty())
+                    .into(),
+                SEP,
+            ]
+            .into_iter()
+            .chain(ZOOM_PRESETS.iter().map(|&percent| {
+                let current = (app.view.zoom * 100.0).round() as i64 == i64::from(percent);
+                item(&format!("{percent}%"), A::ZoomPercent(percent))
+                    .radio(current)
+                    .into()
+            }))
+            .collect(),
         ),
         sub(
             "Rotate Page",
-            vec![todo("0°"), todo("90°"), todo("180°"), todo("270°")],
+            (0..4u8)
+                .map(|turns| {
+                    item(&format!("{}°", u16::from(turns) * 90), A::RotateView(turns))
+                        .radio(app.view.quarter_turns % 4 == turns)
+                        .into()
+                })
+                .collect(),
         ),
         SEP,
         todo("Grid Options…"),
@@ -531,10 +552,21 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .shortcut(kbd(CMD, Key::Quote))
             .check(app.prefs.show_grid)
             .into(),
-        todo("Snap to Grid"),
-        todo("Smart Snapping"),
-        todo_key("Smart Guides", CMD, Key::U),
-        todo("Snap to Point"),
+        item("Snap to Grid", A::ToggleSnapGrid)
+            .shortcut(kbd(cmd_shift(), Key::Quote))
+            .check(app.engine.doc.snap.grid)
+            .into(),
+        item("Smart Snapping", A::ToggleSmartSnapping)
+            .check(app.engine.doc.snap.objects)
+            .into(),
+        item("Smart Guides", A::ToggleSmartGuides)
+            .shortcut(kbd(CMD, Key::U))
+            .check(app.prefs.smart_guides)
+            .into(),
+        item("Snap to Point", A::ToggleSnapPoint)
+            .shortcut(kbd(cmd_alt(), Key::Quote))
+            .check(app.engine.doc.snap.points)
+            .into(),
         item("Rulers", A::ToggleRulers)
             .shortcut(kbd(cmd_shift(), Key::R))
             .check(app.prefs.show_rulers)
@@ -542,10 +574,26 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Guides",
             vec![
-                todo("Show Guides"),
-                todo("Lock Guides"),
-                todo_key("Make Guides", CMD, Key::Num5),
-                todo_key("Release Guides", cmd_alt(), Key::Num5),
+                item("Show Guides", A::ToggleShowGuides)
+                    .shortcut(kbd(CMD, Key::Semicolon))
+                    .check(app.prefs.show_guides)
+                    .into(),
+                item("Lock Guides", A::ToggleLockGuides)
+                    .shortcut(kbd(cmd_alt(), Key::Semicolon))
+                    .check(app.guides_locked())
+                    .enabled(!app.engine.doc.guides.is_empty())
+                    .into(),
+                item("Make Guides", A::MakeGuides)
+                    .shortcut(kbd(CMD, Key::Num5))
+                    .enabled(!app.selected_shapes.is_empty())
+                    .into(),
+                item("Release Guides", A::ReleaseGuides)
+                    .shortcut(kbd(cmd_alt(), Key::Num5))
+                    .enabled(app.engine.doc.guides.iter().any(|g| !g.locked))
+                    .into(),
+                item("Clear Guides", A::ClearGuides)
+                    .enabled(app.engine.doc.guides.iter().any(|g| !g.locked))
+                    .into(),
             ],
         ),
         SEP,
@@ -744,6 +792,18 @@ mod tests {
             "Stroke Color",
             "Replicate",
             "Offset",
+            "Zoom to Selection",
+            "200%",
+            "90°",
+            "Snap to Grid",
+            "Smart Snapping",
+            "Smart Guides",
+            "Snap to Point",
+            "Show Guides",
+            "Lock Guides",
+            "Make Guides",
+            "Release Guides",
+            "Clear Guides",
         ] {
             let found: Vec<_> = items.iter().filter(|(l, ..)| l == wired).collect();
             assert!(!found.is_empty(), "missing {wired}");
@@ -753,7 +813,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Bring to Front", "Detach Lines", "Zoom to Selection"] {
+        for planned in ["Bring to Front", "Detach Lines", "Outline View"] {
             assert!(
                 items
                     .iter()

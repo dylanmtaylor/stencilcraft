@@ -104,10 +104,14 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     reordering, object and layer locks, renaming and moving objects between layers.
     Desktop controls and shortcuts remain incomplete. Attach and Contour commands exist
     in the production engine; their desktop workflows still need integration.
-18. **Snapping and guides**: the document and command layer supports guides, grid
-    and snap settings, snapping queries and measurements. Desktop gesture integration,
-    smart guides and live width/height callouts remain incomplete; display-unit support
-    also needs integration in the desktop UI.
+18. **Snapping and guides**: guides, grid and snap settings, snapping and measuring are
+    engine commands, and the desktop wires them: guides drag out of the rulers, move and
+    drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
+    and draws smart guides. Missing: snapping while drawing shapes, resizing, dragging
+    nodes and the pen; Alt to suspend snapping; a Grid Options panel (spacing,
+    subdivisions, tolerance, isometric grid, Smart Snap only within media); live
+    width/height callouts beyond the move readout; display units other than mm. A move
+    drag still records one undo step per frame.
 19. **Text**: the desktop Text dialog creates editable text using the built-in single-line
     font or an installed font family, with a point-size control; Type › Edit Selected
     Text updates it. Missing: font file and style selection, direct canvas insertion,
@@ -184,8 +188,11 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 35. **Multiple boards**: the document model supports extra pages and the command
     layer can create a document from templates. Desktop multi-page editing, a fully
     integrated template wizard and Save Selection As remain incomplete.
-36. **View aids**: missing smart guides, snap to point, guides (make, release, lock),
-    outline view, Show Print/Cut Border, rotated page view and zoom to selection.
+36. **View aids**: Zoom to Selection, zoom presets, Rotate Page (0/90/180/270, view
+    only), Smart Guides, Snap to Point and Guides (show, lock, make, release, clear) exist.
+    Missing: outline view, Show Print/Cut Border, Show Dimensions; Make Guides turns a
+    shape into its bounds' edge lines, not a guide of its own outline (guides are
+    straight lines only).
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.
     Missing: Select Same operation, next object above/below, and saved selections.
 38. **Rhinestone, lattice and other generators**: engine/MCP include rhinestone, puzzle

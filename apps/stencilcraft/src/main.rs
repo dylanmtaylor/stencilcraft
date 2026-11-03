@@ -69,6 +69,10 @@ pub struct UserPrefs {
     pub dark_theme: bool,
     pub show_rulers: bool,
     pub show_grid: bool,
+    /// View › Guides › Show Guides.
+    pub show_guides: bool,
+    /// View › Smart Guides: draw the alignment lines snapping found while dragging.
+    pub smart_guides: bool,
     pub print_cut_marks: bool,
     pub rail_columns: u8,
     pub link_aspect: bool,
@@ -83,6 +87,8 @@ impl Default for UserPrefs {
             dark_theme: true,
             show_rulers: true,
             show_grid: true,
+            show_guides: true,
+            smart_guides: true,
             print_cut_marks: false,
             rail_columns: 1,
             link_aspect: false,
@@ -293,8 +299,23 @@ pub enum TopMenuAction {
     ActualSize,
     ZoomIn,
     ZoomOut,
+    /// View › Zoom › Selection: fit the selection's bounds.
+    ZoomSelection,
+    /// View › Zoom presets: 100 is one screen point per millimetre, as the status bar shows.
+    ZoomPercent(u16),
+    /// View › Rotate Page: clockwise quarter turns of the view (0–3).
+    RotateView(u8),
     ToggleRulers,
     ToggleGrid,
+    ToggleSnapGrid,
+    ToggleSmartSnapping,
+    ToggleSnapPoint,
+    ToggleSmartGuides,
+    ToggleShowGuides,
+    ToggleLockGuides,
+    MakeGuides,
+    ReleaseGuides,
+    ClearGuides,
     ToggleKerfPreview,
     TogglePrintCutMarks,
     ResetWorkspace,
@@ -543,6 +564,12 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
 pub enum CanvasViewCommand {
     Fit,
     Center,
+    /// Fit the selection's bounds (does nothing without a selection).
+    Selection,
+    /// Zoom to a percentage about the canvas centre.
+    ZoomPercent(u16),
+    /// Turn the view to this many clockwise quarter turns about the canvas centre.
+    Rotate(u8),
 }
 
 pub struct StencilApp {
@@ -559,6 +586,12 @@ pub struct StencilApp {
     pub pressure_before: Option<f64>,
     pub speed_before: Option<f64>,
     pub zoom_before: Option<f64>,
+    /// A ruler guide being dragged on the canvas: its key and where it is now.
+    pub guide_preview: Option<(u64, craft_ui::canvas::GuidePlace)>,
+    /// The selection's bounds when a move drag began, so snapping works from the start.
+    pub drag_origin: Option<stencilcraft_geom::Rect>,
+    /// Smart guides: the lines the last snap of a move drag found, in millimetres.
+    pub snap_lines: Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
     pub text_before: Option<String>,
     pub status: String,
     pub open_path: Option<String>,
@@ -728,6 +761,9 @@ impl StencilApp {
             pressure_before: None,
             speed_before: None,
             zoom_before: None,
+            guide_preview: None,
+            drag_origin: None,
+            snap_lines: Vec::new(),
             text_before: None,
             status,
             open_path: open_path.clone(),
@@ -902,6 +938,26 @@ impl StencilApp {
         self.status = "panel layout restored".to_string();
     }
 
+    /// Whether every guide is locked (and there is at least one): View › Guides › Lock Guides.
+    pub fn guides_locked(&self) -> bool {
+        let guides = &self.engine.doc.guides;
+        !guides.is_empty() && guides.iter().all(|g| g.locked)
+    }
+
+    /// Change snapping settings through `snap.set`, leaving the fields `edit` doesn't set.
+    fn run_snap_set(&mut self, edit: impl FnOnce(&mut SnapToggles)) {
+        let mut t = SnapToggles::default();
+        edit(&mut t);
+        self.run_command(Command::Document(DocumentCommand::SnapSet {
+            grid: t.grid,
+            guides: None,
+            objects: t.objects,
+            spacing: t.spacing,
+            points: t.points,
+            tolerance_mm: None,
+        }));
+    }
+
     pub fn run_command(&mut self, command: Command) {
         match self.engine.run(command) {
             Ok(_effect) => self.status = "done".to_string(),
@@ -1050,6 +1106,123 @@ impl StencilApp {
         }
     }
 
+    /// Move the dragged selection so its bounds sit `total_screen` from where the drag
+    /// began, snapped by `snap.point` (grid, guides, objects, spacing, points as the
+    /// document's snap settings say). The snap's lines become the smart guides.
+    pub fn drag_selection_to(&mut self, id: u64, total_screen: egui::Vec2) {
+        let Some(origin) = self.drag_origin else {
+            return;
+        };
+        let d = self.view.screen_delta_to_world(total_screen);
+        let (mut x, mut y) = (origin.x0 + d.x, origin.y0 + d.y);
+        self.snap_lines.clear();
+        let snap = &self.engine.doc.snap;
+        if snap.grid || snap.guides || snap.objects || snap.spacing || snap.points {
+            let query = stencilcraft_engine::document::SnapQuery {
+                x,
+                y,
+                width: origin.width(),
+                height: origin.height(),
+                exclude: self.selected_shapes.clone(),
+                tolerance_mm: None,
+            };
+            if let Ok(stencilcraft_engine::Effect::Document(
+                stencilcraft_engine::document::DocumentEffect::Snap(r),
+            )) = self
+                .engine
+                .run(Command::Document(DocumentCommand::SnapPoint(query)))
+            {
+                (x, y) = (r.x, r.y);
+                self.snap_lines = r
+                    .lines
+                    .iter()
+                    .map(|l| {
+                        (
+                            stencilcraft_geom::Point::new(l.from[0], l.from[1]),
+                            stencilcraft_geom::Point::new(l.to[0], l.to[1]),
+                        )
+                    })
+                    .collect();
+            }
+        }
+        let Some(now) =
+            stencilcraft_ui_egui::selected_world_bounds(&self.engine.doc, &self.selected_shapes)
+        else {
+            return;
+        };
+        let (dx_mm, dy_mm) = (x - now.x0, y - now.y0);
+        if dx_mm.abs() < 1e-9 && dy_mm.abs() < 1e-9 {
+            return;
+        }
+        if self.selected_shapes.len() > 1 {
+            self.run_command(Command::ShapesTransform {
+                ids: self.selected_shapes.clone(),
+                dx_mm,
+                dy_mm,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                degrees: 0.0,
+            });
+        } else {
+            self.run_command(Command::ShapeMove { id, dx_mm, dy_mm });
+        }
+    }
+
+    /// Turn a canvas guide edit into `guide.*` commands: a drag shows as a preview and
+    /// commits once; a guide dragged out of a ruler is added; one dropped off the page
+    /// (or deleted) is removed. Keys are guide index + 1 ([`stencilcraft_ui_egui::canvas_guides`]).
+    pub fn apply_guide_event(
+        &mut self,
+        event: Option<(Option<u64>, EditEvent<craft_ui::canvas::GuidePlace>)>,
+    ) {
+        let Some((key, event)) = event else {
+            return;
+        };
+        match (key, event) {
+            (
+                Some(key),
+                EditEvent::Begin {
+                    value: Some(place), ..
+                },
+            )
+            | (Some(key), EditEvent::Update { value: place, .. }) => {
+                self.guide_preview = Some((key, place));
+            }
+            (_, EditEvent::Cancel { .. }) => self.guide_preview = None,
+            (key, EditEvent::Commit { value: place, .. } | EditEvent::Set { value: place, .. }) => {
+                self.guide_preview = None;
+                let axis = match place.orientation {
+                    craft_ui::canvas::Orientation::Horizontal => {
+                        stencilcraft_doc::GuideAxis::Horizontal
+                    }
+                    craft_ui::canvas::Orientation::Vertical => {
+                        stencilcraft_doc::GuideAxis::Vertical
+                    }
+                };
+                let index = key.and_then(|k| usize::try_from(k.checked_sub(1)?).ok());
+                let command = match (index, place.position) {
+                    (None, Some(position_mm)) => DocumentCommand::GuideAdd { axis, position_mm },
+                    (None, None) => return,
+                    (Some(index), None) => DocumentCommand::GuideRemove { index },
+                    (Some(index), Some(position_mm)) => {
+                        if self.engine.doc.guides.get(index).map(|g| g.axis) != Some(axis) {
+                            // shortcut: an Alt-turned guide is re-added on its new axis;
+                            // two undo steps instead of one.
+                            self.run_command(Command::Document(DocumentCommand::GuideRemove {
+                                index,
+                            }));
+                            DocumentCommand::GuideAdd { axis, position_mm }
+                        } else {
+                            DocumentCommand::GuideMove { index, position_mm }
+                        }
+                    }
+                };
+                self.run_command(Command::Document(command));
+            }
+            _ => {}
+        }
+    }
+
     pub fn delete_selection(&mut self) {
         if self.selected_shapes.is_empty() {
             return;
@@ -1103,7 +1276,39 @@ impl StencilApp {
                 panels::EditAction::Simplify,
             ),
         ];
-        if let Some(action) = edit_keys.into_iter().find_map(|(modifiers, key, action)| {
+        // View menu keys (menus.rs), modified variants before their plain twins.
+        let view_keys = [
+            (cmd_alt, egui::Key::Num0, TopMenuAction::ZoomSelection),
+            (cmd_alt, egui::Key::Num5, TopMenuAction::ReleaseGuides),
+            (
+                cmd_alt,
+                egui::Key::Semicolon,
+                TopMenuAction::ToggleLockGuides,
+            ),
+            (cmd_alt, egui::Key::Quote, TopMenuAction::ToggleSnapPoint),
+            (cmd_shift, egui::Key::Quote, TopMenuAction::ToggleSnapGrid),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::Num5,
+                TopMenuAction::MakeGuides,
+            ),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::Semicolon,
+                TopMenuAction::ToggleShowGuides,
+            ),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::U,
+                TopMenuAction::ToggleSmartGuides,
+            ),
+        ];
+        if let Some(action) = view_keys.into_iter().find_map(|(modifiers, key, action)| {
+            ctx.input_mut(|input| input.consume_key(modifiers, key))
+                .then_some(action)
+        }) {
+            self.handle_menu_action(action);
+        } else if let Some(action) = edit_keys.into_iter().find_map(|(modifiers, key, action)| {
             ctx.input_mut(|input| input.consume_key(modifiers, key))
                 .then_some(action)
         }) {
@@ -1873,7 +2078,67 @@ impl StencilApp {
             TopMenuAction::CenterView => {
                 self.pending_view_command = Some(CanvasViewCommand::Center)
             }
-            TopMenuAction::ActualSize => self.view.zoom = 1.0,
+            TopMenuAction::ActualSize => {
+                self.pending_view_command = Some(CanvasViewCommand::ZoomPercent(100))
+            }
+            TopMenuAction::ZoomSelection => {
+                if self.selected_shapes.is_empty() {
+                    self.status = "zoom to selection: select shapes first".to_string();
+                } else {
+                    self.pending_view_command = Some(CanvasViewCommand::Selection);
+                }
+            }
+            TopMenuAction::ZoomPercent(percent) => {
+                self.pending_view_command = Some(CanvasViewCommand::ZoomPercent(percent))
+            }
+            TopMenuAction::RotateView(turns) => {
+                self.pending_view_command = Some(CanvasViewCommand::Rotate(turns))
+            }
+            TopMenuAction::ToggleSnapGrid => {
+                let on = !self.engine.doc.snap.grid;
+                self.run_snap_set(|s| s.grid = Some(on));
+            }
+            TopMenuAction::ToggleSmartSnapping => {
+                // Silhouette's Smart Snapping: other objects' edges, centres and spacing.
+                let on = !self.engine.doc.snap.objects;
+                self.run_snap_set(|s| {
+                    s.objects = Some(on);
+                    s.spacing = Some(on);
+                });
+            }
+            TopMenuAction::ToggleSnapPoint => {
+                let on = !self.engine.doc.snap.points;
+                self.run_snap_set(|s| s.points = Some(on));
+            }
+            TopMenuAction::ToggleSmartGuides => {
+                self.prefs.smart_guides = !self.prefs.smart_guides;
+                self.save_prefs();
+            }
+            TopMenuAction::ToggleShowGuides => {
+                self.prefs.show_guides = !self.prefs.show_guides;
+                self.save_prefs();
+            }
+            TopMenuAction::ToggleLockGuides => {
+                let locked = !self.guides_locked();
+                self.run_command(Command::Document(DocumentCommand::GuideLockAll { locked }));
+            }
+            TopMenuAction::MakeGuides => {
+                let ids = self.selected_shapes.clone();
+                self.run_command(Command::Document(DocumentCommand::GuideMake { ids }));
+                self.retain_valid_selection();
+            }
+            TopMenuAction::ReleaseGuides => {
+                if let Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) = self
+                    .engine
+                    .run(Command::Document(DocumentCommand::GuideRelease {}))
+                {
+                    self.status = format!("released {} guides", ids.len());
+                    self.set_selection(ids);
+                }
+            }
+            TopMenuAction::ClearGuides => {
+                self.run_command(Command::Document(DocumentCommand::GuideClear {}))
+            }
             TopMenuAction::ZoomIn => self.view.zoom = (self.view.zoom * 1.25).clamp(0.05, 400.0),
             TopMenuAction::ZoomOut => self.view.zoom = (self.view.zoom / 1.25).clamp(0.05, 400.0),
             TopMenuAction::ToggleRulers => {
@@ -2872,7 +3137,18 @@ impl StencilApp {
             self.view_initialized = true;
         }
         if let Some(command) = view_command {
-            apply_canvas_view_command(&mut self.view, command, extent_width, extent_height, clip);
+            let selection = stencilcraft_ui_egui::selected_world_bounds(
+                &self.engine.doc,
+                &self.selected_shapes,
+            );
+            apply_canvas_view_command(
+                &mut self.view,
+                command,
+                extent_width,
+                extent_height,
+                selection,
+                clip,
+            );
         }
         if let Some(zoom) = self.pending_zoom.take() {
             self.view.zoom_at(zoom / self.view.zoom, clip.center());
@@ -2937,13 +3213,49 @@ impl StencilApp {
             stencilcraft_ui_egui::paint_preview_paths(&painter, &view, paths, color);
         }
 
+        // Scroll bars over the mat/board extent (plus a margin): drag one to bring the mat
+        // back after scrolling or zooming it out of view.
+        let mut scroll_view = self.view.to_canvas_view(clip);
+        let bars = craft_ui::canvas::CanvasScrollbars::new(
+            "stencil-scrollbars",
+            craft_ui::canvas::ScrollbarNames::new("Horizontal scroll", "Vertical scroll"),
+        )
+        .overscroll(true)
+        .show(
+            ui,
+            &mut scroll_view,
+            stencilcraft_ui_egui::scroll_extent(extent_width, extent_height),
+        );
+        if bars.changed {
+            self.view.from_canvas_view(&scroll_view);
+            ui.ctx().request_repaint();
+        }
         let canvas_view = self.view.to_canvas_view(clip);
+        let mut guides_claimed = bars.over;
         let mm_units = RulerUnits {
             per_doc: 1.0,
             ticks: craft_ui::canvas::Ticks::Decimal { whole: false },
             numbers: self.locale_numbers.clone(),
             unit: Unit::new("{n} mm"),
             decimals: 1,
+        };
+
+        let guides_id = if self.prefs.show_guides {
+            let shown = stencilcraft_ui_egui::canvas_guides(&doc.guides, self.guide_preview);
+            let guides = craft_ui::canvas::Guides::new(
+                "stencil-guides",
+                &shown,
+                &mm_units,
+                &mm_units,
+                craft_ui::canvas::GuideNames::new("Guides", "Vertical guide", "Horizontal guide"),
+            )
+            .zero(self.ruler_origin)
+            .show(ui, &response, &canvas_view);
+            self.apply_guide_event(guides.event);
+            guides_claimed = guides.claimed;
+            Some(guides.id)
+        } else {
+            None
         };
 
         if self.prefs.show_rulers {
@@ -2954,7 +3266,7 @@ impl StencilApp {
                 RulerNames::new("Horizontal ruler", "Vertical ruler", "Ruler origin"),
             )
             .zero(self.ruler_origin)
-            .show(ui, full_rect, &canvas_view, None);
+            .show(ui, full_rect, &canvas_view, guides_id);
             if r.reset_origin {
                 self.ruler_origin = stencilcraft_geom::Point::ZERO;
             }
@@ -2963,7 +3275,7 @@ impl StencilApp {
             }
         }
 
-        let mut overlay_claimed = false;
+        let mut overlay_claimed = guides_claimed;
 
         // Interactive BezierOverlay for node editing
         if matches!(
@@ -3257,32 +3569,21 @@ impl StencilApp {
                 }
             }
 
+            if response.drag_started() {
+                self.drag_origin = self.canvas_drag_shape.and_then(|_| {
+                    stencilcraft_ui_egui::selected_world_bounds(
+                        &self.engine.doc,
+                        &self.selected_shapes,
+                    )
+                });
+                self.snap_lines.clear();
+            }
             if response.dragged() && !self.canvas_panning {
-                let total_delta = response.drag_delta();
-                let delta = total_delta - self.last_drag_delta;
-                self.last_drag_delta = total_delta;
-                if delta != egui::Vec2::ZERO {
-                    if let Some(id) = self.canvas_drag_shape {
-                        if self.selected_shapes.len() > 1 {
-                            self.run_command(Command::ShapesTransform {
-                                ids: self.selected_shapes.clone(),
-                                dx_mm: f64::from(delta.x / self.view.zoom),
-                                dy_mm: f64::from(delta.y / self.view.zoom),
-                                scale_x: 1.0,
-                                scale_y: 1.0,
-                                degrees: 0.0,
-                            });
-                        } else {
-                            self.run_command(Command::ShapeMove {
-                                id,
-                                dx_mm: f64::from(delta.x / self.view.zoom),
-                                dy_mm: f64::from(delta.y / self.view.zoom),
-                            });
-                        }
-                    } else if self.canvas_selection_start.is_none() {
-                        self.view.pan_mm.x -= delta.x / self.view.zoom;
-                        self.view.pan_mm.y -= delta.y / self.view.zoom;
-                    }
+                if let Some(id) = self.canvas_drag_shape {
+                    let total = response.total_drag_delta().unwrap_or_default();
+                    self.drag_selection_to(id, total);
+                } else if self.canvas_selection_start.is_none() {
+                    self.view.pan_mm -= response.drag_delta() / self.view.zoom;
                 }
                 // Live position callout while a selection is dragged.
                 if self.canvas_drag_shape.is_some()
@@ -3340,7 +3641,13 @@ impl StencilApp {
                 self.canvas_selection_start = None;
                 self.canvas_selection_points.clear();
                 self.last_drag_delta = egui::Vec2::ZERO;
+                self.drag_origin = None;
+                self.snap_lines.clear();
             }
+        }
+        if self.prefs.smart_guides && !self.snap_lines.is_empty() {
+            let color = craft_ui::canvas::Guides::style(&tokens).smart;
+            stencilcraft_ui_egui::paint_snap_lines(&painter, &self.view, &self.snap_lines, color);
         }
 
         // Zoom: scroll wheel around the pointer.
@@ -3415,11 +3722,23 @@ impl StencilApp {
     }
 }
 
+/// The snapping switches the View menu flips (`snap.set` fields).
+#[derive(Default)]
+struct SnapToggles {
+    grid: Option<bool>,
+    objects: Option<bool>,
+    spacing: Option<bool>,
+    points: Option<bool>,
+}
+
+/// Apply a view command: `width_mm` × `height_mm` is the extent Fit and Center frame,
+/// `selection` the selection's bounds for Zoom to Selection.
 pub fn apply_canvas_view_command(
     view: &mut stencilcraft_ui_egui::View,
     command: CanvasViewCommand,
     width_mm: f64,
     height_mm: f64,
+    selection: Option<stencilcraft_geom::Rect>,
     viewport: egui::Rect,
 ) {
     match command {
@@ -3429,6 +3748,16 @@ pub fn apply_canvas_view_command(
         CanvasViewCommand::Center => {
             view.center_extent(width_mm, height_mm, viewport);
         }
+        CanvasViewCommand::Selection => {
+            if let Some(rect) = selection {
+                view.fit_rect(rect, viewport, 24.0);
+            }
+        }
+        CanvasViewCommand::ZoomPercent(percent) => {
+            let zoom = f32::from(percent) / 100.0;
+            view.zoom_at(zoom / view.zoom, viewport.center());
+        }
+        CanvasViewCommand::Rotate(turns) => view.set_rotation(turns, viewport),
     }
 }
 
@@ -3938,15 +4267,16 @@ mod tests {
             let mut view = stencilcraft_ui_egui::View {
                 zoom: 2.5,
                 pan_mm: egui::vec2(700.0, -300.0),
+                ..Default::default()
             };
             let viewport =
                 egui::Rect::from_min_size(egui::pos2(100.0, 60.0), egui::vec2(800.0, 500.0));
-            apply_canvas_view_command(&mut view, expected, 600.0, 300.0, viewport);
+            apply_canvas_view_command(&mut view, expected, 600.0, 300.0, None, viewport);
             let center = view.world_to_screen(stencilcraft_geom::Point::new(300.0, 150.0));
             assert!((center - viewport.center()).length() < 1e-4);
             match expected {
                 CanvasViewCommand::Fit => assert!(view.zoom < 2.5),
-                CanvasViewCommand::Center => assert_eq!(view.zoom, 2.5),
+                _ => assert_eq!(view.zoom, 2.5),
             }
         }
     }

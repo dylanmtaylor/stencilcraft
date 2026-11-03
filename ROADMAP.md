@@ -99,6 +99,14 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — View aids (M4, gaps 18/36): Zoom to Selection (Ctrl+Alt+0) and the 25–400 %
+  presets, Rotate Page 0/90/180/270 (view state: rulers, overlays and drags follow the
+  turn), canvas guides from the rulers (`guide.add/move/remove`) plus Show/Lock/Make/
+  Release/Clear (`guide.lock-all`, `guide.make`, `guide.release`), Snap to Grid, Smart
+  Snapping and Snap to Point (`snap.set` {points}) applied to move drags through
+  `snap.point`, Smart Guides drawing the snap lines, and canvas scroll bars (craft-ui
+  `CanvasScrollbars` over the mat/board extent plus a margin) to drag a lost mat back. Measured: unit tests only
+  (engine snapping and guide commands, headless view/paint helpers); not checked on screen.
 - 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
   each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
   Measured: the default blue and the #b87c1b sample come back as their own layers.

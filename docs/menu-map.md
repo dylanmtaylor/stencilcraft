@@ -217,19 +217,21 @@ between Design and Send. We add guides, smart guides, outline view and point sna
 | Zoom › Fit to Page | F | SS/ours | have | app view |
 | Zoom › Center Page | C | ours | have | app view |
 | Zoom › Actual Size | Ctrl+1 | AI | have | app view |
-| Zoom › Selection | Ctrl+Alt+0 (*ours*) | SS | missing | app view |
-| Rotate Page › 0/90/180/270 | — | SS | missing | app view |
+| Zoom › Selection | Ctrl+Alt+0 (*ours*) | SS | have | app view (`View::fit_rect`) |
+| Zoom › 25/33/50/75/100/150/200/400 % | — | SS | have | app view |
+| Rotate Page › 0/90/180/270 | — | SS | have | app view (view state only; the document never turns) |
 | Grid Options… | Ctrl+F4 | SS | missing | app view (prefs) |
 | Show Grid | Ctrl+' | SS/AI | have | app view |
-| Snap to Grid | Ctrl+Shift+' | SS/AI | missing | app snapping |
-| Enable Smart Snapping (objects) | — | SS | missing | app snapping |
-| Smart Guides | Ctrl+U | AI/DS | missing | app snapping |
-| Snap to Point | Ctrl+Alt+' | AI | missing | app snapping |
+| Snap to Grid | Ctrl+Shift+' | SS/AI | have | `snap.set` {grid}; move drags call `snap.point` |
+| Enable Smart Snapping (objects) | — | SS | have | `snap.set` {objects, spacing} |
+| Smart Guides | Ctrl+U | AI/DS | have | app view: draws `snap.point` lines while dragging |
+| Snap to Point | Ctrl+Alt+' | AI | have | `snap.set` {points} |
 | Rulers | Ctrl+Shift+R | ours | have | app view |
-| Guides › Show | Ctrl+; | AI | missing | app view |
-| Guides › Lock | Ctrl+Alt+; | AI | missing | app view |
-| Guides › Make | Ctrl+5 | AI | missing | *proposed `guides.make`* |
-| Guides › Release | Ctrl+Alt+5 | AI | missing | *proposed `guides.release`* |
+| Guides › Show | Ctrl+; | AI | have | app view; drag a guide out of a ruler (`guide.add`), drag it to move (`guide.move`) or off the canvas to remove (`guide.remove`) |
+| Guides › Lock | Ctrl+Alt+; | AI | have | `guide.lock-all` |
+| Guides › Make | Ctrl+5 | AI | have | `guide.make` (bounds edges; our guides are straight lines, not arbitrary paths) |
+| Guides › Release | Ctrl+Alt+5 | AI | have | `guide.release` |
+| Guides › Clear | — | AI | have | `guide.clear` |
 | Outline View | Ctrl+Y | AI | missing | app view |
 | Show Print Border | Ctrl+Shift+P | SS | missing | app view |
 | Show Cut Border | Ctrl+Shift+L | SS | missing | app view |

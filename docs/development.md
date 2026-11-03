@@ -8,6 +8,7 @@ How to build, test and run StencilCraft on each supported platform.
 cargo test                      # workspace tests
 cargo run --release -p stencilcraft            # desktop app
 cargo run --release -p stencilcraft-cli -- run --in examples/starter.stencilcraft --export out.svg
+packaging/linux/install-flatpak.sh             # build and install as a user Flatpak (Linux)
 ```
 
 Quality gates before every commit:

@@ -92,3 +92,5 @@ that permission; older versions may ignore it. Host device permissions still app
 Rebuild and reinstall the package, then restart the app to apply manifest changes
 to an existing installation. This does not itself enable USB support in CLI builds.
 See [Flatpak sandbox permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
+
+For Linux host cutter permissions, see [Linux cutter permissions](machine.md#linux-cutter-permissions).

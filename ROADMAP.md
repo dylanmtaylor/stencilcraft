@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: Linux cutter access setup generates udev rules for catalogued
+  USB IDs; active-session access and Flatpak permissions are documented.
+
 - 2026-11-03 — M3: grant raw USB access in both Flatpak manifests and the
   fallback bundle builder so packaged desktop builds can reach cutters. Host
   device permissions and hardware validation remain necessary.

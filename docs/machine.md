@@ -298,3 +298,16 @@ appear in Make. No broad USB permission rules are installed by the application.
 Cricut remains SVG export to Design Space, not direct USB control. Public connection
 instructions describe Design Space but do not specify cut-command bytes:
 https://help.cricut.com/hc/en-us/articles/6581830148759-Bluetooth-and-USB-Connection-Help
+
+### Linux cutter permissions
+
+From a source checkout, run `packaging/linux/grant-cutter-access.sh` to install
+a udev rule for the USB IDs in the machine catalog. It uses sudo for the system
+rule, reloads udev and triggers matching connected devices. The `uaccess` tag
+grants the active local desktop session access; it does not make devices writable
+by everyone. Preview the rule with `packaging/linux/grant-cutter-access.sh --print`.
+If necessary reconnect the cutter and click **Find USB cutters** again. Check
+`lsusb` and `getfacl /dev/bus/usb/BBB/DDD` for the current bus and device.
+Flatpak additionally requires `--device=usb` and a rebuilt application containing
+the USB workflow; see [development](development.md#flatpak-usb-access).
+The catalog and generated rule cover known USB IDs only, not all manufacturers.

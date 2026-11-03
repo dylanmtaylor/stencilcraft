@@ -89,7 +89,7 @@ Expand and Offset Path.
 
 | Item | Shortcut | Source | Status | Implementation |
 | --- | --- | --- | --- | --- |
-| Mirror › Horizontal, Vertical | — | SS | missing | `shapes.transform` (scale −1) |
+| Mirror › Flip Horizontal, Flip Vertical | — | SS | have | `transform.each` (scale −1) |
 | Arrange › Bring to Front | Ctrl+Shift+] | SS | missing | *proposed `shapes.arrange`* |
 | Arrange › Bring Forward | Ctrl+] | SS | missing | *proposed `shapes.arrange`* |
 | Arrange › Send Backward | Ctrl+[ | SS | missing | *proposed `shapes.arrange`* |
@@ -97,14 +97,14 @@ Expand and Offset Path.
 | Arrange › Send to Layer… | — | AI | missing | *proposed `shapes.move-to-layer`* |
 | Align › Left, Center, Right, Top, Middle, Bottom | — | SS | have | `shapes.align` |
 | Align › Center to Page | — | SS | have | `shapes.align` {to_board} |
-| Align › To Key Object | — | AI | missing | `shapes.align` + *proposed key-object field* |
+| Align › To Key Object › Left … Bottom | — | AI | have (key = last shape selected) | `shapes.align-to-key` |
 | Align › Space Horizontally / Vertically | — | SS | have | `shapes.distribute` |
-| Align › Distribute Spacing by Value… | — | AI | missing | *proposed `shapes.distribute` {gap_mm}* |
-| Rotate › 15° steps, 90°, 180°, custom… | — | SS | have (custom angle in the Transform panel) | `shapes.transform` {degrees} |
+| Align › Distribute Spacing by Value… | — | AI | have (Spacing field in the Transform panel) | `shapes.distribute-spacing` |
+| Rotate › 15° steps, 90°, 180°, custom… | — | SS | have (custom angle in the Transform panel) | `transform.each` {degrees} |
 | Replicate › Duplicate left/right/above/below, rows, columns, fill page, mirror, rotate copies | — | SS | have (menu + Replicate panel) | `shapes.replicate-side/-array/-fill`, `shapes.mirror-copy`, `shapes.rotate-copies` |
-| Transform › Move…, Scale…, Rotate…, Shear… | — | AI | partial: move/scale/rotate in the Transform panel; shear missing | `shapes.transform`; shear *proposed* |
-| Transform Again | Ctrl+Shift+D (*ours*; AI's Ctrl+D is Duplicate here) | AI | missing | app: replay the last `shapes.transform` |
-| Transform Each… | Ctrl+Alt+Shift+D | AI | missing | *proposed `shapes.transform-each`* |
+| Transform › Move…, Scale…, Rotate…, Shear… | — | AI | have (Transform panel) | `transform.each`, `shapes.shear` |
+| Transform Again | Ctrl+Shift+D (*ours*; AI's Ctrl+D is Duplicate here) | AI | have | `transform.again` |
+| Transform Each… | Ctrl+Alt+Shift+D (not bound yet) | AI | have (the panel's "each object" checkbox) | `transform.each` {each} |
 | Modify › Weld | Ctrl+Shift+W | SS | have | `shape.pathfinder` union |
 | Modify › Subtract | — | SS | have | `shape.pathfinder` difference |
 | Modify › Subtract All | — | SS | have | `shape.pathfinder` difference over all |
@@ -255,7 +255,7 @@ Silhouette users expect every right-column panel to be listed here.
 | Image Effects | — | SS | missing | app |
 | Text Style | — | SS | missing | *proposed `text.set-style`* |
 | Spelling | F7 | SS | missing | app |
-| Transform | — | SS | have (align, rotate, scale, move by value) | `shapes.transform`, `shapes.align`, `shapes.distribute` |
+| Transform | — | SS | have (align, spacing by value, rotate, scale, shear, move by value, each) | `transform.each`, `shapes.align`, `shapes.distribute`, `shapes.distribute-spacing` |
 | Replicate | — | SS | have | `shapes.replicate-*`, `shapes.mirror-copy`, `shapes.rotate-copies` |
 | Modify | — | SS | have (weld family, Pathfinder, compound paths, outline stroke) | `shape.pathfinder`, `shapes.make-compound`, `path.outline-stroke` |
 | Offset | — | SS | have (distance, internal, corner, limit, preview) | `shapes.offset` |

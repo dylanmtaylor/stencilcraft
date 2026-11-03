@@ -13,7 +13,9 @@ use std::collections::BTreeSet;
 use kurbo::{Affine, Rect};
 use serde::{Deserialize, Serialize};
 use stencilcraft_doc::canvas::{self, color_distance, format_hex_color, parse_hex_color};
-use stencilcraft_doc::templates::{ProjectTemplate, TemplateParams, new_from_template};
+use stencilcraft_doc::templates::{
+    ProjectTemplate, TemplateInfo, TemplateParams, list_templates, new_from_template,
+};
 use stencilcraft_doc::{
     CutStyle, Group, GroupChild, Guide, GuideAxis, Orientation, Page, PagePreset, PageSetup,
 };
@@ -215,6 +217,10 @@ pub enum DocumentCommand {
     /// Store a fresh SVG thumbnail of the main board in the file.
     #[serde(rename = "document.update-thumbnail")]
     DocumentUpdateThumbnail {},
+    /// Query: the project templates `document.new-from-template` offers (id, name,
+    /// description, category, params), for a new-project wizard.
+    #[serde(rename = "templates.list")]
+    TemplatesList {},
     /// Replace the document with a new one from a project template (keeps the kerf
     /// setting, like `document.new`; undoable).
     #[serde(rename = "document.new-from-template")]
@@ -374,6 +380,7 @@ pub enum DocumentEffect {
     Measure(Measurement),
     Dimensions { x: f64, y: f64, width: f64, height: f64 },
     Copied { count: usize },
+    Templates(Vec<TemplateInfo>),
 }
 
 /// Per-engine state that is not part of the document or its history.
@@ -491,6 +498,9 @@ fn query(engine: &Engine, command: &DocumentCommand) -> Option<Result<Effect, En
             selection(selectable(engine, false).into_iter().map(|(_, id)| id).collect())
         }
         DocumentCommand::SelectNone {} => selection(Vec::new()),
+        DocumentCommand::TemplatesList {} => Ok(Effect::Document(DocumentEffect::Templates(
+            list_templates(),
+        ))),
         DocumentCommand::SelectByColor { color, tolerance } => {
             let Some(rgb) = parse_hex_color(color) else {
                 return Some(Err(invalid(
@@ -876,6 +886,7 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
         | DocumentCommand::QueryDimensions { .. }
         | DocumentCommand::SelectAll {}
         | DocumentCommand::SelectNone {}
+        | DocumentCommand::TemplatesList {}
         | DocumentCommand::SelectByColor { .. }
         | DocumentCommand::SelectByOperation { .. }
         | DocumentCommand::SelectByLayer { .. }

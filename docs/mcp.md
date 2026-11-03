@@ -130,7 +130,8 @@ means the smaller y.
 | `shapes.distribute-spacing` | `{ids, axis, gap_mm}` | The first object stays; the rest follow `gap_mm` apart. |
 | `document.set-meta` | `{title?, notes?}` | Title up to 1 KiB, notes up to 64 KiB. |
 | `document.update-thumbnail` | `{}` | Stores an SVG thumbnail (≤ 64 KiB) in the file. |
-| `document.new-from-template` | `{template, params?}` | New document from a project template: `blank`, `card` (default 10 × 7 in outline with a dashed score fold, `fold` vertical/horizontal, grouped, on a 12×12 page), `gift-tag` (2 × 3.5 in with chamfered top and a 1/4 in hole, `hole_mm`), `emboss`, `sketch`, `stamp`, `stipple`, `print-and-cut` (Letter). `params`: `preset`, `width_mm`, `height_mm`, `fold`, `hole_mm`. Keeps the kerf width. |
+| `templates.list` (Q) | `{}` | `{Templates: [{id, name, description, category, params}]}` for a new-project wizard: `wizard` types (`blank`, `card`, `emboss`, `gift-tag`, `pixscan`, `print-and-cut`, `sketch`, `stamping`, `stipple`) and `starter`s (`vinyl-sticker`, `heat-transfer-tshirt`, `sticker-sheet`, `greetings-card`, `stencil`, `sketched-message`, `foil-stamp-card`, `foil-stamp-notebook`, `acrylic-light`, `metal-engraved-decor`, `embossed-card`, `embossed-sticker`, `coin-case`). |
+| `document.new-from-template` | `{template, params?}` | New document from a template (`crates/doc/src/templates.rs`, our own geometry): page/mat/media, operation layers (score, pen, foil, emboss, stipple and engrave are named `engrave` layers), `mirror` and `registration_marks` on the page setup, and the main pieces grouped. E.g. `card`: 10 × 7 in outline with a dashed score fold on a 12×12 page. `params`: `preset`, `width_mm`, `height_mm`, `fold` (`vertical`/`horizontal`), `hole_mm`; the page grows when the item does not fit. Keeps the kerf width. |
 
 Format: these fields are stored in `.stencilcraft` version 1 under optional keys
 (`board-setup`, `pages`, `guides`, `grid`, `snap`, `groups`, `meta`, and per layer

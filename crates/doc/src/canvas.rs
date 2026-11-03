@@ -38,6 +38,12 @@ pub struct PageSetup {
     /// Page colour, `#rrggbb`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Cut mirrored (heat-transfer material is cut face down).
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub mirror: bool,
+    /// The page is printed with registration marks for Print & Cut.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub registration_marks: bool,
 }
 
 impl PageSetup {

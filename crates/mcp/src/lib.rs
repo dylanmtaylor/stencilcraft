@@ -485,7 +485,8 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             json!({"index": integer, "position_mm": number}),
             json!(["index", "position_mm"]),
         ),
-        "guide.clear" | "select.all" | "select.none" | "document.update-thumbnail" => {
+        "guide.clear" | "select.all" | "select.none" | "document.update-thumbnail"
+        | "templates.list" => {
             (json!({}), json!([]))
         }
         "grid.set" => (
@@ -534,7 +535,7 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
         "document.set-meta" => (json!({"title": string, "notes": string}), json!([])),
         "document.new-from-template" => (
             json!({
-                "template": {"type": "string", "enum": ["blank", "card", "gift-tag", "emboss", "sketch", "stamp", "stipple", "print-and-cut"]},
+                "template": {"type": "string", "description": "a template id from templates_list"},
                 "params": {"type": "object", "properties": {
                     "preset": string, "width_mm": number, "height_mm": number,
                     "fold": {"type": "string", "enum": ["vertical", "horizontal"]}, "hole_mm": number,
@@ -880,9 +881,14 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "Store a fresh SVG thumbnail in the document.",
     ),
     (
+        "templates_list",
+        "templates.list",
+        "The project templates for document_new_from_template: id, name, description, category (wizard, starter) and the params each reads.",
+    ),
+    (
         "document_new_from_template",
         "document.new-from-template",
-        "Replace the document with a project template. Args: template (blank, card, gift-tag, emboss, sketch, stamp, stipple, print-and-cut), params? {preset?, width_mm?, height_mm?, fold? (vertical, horizontal), hole_mm?}.",
+        "Replace the document with a project template (ids from templates_list). Args: template, params? {preset?, width_mm?, height_mm?, fold? (vertical, horizontal), hole_mm?}.",
     ),
 ];
 
@@ -1203,6 +1209,8 @@ mod tests {
             assert_eq!(value["result"]["isError"], false, "{name}: {value}");
             serde_json::from_str(value["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
         };
+        let templates = call(&mut session, "templates_list", "{}");
+        assert!(templates["Document"]["Templates"].as_array().unwrap().len() >= 20);
         call(&mut session, "document_new_from_template", r#"{"template":"card"}"#);
         assert_eq!(session.engine.doc.shape_count(), 2);
         let group = call(&mut session, "group_of", r#"{"id":1}"#);

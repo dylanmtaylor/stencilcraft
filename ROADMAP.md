@@ -50,43 +50,23 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
    family, Bluetooth RFCOMM/BLE, registration marks (print-and-cut), mat-free path
    sorting for knife-pressure relief.
 
-## Silhouette Studio feature TODO
+## Reference-app feature inventory
 
-The scope is to track the full feature comparison, including ecosystem-scale work; this
-list is an inventory, not a promise to reproduce proprietary services or assets.
-Completed items should be marked here only when behavior is usable end-to-end.
-
-- [x] VectorCraft-backed engine commands for ellipses, polygons, stars, moving, rotating,
-  scaling, exact-position duplication, Pathfinder, alignment and distribution, with
-  finite-geometry validation and journal-backed undo/redo that preserves StencilCraft
-  metadata snapshots. The desktop exposes duplication for selected objects.
-- [ ] Add pen and node editing; continue expanding path construction and editing. The desktop supports click, box and lasso selection, additive multi-select, drag-to-move, Pathfinder operations, alignment/distribution, and primary-shape rotate/scale controls.
-- [x] Add image import and threshold silhouette trace-to-path workflow for PNG/JPEG, with a configurable threshold and geometry/resource limits; full-color tracing and embedded raster editing remain open.
-- [ ] Add text objects and text-to-path conversion without bundling fonts; define a user
-  font/shaping integration point.
-- [ ] Expand SVG fidelity: advanced CSS/at-rules, external references, clipping, masks,
-  filters, and additional vector formats.
-- [ ] Implement Print & Cut: printable SVG sheet export with three alignment marks is available; printer dialog support, machine sensor protocol, calibration and hardware end-to-end tests remain open.
-- [ ] Add production tools: weed lines, nesting, multi-cutter job assignment, batch and
-  repeated-pass workflows.
-- [ ] Expand design formats and project interoperability, including DXF import and a
-  documented strategy for proprietary Studio3 files (do not reverse-engineer protected
-  formats without an appropriate public specification).
-- [ ] Grow machine support: USB bulk, Bluetooth, more model generations, device discovery,
-  live status, registration-mark protocol, and mat-free knife path ordering.
-- [ ] Add cloud/account features: sign-in, library sync, purchased-design management and
-  offline cache; decide on a compatible service and data/rights model before implementation.
-- [ ] Add a design marketplace or catalog only with original or permissively licensed
-  assets, clear ownership/licensing, and a sustainable distribution model.
-- [ ] Add mobile and browser clients with shared editing/sending workflows and cloud sync.
-- [ ] Add optional integrations for external design tools (e.g. Illustrator/CorelDRAW-like
-  interchange or plugins) without coupling the core to proprietary software.
-- [ ] Improve export/production parity: PDF/print sheets, design previews, automatic
-  nesting, printer controls and multi-machine output. A manual printable SVG page with
-  three registration marks is available through `print-cut`; automatic sensor alignment
-  is not implemented.
+The full feature comparison with Silhouette Studio 5.0.x and Cricut Design Space 9.8x
+lives in [`docs/reference-apps.md`](docs/reference-apps.md). It lists each feature, our
+status (have / partial / missing / out of scope) and our posture (replicate / reimagine /
+won't do). It replaced the Silhouette Studio feature TODO list that used to be here. The
+same doc states the clean-room posture: we drive the reference apps through their normal
+UI and read their public documentation, then write our own implementation, never using
+their code or assets. Missing items feed the ranked list in [`docs/gaps.md`](docs/gaps.md).
 
 ## Progress log
+
+- 2026-11-02 — Reference-app inventory: `docs/reference-apps.md` lists Silhouette
+  Studio and Cricut Design Space features area by area, with status and posture; it
+  replaces the feature TODO list here. The clean-room posture now allows driving the
+  reference apps through their UI and recording what we observe; their code and assets
+  stay off limits.
 
 - 2026-11-02 — Canvas navigation uses the shared status bar: Fit, Center and zoom
   controls move below the canvas, leaving more room for the artwork. The zoom slider

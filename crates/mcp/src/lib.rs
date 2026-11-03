@@ -1549,7 +1549,7 @@ fn mcp_tools() -> Vec<serde_json::Value> {
         ),
         (
             "machine_dry_run",
-            "Encode the current document for a cutter without touching hardware and return the command transcript. Settings outside the model's documented limits are rejected. model is a machines_list id; optional: media (preset name/id), force, speed, tool, holder, depth, passes, overcut (mm), mat, media_size [w, l] mm, pen, track_enhancing, bbox, regmarks {width, length, x, y, search, quad}, path (also write the byte stream there).",
+            "Encode the current document for a cutter without touching hardware and return the command transcript. Settings outside the model's documented limits are rejected. model is a machines_list id; optional: media (preset name/id), force, speed, tool, holder, depth, passes, overcut (mm), mat, media_size [w, l] mm, pen, track_enhancing, bbox, regmarks {width, length, x, y, search, quad}, order (none | speed | roller, default roller), interior_first (default true), closed_overcut (mm past the start of each closed contour, 0..5), mirror (flip about the media centre for heat-transfer vinyl), path (also write the byte stream there).",
             json!({
                 "model": json!({"type": "string"}),
                 "media": json!({"type": ["string", "integer"]}),
@@ -1566,6 +1566,10 @@ fn mcp_tools() -> Vec<serde_json::Value> {
                 "track_enhancing": json!({"type": "boolean"}),
                 "bbox": json!({"type": "boolean"}),
                 "regmarks": json!({"type": "object"}),
+                "order": json!({"type": "string", "enum": ["none", "speed", "roller"]}),
+                "interior_first": json!({"type": "boolean"}),
+                "closed_overcut": number,
+                "mirror": json!({"type": "boolean"}),
                 "path": path,
             }),
             json!(["model"]),
@@ -1834,6 +1838,23 @@ fn machine_dry_run(
         return Err(bad("document has no visible shapes to cut".to_string()));
     }
     let mut job = s.to_job(&paths, &m::PlotOptions::default(), flag("bbox"));
+    if let Some(v) = params.get("order").filter(|v| !v.is_null()) {
+        job.order = v
+            .as_str()
+            .and_then(m::CutOrder::parse)
+            .ok_or_else(|| bad("order must be none, speed or roller".to_string()))?;
+    }
+    if let Some(v) = params.get("interior_first").filter(|v| !v.is_null()) {
+        job.interior_first = v
+            .as_bool()
+            .ok_or_else(|| bad("interior_first must be a boolean".to_string()))?;
+    }
+    if let Some(v) = params.get("closed_overcut").filter(|v| !v.is_null()) {
+        job.closed_overcut_mm = v
+            .as_f64()
+            .ok_or_else(|| bad("closed_overcut must be a number of mm".to_string()))?;
+    }
+    job.mirror = flag("mirror");
     // Force/speed in the machine's own units (steps, laser power, mm/min).
     let (force, speed) = (u32_param(params, "force")?, u32_param(params, "speed")?);
     for op in &mut job.operations {
@@ -1861,6 +1882,10 @@ fn machine_dry_run(
         "bytes": stream.len(),
         "bbox_mm": program.bbox_mm.map(|b| [b.1, b.0, b.3, b.2]),
         "registration_wait": program.registration_wait,
+        "order": job.order.id(),
+        "interior_first": job.interior_first,
+        "closed_overcut_mm": job.closed_overcut_mm,
+        "mirror": job.mirror,
         "truncated": transcript.len() > DRY_RUN_LINES,
         "transcript": transcript.iter().take(DRY_RUN_LINES).collect::<Vec<_>>(),
         "path": written,
@@ -2258,6 +2283,22 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(r.contains("\"ok\":false") && r.contains("force 50"), "{r}");
+        let r = session
+            .handle_line(r#"{"id":7,"method":"machine.dry_run","params":{"model":"cameo-4","order":"speed","interior_first":false,"closed_overcut":1.0,"mirror":true}}"#)
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&r).unwrap();
+        assert_eq!(v["ok"], true, "{r}");
+        assert_eq!(v["result"]["order"], "speed");
+        assert_eq!(v["result"]["mirror"], true);
+        assert_eq!(v["result"]["interior_first"], false);
+        for bad in [
+            r#"{"id":8,"method":"machine.dry_run","params":{"model":"cameo-4","order":"zigzag"}}"#,
+            r#"{"id":9,"method":"machine.dry_run","params":{"model":"cameo-4","closed_overcut":50}}"#,
+        ] {
+            let r = session.handle_line(bad).unwrap().unwrap();
+            assert!(r.contains("\"ok\":false"), "{r}");
+        }
         let r = session
             .handle_line(r#"{"id":5,"method":"machine.dry_run","params":{"model":"cricut-maker"}}"#)
             .unwrap()

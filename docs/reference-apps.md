@@ -358,6 +358,48 @@ Sources: [Silhouette, *File Types and Features*](https://silhouetteamerica.fresh
 | Mobile apps | both | Phone and tablet clients | missing | reimagine as the WASM/browser build (M5) | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Machine registration | both | Register a machine to an account | out of scope | won't do: account system | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 
+## File formats
+
+Every format either app opens, imports, saves or exports, per edition. SS rows marked
+"observed" were seen in 5.0.539 Basic; the rest come from the vendor pages cited above.
+Owner goal: support every format the source apps support.
+
+| Format | App / edition | Direction | StencilCraft status | Posture |
+| --- | --- | --- | --- | --- |
+| `.stencilcraft` (JSON) | StencilCraft | open, save | have | ours |
+| `.studio3` (Studio V3) | SS Basic+ | open, save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
+| `.studio` (Studio V2) | SS Basic+ | open, save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
+| GSP | SS Basic+ | save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
+| GSD (older Graphtec Studio) | SS Basic+ | open (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
+| DXF | SS Basic+ | open (observed 5.0.539) | import missing; export have (R14, flattened) | replicate |
+| DXF | DS desktop | upload (not on iOS/Android) | import missing | replicate |
+| SVG | SS Designer+ | open | import partial (subset) | replicate |
+| SVG | SS Business | export | have | replicate |
+| SVG | DS | upload | import partial (subset) | replicate |
+| PDF | SS Designer+ | open | missing | replicate |
+| PDF | SS Business | export | missing | replicate |
+| PDF | DS | not accepted for upload (help centre) | missing | replicate (for SS parity) |
+| AI (Illustrator) | SS Business | open | missing | replicate via its PDF-compatible content |
+| EPS | SS Business | open | missing | replicate (PostScript subset) |
+| CDR (CorelDRAW) | SS Business | open | missing | replicate only if its structure can be learned clean-room |
+| PNG | SS Basic+ | open (observed 5.0.539; autotrace on import) | import partial (trace only) | replicate (also placed raster for printing) |
+| PNG | SS Business | export | missing | replicate |
+| PNG | DS | upload | import partial (trace only) | replicate |
+| JPEG | SS Basic+ | open (observed 5.0.539) | import partial (trace only) | replicate |
+| JPEG | SS Business | export | missing | replicate |
+| JPEG | DS | upload | import partial (trace only) | replicate |
+| BMP | SS Basic+, DS | open / upload | missing | replicate |
+| GIF | SS Basic+, DS | open / upload | missing | replicate |
+| TIFF | SS Basic+ | open (observed 5.0.539) | missing | replicate |
+| TIFF | DS | not accepted for upload (help centre) | missing | replicate (for SS parity) |
+| HEIC | DS | upload (listed in one help article) | missing | replicate |
+| WebP | DS | not documented in the help articles we found | missing | verify, then replicate if supported |
+| Embroidery: PES, DST, EXP, JEF, XXX | SS Designer Plus | open | missing | replicate (outline only) |
+| Fonts: TTF/OTF (system fonts) | SS, DS | used for text | missing | replicate through system/user fonts; none bundled |
+| Pattern images (JPG/PNG) | SS Designer+, DS | imported as fill patterns | missing | replicate |
+| Design Space projects | DS | cloud-only; no local project file | n/a (we save `.stencilcraft` locally) | won't do: account system |
+| G-code (Grbl) | StencilCraft | export | have | ours |
+
 ## Silhouette Studio paid editions
 
 Features the paid editions (Designer, Designer Plus, Business) add over Basic, from

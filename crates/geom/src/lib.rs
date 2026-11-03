@@ -19,6 +19,19 @@ pub type Result<T> = std::result::Result<T, GeomError>;
 /// value is treated as zero. Values above this but non-finite are always an error.
 pub const MM_EPSILON: f64 = 1e-9;
 
+/// Millimetres per inch: the one inch/mm conversion factor (inch-based mats and page sizes).
+pub const MM_PER_INCH: f64 = 25.4;
+
+/// Converts inches at an input boundary to document millimetres.
+pub const fn inches_to_mm(inches: f64) -> f64 {
+    inches * MM_PER_INCH
+}
+
+/// Converts document millimetres to inches at a display boundary.
+pub const fn mm_to_inches(mm: f64) -> f64 {
+    mm / MM_PER_INCH
+}
+
 /// Rejects a non-finite millimetre length before it can poison a document.
 pub fn check_finite_mm(value: f64, what: &'static str) -> Result<f64> {
     if !value.is_finite() {

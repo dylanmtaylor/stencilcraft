@@ -48,6 +48,9 @@ mod control;
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
 
+/// File › New: the New Document dialog (preset cards and details).
+mod new_doc;
+
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod panels;
 
@@ -69,6 +72,8 @@ pub struct UserPrefs {
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
+    /// Sizes created from New Document, newest first (its Recent tab).
+    pub recent_new: Vec<new_doc::RecentDoc>,
 }
 
 impl Default for UserPrefs {
@@ -81,6 +86,7 @@ impl Default for UserPrefs {
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
+            recent_new: Vec::new(),
         }
     }
 }
@@ -236,6 +242,7 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopMenuAction {
     NewDoc,
+    NewFromTemplate,
     OpenDoc,
     OpenRecent(usize),
     SaveDoc,
@@ -533,6 +540,9 @@ fn main() -> Result<(), String> {
     let mut app = StencilApp::new(open_path.as_deref());
     app.window_frame = decision.frame;
     app.control_port = control_port;
+    if open_path.is_none() {
+        app.open_new_document(0);
+    }
 
     let options = eframe::NativeOptions {
         viewport,
@@ -639,6 +649,13 @@ pub struct StencilApp {
     /// File › Quit was chosen; the next frame closes the window.
     pub quit_requested: bool,
     pub text_dialog_state: DialogState<String>,
+    /// File › New's dialog.
+    pub new_doc: new_doc::NewDocState,
+    saved_document: stencilcraft_doc::Document,
+    pending_new_document: Option<new_doc::Choice>,
+    discard_new_dialog: DialogState,
+    /// Name of an unsaved document (New Document's Name), shown in the title bar.
+    pub doc_title: String,
     pub text_value: String,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
@@ -765,6 +782,7 @@ impl StencilApp {
         } else {
             stencilcraft_ui_egui::ColorTheme::Light
         };
+        let saved_document = engine.doc.clone();
         Self {
             workspace: default_workspace(),
             window_frame: Frame::Native,
@@ -793,6 +811,11 @@ impl StencilApp {
             text_dialog: false,
             quit_requested: false,
             text_dialog_state: DialogState::new(),
+            new_doc: new_doc::NewDocState::default(),
+            saved_document,
+            pending_new_document: None,
+            discard_new_dialog: DialogState::new(),
+            doc_title: "Untitled".to_string(),
             text_value: String::new(),
             canvas_drag_shape: None,
             canvas_selection_start: None,
@@ -885,6 +908,7 @@ impl StencilApp {
                     self.last_board = None;
                 }
                 self.open_path = Some(path.clone());
+                self.saved_document = self.engine.doc.clone();
                 self.record_recent_file(path);
             }
             let _ = job.reply.send(reply);
@@ -949,6 +973,7 @@ impl StencilApp {
         match stencilcraft_doc::save_to(&self.engine.doc, &path) {
             Ok(()) => {
                 self.open_path = Some(path.clone());
+                self.saved_document = self.engine.doc.clone();
                 self.record_recent_file(path);
                 self.status = "saved".to_string();
             }
@@ -983,6 +1008,7 @@ impl StencilApp {
         match stencilcraft_doc::load_from(path) {
             Ok(doc) => {
                 self.engine = stencilcraft_engine::Engine::new(doc);
+                self.saved_document = self.engine.doc.clone();
                 self.set_selection([]);
                 self.open_path = Some(path.to_string());
                 self.view_initialized = false;
@@ -1353,6 +1379,73 @@ impl StencilApp {
         }
     }
 
+    /// Opens File › New on `tab` (0 Recent, 1.. the preset categories).
+    pub fn open_new_document(&mut self, tab: usize) {
+        let kerf = self.engine.doc.kerf.width_mm;
+        self.new_doc.open(tab, kerf, self.mat, self.send.model);
+    }
+
+    pub fn new_document_dialog(&mut self, parent: &mut egui::Ui) {
+        if let Some(choice) = self.new_doc.show(parent.ctx(), &self.prefs.recent_new) {
+            self.request_new_document(choice);
+        }
+        if self.pending_new_document.is_some() {
+            let shown = Dialog::new("discard-before-new", "Discard unsaved changes?")
+                .footer(Footer::standard().ok("Discard changes").cancel("Cancel"))
+                .show(parent.ctx(), &mut self.discard_new_dialog, &mut (), |ui, ()| {
+                    ui.add(Text::new("Creating a new document will discard changes. Cancel to save your work first.").content(Content::Muted));
+                });
+            if shown.outcome == Some(Outcome::Ok) {
+                self.confirm_new_document();
+            } else if shown.closed {
+                self.pending_new_document = None;
+            }
+        }
+    }
+
+    fn request_new_document(&mut self, choice: new_doc::Choice) {
+        if self.engine.doc != self.saved_document {
+            self.pending_new_document = Some(choice);
+        } else {
+            self.create_document(&choice);
+        }
+    }
+
+    fn confirm_new_document(&mut self) {
+        if let Some(choice) = self.pending_new_document.take() {
+            self.create_document(&choice);
+        }
+    }
+
+    /// Create in New Document: a fresh board and kerf through the engine, then the mat,
+    /// machine and title the details chose.
+    pub fn create_document(&mut self, choice: &new_doc::Choice) {
+        for command in choice.commands() {
+            if let Err(e) = self.engine.run(command) {
+                self.status = e.to_string();
+                return;
+            }
+        }
+        self.saved_document = self.engine.doc.clone();
+        self.mat = choice.mat;
+        self.send.model = choice.model;
+        self.doc_title = choice.name.trim().to_string();
+        self.open_path = None;
+        self.set_selection([]);
+        self.view_initialized = false;
+        self.last_board = None;
+        new_doc::push_recent(
+            &mut self.prefs.recent_new,
+            choice.recent(),
+            new_doc::MAX_RECENT,
+        );
+        self.save_prefs();
+        self.status = format!(
+            "new document {}",
+            new_doc::size_line(choice.width_mm, choice.height_mm, choice.units)
+        );
+    }
+
     pub fn commit_pen_draft(&mut self) {
         if let Some(draft) = self.pen_draft.take() {
             let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&[draft]);
@@ -1439,14 +1532,8 @@ impl StencilApp {
 
     pub fn handle_menu_action(&mut self, action: TopMenuAction) {
         match action {
-            TopMenuAction::NewDoc => {
-                self.run_command(Command::DocumentNew {
-                    width_mm: 100.0,
-                    height_mm: 150.0,
-                });
-                self.set_selection([]);
-                self.open_path = None;
-            }
+            TopMenuAction::NewDoc => self.open_new_document(0),
+            TopMenuAction::NewFromTemplate => self.open_new_document(2),
             TopMenuAction::OpenDoc => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("StencilCraft", &["stencilcraft"])
@@ -1465,7 +1552,7 @@ impl StencilApp {
                     Some(p) => Some(std::path::PathBuf::from(p)),
                     None => rfd::FileDialog::new()
                         .add_filter("StencilCraft", &["stencilcraft"])
-                        .set_file_name("untitled.stencilcraft")
+                        .set_file_name(format!("{}.stencilcraft", self.doc_title))
                         .save_file(),
                 };
                 if let Some(path) = pick {
@@ -1781,7 +1868,8 @@ impl StencilApp {
             .open_path
             .as_deref()
             .and_then(|p| std::path::Path::new(p).file_name()?.to_str())
-            .unwrap_or("Untitled.stencilcraft");
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}.stencilcraft", self.doc_title));
         let title_text = format!("StencilCraft — {doc_name}");
 
         let menus = self.build_menu_bar();
@@ -3536,6 +3624,7 @@ impl eframe::App for StencilApp {
         content.app.workspace = workspace;
         content.app.retain_valid_selection();
         content.app.text_dialog(ui);
+        content.app.new_document_dialog(ui);
         ui.ctx().request_repaint();
     }
 }
@@ -3912,6 +4001,26 @@ mod tests {
             compensated.get_shape(1).unwrap().path,
             app.engine.doc.get_shape(1).unwrap().path
         );
+    }
+
+    #[test]
+    fn new_document_waits_for_confirmation_when_document_changed() {
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::KerfSet { width_mm: 0.4 });
+        let changed = app.engine.doc.clone();
+        let choice = new_doc::Choice {
+            width_mm: 300.0,
+            ..Default::default()
+        };
+        app.request_new_document(choice.clone());
+        assert_eq!(app.engine.doc, changed);
+        assert!(app.pending_new_document.is_some());
+        app.pending_new_document = None; // Cancel preserves the original document.
+        assert_eq!(app.engine.doc, changed);
+        app.request_new_document(choice);
+        app.confirm_new_document();
+        assert_eq!(app.engine.doc.board.width_mm, 300.0);
+        assert_eq!(app.engine.doc, app.saved_document);
     }
 
     #[test]

@@ -32,9 +32,10 @@ pub mod transport;
 pub use capabilities::{Capabilities, Dialect, ProtocolId, Range, Support};
 pub use driver::{MachineDriver, dry_run};
 pub use job::{
-    BBoxMm, CutJob, CutOrder, MAX_BLADE_DIAMETER_MM, MAX_CLOSED_OVERCUT_MM, MAX_OPERATIONS,
-    MAX_OVERCUT_MM, MAX_PASSES, MAX_POINTS, MAX_SORT_PATHS, OpKind, OpSettings, Operation,
-    Registration, apply_job_settings, extend_closed, find_bbox, order_paths, validate,
+    BBoxMm, CutJob, CutOrder, LayerPaths, LayerSettings, MAX_BLADE_DIAMETER_MM,
+    MAX_CLOSED_OVERCUT_MM, MAX_OPERATIONS, MAX_OVERCUT_MM, MAX_PASSES, MAX_POINTS, MAX_SORT_PATHS,
+    OpKind, OpSettings, Operation, Registration, apply_job_settings, extend_closed, find_bbox,
+    order_paths, validate, weld_paths,
 };
 pub use protocol::{
     DriverEvent, MachineStatus, NoHooks, Protocol, SendReport, SessionHooks, WaitFn,
@@ -806,6 +807,7 @@ impl CutSettings {
                     sharpen_start_mm: self.sharpen_start_mm,
                     sharpen_end_mm: self.sharpen_end_mm,
                 },
+                ..Operation::default()
             }],
             origin_down_mm: opts.margin_down_mm,
             origin_right_mm: opts.margin_right_mm,

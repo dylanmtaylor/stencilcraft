@@ -1558,7 +1558,7 @@ fn mcp_tools() -> Vec<serde_json::Value> {
         ),
         (
             "machine_dry_run",
-            "Encode the current document for a cutter without touching hardware and return the command transcript. Settings outside the model's documented limits are rejected. model is a machines_list id; optional: media (preset name/id), force, speed, tool, holder, depth, passes, overcut (mm), mat, media_size [w, l] mm, pen, track_enhancing, bbox, regmarks {width, length, x, y, search, quad}, order (none | speed | roller, default roller), interior_first (default true), closed_overcut (mm past the start of each closed contour, 0..5), mirror (flip about the media centre for heat-transfer vinyl), path (also write the byte stream there).",
+            "Encode the current document for a cutter without touching hardware and return the command transcript. Settings outside the model's documented limits are rejected. model is a machines_list id; optional: media (preset name/id), force, speed, tool, holder, depth, passes, overcut (mm), mat, media_size [w, l] mm, pen, track_enhancing, bbox, regmarks {width, length, x, y, search, quad}, order (none | speed | roller, default roller), interior_first (default true), closed_overcut (mm past the start of each closed contour, 0..5), mirror (flip about the media centre for heat-transfer vinyl), weld (unite overlapping closed contours so overlaps are cut once), layers [{layer: name or #rrggbb line colour, skip, holder (alias tool) 1|2, passes, force, speed}] (cut by layer / line colour; refused when a layer is unknown or a value is outside the machine's limits), path (also write the byte stream there).",
             json!({
                 "model": json!({"type": "string"}),
                 "media": json!({"type": ["string", "integer"]}),
@@ -1579,6 +1579,8 @@ fn mcp_tools() -> Vec<serde_json::Value> {
                 "interior_first": json!({"type": "boolean"}),
                 "closed_overcut": number,
                 "mirror": json!({"type": "boolean"}),
+                "weld": json!({"type": "boolean"}),
+                "layers": json!({"type": "array", "items": json!({"type": "object"})}),
                 "path": path,
             }),
             json!(["model"]),
@@ -1833,8 +1835,9 @@ fn machine_dry_run(
             quad: b("quad"),
         });
     }
-    let mut paths = Vec::new();
+    let mut layers = Vec::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
+        let mut paths = Vec::new();
         for shape in &layer.shapes {
             let pl = stencilcraft_geom::path_to_polylines(
                 &shape.path,
@@ -1842,7 +1845,13 @@ fn machine_dry_run(
             );
             paths.extend(m::paths_from_polylines(&pl));
         }
+        layers.push(m::LayerPaths {
+            name: layer.name.clone(),
+            color: layer.color.clone(),
+            paths,
+        });
     }
+    let paths: Vec<Vec<(f64, f64)>> = layers.iter().flat_map(|l| l.paths.clone()).collect();
     if paths.is_empty() {
         return Err(bad("document has no visible shapes to cut".to_string()));
     }
@@ -1864,6 +1873,7 @@ fn machine_dry_run(
             .ok_or_else(|| bad("closed_overcut must be a number of mm".to_string()))?;
     }
     job.mirror = flag("mirror");
+    job.weld = flag("weld");
     // Force/speed in the machine's own units (steps, laser power, mm/min).
     let (force, speed) = (u32_param(params, "force")?, u32_param(params, "speed")?);
     for op in &mut job.operations {
@@ -1874,6 +1884,16 @@ fn machine_dry_run(
             op.settings.speed = speed;
         }
     }
+    let settings: Vec<m::LayerSettings> = match params.get("layers").filter(|v| !v.is_null()) {
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+            bad(format!(
+                "layers must be [{{layer, skip, holder, passes, force, speed}}]: {e}"
+            ))
+        })?,
+        None => Vec::new(),
+    };
+    job.split_layers(layers, &settings)
+        .map_err(|e| bad(e.to_string()))?;
     let program = m::dry_run(caps, &job).map_err(|e| bad(e.to_string()))?;
     let stream = program.to_stream();
     let written = match params.get("path").and_then(serde_json::Value::as_str) {
@@ -1895,6 +1915,15 @@ fn machine_dry_run(
         "interior_first": job.interior_first,
         "closed_overcut_mm": job.closed_overcut_mm,
         "mirror": job.mirror,
+        "weld": job.weld,
+        "operations": job.operations.iter().map(|op| serde_json::json!({
+            "layer": op.layer,
+            "holder": op.holder,
+            "passes": op.settings.passes,
+            "force": op.settings.force,
+            "speed": op.settings.speed,
+            "paths": op.paths.len(),
+        })).collect::<Vec<_>>(),
         "truncated": transcript.len() > DRY_RUN_LINES,
         "transcript": transcript.iter().take(DRY_RUN_LINES).collect::<Vec<_>>(),
         "path": written,
@@ -2304,10 +2333,24 @@ mod tests {
         for bad in [
             r#"{"id":8,"method":"machine.dry_run","params":{"model":"cameo-4","order":"zigzag"}}"#,
             r#"{"id":9,"method":"machine.dry_run","params":{"model":"cameo-4","closed_overcut":50}}"#,
+            r#"{"id":10,"method":"machine.dry_run","params":{"model":"cameo-4","layers":[{"layer":"cut","passes":50}]}}"#,
+            r#"{"id":11,"method":"machine.dry_run","params":{"model":"cameo-4","layers":[{"layer":"nope","skip":true}]}}"#,
+            r#"{"id":12,"method":"machine.dry_run","params":{"model":"cameo-4","layers":[{"layer":"cut","colour":1}]}}"#,
         ] {
             let r = session.handle_line(bad).unwrap().unwrap();
             assert!(r.contains("\"ok\":false"), "{r}");
         }
+        let r = session
+            .handle_line(r#"{"id":13,"method":"machine.dry_run","params":{"model":"cameo-4","weld":true,"layers":[{"layer":"cut","tool":2,"passes":2}]}}"#)
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&r).unwrap();
+        assert_eq!(v["ok"], true, "{r}");
+        assert_eq!(v["result"]["weld"], true);
+        assert_eq!(v["result"]["operations"][0]["holder"], 2);
+        assert_eq!(v["result"]["operations"][0]["passes"], 2);
+        let lines = v["result"]["transcript"].as_array().unwrap();
+        assert!(lines.iter().any(|l| l == "J2"), "{r}");
         let r = session
             .handle_line(r#"{"id":5,"method":"machine.dry_run","params":{"model":"cricut-maker"}}"#)
             .unwrap()

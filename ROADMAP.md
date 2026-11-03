@@ -103,6 +103,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
   been panned (zoom re-anchored by adding to the pan instead of replacing it) and now
   zooms around the pointer. The single-entry "Essentials" workspace switcher is removed
   from the title bar.
+- 2026-11-03 — Weld on cut and cut by layer in the machine job layer: `cut --weld` /
+  MCP `weld` unites overlapping closed contours per operation with the Pathfinder
+  boolean engine (measured: two squares overlapping by 10 mm cut as one 100 mm outline,
+  not 160 mm), and `cut --layer NAME:SET` / MCP `layers` give each layer or `#rrggbb`
+  line colour skip, tool holder, passes, force and speed, validated against the machine
+  and shown in the dry run (gap 31; desktop Send panel not wired).
+
 - 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
   each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
   Measured: the default blue and the #b87c1b sample come back as their own layers.

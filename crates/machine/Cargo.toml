@@ -8,6 +8,9 @@ description = "Vendor-neutral cutting-machine drivers for StencilCraft: capabili
 
 [dependencies]
 stencilcraft-geom = { workspace = true }
+# Weld on cut: the same boolean engine as the Pathfinder/Weld commands.
+vectorcraft-geom = { workspace = true }
+vectorcraft-pathops = { workspace = true }
 serde = { workspace = true }
 # The machine table (`machines.toml`); MIT OR Apache-2.0, wasm-buildable.
 toml = { version = "1", default-features = false, features = ["std", "serde", "parse"] }

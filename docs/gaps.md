@@ -165,8 +165,13 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     flips about the media centre at job build time; the desktop Send panel doesn't offer it
     yet and no material preset turns it on. No choice between on-mat, without-mat (Smart Materials) and roll feed,
     no project copies, and no arranging pieces on a mat preview.
-31. **Weld on cut and cut by layer**: overlapping shapes are cut twice unless welded by
-    hand, and there is no per-layer cut order or per-layer settings at send time.
+31. **Weld on cut and cut by layer**: the job layer now has weld on cut (`cut --weld`,
+    MCP `weld`) and per-layer send settings (`cut --layer NAME:skip|tool=2,passes=…`,
+    MCP `layers`: skip, tool holder, passes, force, speed, by layer name or line
+    colour). Missing: the desktop Send panel doesn't offer either yet; no per-layer
+    material/media or tool type, no cut-by-fill-colour mode, no per-layer cut order (layers
+    cut in document order), and weld treats a shape lying wholly inside another as a
+    hole.
 32. **Path construction**: the engine now has `path.join`, `path.average-nodes`,
     `path.break`, `path.close`, `shapes.make-compound` and `shapes.release-compound`.
     Missing: clipping masks (make/release) and menu/UI wiring for the path commands.

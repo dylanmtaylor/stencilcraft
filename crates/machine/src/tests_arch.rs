@@ -139,6 +139,7 @@ fn multi_operation_jobs_retool_between_operations() {
                     speed: Some(10),
                     ..OpSettings::default()
                 },
+                ..Operation::default()
             },
             Operation {
                 kind: OpKind::Cut,
@@ -152,6 +153,7 @@ fn multi_operation_jobs_retool_between_operations() {
                     passes: 2,
                     ..OpSettings::default()
                 },
+                ..Operation::default()
             },
         ],
         mat: Mat::Cameo12x12,
@@ -433,4 +435,103 @@ fn mirror_flips_about_the_media_centre_at_job_build_time() {
         quad: false,
     });
     assert!(dry_run(caps, &job).is_err());
+}
+
+fn path_len(paths: &[Vec<(f64, f64)>]) -> f64 {
+    paths
+        .iter()
+        .flat_map(|p| p.windows(2))
+        .map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1))
+        .sum()
+}
+
+#[test]
+fn weld_on_cut_removes_the_doubled_overlap() {
+    // Two 20 mm squares overlapping by 10 mm: 160 mm of cut, 100 mm welded.
+    let two = vec![rect(0.0, 0.0, 20.0, 20.0), rect(10.0, 0.0, 20.0, 20.0)];
+    let welded = weld_paths(two.clone());
+    assert_eq!(welded.len(), 1);
+    assert!(
+        (path_len(&welded) - 100.0).abs() < 1e-6,
+        "{}",
+        path_len(&welded)
+    );
+    // A ring keeps its hole; an open path passes through.
+    let ring = vec![
+        rect(0.0, 0.0, 30.0, 30.0),
+        rect(10.0, 10.0, 10.0, 10.0),
+        vec![(40.0, 0.0), (50.0, 0.0)],
+    ];
+    let w = weld_paths(ring.clone());
+    assert_eq!(w.len(), 3);
+    assert!((path_len(&w) - path_len(&ring)).abs() < 1e-6);
+    // Through the job: off by default, one path when on; the job is untouched.
+    let caps = reg().by_id("cameo-4").unwrap();
+    let mut job = vinyl_job(caps);
+    job.operations[0].paths = two.clone();
+    let moves = |j: &CutJob| {
+        let t = dry_run(caps, j).unwrap().transcript();
+        t.iter().filter(|l| l.starts_with('M')).count()
+    };
+    let without = moves(&job);
+    job.weld = true;
+    let built = apply_job_settings(caps, &job).unwrap();
+    assert_eq!(built.operations[0].paths.len(), 1);
+    assert_eq!(moves(&job), without - 1, "one path to cut, not two");
+    assert_eq!(job.operations[0].paths, two);
+}
+
+fn two_layers() -> Vec<LayerPaths> {
+    vec![
+        LayerPaths {
+            name: "Line #ff0000".into(),
+            color: Some("#ff0000".into()),
+            paths: vec![rect(0.0, 0.0, 10.0, 10.0)],
+        },
+        LayerPaths {
+            name: "score".into(),
+            color: None,
+            paths: vec![rect(20.0, 0.0, 10.0, 10.0)],
+        },
+    ]
+}
+
+#[test]
+fn cut_by_layer_skips_assigns_holders_and_overrides() {
+    let caps = reg().by_id("cameo-4").unwrap();
+    // No settings: one operation, as before.
+    let mut job = vinyl_job(caps);
+    job.split_layers(two_layers(), &[]).unwrap();
+    assert_eq!(job.operations.len(), 1);
+    assert_eq!(job.operations[0].paths.len(), 2);
+    // Skip a layer by colour: its paths drop out.
+    let mut job = vinyl_job(caps);
+    let skip = LayerSettings::parse("#FF0000:skip").unwrap();
+    job.split_layers(two_layers(), &[skip]).unwrap();
+    assert_eq!(job.operations.len(), 1);
+    assert_eq!(job.operations[0].paths, vec![rect(20.0, 0.0, 10.0, 10.0)]);
+    // Tool 2 with its own passes/force/speed reaches the transcript.
+    let mut job = vinyl_job(caps);
+    let ls = LayerSettings::parse("score:tool=2,passes=2,force=7,speed=3").unwrap();
+    job.split_layers(two_layers(), &[ls]).unwrap();
+    assert_eq!(job.operations.len(), 2);
+    let lines = dry_run(caps, &job).unwrap().transcript();
+    let j: Vec<&String> = lines.iter().filter(|l| l.starts_with('J')).collect();
+    assert_eq!(j, ["J1", "J2"]);
+    assert!(lines.iter().any(|l| l == "FX7,2"), "{lines:?}");
+    assert!(lines.iter().any(|l| l == "!3,2"), "{lines:?}");
+    // Bad overrides are refused with the layer named; unknown layers too.
+    for spec in ["score:passes=50", "score:tool=3", "score:force=999"] {
+        let mut job = vinyl_job(caps);
+        job.split_layers(two_layers(), &[LayerSettings::parse(spec).unwrap()])
+            .unwrap();
+        let err = dry_run(caps, &job).unwrap_err().to_string();
+        assert!(err.contains("layer score"), "{spec}: {err}");
+    }
+    let mut job = vinyl_job(caps);
+    let missing = LayerSettings::parse("nope:skip").unwrap();
+    assert!(job.split_layers(two_layers(), &[missing]).is_err());
+    for spec in ["noname", "a:passes=x", "a:colour=1"] {
+        assert!(LayerSettings::parse(spec).is_err(), "{spec}");
+    }
 }

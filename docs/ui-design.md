@@ -47,6 +47,32 @@ clean-room posture and the full feature inventory). The structure is borrowed; t
 - All actions flow through engine `Command`s / transports — the UI stays thin.
 - Selection supports click, left-to-right box/lasso containment, and right-to-left intersecting selection. Current candidates use shape bounds, so curved or concave paths may be conservatively selected; multi-select transforms and modifier-key additive selection remain future work.
 
+## Right-hand panels (Silhouette's panel strip)
+
+Below Properties/Layers the dock holds Silhouette's editing panels as tabs, each a thin
+front end over engine commands (`apps/stencilcraft/src/panels.rs`):
+
+- **Transform**: `AlignBar` + Center to Page, rotate by angle, scale by percent (linked),
+  move by X/Y.
+- **Replicate**: duplicate left/right/above/below, mirror copies, row/column of N copies,
+  fill page, rotate copies (count), one shared spacing field. "Above" is screen-above:
+  the canvas draws document y downwards, so it maps to the engine's `below`.
+- **Offset**: Offset / Internal Offset, distance, corner sharp/round/bevel, corner limit.
+  Touching a control shows a blue preview outline on the canvas (computed with
+  `stencilcraft_kerf::offset_path`, the same code `shapes.offset` runs); Cancel drops it,
+  Apply runs `shapes.offset` and selects the result.
+- **Modify**: weld, subtract, subtract all, intersect, crop, divide, exclude, the
+  Illustrator Pathfinder extras, make/release compound path, convert to path, outline
+  stroke.
+- **Point Editing**: double-click a shape to edit its points (double-click empty canvas
+  to leave); delete, break, corner, smooth, merge, average, make flat/curve, close, join,
+  simplify, convert to path, and a node-count readout.
+
+The options bar shows X/Y/W/H of the selection with a reference-point picker and an
+aspect-lock link; the canvas shows W/H while drawing a shape and X/Y/W/H while dragging
+one. Hidden shapes are not drawn; hidden and locked shapes are skipped by clicks, boxes
+and lassos, and the Layers panel lists every object with eye and lock toggles.
+
 ## Mat backdrop behaviour
 
 - The mat paints behind the design sheet, mats at pixel-corner aligned to the

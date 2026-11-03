@@ -37,6 +37,8 @@ stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }
 stencilcraft-kerf = { path = "crates/kerf" }
 stencilcraft-tiling = { path = "crates/tiling" }
+stencilcraft-layout = { path = "crates/layout" }
+stencilcraft-color = { path = "crates/color" }
 stencilcraft-svg = { path = "crates/svg" }
 stencilcraft-dxf = { path = "crates/dxf" }
 stencilcraft-gcode = { path = "crates/gcode" }

@@ -4969,9 +4969,12 @@ dependencies = [
  "kurbo 0.13.1",
  "serde",
  "serde_json",
+ "stencilcraft-color",
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-kerf",
+ "stencilcraft-layout",
+ "stencilcraft-svg",
  "thiserror 2.0.21",
  "vectorcraft-engine",
  "vectorcraft-geom",
@@ -5008,6 +5011,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "stencilcraft-layout"
+version = "0.1.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "serde",
+ "serde_json",
+ "stencilcraft-doc",
+ "stencilcraft-geom",
+ "stencilcraft-kerf",
+ "thiserror 2.0.21",
+ "tiny-skia",
+]
+
+[[package]]
 name = "stencilcraft-machine"
 version = "0.1.0"
 dependencies = [
@@ -5026,6 +5043,7 @@ dependencies = [
  "stencilcraft-engine",
  "stencilcraft-gcode",
  "stencilcraft-kerf",
+ "stencilcraft-layout",
  "stencilcraft-svg",
  "stencilcraft-testkit",
  "stencilcraft-tiling",

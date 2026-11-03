@@ -1,0 +1,22 @@
+[package]
+name = "stencilcraft-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Cut production layout: machine mats, nesting, cut jobs (order, overcut, test cut, weeding) and Print Then Cut sheets"
+
+[dependencies]
+kurbo = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-geom = { workspace = true }
+stencilcraft-kerf = { workspace = true }
+tiny-skia = "0.11"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

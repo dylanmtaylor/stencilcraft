@@ -107,8 +107,8 @@ Two entry points create a new document pre-set for a kind of project.
 Blank Document, Card, Emboss, Gift Tag, PixScan, Print & Cut, Sketch, Stamping, Stipple.
 Card creates a 10 × 7 in outline with a dashed centre fold (score) line, grouped.
 
-**Home screen "What will you create today?" carousel**: illustrated starter projects, paged with arrows (each click moves it a small step and the app is slow, so page slowly). Seen so far, in order:
-New Document, Vinyl Sticker, Heat Transfer T-Shirt, Sticker Sheet with Print & Cut, Greetings Card, Gift Tag, Stencil, Sketched Message, Foil Stamp Card, Foil Stamp Notebook, Acrylic Light, Metal Engraved Framed Decor, Embossed Card, Embossed Sticker, Coin Case, … (the list continues past Coin Case; still to be recorded).
+**Home screen "What will you create today?" carousel**: illustrated starter projects, paged with arrows (each click moves it a small step and the app is slow, so page slowly). In order:
+New Document, Vinyl Sticker, Heat Transfer T-Shirt, Sticker Sheet with Print & Cut, Greetings Card, Gift Tag, Stencil, Sketched Message, Foil Stamp Card, Foil Stamp Notebook, Acrylic Light, Metal Engraved Framed Decor, Embossed Card, Embossed Sticker, Coin Case, Faux Leather Tray, Leather Earrings, Leather Keychain (18 in all; the carousel stops at Leather Keychain). The mouse wheel over the carousel scrolls it much faster than the arrows.
 
 Posture: replicate as a StencilCraft new-project wizard of our own templates (our own geometry, names and thumbnails; none of the vendor's artwork or photos), each setting page/mat, operation (cut, score, sketch/pen, foil, emboss, engrave), mirror for heat transfer, and print-and-cut marks as the project needs.
 

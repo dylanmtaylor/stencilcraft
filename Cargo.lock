@@ -4231,6 +4231,7 @@ dependencies = [
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-geom",
+ "stencilcraft-kerf",
  "thiserror 2.0.21",
  "vectorcraft-engine",
  "vectorcraft-geom",

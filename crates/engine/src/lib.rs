@@ -15,6 +15,7 @@ use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_kerf::JoinStyle;
 use vectorcraft_engine::Session as VectorCraftSession;
 use vectorcraft_engine::doc::color::{Color, Paint};
 use vectorcraft_engine::doc::geom::PathData;
@@ -168,6 +169,52 @@ pub enum Command {
         ids: Vec<u64>,
         axis: DistributionAxis,
     },
+    /// Copy the selection once beside itself: the copy's bounds touch the
+    /// selection's bounds on `side`, `gap_mm` (finite, ≥ 0) apart.
+    #[serde(rename = "shapes.replicate-side")]
+    ShapesReplicateSide {
+        ids: Vec<u64>,
+        side: Side,
+        gap_mm: f64,
+    },
+    /// A row (`horizontal`, growing right) or column (`vertical`, growing up) of
+    /// `count` items in total, the selection being the first; `gap_mm` between items.
+    #[serde(rename = "shapes.replicate-array")]
+    ShapesReplicateArray {
+        ids: Vec<u64>,
+        axis: DistributionAxis,
+        count: u32,
+        gap_mm: f64,
+    },
+    /// Fill the board with as many copies as fit on the selection's grid (pitch =
+    /// selection size + `gap_mm`), keeping the selection as one cell of it.
+    #[serde(rename = "shapes.replicate-fill")]
+    ShapesReplicateFill { ids: Vec<u64>, gap_mm: f64 },
+    /// A mirrored copy placed on `side`: left/right copies flip horizontally,
+    /// above/below copies flip vertically.
+    #[serde(rename = "shapes.mirror-copy")]
+    ShapesMirrorCopy {
+        ids: Vec<u64>,
+        side: Side,
+        gap_mm: f64,
+    },
+    /// A radial array: `count` items in total, the selection being the first, rotated
+    /// in equal steps of 360°/count about the selection's bounds centre.
+    #[serde(rename = "shapes.rotate-copies")]
+    ShapesRotateCopies { ids: Vec<u64>, count: u32 },
+    /// Add an offset outline of each selected shape (the originals stay): positive
+    /// `distance_mm` grows the solid, negative is an internal offset. `join` is
+    /// `miter` (default), `round` or `bevel`; `miter_limit` (≥ 1, default 4) is the
+    /// corner limit as a multiple of the distance.
+    #[serde(rename = "shapes.offset")]
+    ShapesOffset {
+        ids: Vec<u64>,
+        distance_mm: f64,
+        #[serde(default)]
+        join: JoinStyle,
+        #[serde(default = "default_miter_limit")]
+        miter_limit: f64,
+    },
     /// Add a layer with a name and a production kind.
     #[serde(rename = "layer.add")]
     LayerAdd { name: String, kind: CutStyle },
@@ -221,6 +268,25 @@ pub enum DistributionAxis {
     Horizontal,
     Vertical,
 }
+
+/// Where a replicated copy goes, relative to the selection. Documents are y-up, so
+/// `above` is towards larger y.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Side {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+fn default_miter_limit() -> f64 {
+    stencilcraft_kerf::DEFAULT_MITER_LIMIT
+}
+
+/// Largest `count` a replicate command accepts, and most shapes one may add.
+const MAX_REPLICATE_COUNT: u32 = 1000;
+const MAX_REPLICATED_SHAPES: usize = 10_000;
 
 /// The result of a command: what changed.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -825,6 +891,84 @@ impl Engine {
                 }
                 self.vector_distribute(&ids, axis)
             }
+            Command::ShapesReplicateSide { ids, side, gap_mm } => {
+                const C: &str = "shapes.replicate-side";
+                let (shapes, bounds) = self.replication_source(&ids, gap_mm, C)?;
+                let step = side_step(bounds, side, gap_mm);
+                self.add_replicas(&shapes, &[kurbo::Affine::translate(step)], C)
+            }
+            Command::ShapesReplicateArray {
+                ids,
+                axis,
+                count,
+                gap_mm,
+            } => {
+                const C: &str = "shapes.replicate-array";
+                let (shapes, bounds) = self.replication_source(&ids, gap_mm, C)?;
+                validate_count(count, C)?;
+                let side = match axis {
+                    DistributionAxis::Horizontal => Side::Right,
+                    DistributionAxis::Vertical => Side::Above,
+                };
+                let step = side_step(bounds, side, gap_mm);
+                let transforms = (1..count)
+                    .map(|k| kurbo::Affine::translate(step * f64::from(k)))
+                    .collect::<Vec<_>>();
+                self.add_replicas(&shapes, &transforms, C)
+            }
+            Command::ShapesReplicateFill { ids, gap_mm } => {
+                const C: &str = "shapes.replicate-fill";
+                let (shapes, bounds) = self.replication_source(&ids, gap_mm, C)?;
+                let transforms = fill_offsets(bounds, gap_mm, &self.doc.board, shapes.len(), C)?;
+                self.add_replicas(&shapes, &transforms, C)
+            }
+            Command::ShapesMirrorCopy { ids, side, gap_mm } => {
+                const C: &str = "shapes.mirror-copy";
+                let (shapes, bounds) = self.replication_source(&ids, gap_mm, C)?;
+                let center = bounds.center().to_vec2();
+                let flip = match side {
+                    Side::Left | Side::Right => kurbo::Affine::FLIP_X,
+                    Side::Above | Side::Below => kurbo::Affine::FLIP_Y,
+                };
+                let mirror = kurbo::Affine::translate(center + side_step(bounds, side, gap_mm))
+                    * flip
+                    * kurbo::Affine::translate(-center);
+                self.add_replicas(&shapes, &[mirror], C)
+            }
+            Command::ShapesRotateCopies { ids, count } => {
+                const C: &str = "shapes.rotate-copies";
+                let (shapes, bounds) = self.replication_source(&ids, 0.0, C)?;
+                validate_count(count, C)?;
+                let center = bounds.center().to_vec2();
+                let transforms = (1..count)
+                    .map(|k| {
+                        let angle = std::f64::consts::TAU * f64::from(k) / f64::from(count);
+                        kurbo::Affine::translate(center)
+                            * kurbo::Affine::rotate(angle)
+                            * kurbo::Affine::translate(-center)
+                    })
+                    .collect::<Vec<_>>();
+                self.add_replicas(&shapes, &transforms, C)
+            }
+            Command::ShapesOffset {
+                ids,
+                distance_mm,
+                join,
+                miter_limit,
+            } => {
+                const C: &str = "shapes.offset";
+                let shapes = self.selected_shapes(&ids, C)?;
+                let options = stencilcraft_kerf::OffsetOptions { join, miter_limit };
+                let outlines = shapes
+                    .into_iter()
+                    .map(|(path, style)| {
+                        stencilcraft_kerf::offset_path(&path, distance_mm, &options)
+                            .map(|path| (path, style))
+                            .map_err(|error| EngineError::Invalid(format!("{C}: {error}")))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.add_replicas(&outlines, &[kurbo::Affine::IDENTITY], C)
+            }
             Command::LayerAdd { name, kind } => {
                 if name.trim().is_empty() {
                     return Err(EngineError::Invalid(
@@ -1022,12 +1166,79 @@ impl Engine {
     }
 
     fn duplicate_shapes(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
+        let shapes = self.selected_shapes(ids, "shapes.duplicate")?;
+        let new_ids = self.vector_add_paths(shapes, "shapes.duplicate")?;
+        Ok(Effect::ShapesAdded { ids: new_ids })
+    }
+
+    /// The selection for a replicate command, with its combined bounds.
+    fn replication_source(
+        &self,
+        ids: &[u64],
+        gap_mm: f64,
+        command: &str,
+    ) -> Result<(Vec<(BezPath, CutStyle)>, kurbo::Rect), EngineError> {
+        if !(gap_mm.is_finite() && gap_mm >= 0.0) {
+            return Err(EngineError::Invalid(format!(
+                "{command}: gap {gap_mm} mm is not a finite non-negative distance"
+            )));
+        }
+        let shapes = self.selected_shapes(ids, command)?;
+        let bounds = shapes
+            .iter()
+            .filter_map(|(path, _)| stencilcraft_geom::bounds_of_shape(path))
+            .reduce(|a, b| a.union(b))
+            .ok_or_else(|| EngineError::Invalid(format!("{command}: selection has no bounds")))?;
+        Ok((shapes, bounds))
+    }
+
+    /// Adds every source shape under every transform as one edit, in transform order.
+    fn add_replicas(
+        &mut self,
+        shapes: &[(BezPath, CutStyle)],
+        transforms: &[kurbo::Affine],
+        command: &str,
+    ) -> Result<Effect, EngineError> {
+        let total = shapes.len().saturating_mul(transforms.len());
+        if total > MAX_REPLICATED_SHAPES {
+            return Err(EngineError::Invalid(format!(
+                "{command}: would add {total} shapes, more than the {MAX_REPLICATED_SHAPES} limit"
+            )));
+        }
+        let mut copies = Vec::with_capacity(total);
+        for transform in transforms {
+            for (path, style) in shapes {
+                let copy = transform_path(path, *transform);
+                // VectorCraft stores points; the copy must stay finite in both units.
+                let finite = transform_path(&copy, kurbo::Affine::scale(POINTS_PER_MM))
+                    .elements()
+                    .iter()
+                    .chain(copy.elements())
+                    .all(path_element_is_finite);
+                if !finite {
+                    return Err(EngineError::Invalid(format!(
+                        "{command}: a copy lands outside the finite coordinate range"
+                    )));
+                }
+                copies.push((copy, *style));
+            }
+        }
+        let ids = self.vector_add_paths(copies, command)?;
+        Ok(Effect::ShapesAdded { ids })
+    }
+
+    /// Unique, existing shapes in document order.
+    fn selected_shapes(
+        &self,
+        ids: &[u64],
+        command: &str,
+    ) -> Result<Vec<(BezPath, CutStyle)>, EngineError> {
         if ids.is_empty()
             || std::collections::BTreeSet::from_iter(ids.iter().copied()).len() != ids.len()
         {
-            return Err(EngineError::Invalid(
-                "shapes.duplicate: expected one or more unique shape ids".to_string(),
-            ));
+            return Err(EngineError::Invalid(format!(
+                "{command}: expected one or more unique shape ids"
+            )));
         }
         let requested: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
         let shapes = self
@@ -1043,11 +1254,10 @@ impl Engine {
                 .copied()
                 .unwrap_or_default();
             return Err(EngineError::Invalid(format!(
-                "shapes.duplicate: no shape has id {missing}"
+                "{command}: no shape has id {missing}"
             )));
         }
-        let new_ids = self.vector_add_paths(shapes, "shapes.duplicate")?;
-        Ok(Effect::ShapesAdded { ids: new_ids })
+        Ok(shapes)
     }
 
     fn remove_shapes(&mut self, ids: &[u64], command: &str) -> Result<Effect, EngineError> {
@@ -1756,6 +1966,70 @@ fn validate_radial_primitive(
         )));
     }
     Ok(())
+}
+
+/// The translation that puts a copy edge to edge with `bounds` on `side`.
+fn side_step(bounds: kurbo::Rect, side: Side, gap_mm: f64) -> kurbo::Vec2 {
+    let (w, h) = (bounds.width() + gap_mm, bounds.height() + gap_mm);
+    match side {
+        Side::Left => kurbo::Vec2::new(-w, 0.0),
+        Side::Right => kurbo::Vec2::new(w, 0.0),
+        Side::Above => kurbo::Vec2::new(0.0, h),
+        Side::Below => kurbo::Vec2::new(0.0, -h),
+    }
+}
+
+fn validate_count(count: u32, command: &str) -> Result<(), EngineError> {
+    if !(2..=MAX_REPLICATE_COUNT).contains(&count) {
+        return Err(EngineError::Invalid(format!(
+            "{command}: count {count} must be between 2 and {MAX_REPLICATE_COUNT} (the selection counts as one)"
+        )));
+    }
+    Ok(())
+}
+
+/// Translations for every cell of the selection's grid that lies wholly on the
+/// board, except the selection's own cell.
+fn fill_offsets(
+    bounds: kurbo::Rect,
+    gap_mm: f64,
+    board: &stencilcraft_doc::Board,
+    shapes_per_copy: usize,
+    command: &str,
+) -> Result<Vec<kurbo::Affine>, EngineError> {
+    const EPS: f64 = 1e-9;
+    let (px, py) = (bounds.width() + gap_mm, bounds.height() + gap_mm);
+    if !(px > 0.0 && py > 0.0 && px.is_finite() && py.is_finite()) {
+        return Err(EngineError::Invalid(format!(
+            "{command}: a selection with no width or height needs a positive gap"
+        )));
+    }
+    // Cell i spans [x0 + i·px, x1 + i·px]; keep the cells inside [0, board].
+    let i_min = ((-bounds.x0) / px - EPS).ceil();
+    let i_max = ((board.width_mm - bounds.x1) / px + EPS).floor();
+    let j_min = ((-bounds.y0) / py - EPS).ceil();
+    let j_max = ((board.height_mm - bounds.y1) / py + EPS).floor();
+    let cells = (i_max - i_min + 1.0).max(0.0) * (j_max - j_min + 1.0).max(0.0);
+    if !cells.is_finite() || cells * shapes_per_copy as f64 > (MAX_REPLICATED_SHAPES + 1) as f64 {
+        return Err(EngineError::Invalid(format!(
+            "{command}: filling the board needs more than {MAX_REPLICATED_SHAPES} shapes; raise the gap"
+        )));
+    }
+    let mut offsets = Vec::new();
+    // Bounded by the cell check above, so these casts and loops are small.
+    for j in (j_min as i64)..=(j_max as i64) {
+        for i in (i_min as i64)..=(i_max as i64) {
+            if i != 0 || j != 0 {
+                offsets.push(kurbo::Affine::translate((i as f64 * px, j as f64 * py)));
+            }
+        }
+    }
+    if offsets.is_empty() {
+        return Err(EngineError::Invalid(format!(
+            "{command}: no copy fits on the board"
+        )));
+    }
+    Ok(offsets)
 }
 
 fn path_element_is_finite(element: &kurbo::PathEl) -> bool {
@@ -2983,5 +3257,368 @@ mod tests {
         assert!(engine.can_redo());
         assert!(engine.redo());
         assert_eq!(engine.doc.layers.len(), 1);
+    }
+
+    /// An engine holding one 10 × 5 mm rectangle (id 1) at (10, 20) on a 200 × 100 board.
+    fn one_rect() -> Engine {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::DocumentSetBoard {
+                width_mm: 200.0,
+                height_mm: 100.0,
+            })
+            .unwrap();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 10.0,
+                y: 20.0,
+                width: 10.0,
+                height: 5.0,
+            })
+            .unwrap();
+        engine
+    }
+
+    fn added(effect: Effect) -> Vec<u64> {
+        match effect {
+            Effect::ShapesAdded { ids } => ids,
+            other => panic!("expected ShapesAdded, got {other:?}"),
+        }
+    }
+
+    fn bounds_of(engine: &Engine, id: u64) -> kurbo::Rect {
+        engine.doc.get_shape(id).unwrap().bounds().unwrap()
+    }
+
+    fn assert_rect(actual: kurbo::Rect, expected: (f64, f64, f64, f64)) {
+        let (x0, y0, x1, y1) = expected;
+        for (a, e) in [
+            (actual.x0, x0),
+            (actual.y0, y0),
+            (actual.x1, x1),
+            (actual.y1, y1),
+        ] {
+            assert!((a - e).abs() < 1e-9, "{actual:?} vs {expected:?}");
+        }
+    }
+
+    /// Runs `command`, checks one undo restores the document and redo replays it.
+    fn run_undoable(engine: &mut Engine, command: Command) -> Vec<u64> {
+        let before = engine.doc.clone();
+        let ids = added(engine.run(command).unwrap());
+        let after = engine.doc.clone();
+        assert!(engine.undo());
+        assert_eq!(engine.doc, before, "undo restores the document");
+        assert!(engine.redo());
+        assert_eq!(engine.doc, after, "redo replays the command");
+        ids
+    }
+
+    #[test]
+    fn replicate_side_places_one_copy_edge_to_edge() {
+        for (side, expected) in [
+            (Side::Right, (22.0, 20.0, 32.0, 25.0)),
+            (Side::Left, (-2.0, 20.0, 8.0, 25.0)),
+            (Side::Above, (10.0, 27.0, 20.0, 32.0)),
+            (Side::Below, (10.0, 13.0, 20.0, 18.0)),
+        ] {
+            let mut engine = one_rect();
+            let ids = run_undoable(
+                &mut engine,
+                Command::ShapesReplicateSide {
+                    ids: vec![1],
+                    side,
+                    gap_mm: 2.0,
+                },
+            );
+            assert_eq!(ids.len(), 1);
+            assert_eq!(engine.doc.shape_count(), 2);
+            assert_rect(bounds_of(&engine, ids[0]), expected);
+        }
+    }
+
+    #[test]
+    fn replicate_array_builds_rows_and_columns() {
+        let mut engine = one_rect();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesReplicateArray {
+                ids: vec![1],
+                axis: DistributionAxis::Horizontal,
+                count: 4,
+                gap_mm: 1.0,
+            },
+        );
+        assert_eq!(ids.len(), 3, "count includes the original");
+        for (k, id) in ids.iter().enumerate() {
+            let x0 = 10.0 + 11.0 * (k + 1) as f64;
+            assert_rect(bounds_of(&engine, *id), (x0, 20.0, x0 + 10.0, 25.0));
+        }
+        let mut engine = one_rect();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesReplicateArray {
+                ids: vec![1],
+                axis: DistributionAxis::Vertical,
+                count: 3,
+                gap_mm: 0.5,
+            },
+        );
+        assert_rect(bounds_of(&engine, ids[1]), (10.0, 31.0, 20.0, 36.0));
+    }
+
+    #[test]
+    fn replicate_fill_covers_the_board_with_whole_copies() {
+        let mut engine = one_rect();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesReplicateFill {
+                ids: vec![1],
+                gap_mm: 0.0,
+            },
+        );
+        // The 10 × 5 grid through (10, 20) tiles the 200 × 100 board exactly.
+        assert_eq!(ids.len(), 20 * 20 - 1);
+        let all = engine
+            .doc
+            .shapes()
+            .filter_map(|(_, shape)| shape.bounds())
+            .reduce(|a, b| a.union(b))
+            .unwrap();
+        assert_rect(all, (0.0, 0.0, 200.0, 100.0));
+
+        let mut engine = one_rect();
+        let ids = added(
+            engine
+                .run(Command::ShapesReplicateFill {
+                    ids: vec![1],
+                    gap_mm: 3.0,
+                })
+                .unwrap(),
+        );
+        // Pitch 13 × 8: columns at x0 = 10 − 13k ≥ 0 … ≤ 190, rows at 20 − 8k ≥ 0 … ≤ 95.
+        let columns = (0..).take_while(|k| 10 + 13 * k <= 190).count()
+            + (1..).take_while(|k| 10 - 13 * k >= 0).count();
+        let rows = (0..).take_while(|k| 20 + 8 * k <= 95).count()
+            + (1..).take_while(|k| 20 - 8 * k >= 0).count();
+        assert_eq!(ids.len(), columns * rows - 1);
+        for id in ids {
+            let b = bounds_of(&engine, id);
+            assert!(b.x0 >= -1e-9 && b.y0 >= -1e-9 && b.x1 <= 200.0 + 1e-9 && b.y1 <= 100.0 + 1e-9);
+        }
+    }
+
+    #[test]
+    fn mirror_copy_flips_and_sits_beside_the_selection() {
+        // A right triangle with its right angle at the bottom-left.
+        let mut triangle = BezPath::new();
+        triangle.move_to((0.0, 0.0));
+        triangle.line_to((10.0, 0.0));
+        triangle.line_to((0.0, 6.0));
+        triangle.close_path();
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddPath {
+                path: triangle,
+                style: CutStyle::Cut,
+            })
+            .unwrap();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesMirrorCopy {
+                ids: vec![1],
+                side: Side::Right,
+                gap_mm: 1.0,
+            },
+        );
+        let copy = &engine.doc.get_shape(ids[0]).unwrap().path;
+        assert_rect(kurbo::Shape::bounding_box(copy), (11.0, 0.0, 21.0, 6.0));
+        // The right angle moved to the bottom-right: (21, 6) is the flipped apex.
+        let points: Vec<kurbo::Point> = copy
+            .elements()
+            .iter()
+            .filter_map(|e| e.end_point())
+            .collect();
+        assert!(
+            points
+                .iter()
+                .any(|p| (*p - kurbo::Point::new(21.0, 6.0)).hypot() < 1e-9)
+        );
+        assert!(
+            points
+                .iter()
+                .any(|p| (*p - kurbo::Point::new(21.0, 0.0)).hypot() < 1e-9)
+        );
+
+        let ids = added(
+            engine
+                .run(Command::ShapesMirrorCopy {
+                    ids: vec![1],
+                    side: Side::Below,
+                    gap_mm: 0.0,
+                })
+                .unwrap(),
+        );
+        let copy = &engine.doc.get_shape(ids[0]).unwrap().path;
+        assert_rect(kurbo::Shape::bounding_box(copy), (0.0, -6.0, 10.0, 0.0));
+        let points: Vec<kurbo::Point> = copy
+            .elements()
+            .iter()
+            .filter_map(|e| e.end_point())
+            .collect();
+        assert!(
+            points
+                .iter()
+                .any(|p| (*p - kurbo::Point::new(0.0, -6.0)).hypot() < 1e-9)
+        );
+    }
+
+    #[test]
+    fn rotate_copies_spin_about_the_selection_centre() {
+        let mut engine = one_rect();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesRotateCopies {
+                ids: vec![1],
+                count: 4,
+            },
+        );
+        assert_eq!(ids.len(), 3);
+        // Centre (15, 22.5): a quarter turn swaps width and height, a half turn is the
+        // original footprint again.
+        assert_rect(bounds_of(&engine, ids[0]), (12.5, 17.5, 17.5, 27.5));
+        assert_rect(bounds_of(&engine, ids[1]), (10.0, 20.0, 20.0, 25.0));
+        assert_rect(bounds_of(&engine, ids[2]), (12.5, 17.5, 17.5, 27.5));
+    }
+
+    #[test]
+    fn offset_adds_outlines_and_supports_internal_offsets() {
+        for (distance, join, expected) in [
+            (1.0, JoinStyle::Miter, (9.0, 19.0, 21.0, 26.0)),
+            (1.0, JoinStyle::Round, (9.0, 19.0, 21.0, 26.0)),
+            (-1.0, JoinStyle::Round, (11.0, 21.0, 19.0, 24.0)),
+        ] {
+            let mut engine = one_rect();
+            let ids = run_undoable(
+                &mut engine,
+                Command::ShapesOffset {
+                    ids: vec![1],
+                    distance_mm: distance,
+                    join,
+                    miter_limit: 4.0,
+                },
+            );
+            assert_eq!(engine.doc.shape_count(), 2, "the original stays");
+            assert_rect(bounds_of(&engine, ids[0]), expected);
+        }
+        // Defaults come from serde: miter join, corner limit 4.
+        let command: Command = serde_json::from_str(
+            r#"{"command":"shapes.offset","params":{"ids":[1],"distance_mm":-0.5}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::ShapesOffset {
+                ids: vec![1],
+                distance_mm: -0.5,
+                join: JoinStyle::Miter,
+                miter_limit: 4.0
+            }
+        );
+    }
+
+    #[test]
+    fn replicate_commands_reject_bad_input_without_editing() {
+        let mut engine = one_rect();
+        let before = engine.doc.clone();
+        let side = |ids: Vec<u64>, gap_mm| Command::ShapesReplicateSide {
+            ids,
+            side: Side::Right,
+            gap_mm,
+        };
+        let array = |count| Command::ShapesReplicateArray {
+            ids: vec![1],
+            axis: DistributionAxis::Horizontal,
+            count,
+            gap_mm: 0.0,
+        };
+        let bad = vec![
+            side(vec![], 1.0),
+            side(vec![1, 1], 1.0),
+            side(vec![99], 1.0),
+            side(vec![1], f64::NAN),
+            side(vec![1], f64::INFINITY),
+            side(vec![1], -1.0),
+            side(vec![1], 1e308),
+            array(0),
+            array(1),
+            array(MAX_REPLICATE_COUNT + 1),
+            array(u32::MAX),
+            Command::ShapesRotateCopies {
+                ids: vec![1],
+                count: 0,
+            },
+            Command::ShapesRotateCopies {
+                ids: vec![],
+                count: 4,
+            },
+            Command::ShapesMirrorCopy {
+                ids: vec![1],
+                side: Side::Above,
+                gap_mm: f64::NEG_INFINITY,
+            },
+            // The gap is so big no second copy fits on the board.
+            Command::ShapesReplicateFill {
+                ids: vec![1],
+                gap_mm: 500.0,
+            },
+            Command::ShapesOffset {
+                ids: vec![1],
+                distance_mm: f64::NAN,
+                join: JoinStyle::Round,
+                miter_limit: 4.0,
+            },
+            Command::ShapesOffset {
+                ids: vec![1],
+                distance_mm: 1.0,
+                join: JoinStyle::Miter,
+                miter_limit: 0.0,
+            },
+        ];
+        for command in bad {
+            assert!(engine.run(command.clone()).is_err(), "{command:?}");
+            assert_eq!(engine.doc, before, "{command:?} left the document alone");
+        }
+
+        // A hairline selection would need far too many copies to fill the board.
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.01,
+                height: 0.01,
+            })
+            .unwrap();
+        let before = engine.doc.clone();
+        assert!(
+            engine
+                .run(Command::ShapesReplicateFill {
+                    ids: vec![1],
+                    gap_mm: 0.0,
+                })
+                .is_err()
+        );
+        assert_eq!(engine.doc, before);
+        // Still editable after the failures.
+        assert!(
+            engine
+                .run(Command::ShapesReplicateSide {
+                    ids: vec![1],
+                    side: Side::Right,
+                    gap_mm: 0.0,
+                })
+                .is_ok()
+        );
     }
 }

@@ -1147,8 +1147,9 @@ impl Engine {
                 miter_limit,
             } => {
                 let miter_limit = miter_limit.unwrap_or(4.0);
-                if !(width_mm.is_finite() && width_mm > 0.0 && width_mm <= 1000.0)
-                    || !(miter_limit.is_finite() && (1.0..=100.0).contains(&miter_limit))
+                // Range checks reject NaN and infinities too.
+                if !((f64::MIN_POSITIVE..=1000.0).contains(&width_mm)
+                    && (1.0..=100.0).contains(&miter_limit))
                 {
                     return Err(EngineError::Invalid("path.outline-stroke: width_mm must be finite, positive and at most 1000; miter_limit between 1 and 100".to_string()));
                 }

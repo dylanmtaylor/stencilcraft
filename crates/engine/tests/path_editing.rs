@@ -1,5 +1,6 @@
 //! Path editing, compound, pathfinder extras, flags and queries: geometry, node counts,
 //! undo, and calm errors on bad input.
+#![allow(clippy::unwrap_used, clippy::panic)]
 
 use kurbo::{BezPath, ParamCurveNearest, PathEl, Point, Shape as _};
 use stencilcraft_doc::CutStyle;

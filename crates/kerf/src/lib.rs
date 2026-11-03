@@ -287,6 +287,7 @@ mod tests {
             },
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
+            images: Vec::new(),
         };
         doc.push_shape(0, ccw_path(50.0), CutStyle::Cut).unwrap();
         let out = apply(&doc, 4.0).unwrap();
@@ -319,6 +320,7 @@ mod tests {
             },
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
+            images: Vec::new(),
         };
         doc.push_shape(0, ccw_path(100.0), CutStyle::Cut).unwrap();
         let mut counter = kurbo::BezPath::new();
@@ -366,6 +368,7 @@ mod tests {
             },
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
+            images: Vec::new(),
         };
         let mut compound = box_at(0.0, 0.0, 100.0, 100.0);
         compound.extend(box_at(20.0, 20.0, 80.0, 80.0).elements().iter().copied());
@@ -424,6 +427,7 @@ mod tests {
             },
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
+            images: Vec::new(),
         };
         let source = Polyline::from_path(&path);
         let source_perimeter = perimeter(&source[0].points);
@@ -498,6 +502,7 @@ mod tests {
                     },
                     layers: vec![Layer::new("cut", CutStyle::Cut)],
                     next_shape_id: 1,
+                    images: Vec::new(),
                 };
                 doc.push_shape(0, regular_polygon(sides, radius), CutStyle::Cut)
                     .unwrap();

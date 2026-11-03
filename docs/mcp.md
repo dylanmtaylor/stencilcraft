@@ -290,7 +290,7 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `machines.list` | `{}` | array of machines: `{id, name, vendor, protocol, support, usb, firmware, cut_width_mm, cut_length_mm, media_width_mm, mats, tool_holders, tools, max_force_gf, force{min,max,unit}, speed{min,max,unit}, roll_feed, bluetooth, regmarks, quad_regmarks, overcut, multi_pass, notes}` (`null` = undocumented) |
 | `machine.capabilities` | `{model}` | that machine's full capabilities row |
-| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, order?: "none"\|"speed"\|"roller", interior_first?, closed_overcut?, mirror?, path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, order, interior_first, closed_overcut_mm, mirror, truncated, transcript: [..], path}` |
+| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, order?: "none"\|"speed"\|"roller", interior_first?, closed_overcut?, mirror?, weld?, layers?: [{layer, skip?, holder?, passes?, force?, speed?}], path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, order, interior_first, closed_overcut_mm, mirror, weld, operations: [{layer, holder, passes, force, speed, paths}], truncated, transcript: [..], path}` |
 | `export.pdf` | `{path}` | `{path}` |
 | `export.image` | `{path, dpi?}` (`.png`, `.jpg`/`.jpeg`; dpi default 300, up to 4800) | `{path, dpi}` |
 | `import.file` | `{path, fit_to_page?, join?, join_tolerance?, dpi?}` | `{shapes: [id], images: [id]}` |
@@ -428,7 +428,11 @@ naming the knob and range — never clamped. Job settings: `order` (`roller` def
 by the feed-axis top edge; `speed`: nearest-neighbour; `none`: document order),
 `interior_first` (default true: inner contours before the closed path around them),
 `closed_overcut` (mm, 0–5, past the start of each closed contour) and `mirror` (flip about
-the media centre for heat-transfer vinyl; not with `regmarks`). See
+the media centre for heat-transfer vinyl; not with `regmarks`), `weld` (unite overlapping
+closed contours so overlaps are cut once) and `layers` (cut by layer: per layer name or
+`#rrggbb` line colour, `skip`, `holder` (alias `tool`) 1 or 2, `passes`, `force`,
+`speed`; an unknown layer or field, or a value outside the machine's limits, is an
+error). See
 [`machine.md`](machine.md) › Job options. There is deliberately **no** MCP method that sends
 to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a person.
 

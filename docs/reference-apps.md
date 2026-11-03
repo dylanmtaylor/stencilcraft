@@ -400,6 +400,47 @@ Owner goal: support every format the source apps support.
 | Design Space projects | DS | cloud-only; no local project file | n/a (we save `.stencilcraft` locally) | won't do: account system |
 | G-code (Grbl) | StencilCraft | export | have | ours |
 
+## Cutters
+
+Every machine either app drives. Silhouette USB IDs and widths come from the device table of
+[inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette) (GPL, read as a
+specification only; see [`machine.md`](machine.md)). Tools and Cricut sizes are from vendor
+pages and marked "to verify" where they are not settled. StencilCraft's `Model` table in
+`crates/machine` currently covers CAMEO 3/4/4 Plus/4 Pro/5/5 Plus/Pro MK-II and Portrait 3/4,
+with a dry-run encoder and an opt-in serial transport (no USB bulk or Bluetooth yet).
+Owner goal: support every cutter the source apps drive.
+
+| Machine | Connection | Protocol | Tools / holders | Max media / mats | StencilCraft status | Posture |
+| --- | --- | --- | --- | --- | --- | --- |
+| Silhouette SD | USB `0b4d:111c` / `0b4d:111d` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | to verify | missing | replicate |
+| Silhouette CAMEO (1) | USB `0b4d:1121` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | 304 mm wide; 12×12 / 12×24 mat; rolls to 3 m | missing | replicate |
+| Silhouette CAMEO 2 | USB `0b4d:112b` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | 304 mm wide; 12×12 / 12×24 mat; 3 m | missing | replicate |
+| Silhouette CAMEO 3 | USB `0b4d:112f`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders; AutoBlade | 304.8 mm wide; 12×12 / 12×24 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 4 | USB `0b4d:1137`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders; AutoBlade, ratchet, kraft, rotary, pens | 304.8 mm wide; 12×12 / 12×24 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 4 Plus | USB `0b4d:1138`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders, as CAMEO 4 | 372 mm wide; 15×15 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 4 Pro | USB `0b4d:1139`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders, as CAMEO 4 | 600 mm wide; 24×24 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 5 | USB `0b4d:1140`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders (tool range per vendor docs, to verify) | 330.2 mm wide; 12×12 / 12×24 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 5 Plus | USB `0b4d:1141`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders (to verify) | 372 mm wide; 15×15 mat; 3 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette CAMEO 5 Alpha / Alpha Plus | USB `3844:0001` / `3844:0002` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification); four-mark registration | to verify | 330.2 / 372 mm wide; 3 m | missing | replicate |
+| Silhouette CAMEO Pro MK-II | USB `0b4d:1146` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification); four-mark registration | to verify | 609 mm wide; rolls to 18.29 m | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette Portrait (1) | USB `0b4d:1123` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | 206 mm wide; 8×12 mat | missing | replicate |
+| Silhouette Portrait 2 | USB `0b4d:1132`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | 203 mm wide; 8×12 mat | missing | replicate |
+| Silhouette Portrait 3 | USB `0b4d:113a`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder; AutoBlade | 203 mm wide; 8×12 mat; long media | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette Portrait 4 | USB `0b4d:113f`, Bluetooth | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 2 holders (to verify) | 216 mm wide; 8.5×12 mat; long media | partial: in `Model`; dry-run encode; serial only | replicate |
+| Silhouette Curio | USB (ID not in our sources) | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) (to verify) | 2 holders; emboss/etch/stipple tools; platform base | 8.5×6 in base, 8.5×12 extended (to verify) | missing | replicate once its IDs and commands are confirmed from public sources or observation |
+| Silhouette Curio 2 | USB, Bluetooth (ID not in our sources) | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) (to verify) | 2 holders; emboss/etch tools | to verify | missing | replicate once its IDs and commands are confirmed |
+| Graphtec Craft ROBO CC200-20 | USB `0b4d:110a` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | 200 mm wide; 1 m | missing | replicate |
+| Graphtec Craft ROBO CC300-20 | USB `0b4d:111a` | Graphtec GPGL-style ASCII (facts from GPL drivers used as a specification) | 1 holder | to verify | missing | replicate |
+| Graphtec CE/CB professional plotters | USB, serial, network (vendor docs) | Graphtec GP-GL / HP-GL (vendor-published command references) | 1–2 tools | to verify per model | missing | replicate from Graphtec's published command references; whether SS drives them is to verify |
+| "Silhouette Joy" | — | — | — | — | n/a | no such Silhouette machine found; Joy is a Cricut machine (below) |
+| Cricut Explore / Explore One | USB; Bluetooth via adapter | Cricut proprietary | Explore: 2 clamps (A accessory, B blade); One: 1 | 12×12 / 12×24 mat | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Explore Air / Air 2 | USB, Bluetooth | Cricut proprietary | 2 clamps; fine/deep-point blades, pens, scoring stylus, foil | 12×12 / 12×24 mat | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Explore 3 | USB, Bluetooth | Cricut proprietary | 2 clamps, as Air 2 | 12×12 / 12×24 mat; Smart Materials without a mat up to 12 ft | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Maker / Maker 3 | USB, Bluetooth | Cricut proprietary | Adaptive tools: rotary, knife (multi-pass), scoring wheel, debossing, engraving, perforation, wave, foil | 12×12 / 12×24 mat; Maker 3: Smart Materials up to 12 ft | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Joy | Bluetooth | Cricut proprietary | 1 tool: blade, pens, foil | 4.5×6.5 / 4.5×12 mat, Card Mat; Smart Materials up to 20 ft | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Joy Xtra | Bluetooth | Cricut proprietary | 1 tool: blade, pens, foil; Print Then Cut | 8.5×12 mat; Smart Materials 9.5 in wide | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+| Cricut Venture | USB, Bluetooth | Cricut proprietary | Performance blade, pens (to verify) | 24×28 mat; rolls up to 25 in wide | missing | pending owner decision: Cricut machines speak a proprietary, reportedly encrypted protocol tied to Design Space; supporting them would mean reverse-engineering that protocol and possibly circumventing a technical protection measure. We do not do that without the owner's explicit decision and legal review |
+
 ## Silhouette Studio paid editions
 
 Features the paid editions (Designer, Designer Plus, Business) add over Basic, from

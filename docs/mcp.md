@@ -154,13 +154,14 @@ kerf compensation takes `--kerf-join miter|round|bevel` and `--kerf-limit N` bes
 `--apply-kerf MM`; miter with limit 4 stays the default. The MCP `kerf_apply` tool only
 records the kerf width on the document; offsetting with a chosen join is `shapes_offset`.
 
-The desktop app's `--control` socket also answers two window methods the headless session
+The desktop app's `--control` socket also answers three window methods the headless session
 cannot (legacy envelope only):
 
 | Method | Params | Result |
 | --- | --- | --- |
 | `app.screenshot` | `{path}` | `{path, size: [w, h]}`: the next painted frame as a PNG |
 | `app.select` | `{ids}` | `{selected}`: sets the canvas selection (unknown ids are dropped) |
+| `app.view` | `{kerf_preview?, theme?}` | `{kerf_preview, theme}`: turns the kerf preview on or off and sets the theme (`light`/`dark`) |
 
 A successful `doc.open` or `doc.save` through the socket also updates the window title and
 the recent-files list, as File › Open and Save do.

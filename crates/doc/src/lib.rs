@@ -4,6 +4,8 @@
 //! Every read path returns `Result` with a calm, printable error: a malformed file
 //! must never crash (`AGENTS.md` › "Never crash"), because it is untrusted input.
 
+pub mod format;
+
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};

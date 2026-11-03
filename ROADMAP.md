@@ -99,6 +99,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Production groundwork: shape operation and contour metadata, reversible
+  combine/attach workflows, mat layout, and print-sheet planning are available through
+  engine commands and MCP. Hardware cutting and complete UI wiring remain open.
+
 - 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
   size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only
   from files we saved ourselves (`docs/formats/silhouette-studio.md`). It sits behind the new

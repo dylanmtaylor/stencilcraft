@@ -107,6 +107,7 @@ fn layers() -> Result<(), String> {
         "crates/dxf",
         "crates/gcode",
         "crates/tiling",
+        "crates/layout",
         "crates/kerf",
         "crates/geom",
         "crates/doc",

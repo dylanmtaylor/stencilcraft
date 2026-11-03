@@ -16,6 +16,8 @@ stencilcraft-geom = { workspace = true }
 stencilcraft-raster = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-generate = { workspace = true }
+stencilcraft-layout = { workspace = true }
+stencilcraft-color = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }
@@ -26,6 +28,7 @@ image = { workspace = true }
 serde_json = { workspace = true }
 # Fonts built in code for tests (no font file in this repository).
 vectorcraft-text = { workspace = true, features = ["test-fonts"] }
+stencilcraft-svg = { workspace = true }
 
 [lints]
 workspace = true

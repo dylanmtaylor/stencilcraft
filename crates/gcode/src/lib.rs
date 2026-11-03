@@ -184,7 +184,9 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
             );
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            for pl in &path_to_polylines(&shape.path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS) {
+            for pl in
+                &path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+            {
                 emit_contour(&mut out, &contour_points(pl), settings, base_power)?;
             }
         }

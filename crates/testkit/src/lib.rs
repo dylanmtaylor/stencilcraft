@@ -23,6 +23,7 @@ fn shape(id: u64, path: BezPath, style: CutStyle) -> Shape {
         hidden: false,
         locked: false,
         tool: None,
+        text: None,
     }
 }
 

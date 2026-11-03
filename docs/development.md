@@ -32,6 +32,28 @@ the desktop app's Save, `stencilcraft-cli`, or by hand — a hand-written file i
 input. Malformed files must yield a calm error message ("line 7: unknown layer kind"),
 never a crash; `crates/doc/tests/` feeds junk into the loader and checks it never panics.
 
+A shape may carry an optional `text` object (format version 1; no bump: older files have
+none, and older readers ignore it and cut `path`). Its `path` is always the laid-out
+outline; `text` holds what it was laid out from, so the text stays editable:
+
+```json
+"text": {
+  "text": "Hello", "font": {"family": "Source Sans 3", "style": "Bold", "file": "/fonts/x.ttf"},
+  "size": 72, "x": 10, "y": 20, "alignment": "centre",
+  "letter_spacing": 0, "line_spacing": 100, "kerning": true,
+  "vertical": false, "weld": false,
+  "flow": {"kind": "curve", "diameter_mm": 80},
+  "letters": [{"index": 1, "dx_mm": 0.5, "dy_mm": 0, "rotate_deg": 10}],
+  "transform": [1, 0, 0, 1, 0, 0]
+}
+```
+
+Only `text`, `font.family`, `size`, `x` and `y` are required; the rest default as shown
+(`style` `Regular`, `flow` straight, `transform` identity) and are left out when default.
+`transform` holds turns and scales made to the shape since its last layout (plain moves fold
+into `x, y`). `flow` may also be `{"kind": "on-path", "path": <a path, as a shape's `path`>, "start",
+"offset_mm", "flip", "shape"}`. Field meanings are in `docs/mcp.md` › Text.
+
 ## Exports
 
 - **SVG**: one `<g>` per layer, `data-kind` records cut/engrave, viewBox in millimetres.

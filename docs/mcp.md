@@ -29,7 +29,8 @@ and `machine_dry_run` (see [Cutting machines](#cutting-machines)), the replicate
 `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset` (see
 [Replicate and offset](#replicate-and-offset)), and the image tools `image_trace`,
 `image_remove_background`, `image_set_bounds` and `image_remove` (see
-[Import and trace](#import-and-trace)). Their
+[Import and trace](#import-and-trace)), and the text tools `text_add`, `text_edit`,
+`text_to_outlines`, `text_ungroup`, `text_fonts` and `text_monogram` (see [Text](#text)). Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -120,6 +121,62 @@ tool, cut): a backend with a punch plunges once per contour at its bounds centre
 | `generate.object-on-path` | `{ids, path_id, perpendicular?, start_angle_deg?, increment_angle_deg?, start_position_mm?, section_length_mm?, count?, step_mm?}` | Copies of the shapes `ids` (as a group, by their bounds centre) along the first contour of `path_id`: rotated to the tangent when `perpendicular` (default true), plus `start_angle_deg` and `increment_angle_deg` per copy; from `start_position_mm` over `section_length_mm` (0 = the whole path); `count` copies (default 50) or one every `step_mm`. The copies are independent shapes. |
 | `generate.replicate` | `{ids, direction, angle_deg?, count?, gap_mm?}` | Advanced Replicate: `count` copies (1–10,000) `on-top` (stacked exactly), `left`, `right`, `above`, `below` or along `angle_deg` (`direction: angle`), each clearing the last by `gap_mm`. |
 | `generate.release` | `{ids}` | Splits each shape into one plain shape per contour and clears tool tags. |
+
+## Text
+
+Live text objects (`crates/engine/src/text.rs`). A text shape's `path` holds the laid-out
+outlines (what every export cuts); its `text` field keeps the parameters so the text stays
+editable. Each command is a dedicated MCP tool (`text_add`, …), a `command_execute`
+command and a `--command` for `stencilcraft-cli run`; editing commands are one undo step.
+
+| Command / tool | Params | Effect |
+| --- | --- | --- |
+| `text.add` / `text_add` | `{text, font, size, x, y, alignment?, letter_spacing?, line_spacing?, kerning?, vertical?, weld?, flow?, letters?, style?}` | `ShapeAdded`. A live text shape on the top layer of `style` (default `cut`; `engrave` for the single-line font). |
+| `text.edit` / `text_edit` | `{id, …any text.add field but style}` | `ShapesEdited`. Lays the text out again; moves, turns, scales and mirrors made to the shape since are kept. |
+| `text.to-outlines` / `text_to_outlines` | `{ids}` | `ShapesEdited`. The outlines stay as plain paths; the text is no longer editable. |
+| `text.ungroup` / `text_ungroup` | `{id, to}` | `ShapesAdded` with every id (the first keeps `id`). `to: lines` makes one text object per line (straight text only); `letters` one per letter, each live text in its exact place (nudges, curve and path placement become its transform). |
+| `text.fonts` / `text_fonts` | `{query?}` | `{"Fonts": {families: [{family, styles, single_line}]}}`: the built-in single-line family first, then installed fonts and loaded font files whose name contains `query`. A query: not recorded. |
+| `text.monogram` / `text_monogram` | `{initials, font, size?, x, y, frame?, padding_mm?}` | `ShapesAdded` `[text, frame]`: 1–4 initials (live text) centred on `x, y`, with a built-in frame (`none`, `circle` (default), `square`, `diamond`, `scallop`) `padding_mm` (default 3) clear of them. |
+
+Fields:
+
+- `font`: `{family, style?, file?}`. `family` is an installed family (`text.fonts`), or
+  `"StencilCraft Single Line"`, the built-in single-stroke lettering for pens and engraving
+  (printable ASCII; other characters draw `?`). `style` defaults to `Regular`; a missing style
+  takes the family's nearest one, a missing family is an error. `file` loads a TTF/OTF/TTC
+  (at most 64 MiB; unreadable files are an error) and is read again whenever the text is laid
+  out; with `file`, `family` may be empty (the file's first family).
+- `size` is the em size in points (1 pt = 25.4/72 mm), 0.01–5000. `x, y` (mm) is the anchor:
+  the first baseline, at its left end, centre or right end by `alignment`.
+- `alignment`: `left` (default), `centre` (`center` also accepted), `right`, `justify` (every
+  line but the last stretched to the widest line).
+- `letter_spacing`: space added between letters in percent of the em (0 = the font's own
+  spacing; −100 to 1000). `line_spacing`: percent of the normal line distance (1.2 em; 100 =
+  normal; 1 to 1000). `kerning: false` turns the font's pair kerning off.
+- `vertical`: letters run top to bottom in columns from right to left.
+- `weld`: overlapping letters are merged into one cut outline (connected script); counters
+  stay. Ignored for the single-line font.
+- `flow` (one horizontal line only; ungroup to lines first):
+  - `{"kind": "straight"}` (default);
+  - `{"kind": "curve", "diameter_mm": D}`: the line bent round a circle of diameter |D| with
+    its middle at the anchor; positive D arches up, negative dips; 0 straightens;
+  - `{"kind": "on-path", "shape": id | "path": <path>, "start": 0.0, "offset_mm": 0, "flip":
+    false}`: the letters follow the shape's outline (its first contour, copied when the
+    command runs). `start` is the fraction of the path's length where the anchor sits (so
+    `alignment` centres or ends the text there); `offset_mm` lifts the letters off the path;
+    `flip` runs the text the other way round, on the other side. Closed paths wrap; open
+    ones continue straight past their ends.
+  Letters are placed rigidly (turned to the path, not bent).
+- `letters`: `[{index, dx_mm, dy_mm, rotate_deg}]`: per-letter nudges by character index into
+  `text` (newlines count), moved and turned about the letter's baseline origin (before any
+  curve or path placement, so `dy_mm` lifts a letter off its path).
+
+`text.edit` works out the move made to the shape by fitting an affine from a fresh layout of
+its old parameters to its current path; when the outline was edited as a path (node edits,
+pathfinder) it no longer fits and `text.edit`/`text.ungroup` refuse instead of discarding the
+edit: undo it, or keep the outlines with `text.to-outlines`. The same happens when the font
+the text was set in is no longer installed. Release Compound Path on a text shape makes plain
+paths.
 
 Legacy requests use one line in and one line out; logging goes to stderr only.
 

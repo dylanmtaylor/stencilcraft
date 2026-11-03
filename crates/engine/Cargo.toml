@@ -19,10 +19,13 @@ stencilcraft-generate = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }
+vectorcraft-text = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }
 serde_json = { workspace = true }
+# Fonts built in code for tests (no font file in this repository).
+vectorcraft-text = { workspace = true, features = ["test-fonts"] }
 
 [lints]
 workspace = true

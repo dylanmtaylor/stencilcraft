@@ -112,6 +112,14 @@ Completed items should be marked here only when behavior is usable end-to-end.
   threshold, despeckle, blur/edge filters, colour range, smoothing/corner threshold and
   all-edges/outer-edge/detach modes, plus background removal. New exports: vector PDF
   and PNG/JPEG at 300/600/1200/custom dpi. Every reader has a mutation corpus.
+- 2026-11-02 — live text engine commands (`docs/mcp.md` › Text): `text.add`/`text.edit`
+  with system fonts or a font file (VectorCraft's font database and shaping), size, x/y,
+  left/centre/right/justify, letter and line spacing, kerning toggle, vertical; weld,
+  ungroup to lines/letters, per-letter nudges, curve by diameter, text on a path (offset,
+  start, flip), to-outlines, font listing, monogram with built-in frames, and an original
+  single-stroke font drawn in code for pens. Text objects saved in `.stencilcraft` (no
+  version bump). 13 engine tests (measured). Desktop UI not wired yet.
+
 - 2026-11-02 — path editing engine commands (`docs/mcp.md`): break, join, close,
   average/merge, delete nodes, corner/smooth, line/curve segment, simplify with a
   tolerance (deviation tested ≤ 1.5× tolerance), outline stroke with join/cap, shape to

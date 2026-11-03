@@ -145,6 +145,10 @@ pub struct Shape {
     /// Locked shapes cannot be selected or edited until unlocked.
     #[serde(default, skip_serializing_if = "is_false")]
     pub locked: bool,
+    /// Live text: the parameters `path` was laid out from, so the text stays editable
+    /// (`text.edit` lays it out again). Absent for plain paths and in older files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<Box<TextSpec>>,
     /// A tool-specific operation for this path (score, emboss, engrave, foil, punch);
     /// `None` is a plain cut or engrave pass by `style`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,6 +201,134 @@ pub enum ToolOp {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// A live text object's parameters. The shape's `path` always holds the laid-out outlines,
+/// so readers that ignore `text` (older builds, every export) still cut the right thing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextSpec {
+    pub text: String,
+    pub font: FontSpec,
+    /// Em size in points (1 pt = 25.4/72 mm).
+    pub size: f64,
+    /// Anchor in mm: the first line's baseline at the alignment point.
+    pub x: f64,
+    pub y: f64,
+    #[serde(default)]
+    pub alignment: TextAlign,
+    /// Space added between letters, in percent of the em (0 = the font's own spacing).
+    #[serde(default)]
+    pub letter_spacing: f64,
+    /// Distance between lines in percent of the normal line distance (100 = normal).
+    #[serde(default = "hundred")]
+    pub line_spacing: f64,
+    /// Pair kerning from the font's tables.
+    #[serde(default = "yes")]
+    pub kerning: bool,
+    /// Top-to-bottom columns instead of left-to-right lines.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub vertical: bool,
+    /// Merge overlapping letter outlines into one cut path (script fonts).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub weld: bool,
+    #[serde(default, skip_serializing_if = "TextFlow::is_straight")]
+    pub flow: TextFlow,
+    /// Per-letter nudges, by character index into `text` (newlines count).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub letters: Vec<LetterOffset>,
+    /// Affine `[a, b, c, d, e, f]` applied after layout: the moves, turns and scales made to
+    /// the shape since its text was laid out.
+    #[serde(default = "identity", skip_serializing_if = "is_identity")]
+    pub transform: [f64; 6],
+}
+
+/// A font by family and style, optionally from a font file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FontSpec {
+    pub family: String,
+    #[serde(default = "regular")]
+    pub style: String,
+    /// The font file the family came from, loaded again when the text is laid out again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextAlign {
+    #[default]
+    Left,
+    #[serde(alias = "center", alias = "centre")]
+    Centre,
+    Right,
+    /// Every line but the last is stretched to the widest line.
+    Justify,
+}
+
+/// How the text runs: straight lines, one line bent round a circle, or one line along a path.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum TextFlow {
+    #[default]
+    Straight,
+    /// One line bent into an arc of this diameter in mm: positive arches up, negative dips.
+    Curve { diameter_mm: f64 },
+    /// One line along `path` (mm). `start` is where the anchor sits, as a fraction of the
+    /// path's length; `offset_mm` lifts the letters off the path; `flip` runs the text the
+    /// other way round, on the other side. `shape` names the shape the path was copied from.
+    OnPath {
+        #[serde(default)]
+        path: BezPath,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<u64>,
+        #[serde(default)]
+        start: f64,
+        #[serde(default)]
+        offset_mm: f64,
+        #[serde(default)]
+        flip: bool,
+    },
+}
+
+impl TextFlow {
+    pub fn is_straight(&self) -> bool {
+        matches!(self, TextFlow::Straight)
+    }
+}
+
+/// A nudge to one letter: moved by `dx_mm`, `dy_mm` and turned `rotate_deg` about its origin.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct LetterOffset {
+    pub index: usize,
+    #[serde(default)]
+    pub dx_mm: f64,
+    #[serde(default)]
+    pub dy_mm: f64,
+    #[serde(default)]
+    pub rotate_deg: f64,
+}
+
+fn hundred() -> f64 {
+    100.0
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn regular() -> String {
+    "Regular".to_string()
+}
+
+/// The identity affine in `TextSpec::transform` form.
+pub const IDENTITY_TRANSFORM: [f64; 6] = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+
+fn identity() -> [f64; 6] {
+    IDENTITY_TRANSFORM
+}
+
+fn is_identity(xf: &[f64; 6]) -> bool {
+    *xf == IDENTITY_TRANSFORM
 }
 
 impl Shape {
@@ -335,6 +467,7 @@ impl Document {
             hidden: false,
             locked: false,
             tool: None,
+            text: None,
         };
         layer.shapes.push(shape.clone());
         Ok(shape)
@@ -545,6 +678,51 @@ mod tests {
         doc.layers[0].shapes[0].locked = true;
         let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
         assert_eq!(doc, back);
+    }
+
+    #[test]
+    fn text_round_trips_and_minimal_text_loads() {
+        let mut doc = sample();
+        let plain = doc.save_json().unwrap();
+        assert!(!plain.contains("\"text\""));
+        doc.layers[0].shapes[0].text = Some(Box::new(TextSpec {
+            text: "Hi".into(),
+            font: FontSpec {
+                family: "Sans".into(),
+                style: "Bold".into(),
+                file: None,
+            },
+            size: 72.0,
+            x: 1.0,
+            y: 2.0,
+            alignment: TextAlign::Centre,
+            letter_spacing: -5.0,
+            line_spacing: 120.0,
+            kerning: false,
+            vertical: false,
+            weld: true,
+            flow: TextFlow::Curve { diameter_mm: 50.0 },
+            letters: vec![LetterOffset {
+                index: 1,
+                dx_mm: 1.0,
+                ..LetterOffset::default()
+            }],
+            transform: IDENTITY_TRANSFORM,
+        }));
+        let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
+        assert_eq!(doc, back);
+        // A minimal hand-written text object fills in the defaults.
+        let json = plain.replace(
+            "\"style\": \"cut\"",
+            "\"style\": \"cut\", \"text\": {\"text\": \"A\", \"font\": {\"family\": \"X\"}, \"size\": 12, \"x\": 0, \"y\": 0}",
+        );
+        let spec = Document::load_json(&json).unwrap().layers[0].shapes[0]
+            .text
+            .clone()
+            .unwrap();
+        assert_eq!(spec.line_spacing, 100.0);
+        assert!(spec.kerning && spec.flow.is_straight());
+        assert_eq!(spec.font.style, "Regular");
     }
 
     #[test]

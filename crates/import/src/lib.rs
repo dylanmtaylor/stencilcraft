@@ -322,6 +322,7 @@ fn join_document(doc: &mut Document, tolerance: f64) {
                     hidden: false,
                     locked: false,
                     tool: None,
+                    text: None,
                 });
                 next_id = next_id.saturating_add(1);
             }

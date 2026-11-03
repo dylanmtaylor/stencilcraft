@@ -10,6 +10,7 @@
 
 pub mod generate;
 mod path_edit;
+pub mod text;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -420,6 +421,27 @@ pub enum Command {
     GenerateReplicate(generate::ReplicateArgs),
     #[serde(rename = "generate.release")]
     GenerateRelease(generate::IdsArgs),
+    /// Live text (`text.rs`; params in `docs/mcp.md` › Text). Add an editable text object.
+    #[serde(rename = "text.add")]
+    TextAdd(text::TextAdd),
+    /// Change some of a text object's parameters and lay it out again.
+    #[serde(rename = "text.edit")]
+    TextEdit(text::TextEdit),
+    /// Keep the outlines as plain cut paths; the text is no longer editable.
+    #[serde(rename = "text.to-outlines")]
+    TextToOutlines { ids: Vec<u64> },
+    /// Split a text object into one text object per line or per letter, in place.
+    #[serde(rename = "text.ungroup")]
+    TextUngroup { id: u64, to: text::UngroupTo },
+    /// Query: font families (built-in single-line, installed, loaded files). Not undoable.
+    #[serde(rename = "text.fonts")]
+    TextFonts {
+        #[serde(default)]
+        query: String,
+    },
+    /// Initials centred in one of the built-in frames (text and frame shapes).
+    #[serde(rename = "text.monogram")]
+    TextMonogram(text::TextMonogram),
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -537,6 +559,10 @@ pub enum Effect {
         ids: Vec<u64>,
     },
     NodeCount(NodeCount),
+    /// `text.fonts`: the font families to choose from.
+    Fonts {
+        families: Vec<text::FontFamily>,
+    },
 }
 
 /// Undo/redo snapshots StencilCraft's production document; VectorCraft still owns the reusable
@@ -667,6 +693,7 @@ impl Engine {
             | Command::SelectSameFill { .. }
             | Command::SelectSameStroke { .. }
             | Command::SelectInverse { .. } => return self.query(&command),
+            Command::TextFonts { .. } => return text::run(self, command),
             _ => {}
         }
         if let Some(id) = edit_targets(&command)
@@ -705,6 +732,11 @@ impl Engine {
                 | Command::ShapesReleaseCompound { .. }
                 | Command::ShapesSetLocked { .. }
                 | Command::ShapesSetHidden { .. }
+                | Command::TextAdd(_)
+                | Command::TextEdit(_)
+                | Command::TextToOutlines { .. }
+                | Command::TextUngroup { .. }
+                | Command::TextMonogram(_)
         );
         let before = self.capture_history_entry(false, false);
         let document_before = self.session.active().map(|state| Arc::clone(&state.doc));
@@ -1469,6 +1501,12 @@ impl Engine {
             | Command::GenerateObjectOnPath(_)
             | Command::GenerateReplicate(_)
             | Command::GenerateRelease(_) => self.generate(command),
+            command @ (Command::TextAdd(_)
+            | Command::TextEdit(_)
+            | Command::TextToOutlines { .. }
+            | Command::TextUngroup { .. }
+            | Command::TextFonts { .. }
+            | Command::TextMonogram(_)) => text::run(self, command),
         }
     }
 
@@ -1745,6 +1783,8 @@ impl Engine {
             )));
         };
         template.path = first;
+        // The pieces are no longer the laid-out text.
+        template.text = None;
         let template = template.clone();
         let mut ids = vec![id];
         let mut extra = Vec::new();
@@ -2482,6 +2522,8 @@ impl Engine {
                         kurbo::Affine::scale(1.0 / POINTS_PER_MM),
                     )),
                     style,
+                    // Live text rides along; `text.edit` works out the edit made since.
+                    text: source_shape.and_then(|shape| shape.text.clone()),
                 },
             ));
             active_nodes.insert(shape_id, node_id.0);
@@ -2640,7 +2682,9 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::PathMergeNodes { id, .. }
         | Command::PathDeleteNodes { id, .. }
         | Command::PathSetNodeType { id, .. }
-        | Command::PathSetSegment { id, .. } => vec![*id],
+        | Command::PathSetSegment { id, .. }
+        | Command::TextUngroup { id, .. } => vec![*id],
+        Command::TextEdit(edit) => vec![edit.id],
         Command::ShapeBoolean { a, b, .. } | Command::PathJoin { a, b, .. } => vec![*a, *b],
         Command::ShapesRemove { ids }
         | Command::ShapesSetStyle { ids, .. }
@@ -2653,7 +2697,8 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesToPath { ids }
         | Command::ShapesMakeCompound { ids }
         | Command::ShapesReleaseCompound { ids }
-        | Command::ShapesSetHidden { ids, .. } => ids.clone(),
+        | Command::ShapesSetHidden { ids, .. }
+        | Command::TextToOutlines { ids } => ids.clone(),
         _ => Vec::new(),
     }
 }

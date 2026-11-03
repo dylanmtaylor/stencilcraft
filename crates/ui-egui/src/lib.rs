@@ -219,8 +219,8 @@ impl View {
         let world_before = self.screen_to_world(anchor);
         self.zoom = (self.zoom * factor).clamp(0.05, 400.0);
         // Re-anchor: solve `anchor/new_zoom + pan = world_before` for pan.
-        self.pan_mm.x += world_before.x as f32 - anchor.x / self.zoom;
-        self.pan_mm.y += world_before.y as f32 - anchor.y / self.zoom;
+        self.pan_mm.x = world_before.x as f32 - anchor.x / self.zoom;
+        self.pan_mm.y = world_before.y as f32 - anchor.y / self.zoom;
     }
 
     /// Center a world-space extent in `viewport` while preserving the current zoom.
@@ -1178,13 +1178,26 @@ mod tests {
 
     #[test]
     fn zoom_at_keeps_anchor_stationary() {
-        let mut view = View::default();
+        let mut view = View {
+            zoom: 3.0,
+            pan_mm: egui::vec2(-40.0, 25.0),
+        };
         let anchor = egui::pos2(133.0, 77.0);
         let before = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
         view.zoom_at(2.0, anchor);
         let after = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
-        assert!((after.x - before.x).abs() < 1e-6, "{before:?} → {after:?}");
-        assert!((after.y - before.y).abs() < 1e-6);
+        assert!((after.x - before.x).abs() < 1e-4, "{before:?} → {after:?}");
+        assert!((after.y - before.y).abs() < 1e-4);
+        // Repeated wheel steps in and back out return to the same view.
+        for _ in 0..10 {
+            view.zoom_at(1.1, anchor);
+        }
+        for _ in 0..10 {
+            view.zoom_at(1.0 / 1.1, anchor);
+        }
+        let back = view.screen_to_world(egui::vec2(anchor.x, anchor.y));
+        assert!((back.x - before.x).abs() < 1e-3 && (back.y - before.y).abs() < 1e-3);
+        assert!((view.zoom - 6.0).abs() < 1e-3);
     }
 
     #[test]

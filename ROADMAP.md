@@ -99,6 +99,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Canvas: wheel zoom no longer throws the canvas off screen once the view has
+  been panned (zoom re-anchored by adding to the pan instead of replacing it) and now
+  zooms around the pointer. The single-entry "Essentials" workspace switcher is removed
+  from the title bar.
 - 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
   each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
   Measured: the default blue and the #b87c1b sample come back as their own layers.

@@ -127,3 +127,40 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     sketch (hatch) and stipple fills for pens, and emboss/deboss/foil patterns. Low
     priority: a pop-up card strut generator, a spelling check for text, and image
     effects on placed rasters.
+29. **Outline Stroke and Expand**: no way to turn a stroked line or open path into a
+    closed outline that can be cut. This is the usual way to make stencil lettering and
+    line art cuttable.
+30. **Mirror on mat and load type**: no per-job mirror for heat-transfer vinyl, which is
+    cut face down. No choice between on-mat, without-mat (Smart Materials) and roll feed,
+    no project copies, and no arranging pieces on a mat preview.
+31. **Weld on cut and cut by layer**: overlapping shapes are cut twice unless welded by
+    hand, and there is no per-layer cut order or per-layer settings at send time.
+32. **Path construction**: missing Join, Average, Break at Point, Close Path, clipping
+    masks (make/release), and Release Compound Path.
+33. **Transform power tools**: missing Transform Again, Transform Each, shear, align to a
+    key object and distribute spacing by a set value.
+34. **More cutters and formats** (see the Cutters and File formats tables in
+    [`reference-apps.md`](reference-apps.md)):
+    - Cutters: Silhouette SD, CAMEO 1/2, CAMEO 5 Alpha, Portrait 1/2, Curio 1/2, Craft
+      ROBO and Graphtec CE/CB are not in the `Model` table.
+    - Formats: PDF/AI/EPS/BMP/GIF/TIFF/HEIC import and PDF/PNG/JPEG export are missing.
+      `.studio3`/GSD import waits on an owner decision.
+    - Cricut machines are pending the owner's decision and a legal review.
+35. **Multiple boards**: one board per document. Missing: Illustrator-style artboards,
+    a template-based new document, and Save Selection As.
+36. **View aids**: missing smart guides, snap to point, guides (make, release, lock),
+    outline view, Show Print/Cut Border, rotated page view and zoom to selection.
+37. **Select menu**: missing Select Inverse, Select Same (fill, stroke, operation, layer),
+    next object above/below, and saved selections.
+38. **Rhinestone, lattice and other generators**: rhinestone layouts, lattice cut-outs,
+    Flexishapes, puzzle and cross-stitch generators, and a font creator.
+39. **Colour tools**: missing swatches, recolour, graphic styles (saved
+    line/fill/operation sets) and an eyedropper.
+40. **Automation**: missing recorded actions and batch replay inside the app. MCP and the
+    CLI cover scripting from outside.
+41. **Design Space conveniences**: missing a history panel, tool and accessory prompts on
+    the Make screen, a favourite-materials list, an uploaded-images library and project
+    collections (as local folders).
+
+The menu-bar placement and proposed engine command for each of these is in
+[`menu-map.md`](menu-map.md).

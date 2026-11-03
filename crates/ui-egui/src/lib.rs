@@ -170,12 +170,16 @@ pub struct MatBackdrop {
     pub label: String,
 }
 
-/// The canvas view: a zoom and a pan, in screen pixels versus world millimetres.
-/// Screen = (world − pan) × zoom.
+/// The canvas view: a zoom, a pan and a quarter-turn rotation, in screen pixels versus
+/// world millimetres. Screen = (turn(world) − pan) × zoom, where `turn` rotates the page
+/// clockwise on screen by `quarter_turns` × 90° (Silhouette's View › Rotate Page). The
+/// rotation is view state only; the document never turns.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct View {
     pub zoom: f32,
     pub pan_mm: egui::Vec2,
+    /// 0–3 clockwise quarter turns; other values are taken modulo 4.
+    pub quarter_turns: u8,
 }
 
 impl Default for View {
@@ -184,24 +188,70 @@ impl Default for View {
         Self {
             zoom: 4.0,
             pan_mm: egui::Vec2::ZERO,
+            quarter_turns: 0,
         }
     }
 }
 
 impl View {
+    /// Rotate a world vector into view space (clockwise on a y-down screen).
+    fn turn(&self, x: f64, y: f64) -> (f64, f64) {
+        match self.quarter_turns % 4 {
+            0 => (x, y),
+            1 => (-y, x),
+            2 => (-x, -y),
+            _ => (y, -x),
+        }
+    }
+
+    /// The inverse of [`turn`](Self::turn).
+    fn unturn(&self, x: f64, y: f64) -> (f64, f64) {
+        match self.quarter_turns % 4 {
+            0 => (x, y),
+            1 => (y, -x),
+            2 => (-x, -y),
+            _ => (-y, x),
+        }
+    }
+
     pub fn world_to_screen(&self, world: stencilcraft_geom::Point) -> egui::Pos2 {
+        let (x, y) = self.turn(world.x, world.y);
         egui::pos2(
-            ((world.x - f64::from(self.pan_mm.x)) * f64::from(self.zoom)) as f32,
-            ((world.y - f64::from(self.pan_mm.y)) * f64::from(self.zoom)) as f32,
+            ((x - f64::from(self.pan_mm.x)) * f64::from(self.zoom)) as f32,
+            ((y - f64::from(self.pan_mm.y)) * f64::from(self.zoom)) as f32,
         )
     }
 
     /// Screen → world, used for pointer-driven pan/zoom.
     pub fn screen_to_world(&self, screen: egui::Vec2) -> stencilcraft_geom::Point {
-        stencilcraft_geom::Point::new(
+        let (x, y) = self.unturn(
             f64::from(screen.x) / f64::from(self.zoom) + f64::from(self.pan_mm.x),
             f64::from(screen.y) / f64::from(self.zoom) + f64::from(self.pan_mm.y),
-        )
+        );
+        stencilcraft_geom::Point::new(x, y)
+    }
+
+    /// A screen-space drag delta as a world-space move in millimetres.
+    pub fn screen_delta_to_world(&self, delta: egui::Vec2) -> stencilcraft_geom::Vec2 {
+        let (x, y) = self.unturn(
+            f64::from(delta.x) / f64::from(self.zoom),
+            f64::from(delta.y) / f64::from(self.zoom),
+        );
+        stencilcraft_geom::Vec2::new(x, y)
+    }
+
+    /// Put world point `world` at screen position `screen` at the current zoom.
+    fn place(&mut self, world: stencilcraft_geom::Point, screen: egui::Pos2) -> bool {
+        let (x, y) = self.turn(world.x, world.y);
+        let pan = egui::vec2(
+            (x - f64::from(screen.x / self.zoom)) as f32,
+            (y - f64::from(screen.y / self.zoom)) as f32,
+        );
+        if !pan.is_finite() {
+            return false;
+        }
+        self.pan_mm = pan;
+        true
     }
 
     /// Zoom by a factor while keeping `anchor_screen` stationary on the same
@@ -215,27 +265,36 @@ impl View {
         {
             return;
         }
-        let anchor = egui::vec2(anchor_screen.x, anchor_screen.y);
-        let world_before = self.screen_to_world(anchor);
+        let world_before = self.screen_to_world(anchor_screen.to_vec2());
         self.zoom = (self.zoom * factor).clamp(0.05, 400.0);
-        // Re-anchor: solve `anchor/new_zoom + pan = world_before` for pan.
-        self.pan_mm.x += world_before.x as f32 - anchor.x / self.zoom;
-        self.pan_mm.y += world_before.y as f32 - anchor.y / self.zoom;
+        self.place(world_before, anchor_screen);
+    }
+
+    /// Turn the view to `quarter_turns` × 90° keeping the world point at the viewport centre.
+    pub fn set_rotation(&mut self, quarter_turns: u8, viewport: egui::Rect) {
+        let center = self.screen_to_world(viewport.center().to_vec2());
+        self.quarter_turns = quarter_turns % 4;
+        if viewport.is_finite() {
+            self.place(center, viewport.center());
+        }
     }
 
     /// Center a world-space extent in `viewport` while preserving the current zoom.
     pub fn center_extent(&mut self, width_mm: f64, height_mm: f64, viewport: egui::Rect) -> bool {
-        if !valid_view_extent(width_mm, height_mm, viewport)
+        self.center_rect(kurbo::Rect::new(0.0, 0.0, width_mm, height_mm), viewport)
+    }
+
+    /// Center world rectangle `rect` in `viewport` while preserving the current zoom.
+    pub fn center_rect(&mut self, rect: kurbo::Rect, viewport: egui::Rect) -> bool {
+        if !valid_view_extent(rect.width(), rect.height(), viewport)
+            || !rect.x0.is_finite()
+            || !rect.y0.is_finite()
             || !self.zoom.is_finite()
             || self.zoom <= 0.0
         {
             return false;
         }
-        self.pan_mm = egui::vec2(
-            (width_mm * 0.5 - f64::from(viewport.center().x / self.zoom)) as f32,
-            (height_mm * 0.5 - f64::from(viewport.center().y / self.zoom)) as f32,
-        );
-        self.pan_mm.is_finite()
+        self.place(rect.center(), viewport.center())
     }
 
     /// Fit a world-space extent inside `viewport`, leaving `margin` points on each side.
@@ -246,7 +305,31 @@ impl View {
         viewport: egui::Rect,
         margin: f32,
     ) -> bool {
-        if !valid_view_extent(width_mm, height_mm, viewport)
+        self.fit_rect(
+            kurbo::Rect::new(0.0, 0.0, width_mm, height_mm),
+            viewport,
+            margin,
+        )
+    }
+
+    /// Fit world rectangle `rect` inside `viewport` (Zoom to Selection), leaving `margin`
+    /// points on each side. A horizontal or vertical line fits along its length.
+    pub fn fit_rect(&mut self, rect: kurbo::Rect, viewport: egui::Rect, margin: f32) -> bool {
+        if !rect.x0.is_finite()
+            || !rect.y0.is_finite()
+            || rect.width() <= 0.0 && rect.height() <= 0.0
+        {
+            return false;
+        }
+        // Give a line a hair of thickness so it still frames along its length.
+        let hair = rect.width().max(rect.height()) * 1e-3;
+        let rect = kurbo::Rect::new(
+            rect.x0,
+            rect.y0,
+            rect.x1.max(rect.x0 + hair),
+            rect.y1.max(rect.y0 + hair),
+        );
+        if !valid_view_extent(rect.width(), rect.height(), viewport)
             || !margin.is_finite()
             || margin < 0.0
             || viewport.width() <= margin * 2.0
@@ -254,46 +337,45 @@ impl View {
         {
             return false;
         }
+        let (w, h) = if self.quarter_turns % 2 == 1 {
+            (rect.height(), rect.width())
+        } else {
+            (rect.width(), rect.height())
+        };
         let available_width = f64::from(viewport.width() - margin * 2.0);
         let available_height = f64::from(viewport.height() - margin * 2.0);
-        self.zoom = (available_width / width_mm)
-            .min(available_height / height_mm)
+        self.zoom = (available_width / w)
+            .min(available_height / h)
             .clamp(0.05, 400.0) as f32;
-        self.center_extent(width_mm, height_mm, viewport)
+        self.center_rect(rect, viewport)
+    }
+
+    /// World rectangle (x0, y0)–(x1, y1) on screen, whatever the rotation.
+    fn rect_screen(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> egui::Rect {
+        egui::Rect::from_two_pos(
+            self.world_to_screen(stencilcraft_geom::Point::new(x0, y0)),
+            self.world_to_screen(stencilcraft_geom::Point::new(x1, y1)),
+        )
     }
 
     /// The document's artboard corners on screen.
     pub fn board_rect_screen(&self, doc: &stencilcraft_doc::Document) -> egui::Rect {
-        let min = self.world_to_screen(stencilcraft_geom::Point::ZERO);
-        let max = self.world_to_screen(stencilcraft_geom::Point::new(
-            doc.board.width_mm,
-            doc.board.height_mm,
-        ));
-        egui::Rect::from_min_max(min, max)
+        self.rect_screen(0.0, 0.0, doc.board.width_mm, doc.board.height_mm)
     }
 
     /// The cutting mat's corners on screen (mat origin = sheet origin: media
     /// loads left-aligned on Cameo 4-series machines).
     pub fn mat_rect_screen(&self, backdrop: &MatBackdrop) -> egui::Rect {
-        let min = self.world_to_screen(stencilcraft_geom::Point::ZERO);
-        let max = self.world_to_screen(stencilcraft_geom::Point::new(
-            backdrop.width_mm,
-            backdrop.height_mm,
-        ));
-        egui::Rect::from_min_max(min, max)
+        self.rect_screen(0.0, 0.0, backdrop.width_mm, backdrop.height_mm)
     }
 
     /// The whole mat on screen: the cutting area plus its rim.
     pub fn mat_frame_rect_screen(&self, backdrop: &MatBackdrop) -> egui::Rect {
-        egui::Rect::from_min_max(
-            self.world_to_screen(stencilcraft_geom::Point::new(
-                -MAT_RIM_SIDE_MM,
-                -MAT_RIM_TOP_MM,
-            )),
-            self.world_to_screen(stencilcraft_geom::Point::new(
-                backdrop.width_mm + MAT_RIM_SIDE_MM,
-                backdrop.height_mm + MAT_RIM_SIDE_MM,
-            )),
+        self.rect_screen(
+            -MAT_RIM_SIDE_MM,
+            -MAT_RIM_TOP_MM,
+            backdrop.width_mm + MAT_RIM_SIDE_MM,
+            backdrop.height_mm + MAT_RIM_SIDE_MM,
         )
     }
 
@@ -302,10 +384,18 @@ impl View {
     pub fn to_canvas_view(&self, viewport: egui::Rect) -> craft_ui::canvas::CanvasView {
         let center_screen = viewport.center();
         let center_world = self.screen_to_world(egui::vec2(center_screen.x, center_screen.y));
-        craft_ui::canvas::CanvasView::new(viewport, center_world, f64::from(self.zoom.max(0.05)))
+        craft_ui::canvas::CanvasView {
+            rotation: 90.0 * f64::from(self.quarter_turns % 4),
+            ..craft_ui::canvas::CanvasView::new(
+                viewport,
+                center_world,
+                f64::from(self.zoom.max(0.05)),
+            )
+        }
     }
 
-    /// Update `zoom` and `pan_mm` from a [`craft_ui::canvas::CanvasView`].
+    /// Update `zoom` and `pan_mm` from a [`craft_ui::canvas::CanvasView`] (its rotation is
+    /// ignored: the view keeps its own quarter turns).
     pub fn from_canvas_view(&mut self, cv: &craft_ui::canvas::CanvasView) {
         if !cv.zoom.is_finite()
             || cv.zoom <= 0.0
@@ -314,13 +404,8 @@ impl View {
         {
             return;
         }
-        let zoom = (cv.zoom as f32).clamp(0.05, 400.0);
-        let center_screen = cv.rect.center();
-        self.zoom = zoom;
-        self.pan_mm = egui::vec2(
-            cv.center.x as f32 - center_screen.x / zoom,
-            cv.center.y as f32 - center_screen.y / zoom,
-        );
+        self.zoom = (cv.zoom as f32).clamp(0.05, 400.0);
+        self.place(cv.center, cv.rect.center());
     }
 }
 
@@ -354,55 +439,64 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop, palet
     ));
     painter.rect_filled(stem, 0.0, palette.ruler);
 
+    let seg = |x0: f64, y0: f64, x1: f64, y1: f64, color| {
+        painter.line_segment(
+            [
+                view.world_to_screen(stencilcraft_geom::Point::new(x0, y0)),
+                view.world_to_screen(stencilcraft_geom::Point::new(x1, y1)),
+            ],
+            (1.0, color),
+        );
+    };
+    let (w, h) = (backdrop.width_mm, backdrop.height_mm);
     let inch_px = (25.4 * view.zoom as f64) as f32;
     if inch_px > 10.0 {
         // Inch grid over the mat surface.
         let mut i = 1.0_f64;
-        while i * 25.4 < backdrop.width_mm {
-            let x = rect.left() + (i * 25.4 * view.zoom as f64) as f32;
-            painter.line_segment(
-                [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                (1.0, palette.mat_grid),
-            );
+        while i * 25.4 < w {
+            seg(i * 25.4, 0.0, i * 25.4, h, palette.mat_grid);
             i += 1.0;
         }
         let mut j = 1.0_f64;
-        while j * 25.4 < backdrop.height_mm {
-            let y = rect.top() + (j * 25.4 * view.zoom as f64) as f32;
-            painter.line_segment(
-                [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                (1.0, palette.mat_grid),
-            );
+        while j * 25.4 < h {
+            seg(0.0, j * 25.4, w, j * 25.4, palette.mat_grid);
             j += 1.0;
         }
     }
     if inch_px > 4.0 {
         // Half-inch ruler ticks on the top and left mat edges, full-inch
-        // ticks darker and longer.
+        // ticks darker and longer (lengths in screen points).
+        let px_mm = 1.0 / f64::from(view.zoom.max(0.05));
         let mut k = 1.0_f64;
-        while k * 12.7 < backdrop.width_mm {
-            let x = rect.left() + (k * 12.7 * view.zoom as f64) as f32;
+        while k * 12.7 < w {
             let (len, color) = tick_style(k, palette);
-            painter.line_segment(
-                [egui::pos2(x, rect.top()), egui::pos2(x, rect.top() + len)],
-                (1.0, color),
-            );
+            seg(k * 12.7, 0.0, k * 12.7, f64::from(len) * px_mm, color);
             k += 1.0;
         }
         let mut m = 1.0_f64;
-        while m * 12.7 < backdrop.height_mm {
-            let y = rect.top() + (m * 12.7 * view.zoom as f64) as f32;
+        while m * 12.7 < h {
             let (len, color) = tick_style(m, palette);
-            painter.line_segment(
-                [egui::pos2(rect.left(), y), egui::pos2(rect.left() + len, y)],
-                (1.0, color),
-            );
+            seg(0.0, m * 12.7, f64::from(len) * px_mm, m * 12.7, color);
             m += 1.0;
         }
     }
+    let label_at = view.world_to_screen(stencilcraft_geom::Point::new(0.0, h));
+    let toward = rect.center() - label_at;
+    let inset = egui::vec2(4.0_f32.copysign(toward.x), 4.0_f32.copysign(toward.y));
     painter.text(
-        egui::pos2(rect.left() + 4.0, rect.bottom() - 4.0),
-        egui::Align2::LEFT_BOTTOM,
+        label_at + inset,
+        egui::Align2([
+            if toward.x >= 0.0 {
+                egui::Align::Min
+            } else {
+                egui::Align::Max
+            },
+            if toward.y >= 0.0 {
+                egui::Align::Min
+            } else {
+                egui::Align::Max
+            },
+        ]),
         &backdrop.label,
         egui::FontId::proportional(10.0),
         palette.text,
@@ -422,7 +516,7 @@ fn mat_feed_arrow(view: &View, backdrop: &MatBackdrop) -> ([egui::Pos2; 3], egui
             point(center + 3.0, -4.5),
             point(center - 3.0, -4.5),
         ],
-        egui::Rect::from_min_max(point(center - 1.8, -4.5), point(center + 1.8, -2.5)),
+        egui::Rect::from_two_pos(point(center - 1.8, -4.5), point(center + 1.8, -2.5)),
     )
 }
 
@@ -486,35 +580,36 @@ pub fn paint_document(
         egui::StrokeKind::Outside,
     );
 
-    // Grid: 10 mm major pitch, drawn only over the board as hairlines.
+    // Grid: the document's grid (10 mm by default) with its subdivisions once they are
+    // far enough apart, drawn only over the board as hairlines.
     if options.show_grid {
-        let pitch_mm = 10.0_f64;
-        let step_px = view.zoom * pitch_mm as f32;
-        if step_px > 6.0 {
-            let origin = view.world_to_screen(stencilcraft_geom::Point::ZERO);
-            let mut x_mm = 0.0_f64;
-            while x_mm <= doc.board.width_mm + 1e-9 {
-                let x_px = origin.x + (x_mm * view.zoom as f64) as f32;
+        let spacing = doc.grid.spacing_mm;
+        let pitch_mm = if f64::from(view.zoom) * doc.grid.step_mm() > 6.0 {
+            doc.grid.step_mm()
+        } else {
+            spacing
+        };
+        if pitch_mm.is_finite() && pitch_mm > 0.0 && f64::from(view.zoom) * pitch_mm > 6.0 {
+            let (w, h) = (doc.board.width_mm, doc.board.height_mm);
+            let seg = |x0, y0, x1, y1| {
                 painter.line_segment(
                     [
-                        egui::pos2(x_px, origin.y),
-                        egui::pos2(x_px, origin.y + doc.board.height_mm as f32 * view.zoom),
+                        view.world_to_screen(stencilcraft_geom::Point::new(x0, y0)),
+                        view.world_to_screen(stencilcraft_geom::Point::new(x1, y1)),
                     ],
                     (1.0, palette.grid),
                 );
-                x_mm += pitch_mm;
+            };
+            // At most 10 000 lines a side: a tiny pitch on a huge board stays bounded.
+            let mut i = 0.0_f64;
+            while i * pitch_mm <= w + 1e-9 && i < 10_000.0 {
+                seg(i * pitch_mm, 0.0, i * pitch_mm, h);
+                i += 1.0;
             }
-            let mut y_mm = 0.0_f64;
-            while y_mm <= doc.board.height_mm + 1e-9 {
-                let y_px = origin.y + (y_mm * view.zoom as f64) as f32;
-                painter.line_segment(
-                    [
-                        egui::pos2(origin.x, y_px),
-                        egui::pos2(origin.x + doc.board.width_mm as f32 * view.zoom, y_px),
-                    ],
-                    (1.0, palette.grid),
-                );
-                y_mm += pitch_mm;
+            let mut j = 0.0_f64;
+            while j * pitch_mm <= h + 1e-9 && j < 10_000.0 {
+                seg(0.0, j * pitch_mm, w, j * pitch_mm);
+                j += 1.0;
             }
         }
     }
@@ -621,16 +716,16 @@ fn paint_registration_marks(
         inset_mm + mark_mm,
         inset_mm + mark_mm,
     ));
-    painter.rect_filled(egui::Rect::from_min_max(tl_min, tl_max), 0.5, mark_color);
+    painter.rect_filled(egui::Rect::from_two_pos(tl_min, tl_max), 0.5, mark_color);
 
-    let tr_h = egui::Rect::from_min_max(
+    let tr_h = egui::Rect::from_two_pos(
         view.world_to_screen(stencilcraft_geom::Point::new(
             w - inset_mm - mark_mm,
             inset_mm,
         )),
         view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm, inset_mm + 1.5)),
     );
-    let tr_v = egui::Rect::from_min_max(
+    let tr_v = egui::Rect::from_two_pos(
         view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm - 1.5, inset_mm)),
         view.world_to_screen(stencilcraft_geom::Point::new(
             w - inset_mm,
@@ -640,14 +735,14 @@ fn paint_registration_marks(
     painter.rect_filled(tr_h, 0.0, mark_color);
     painter.rect_filled(tr_v, 0.0, mark_color);
 
-    let bl_h = egui::Rect::from_min_max(
+    let bl_h = egui::Rect::from_two_pos(
         view.world_to_screen(stencilcraft_geom::Point::new(inset_mm, h - inset_mm - 1.5)),
         view.world_to_screen(stencilcraft_geom::Point::new(
             inset_mm + mark_mm,
             h - inset_mm,
         )),
     );
-    let bl_v = egui::Rect::from_min_max(
+    let bl_v = egui::Rect::from_two_pos(
         view.world_to_screen(stencilcraft_geom::Point::new(
             inset_mm,
             h - inset_mm - mark_mm,
@@ -997,12 +1092,12 @@ pub fn select_shapes_in_lasso(
                         .iter()
                         .any(|point| point_in_lasso(*point, polygon))
                         || polygon.iter().any(|point| {
-                            egui::Rect::from_min_max(screen_corners[0], screen_corners[2])
+                            egui::Rect::from_two_pos(screen_corners[0], screen_corners[2])
                                 .contains(*point)
                         })
                         || polygon.windows(2).any(|segment| {
                             rects_intersect_segment(
-                                egui::Rect::from_min_max(screen_corners[0], screen_corners[2]),
+                                egui::Rect::from_two_pos(screen_corners[0], screen_corners[2]),
                                 segment[0],
                                 segment[1],
                             )
@@ -1068,6 +1163,71 @@ pub fn paint_preview_paths(
             if screen.len() >= 2 {
                 painter.add(egui::Shape::line(screen, (width, color)));
             }
+        }
+    }
+}
+
+/// The range the canvas scroll bars cover: the mat/board extent (`width_mm` × `height_mm`
+/// from the origin) plus a margin of a tenth of its longer side, at least 20 mm. The bars
+/// widen it to take in the current viewport themselves.
+pub fn scroll_extent(width_mm: f64, height_mm: f64) -> kurbo::Rect {
+    let (w, h) = (width_mm.max(0.0), height_mm.max(0.0));
+    let margin = (w.max(h) * 0.1).max(20.0);
+    kurbo::Rect::new(-margin, -margin, w + margin, h + margin)
+}
+
+/// The document's ruler guides as `craft_ui` canvas guides: key = index + 1, so the
+/// engine's `guide.*` index is `key - 1`. `preview` (a guide being dragged: key and
+/// place) moves or hides that guide until the drag commits.
+pub fn canvas_guides(
+    guides: &[stencilcraft_doc::Guide],
+    preview: Option<(u64, craft_ui::canvas::GuidePlace)>,
+) -> Vec<craft_ui::canvas::Guide> {
+    use craft_ui::canvas::Orientation;
+    guides
+        .iter()
+        .zip(1u64..)
+        .filter_map(|(g, key)| {
+            let orientation = match g.axis {
+                stencilcraft_doc::GuideAxis::Horizontal => Orientation::Horizontal,
+                stencilcraft_doc::GuideAxis::Vertical => Orientation::Vertical,
+            };
+            let (orientation, position) = match preview {
+                Some((k, place)) if k == key => (place.orientation, place.position?),
+                _ => (orientation, g.position_mm),
+            };
+            Some(craft_ui::canvas::Guide {
+                locked: g.locked,
+                ..craft_ui::canvas::Guide::new(key, orientation, position)
+            })
+        })
+        .collect()
+}
+
+/// Paint smart guides: the alignment and spacing lines snapping found while dragging,
+/// in world millimetres. A zero-length line is a snapped anchor point and gets a small
+/// square marker. Headless-testable like [`paint_document`].
+pub fn paint_snap_lines(
+    painter: &egui::Painter,
+    view: &View,
+    lines: &[(stencilcraft_geom::Point, stencilcraft_geom::Point)],
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.0, color);
+    for (a, b) in lines {
+        let (sa, sb) = (view.world_to_screen(*a), view.world_to_screen(*b));
+        if !sa.is_finite() || !sb.is_finite() {
+            continue;
+        }
+        if sa.distance(sb) < 0.5 {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(sa, egui::vec2(7.0, 7.0)),
+                0.0,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+        } else {
+            painter.line_segment([sa, sb], stroke);
         }
     }
 }
@@ -1192,6 +1352,7 @@ mod tests {
         let mut view = View {
             zoom: 2.5,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         let viewport = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), egui::vec2(800.0, 500.0));
         assert!(view.center_extent(600.0, 300.0, viewport));
@@ -1235,6 +1396,7 @@ mod tests {
         let view = View {
             zoom: 1.0,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         let r = view.board_rect_screen(&doc);
         assert_eq!(r.width(), doc.board.width_mm as f32);
@@ -1245,6 +1407,7 @@ mod tests {
         let view = View {
             zoom: 2.0,
             pan_mm: egui::vec2(10.0, 20.0),
+            ..View::default()
         };
         let backdrop = MatBackdrop {
             width_mm: 300.0,
@@ -1266,6 +1429,7 @@ mod tests {
         let view = View {
             zoom: 4.0,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         // 600 mm × 600 mm Pro mat in mm, labelled for display.
         let backdrop = MatBackdrop {
@@ -1292,6 +1456,7 @@ mod tests {
         let view = View {
             zoom: 2.0,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         let contained = egui::Rect::from_min_max(egui::pos2(15.0, 15.0), egui::pos2(125.0, 125.0));
         let crossing = egui::Rect::from_min_max(egui::pos2(15.0, 15.0), egui::pos2(50.0, 50.0));
@@ -1315,6 +1480,7 @@ mod tests {
         let view = View {
             zoom: 2.0,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         let lasso = [
             egui::pos2(0.0, 0.0),
@@ -1340,6 +1506,7 @@ mod tests {
         let view = View {
             zoom: 2.0,
             pan_mm: egui::Vec2::ZERO,
+            ..View::default()
         };
         let edge = view.world_to_screen(stencilcraft_geom::Point::new(10.0, 35.0));
         let interior = view.world_to_screen(stencilcraft_geom::Point::new(35.0, 35.0));
@@ -1375,6 +1542,7 @@ mod tests {
         let mut view = View {
             zoom: 3.5,
             pan_mm: egui::vec2(12.0, -8.0),
+            ..View::default()
         };
         let rect = egui::Rect::from_min_size(egui::pos2(20.0, 40.0), egui::vec2(600.0, 400.0));
         let cv = view.to_canvas_view(rect);
@@ -1397,5 +1565,228 @@ mod tests {
         assert_eq!(subs[0].knots.len(), 5);
         let rebuilt = edit_subpaths_to_bezpath(&subs);
         assert!(!rebuilt.elements().is_empty());
+    }
+
+    /// Paint headlessly into a context pass and return the shapes it produced.
+    fn painted(paint: impl Fn(&egui::Painter)) -> Vec<egui::Shape> {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput::default());
+        paint(&ctx.layer_painter(egui::LayerId::background()));
+        let mut output = ctx.end_pass();
+        output.textures_delta.clear();
+        output.shapes.into_iter().map(|c| c.shape).collect()
+    }
+
+    #[test]
+    fn quarter_turns_round_trip_and_turn_clockwise() {
+        for turns in 0..4u8 {
+            let view = View {
+                zoom: 2.0,
+                pan_mm: egui::vec2(-30.0, 12.0),
+                quarter_turns: turns,
+            };
+            let world = stencilcraft_geom::Point::new(17.0, -4.0);
+            let back = view.screen_to_world(view.world_to_screen(world).to_vec2());
+            assert!((back - world).hypot() < 1e-4, "{turns}: {back:?}");
+        }
+        // A quarter turn clockwise: the page's +x runs down the screen, +y runs left.
+        let view = View {
+            quarter_turns: 1,
+            ..View::default()
+        };
+        let o = view.world_to_screen(stencilcraft_geom::Point::ZERO);
+        let x = view.world_to_screen(stencilcraft_geom::Point::new(1.0, 0.0));
+        let y = view.world_to_screen(stencilcraft_geom::Point::new(0.0, 1.0));
+        assert!(x.y > o.y && (x.x - o.x).abs() < 1e-6);
+        assert!(y.x < o.x && (y.y - o.y).abs() < 1e-6);
+        // It matches craft-ui's view, which the rulers and overlays use.
+        let viewport = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 300.0));
+        let cv = view.to_canvas_view(viewport);
+        let p = stencilcraft_geom::Point::new(12.0, 34.0);
+        assert!((cv.to_screen(p) - view.world_to_screen(p)).length() < 1e-3);
+        // A turned drag maps back to the page's axes.
+        let d = view.screen_delta_to_world(egui::vec2(0.0, 8.0));
+        assert!((d.x - 2.0).abs() < 1e-9 && d.y.abs() < 1e-9);
+    }
+
+    #[test]
+    fn rotating_keeps_the_centre_and_fit_swaps_the_sides() {
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 400.0));
+        let mut view = View::default();
+        assert!(view.fit_extent(200.0, 100.0, viewport, 0.0));
+        let upright = view.zoom;
+        let center = view.screen_to_world(viewport.center().to_vec2());
+        view.set_rotation(1, viewport);
+        let after = view.screen_to_world(viewport.center().to_vec2());
+        assert!((after - center).hypot() < 1e-3);
+        // The 200 × 100 sheet stands 200 tall on screen now: it fits at half the zoom.
+        assert!(view.fit_extent(200.0, 100.0, viewport, 0.0));
+        assert!((view.zoom - upright / 2.0).abs() < 1e-4);
+        let board = view.mat_rect_screen(&MatBackdrop {
+            width_mm: 200.0,
+            height_mm: 100.0,
+            label: String::new(),
+        });
+        assert!((board.height() - 400.0).abs() < 1e-2 && board.width() > 0.0);
+        view.set_rotation(6, viewport);
+        assert_eq!(view.quarter_turns, 2);
+    }
+
+    #[test]
+    fn zoom_to_selection_frames_a_rect_and_a_line() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 500.0));
+        let mut view = View {
+            pan_mm: egui::vec2(40.0, -10.0),
+            ..View::default()
+        };
+        assert!(view.fit_rect(kurbo::Rect::new(50.0, 60.0, 70.0, 70.0), viewport, 50.0));
+        assert!((view.zoom - 20.0).abs() < 1e-4);
+        let c = view.world_to_screen(stencilcraft_geom::Point::new(60.0, 65.0));
+        assert!((c - viewport.center()).length() < 1e-2);
+        // A horizontal line fits along its length.
+        assert!(view.fit_rect(kurbo::Rect::new(0.0, 5.0, 100.0, 5.0), viewport, 50.0));
+        assert!((view.zoom - 4.0).abs() < 1e-4);
+        // Nothing to frame, or NaN: the view stays.
+        let before = view;
+        assert!(!view.fit_rect(kurbo::Rect::new(3.0, 3.0, 3.0, 3.0), viewport, 0.0));
+        assert!(!view.fit_rect(kurbo::Rect::new(f64::NAN, 0.0, 1.0, 1.0), viewport, 0.0));
+        assert_eq!(view, before);
+    }
+
+    #[test]
+    fn zoom_at_keeps_the_anchor_with_a_pan() {
+        let mut view = View {
+            pan_mm: egui::vec2(25.0, -40.0),
+            ..View::default()
+        };
+        let anchor = egui::pos2(210.0, 90.0);
+        let before = view.screen_to_world(anchor.to_vec2());
+        view.zoom_at(1.7, anchor);
+        let after = view.screen_to_world(anchor.to_vec2());
+        assert!((after - before).hypot() < 1e-4, "{before:?} → {after:?}");
+    }
+
+    #[test]
+    fn scroll_extent_pads_the_mat() {
+        assert_eq!(
+            scroll_extent(300.0, 600.0),
+            kurbo::Rect::new(-60.0, -60.0, 360.0, 660.0)
+        );
+        assert_eq!(
+            scroll_extent(50.0, 20.0),
+            kurbo::Rect::new(-20.0, -20.0, 70.0, 40.0)
+        );
+        // Non-finite or negative sizes still give a usable range.
+        let r = scroll_extent(-5.0, 0.0);
+        assert!(r.width() > 0.0 && r.height() > 0.0);
+    }
+
+    #[test]
+    fn canvas_guides_map_keys_locks_and_a_drag_preview() {
+        use craft_ui::canvas::{GuidePlace, Orientation};
+        let guides = [
+            stencilcraft_doc::Guide {
+                axis: stencilcraft_doc::GuideAxis::Vertical,
+                position_mm: 10.0,
+                locked: false,
+            },
+            stencilcraft_doc::Guide {
+                axis: stencilcraft_doc::GuideAxis::Horizontal,
+                position_mm: 20.0,
+                locked: true,
+            },
+        ];
+        let shown = canvas_guides(&guides, None);
+        assert_eq!(shown.len(), 2);
+        assert_eq!(
+            (
+                shown[0].key,
+                shown[0].orientation,
+                shown[0].position,
+                shown[0].locked
+            ),
+            (1, Orientation::Vertical, 10.0, false)
+        );
+        assert_eq!((shown[1].key, shown[1].locked), (2, true));
+        let moved = canvas_guides(
+            &guides,
+            Some((
+                1,
+                GuidePlace {
+                    orientation: Orientation::Vertical,
+                    position: Some(15.0),
+                },
+            )),
+        );
+        assert_eq!(moved[0].position, 15.0);
+        let removed = canvas_guides(
+            &guides,
+            Some((
+                1,
+                GuidePlace {
+                    orientation: Orientation::Vertical,
+                    position: None,
+                },
+            )),
+        );
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].key, 2);
+    }
+
+    #[test]
+    fn snap_lines_paint_segments_and_point_markers() {
+        let view = View::default();
+        let lines = [
+            (
+                stencilcraft_geom::Point::new(0.0, 0.0),
+                stencilcraft_geom::Point::new(0.0, 50.0),
+            ),
+            (
+                stencilcraft_geom::Point::new(5.0, 5.0),
+                stencilcraft_geom::Point::new(5.0, 5.0),
+            ),
+            (
+                stencilcraft_geom::Point::new(f64::NAN, 0.0),
+                stencilcraft_geom::Point::new(1.0, 0.0),
+            ),
+        ];
+        let shapes = painted(|p| paint_snap_lines(p, &view, &lines, egui::Color32::RED));
+        assert_eq!(shapes.len(), 2, "{shapes:?}");
+        assert!(matches!(shapes[0], egui::Shape::LineSegment { .. }));
+        let egui::Shape::Rect(marker) = &shapes[1] else {
+            panic!("a point gets a square marker: {:?}", shapes[1]);
+        };
+        assert_eq!(marker.rect.center(), egui::pos2(20.0, 20.0));
+    }
+
+    #[test]
+    fn a_turned_document_paints_its_board_turned() {
+        let doc = stencilcraft_doc::Document::default();
+        let view = View {
+            zoom: 1.0,
+            quarter_turns: 1,
+            ..View::default()
+        };
+        let board = view.board_rect_screen(&doc);
+        assert!((board.width() - doc.board.height_mm as f32).abs() < 1e-3);
+        assert!((board.height() - doc.board.width_mm as f32).abs() < 1e-3);
+        let clip =
+            egui::Rect::from_min_size(egui::pos2(-500.0, -500.0), egui::vec2(1000.0, 1000.0));
+        let shapes = painted(|p| {
+            paint_document(
+                p,
+                clip,
+                &doc,
+                &view,
+                None,
+                CanvasOptions::default(),
+                &SelectionState::default(),
+            )
+        });
+        assert!(
+            shapes
+                .iter()
+                .any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == board))
+        );
     }
 }

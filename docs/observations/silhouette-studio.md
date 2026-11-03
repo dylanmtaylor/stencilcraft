@@ -98,3 +98,18 @@ Notes from driving Silhouette Studio (Basic edition, Windows 11 VM) through its 
 - Project types: Blank Document, Card, Emboss, Gift Tag, PixScan, Print & Cut, Sketch, Stamping, Stipple. Pick one + Start → new tab pre-set for that workflow.
 - Card: creates a 10 × 7 in card outline (W 10.000 H 7.000, centre X 5.5 Y 4.0 — X/Y here reported at centre? reference point shown) with a dashed vertical centre fold (score) line; group of outline + fold; opens Page Setup with "Constrain Media to Cutting Mat" unchecked.
 - Posture: replicate as project templates (card with fold score, gift tag with hole, emboss/sketch/stamp/stipple/print&cut starters) built from our own geometry.
+
+## Built-in project starters (2026-11-02, SS 5.0.539 Basic)
+
+Two entry points create a new document pre-set for a kind of project.
+
+**New Project Wizard** (File > New Project Wizard, Ctrl+Shift+N): a grid of project types, pick one and Start.
+Blank Document, Card, Emboss, Gift Tag, PixScan, Print & Cut, Sketch, Stamping, Stipple.
+Card creates a 10 × 7 in outline with a dashed centre fold (score) line, grouped.
+
+**Home screen "What will you create today?" carousel**: illustrated starter projects, paged with arrows (each click moves it a small step and the app is slow, so page slowly). Seen so far, in order:
+New Document, Vinyl Sticker, Heat Transfer T-Shirt, Sticker Sheet with Print & Cut, Greetings Card, Gift Tag, Stencil, Sketched Message, Foil Stamp Card, Foil Stamp Notebook, Acrylic Light, Metal Engraved Framed Decor, Embossed Card, Embossed Sticker, Coin Case, … (the list continues past Coin Case; still to be recorded).
+
+Posture: replicate as a StencilCraft new-project wizard of our own templates (our own geometry, names and thumbnails; none of the vendor's artwork or photos), each setting page/mat, operation (cut, score, sketch/pen, foil, emboss, engrave), mirror for heat transfer, and print-and-cut marks as the project needs.
+
+Stability: Silhouette Studio exited without an error dialog twice under rapid input (opening a View submenu; fast carousel clicks) on a loaded host. The VM had 5.6 GB disk and 2.1 GB RAM free, and no application-log entry was written.

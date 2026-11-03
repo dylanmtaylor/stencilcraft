@@ -899,6 +899,15 @@ mod tests {
             .handle_line(r#"{"id":5,"method":"machine.dry_run","params":{"model":"cricut-maker"}}"#)
             .unwrap()
             .unwrap();
+        // A Cricut slot exists but never encodes; it points at the export workaround.
+        assert!(
+            r.contains("\"ok\":false") && r.contains("not implemented") && r.contains("SVG"),
+            "{r}"
+        );
+        let r = session
+            .handle_line(r#"{"id":6,"method":"machine.dry_run","params":{"model":"warp-plotter"}}"#)
+            .unwrap()
+            .unwrap();
         assert!(r.contains("unknown model"), "{r}");
     }
 

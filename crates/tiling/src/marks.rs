@@ -168,7 +168,7 @@ mod tests {
             kerf: KerfSettings::default(),
             layers: Vec::new(),
             next_shape_id: 1,
-            images: Vec::new(),
+            ..Document::default()
         }
     }
 

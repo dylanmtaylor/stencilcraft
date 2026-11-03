@@ -98,15 +98,14 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 16. **User offset**: kerf offsetting exists, but there is no command that adds an
     outward/inward offset as a new shape. Also missing: round corners (kerf only mitres)
     and the option to weld the offset outlines into one.
-17. **Groups, stacking and layer control**: no group/ungroup, no reordering
-    (forward/back, with shortcuts), no locking of objects or layers, no rename, no moving objects
-    between layers. Attach (keep positions on the mat) and Contour (turn off single
-    sub-paths) build on these.
-18. **Snapping and guides**: there is a grid display but no snapping to the grid,
-    objects or guides (Silhouette Studio has smart snapping on by default). Also missing:
-    guides, a measure tool, and width/height callouts that follow a shape while it is
-    drawn. Units are mm only, with no inch display (Silhouette Studio defaults to
-    inches).
+17. **Groups, stacking and layer control**: engine commands support groups,
+    reordering, object and layer locks, renaming and moving objects between layers.
+    Desktop controls and shortcuts remain incomplete. Attach (keep positions on the mat)
+    and Contour (turn off single sub-paths) still need work.
+18. **Snapping and guides**: the document and command layer supports guides, grid
+    and snap settings, snapping queries and measurements. Desktop gesture integration,
+    smart guides and live width/height callouts remain incomplete; display-unit support
+    also needs integration in the desktop UI.
 19. **Text**: the Text tool places built-in single-line bitmap lettering only. Missing:
     user/system fonts (through `CRAFT_FONTS_DIR`, never bundled), size and spacing
     controls, text that can be edited after placing, text on a path or arc, and a
@@ -171,8 +170,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     - Formats: PDF/AI/EPS/BMP/GIF/TIFF/HEIC import and PDF/PNG/JPEG export are missing.
       `.studio3`/GSD import waits on an owner decision.
     - Cricut machines are pending the owner's decision and a legal review.
-35. **Multiple boards**: one board per document. Missing: Illustrator-style artboards,
-    a template-based new document, and Save Selection As.
+35. **Multiple boards**: the document model supports extra pages and the command
+    layer can create a document from templates. Desktop multi-page editing, a fully
+    integrated template wizard and Save Selection As remain incomplete.
 36. **View aids**: missing smart guides, snap to point, guides (make, release, lock),
     outline view, Show Print/Cut Border, rotated page view and zoom to selection.
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.

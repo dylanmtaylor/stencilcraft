@@ -99,6 +99,11 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Document model and commands add groups, layer ordering, page metadata,
+  guides, grid and snap settings, local library and recovery helpers, and project
+  templates. They are available through engine commands and MCP; desktop integration
+  remains incomplete. Raster images and canvas metadata share the document round trip.
+
 - 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
   size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only
   from files we saved ourselves (`docs/formats/silhouette-studio.md`). It sits behind the new

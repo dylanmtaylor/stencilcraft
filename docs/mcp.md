@@ -180,6 +180,72 @@ paths.
 
 Legacy requests use one line in and one line out; logging goes to stderr only.
 
+## Document and canvas commands
+
+Engine commands in `crates/engine/src/document.rs`, each with a dedicated MCP tool (the
+command name with `.`/`-` turned into `_`, e.g. `group.create` → `group_create`) whose
+arguments are the command's params; `command_execute` takes them too. Edits are one
+undoable step each; queries (marked Q) and `clipboard.copy` add no history. A refused
+command changes nothing. Millimetres throughout; the canvas draws y downwards, so `top`
+means the smaller y.
+
+| Command | Params | Behaviour |
+| --- | --- | --- |
+| `group.create` | `{ids?, groups?, name?}` | Groups two or more shapes/groups that share one parent (or are all top-level); the new group takes their place. Answers `{GroupCreated: {id}}`. |
+| `group.ungroup` | `{id}` | Members move up to the group's parent. Answers the shapes it held. |
+| `group.rename` | `{id, name}` | |
+| `group.members` (Q) | `{id}` | Every shape in the group, nested groups included. |
+| `group.of` (Q) | `{id}` | `{GroupOf: {group, ids}}`: the shape's outermost group and its shapes (what a click selects). |
+| `shapes.arrange` | `{ids, order}` | `front`, `back`, `forward`, `backward`, within each shape's layer; a selected block moves as one. |
+| `shapes.move-to-layer` | `{ids, layer}` | To the top of the layer; shapes take its operation. A locked layer refuses. |
+| `layer.move` | `{from, to}` | Reorder layers. |
+| `layer.rename` | `{index, name}` | Name must not be blank. |
+| `layer.set-locked` | `{index, locked}` | Locked layers' shapes cannot be selected or edited (also by `lib.rs` commands); new shapes skip them. |
+| `layer.set-template` | `{index, template}` | Template (guide) layers show on the canvas but are left out of SVG/DXF/G-code export, tiling, cutting and thumbnails; new shapes skip them. |
+| `layer.set-color` | `{index, color}` | `#rrggbb` (normalised to lowercase) or `null`. |
+| `layer.color-sync` | `{tolerance, merge?}` | Color Sync: each coloured, non-template layer within `tolerance` (RGB distance 0-442) of an earlier one takes its colour; `merge` also merges unlocked layers that then share colour and operation into the first. |
+| `page.add` | `{preset?, width_mm?, height_mm?, orientation?, name?, mat?, media?, color?}` | Adds a page right of the others (10 mm gap). Presets: `letter`, `a4`, `mat-12x12`, `mat-12x24`, `joy-mat-4.5x6.5`, `joy-mat-4.5x12`, `joy-xtra-mat-8.5x12`, `custom` (needs width and height). Mat presets fill `mat`. Answers `{PageAdded: {index}}`. |
+| `page.set` | `{index, …page.add fields}` | Page 0 is the main board (its size is `board`). Omitted fields keep their value; an empty label clears it. |
+| `page.remove` | `{index}` | Extra pages only (index ≥ 1); shapes stay where they are. |
+| `guide.add` | `{axis, position_mm}` | `horizontal` is the line y = position, `vertical` x = position. At most 1000. |
+| `guide.move` / `guide.remove` | `{index, position_mm}` / `{index}` | Refused for a locked guide. |
+| `guide.set-locked` | `{index, locked}` | |
+| `guide.clear` | `{}` | Removes unlocked guides; answers `{GuidesCleared: {removed}}`. |
+| `grid.set` | `{spacing_mm, subdivisions, visible?}` | Spacing 0.01-10000 mm, subdivisions 1-100; snapping uses spacing / subdivisions. |
+| `snap.set` | `{grid?, guides?, objects?, spacing?, tolerance_mm?}` | Defaults: grid off, the rest on, 2 mm. |
+| `snap.point` (Q) | `{x, y, width?, height?, exclude?, tolerance_mm?}` | A point, or a moving box whose left/centre/right and top/centre/bottom snap. Answers `{Snap: {x, y, dx, dy, snapped_x, snapped_y, lines}}`; each axis snaps to its nearest target (`guide`, `edge`, `center`, `page`, `spacing`, `grid`) within tolerance, and `lines` are the alignment or equal-spacing markers to draw. Also callable as the pure function `stencilcraft_engine::document::snap`. |
+| `measure.distance` (Q) | `{from: [x, y], to: [x, y]}` | `{Measure: {distance_mm, dx_mm, dy_mm, angle_degrees}}`, angle from +x towards +y. |
+| `query.dimensions` (Q) | `{ids}` | `{Dimensions: {x, y, width, height}}` of the combined bounds. |
+| `select.all` / `select.none` (Q) | `{}` | Selectable shapes outside template layers / nothing. |
+| `select.by-color` (Q) | `{color, tolerance?}` | Shapes on layers with a colour within `tolerance` of `color`. |
+| `select.by-operation` (Q) | `{style}` | `cut` or `engrave`, outside template layers. |
+| `select.by-layer` (Q) | `{index}` | |
+| `clipboard.copy` | `{ids}` | Engine clipboard (not saved, not undone); groups wholly inside the copy come along. |
+| `clipboard.cut` | `{ids}` | Copy, then remove. |
+| `clipboard.paste` | `{mode?, offset_mm?}` | `offset` (default, right and down by `offset_mm`, default 5), `in-place` (top of the layer), `in-front` (directly above each original). New ids; copied groups are recreated. |
+| `transform.each` | `{ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?}` | Scale and rotate about the selection's centre, or with `each` about each object's own centre (a group is one object), then move. Remembered. |
+| `transform.again` | `{ids}` | Repeats the last `transform.each` on `ids`. |
+| `shapes.align-to-key` | `{ids, key, alignment}` | The key (with its group) stays still; others align to it. |
+| `shapes.distribute-spacing` | `{ids, axis, gap_mm}` | The first object stays; the rest follow `gap_mm` apart. |
+| `document.set-meta` | `{title?, notes?}` | Title up to 1 KiB, notes up to 64 KiB. |
+| `document.update-thumbnail` | `{}` | Stores an SVG thumbnail (≤ 64 KiB) in the file. |
+| `templates.list` (Q) | `{}` | `{Templates: [{id, name, description, category, params}]}` for a new-project wizard: `wizard` types (`blank`, `card`, `emboss`, `gift-tag`, `pixscan`, `print-and-cut`, `sketch`, `stamping`, `stipple`) and `starter`s (`vinyl-sticker`, `heat-transfer-tshirt`, `sticker-sheet`, `greetings-card`, `stencil`, `sketched-message`, `foil-stamp-card`, `foil-stamp-notebook`, `acrylic-light`, `metal-engraved-decor`, `embossed-card`, `embossed-sticker`, `coin-case`, `faux-leather-tray`, `leather-earrings`, `leather-keychain`). |
+| `document.new-from-template` | `{template, params?}` | New document from a template (`crates/doc/src/templates.rs`, our own geometry): page/mat/media, operation layers (score, pen, foil, emboss, stipple and engrave are named `engrave` layers), `mirror` and `registration_marks` on the page setup, and the main pieces grouped. E.g. `card`: 10 × 7 in outline with a dashed score fold on a 12×12 page. `params`: `preset`, `width_mm`, `height_mm`, `fold` (`vertical`/`horizontal`), `hole_mm`; the page grows when the item does not fit. Keeps the kerf width. |
+
+Format: these fields are stored in `.stencilcraft` version 1 under optional keys
+(`board-setup`, `pages`, `guides`, `grid`, `snap`, `groups`, `meta`, and per layer
+`locked`, `template`, `color`), written only when set, so older files load unchanged and a
+plain document saves exactly as before. Group members that no longer exist are dropped on
+save and load; cycles, a member in two groups, bad colours and over-cap values are load
+errors.
+
+Not engine commands (filesystem, called by the desktop app directly):
+`stencilcraft_doc::recovery::Recovery` (autosave snapshots: `snapshot`, `list`, `restore`,
+`discard`; atomic writes, bounded count and bytes), `recovery::RecentFiles`, and
+`stencilcraft_doc::library::Library` (local design library: folders, favourites, search,
+thumbnails, recycle bin). Display units live in `stencilcraft_geom::Unit`
+(`mm`/`cm`/`in`/`pt`: `to_mm`, `from_mm`, `format`, `parse_to_mm`).
+
 ## Legacy envelope
 
 ```json

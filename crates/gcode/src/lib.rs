@@ -161,7 +161,8 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
         "{} S0 ; laser off until the first cut",
         settings.mode.on_command()
     );
-    for layer in &doc.layers {
+    // Template (guide) layers are canvas-only: never cut.
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
         let kind = match layer.kind {
             CutStyle::Cut => "cut",
             CutStyle::Engrave => "engrave",

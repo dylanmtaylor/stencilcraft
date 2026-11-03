@@ -208,10 +208,10 @@ pub fn tile_document_with(
             kerf: doc.kerf.clone(),
             layers: Vec::new(),
             next_shape_id: doc.next_shape_id,
-            images: Vec::new(),
+            ..Document::default()
         };
         for layer in &doc.layers {
-            if !layer.visible {
+            if !layer.is_output() {
                 continue;
             }
             let mut piece_layer = stencilcraft_doc::Layer::new(layer.name.clone(), layer.kind);
@@ -291,7 +291,7 @@ mod tests {
             kerf: stencilcraft_doc::KerfSettings::default(),
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
-            images: Vec::new(),
+            ..Document::default()
         };
         // A plus-shaped set of lines along the diagonals of the board: these
         // intersect every corner tile of the grid.
@@ -411,7 +411,7 @@ mod tests {
             kerf: stencilcraft_doc::KerfSettings::default(),
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
-            images: Vec::new(),
+            ..Document::default()
         };
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(5.0, 5.0));
@@ -549,7 +549,7 @@ mod tests {
             kerf: stencilcraft_doc::KerfSettings::default(),
             layers: vec![DocLayer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
-            images: Vec::new(),
+            ..Document::default()
         };
         // A rectangle around the whole board, a diagonal and a curve: all three cross
         // sheet edges at some point in this sweep.

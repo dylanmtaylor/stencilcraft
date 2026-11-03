@@ -6,6 +6,15 @@
 
 pub mod format;
 
+pub mod canvas;
+pub mod library;
+pub mod recovery;
+pub mod templates;
+
+pub use canvas::{
+    Grid, Group, GroupChild, Guide, GuideAxis, Metadata, Orientation, Page, PagePreset, PageSetup,
+    SnapSettings,
+};
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};
@@ -104,6 +113,15 @@ pub struct Layer {
     pub kind: CutStyle,
     pub visible: bool,
     pub shapes: Vec<Shape>,
+    /// A locked layer's shapes cannot be selected or edited.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    /// A template (guide) layer is shown on the canvas but never exported or cut.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub template: bool,
+    /// Material colour label, `#rrggbb`; Color Sync merges similar ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 impl Layer {
@@ -113,7 +131,20 @@ impl Layer {
             kind,
             visible: true,
             shapes: Vec::new(),
+            locked: false,
+            template: false,
+            color: None,
         }
+    }
+
+    /// Whether exports and cuts include this layer: visible and not a template.
+    pub fn is_output(&self) -> bool {
+        self.visible && !self.template
+    }
+
+    /// Whether newly created shapes may land here: not locked, not a template.
+    pub fn takes_new_shapes(&self) -> bool {
+        !self.locked && !self.template
     }
 
     /// Sum of per-shape bounds; `None` when the layer has no shapes or only empty
@@ -400,6 +431,23 @@ pub struct Document {
     /// Placed raster images, bottom first, drawn under the cut layers.
     #[serde(default)]
     pub images: Vec<RasterImage>,
+    /// Mat, media, colour and name of the main board (page 0).
+    #[serde(default)]
+    pub board_setup: PageSetup,
+    /// Extra pages beside the main board.
+    #[serde(default)]
+    pub pages: Vec<Page>,
+    #[serde(default)]
+    pub guides: Vec<Guide>,
+    #[serde(default)]
+    pub grid: Grid,
+    #[serde(default)]
+    pub snap: SnapSettings,
+    /// Groups; members that no longer exist are ignored and dropped on save.
+    #[serde(default)]
+    pub groups: Vec<Group>,
+    #[serde(default)]
+    pub meta: Metadata,
 }
 
 impl Default for Document {
@@ -410,6 +458,13 @@ impl Default for Document {
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
             images: Vec::new(),
+            board_setup: PageSetup::default(),
+            pages: Vec::new(),
+            guides: Vec::new(),
+            grid: Grid::default(),
+            snap: SnapSettings::default(),
+            groups: Vec::new(),
+            meta: Metadata::default(),
         }
     }
 }
@@ -515,14 +570,16 @@ impl Document {
                 "a document holds at most {MAX_IMAGES} images"
             )));
         }
-        self.images.iter().try_for_each(RasterImage::validate)
+        self.images.iter().try_for_each(RasterImage::validate)?;
+        self.validate_canvas()
     }
 
     /// Serialises with the format header. The header wraps the document so a reader
-    /// knows what it is before reading the rest.
+    /// knows what it is before reading the rest. Canvas fields are written only when
+    /// set, so a plain document saves exactly as it did before they existed.
     pub fn save_json(&self) -> Result<String, DocError> {
         self.validate()?;
-        let wrapper = serde_json::json!({
+        let mut wrapper = serde_json::json!({
             "stencilcraft": { "name": FORMAT_NAME, "version": FORMAT_VERSION },
             "board": self.board,
             "kerf": self.kerf,
@@ -530,6 +587,31 @@ impl Document {
             "next-shape-id": self.next_shape_id,
             "images": self.images,
         });
+        let groups = self.pruned_groups();
+        let optional = [
+            (
+                "board-setup",
+                !self.board_setup.is_empty(),
+                json(&self.board_setup),
+            ),
+            ("pages", !self.pages.is_empty(), json(&self.pages)),
+            ("guides", !self.guides.is_empty(), json(&self.guides)),
+            ("grid", self.grid != Grid::default(), json(&self.grid)),
+            (
+                "snap",
+                self.snap != SnapSettings::default(),
+                json(&self.snap),
+            ),
+            ("groups", !groups.is_empty(), json(&groups)),
+            ("meta", !self.meta.is_empty(), json(&self.meta)),
+        ];
+        if let Some(map) = wrapper.as_object_mut() {
+            for (key, present, value) in optional {
+                if present {
+                    map.insert(key.to_string(), value?);
+                }
+            }
+        }
         serde_json::to_string_pretty(&wrapper).map_err(|e| DocError::Structure {
             path: "output".to_string(),
             message: e.to_string(),
@@ -589,15 +671,39 @@ fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
         None => Vec::new(),
         Some(v) => serde_json::from_value(v.clone()).map_err(|e| structure_err(path, &e))?,
     };
-    let doc = Document {
+    let mut doc = Document {
         board,
         kerf,
         layers,
         next_shape_id,
         images,
+        board_setup: optional_field(&value, "board-setup", path)?,
+        pages: optional_field(&value, "pages", path)?,
+        guides: optional_field(&value, "guides", path)?,
+        grid: optional_field(&value, "grid", path)?,
+        snap: optional_field(&value, "snap", path)?,
+        groups: optional_field(&value, "groups", path)?,
+        meta: optional_field(&value, "meta", path)?,
     };
     doc.validate()?;
+    doc.groups = doc.pruned_groups();
     Ok(doc)
+}
+
+/// A key added after version 1: absent means its default (older files stay readable).
+fn optional_field<T: serde::de::DeserializeOwned + Default>(
+    value: &serde_json::Value,
+    key: &str,
+    path: &str,
+) -> Result<T, DocError> {
+    match value.get(key) {
+        None => Ok(T::default()),
+        Some(_) => field(value, key, path),
+    }
+}
+
+fn json<T: Serialize>(value: &T) -> Result<serde_json::Value, DocError> {
+    serde_json::to_value(value).map_err(|e| structure_err("output", &e))
 }
 
 fn field<T: serde::de::DeserializeOwned>(
@@ -768,7 +874,7 @@ mod tests {
 
     #[test]
     fn images_round_trip_and_share_the_id_counter() {
-        let mut doc = sample();
+        let mut doc = canvas_sample();
         let id = doc
             .push_image(RasterImage {
                 id: 0,
@@ -782,7 +888,7 @@ mod tests {
                 png_base64: "AAAA".into(),
             })
             .unwrap();
-        assert_eq!(id, 2);
+        assert_eq!(id, 3);
         let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
         assert_eq!(back, doc);
         let mut bad = doc.clone();
@@ -805,5 +911,155 @@ mod tests {
             doc.push_shape(9, rect_path(0.0, 0.0, 1.0, 1.0), CutStyle::Cut),
             Err(DocError::Model(_))
         ));
+    }
+
+    fn canvas_sample() -> Document {
+        let mut doc = sample();
+        doc.push_shape(0, rect_path(50.0, 50.0, 5.0, 5.0), CutStyle::Cut)
+            .unwrap();
+        doc.board_setup.mat = Some("12x12".to_string());
+        doc.pages.push(Page {
+            x_mm: 120.0,
+            y_mm: 0.0,
+            width_mm: 210.0,
+            height_mm: 297.0,
+            setup: PageSetup {
+                name: "A4".to_string(),
+                color: Some("#ffeedd".to_string()),
+                ..PageSetup::default()
+            },
+        });
+        doc.guides.push(Guide {
+            axis: GuideAxis::Vertical,
+            position_mm: 12.5,
+            locked: true,
+        });
+        doc.grid.spacing_mm = 5.0;
+        doc.grid.subdivisions = 4;
+        doc.snap.grid = true;
+        doc.layers[0].color = Some("#112233".to_string());
+        doc.layers.push(Layer {
+            template: true,
+            locked: true,
+            ..Layer::new("guide", CutStyle::Cut)
+        });
+        doc.groups = vec![
+            Group {
+                id: 1,
+                name: "inner".to_string(),
+                children: vec![GroupChild::Shape(1)],
+            },
+            Group {
+                id: 2,
+                name: String::new(),
+                children: vec![GroupChild::Group(1), GroupChild::Shape(2)],
+            },
+        ];
+        doc.meta.title = "Card".to_string();
+        doc.meta.notes = "for mum".to_string();
+        doc.meta.thumbnail_svg = Some(doc.render_thumbnail(4096));
+        doc
+    }
+
+    #[test]
+    fn canvas_fields_round_trip() {
+        let doc = canvas_sample();
+        let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
+        assert_eq!(doc, back);
+        assert_eq!(back.group_chain(GroupChild::Shape(1)), vec![2, 1]);
+        assert_eq!(back.group_shapes(2), vec![1, 2]);
+    }
+
+    #[test]
+    fn plain_documents_save_without_canvas_keys() {
+        let json = sample().save_json().unwrap();
+        for key in [
+            "pages",
+            "guides",
+            "grid",
+            "snap",
+            "groups",
+            "meta",
+            "board-setup",
+            "template",
+        ] {
+            assert!(!json.contains(key), "{key} written for a plain document");
+        }
+    }
+
+    #[test]
+    fn version_1_files_without_canvas_fields_still_load() {
+        for name in ["starter", "poster", "stencil-frame"] {
+            let path = format!(
+                "{}/../../examples/{name}.stencilcraft",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let doc = load_from(&path).unwrap();
+            assert!(doc.pages.is_empty() && doc.groups.is_empty() && doc.guides.is_empty());
+            assert_eq!(doc.grid, Grid::default());
+            assert!(doc.layers.iter().all(|l| !l.template && !l.locked));
+        }
+    }
+
+    #[test]
+    fn dangling_group_members_are_pruned_not_fatal() {
+        let mut doc = canvas_sample();
+        doc.layers[0].shapes.retain(|s| s.id != 1);
+        // Group 1 loses its only member and disappears; group 2 keeps shape 2.
+        let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
+        assert_eq!(back.groups.len(), 1);
+        assert_eq!(back.groups[0].children, vec![GroupChild::Shape(2)]);
+    }
+
+    #[test]
+    fn bad_canvas_data_is_rejected_calmly() {
+        type DocumentMutation = Box<dyn Fn(&mut Document)>;
+        let cases: Vec<DocumentMutation> = vec![
+            Box::new(|d| d.groups[0].children.push(GroupChild::Group(2))),
+            Box::new(|d| d.groups[1].children.push(GroupChild::Shape(1))),
+            Box::new(|d| d.groups[0].id = 2),
+            Box::new(|d| d.pages[0].width_mm = f64::NAN),
+            Box::new(|d| d.guides[0].position_mm = f64::INFINITY),
+            Box::new(|d| d.grid.subdivisions = 0),
+            Box::new(|d| d.layers[0].color = Some("red".to_string())),
+            Box::new(|d| d.meta.notes = "x".repeat(canvas::MAX_NOTES_BYTES + 1)),
+            Box::new(|d| d.snap.tolerance_mm = f64::NAN),
+        ];
+        for (i, corrupt) in cases.iter().enumerate() {
+            let mut doc = canvas_sample();
+            corrupt(&mut doc);
+            assert!(doc.validate().is_err(), "case {i} validated");
+            assert!(doc.save_json().is_err(), "case {i} saved");
+        }
+        // The same faults in a file are load errors.
+        let json = canvas_sample()
+            .save_json()
+            .unwrap()
+            .replace("#112233", "#zz");
+        assert!(Document::load_json(&json).is_err());
+    }
+
+    #[test]
+    fn page_document_takes_the_shapes_on_that_page() {
+        let mut doc = canvas_sample();
+        doc.push_shape(0, rect_path(130.0, 10.0, 10.0, 10.0), CutStyle::Cut)
+            .unwrap();
+        let page = doc.page_document(1).unwrap();
+        assert_eq!((page.board.width_mm, page.board.height_mm), (210.0, 297.0));
+        assert_eq!(page.shape_count(), 1);
+        let b = page.layers[0].shapes[0].bounds().unwrap();
+        assert!((b.x0 - 10.0).abs() < 1e-9 && (b.y0 - 10.0).abs() < 1e-9);
+        assert_eq!(doc.page_document(0).unwrap().shape_count(), 2);
+        assert!(doc.page_document(5).is_none());
+    }
+
+    #[test]
+    fn thumbnail_respects_its_budget() {
+        let doc = canvas_sample();
+        let full = doc.render_thumbnail(64 * 1024);
+        assert!(full.starts_with("<svg") && full.ends_with("</svg>"));
+        assert_eq!(full.matches("<path").count(), 2);
+        let small = doc.render_thumbnail(full.len() - 1);
+        assert!(small.len() < full.len() && small.ends_with("</svg>"));
     }
 }

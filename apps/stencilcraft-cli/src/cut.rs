@@ -262,7 +262,10 @@ pub fn build_job(
 /// x right, y down).
 pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
     let mut paths = Vec::new();
-    for layer in doc.layers.iter().filter(|l| l.visible) {
+    for layer in &doc.layers {
+        if !layer.is_output() {
+            continue;
+        }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let polylines = geom::path_to_polylines(&shape.path, geom::DEFAULT_FLATTEN_STEPS);
             paths.extend(machine::paths_from_polylines(&polylines));

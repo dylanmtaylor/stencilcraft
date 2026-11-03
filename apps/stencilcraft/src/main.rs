@@ -4345,6 +4345,43 @@ mod tests {
     }
 
     #[test]
+    fn zoom_buttons_zoom_about_the_canvas_centre() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let frame = |app: &mut StencilApp| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| app.canvas_body(ui),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut app);
+        let centre = |app: &StencilApp| app.view.screen_to_world(screen.center().to_vec2());
+        let start = centre(&app);
+        let start_zoom = app.view.zoom;
+        // The anchor is the canvas centre (inside the rulers), a few px from the screen
+        // centre, so the world point there may move by those px at the new zoom only.
+        for factor in [1.2_f32; 5].into_iter().chain([1.0 / 1.2; 5]) {
+            app.pending_zoom = Some(app.view.zoom * factor);
+            frame(&mut app);
+            let at = centre(&app);
+            let slack = 30.0 / f64::from(app.view.zoom);
+            assert!(
+                (at.x - start.x).abs() < slack && (at.y - start.y).abs() < slack,
+                "view centre drifted: {start:?} -> {at:?} at zoom {}",
+                app.view.zoom
+            );
+        }
+        let end = centre(&app);
+        assert!((app.view.zoom - start_zoom).abs() < 1e-3);
+        assert!((end.x - start.x).abs() < 0.01 && (end.y - start.y).abs() < 0.01);
+    }
+
+    #[test]
     fn canvas_view_shortcuts_are_ignored_while_text_input_is_wanted() {
         let ctx = egui::Context::default();
         let mut app = StencilApp::new(None);

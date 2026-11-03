@@ -353,6 +353,76 @@ impl Session {
             "machines.list" => Ok(machines_json()),
             "machine.capabilities" => machine_capabilities(params),
             "machine.dry_run" => machine_dry_run(&self.engine.doc, params),
+            "import.file" => {
+                let path = str_param(params, "path")?;
+                let mut options = stencilcraft_import::ImportOptions {
+                    page_mm: (
+                        self.engine.doc.board.width_mm,
+                        self.engine.doc.board.height_mm,
+                    ),
+                    ..stencilcraft_import::ImportOptions::default()
+                };
+                let flag = |key: &str| params.get(key).and_then(serde_json::Value::as_bool);
+                let num = |key: &str| params.get(key).and_then(serde_json::Value::as_f64);
+                options.fit_to_page = flag("fit_to_page").unwrap_or(false);
+                options.join = flag("join").unwrap_or(options.join);
+                options.join_tolerance_mm =
+                    num("join_tolerance").unwrap_or(options.join_tolerance_mm);
+                options.dpi = num("dpi").unwrap_or(options.dpi);
+                let imported = stencilcraft_import::import_file(&path, &options)
+                    .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                let shapes: Vec<_> = imported
+                    .layers
+                    .iter()
+                    .flat_map(|l| l.shapes.iter().map(|s| (s.path.clone(), s.style)))
+                    .collect();
+                let mut shape_ids = Vec::new();
+                if !shapes.is_empty() {
+                    match self.engine.run(Command::ShapeAddPaths { shapes }) {
+                        Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => shape_ids = ids,
+                        Ok(_) => {}
+                        Err(e) => return Err(ProtocolError::Bad(e.to_string())),
+                    }
+                }
+                let mut image_ids = Vec::new();
+                for image in imported.images {
+                    if let stencilcraft_engine::Effect::ImageAdded { id } = self
+                        .engine
+                        .run(Command::ImagePlace { image })
+                        .map_err(|e| ProtocolError::Bad(e.to_string()))?
+                    {
+                        image_ids.push(id);
+                    }
+                }
+                Ok(serde_json::json!({ "shapes": shape_ids, "images": image_ids }))
+            }
+            "export.pdf" => {
+                let path = str_param(params, "path")?;
+                let bytes = stencilcraft_pdf::export(&self.engine.doc)
+                    .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                std::fs::write(&path, bytes)
+                    .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
+                Ok(serde_json::json!({ "path": path }))
+            }
+            "export.image" => {
+                let path = str_param(params, "path")?;
+                let dpi = params
+                    .get("dpi")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(300.0);
+                let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+                let format =
+                    stencilcraft_import::RenderFormat::from_extension(ext).ok_or_else(|| {
+                        ProtocolError::Bad(format!(
+                            "export.image: {path}: use a .png, .jpg or .jpeg name"
+                        ))
+                    })?;
+                let bytes = stencilcraft_import::render_document(&self.engine.doc, dpi, format)
+                    .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                std::fs::write(&path, bytes)
+                    .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
+                Ok(serde_json::json!({ "path": path, "dpi": dpi }))
+            }
             "command.execute" => {
                 let command: Command = serde_json::from_value(params.clone())
                     .map_err(|e| ProtocolError::Bad(format!("bad command parameters: {e}")))?;
@@ -395,6 +465,9 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "machines_list" => Some("machines.list"),
         "machine_capabilities" => Some("machine.capabilities"),
         "machine_dry_run" => Some("machine.dry_run"),
+        "import_file" => Some("import.file"),
+        "export_pdf" => Some("export.pdf"),
+        "export_image" => Some("export.image"),
         _ => ENGINE_TOOLS
             .iter()
             .find(|(tool, _, _)| *tool == name)
@@ -493,6 +566,28 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             json!(["ids", "direction"]),
         ),
         "generate.release" => (json!({"ids": ids}), json!(["ids"])),
+        "image.trace" => (
+            json!({
+                "id": {"type": "integer"},
+                "options": {"type": "object", "properties": {
+                    "threshold": number, "despeckle": {"type": "integer"}, "low_pass": number, "high_pass": number,
+                    "colour_range": {"type": ["object", "null"], "properties": {"hue_min": number, "hue_max": number, "min_saturation": number}},
+                    "smoothing": number, "corner_threshold": number,
+                    "mode": {"type": "string", "enum": ["all-edges", "outer-edge", "detach"]},
+                }},
+                "style": {"type": "string", "enum": ["cut", "engrave"]},
+            }),
+            json!(["id"]),
+        ),
+        "image.remove-background" => (
+            json!({"id": {"type": "integer"}, "tolerance": number}),
+            json!(["id", "tolerance"]),
+        ),
+        "image.set-bounds" => (
+            json!({"id": {"type": "integer"}, "x": number, "y": number, "width": number, "height": number}),
+            json!(["id", "x", "y", "width", "height"]),
+        ),
+        "image.remove" => (json!({"id": {"type": "integer"}}), json!(["id"])),
         _ => (json!({}), json!([])),
     }
 }
@@ -710,6 +805,26 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "generate.release",
         "Release a generated effect (fill, punch points, stones, copies) into plain paths: one shape per contour, tool tags cleared.",
     ),
+    (
+        "image_trace",
+        "image.trace",
+        "Trace a placed image into closed cut paths. options: threshold (0-100 %), despeckle (px area), low_pass and high_pass (radius px, 0-50), colour_range {hue_min, hue_max, min_saturation}, smoothing (px tolerance), corner_threshold (degrees), mode (all-edges, outer-edge, detach). style: cut or engrave.",
+    ),
+    (
+        "image_remove_background",
+        "image.remove-background",
+        "Make a placed image's background transparent: flood fill from the border through colours within tolerance (0-100 %) of the border's dominant colour.",
+    ),
+    (
+        "image_set_bounds",
+        "image.set-bounds",
+        "Move/resize a placed image. Args: id, x, y, width, height (mm).",
+    ),
+    (
+        "image_remove",
+        "image.remove",
+        "Remove a placed image. Args: id.",
+    ),
 ];
 
 fn mcp_tools() -> Vec<serde_json::Value> {
@@ -813,6 +928,24 @@ fn mcp_tools() -> Vec<serde_json::Value> {
                 "path": path,
             }),
             json!(["model"]),
+        ),
+        (
+            "import_file",
+            "Import a file into the current document: SVG, DXF, PDF, EPS/PS/AI vector paths (added as cut shapes), or a PNG/JPEG/BMP/GIF/TIFF/WebP image (placed as an image object to trace). fit_to_page scales vectors to the board (else 1:1); join (default true) joins open paths whose ends meet within join_tolerance mm (default 0.05); dpi sizes images (default 96).",
+            json!({"path": path, "fit_to_page": json!({"type": "boolean"}), "join": json!({"type": "boolean"}), "join_tolerance": number, "dpi": number}),
+            json!(["path"]),
+        ),
+        (
+            "export_pdf",
+            "Export the current document as a one-page vector PDF (cut lines red, engrave blue).",
+            json!({"path": path}),
+            json!(["path"]),
+        ),
+        (
+            "export_image",
+            "Render the current document to PNG or JPEG (by the path's extension) at dpi pixels per inch (default 300; 600, 1200 or custom up to 4800).",
+            json!({"path": path, "dpi": number}),
+            json!(["path"]),
         ),
         (
             "command_execute",
@@ -1423,6 +1556,78 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(r.contains("unknown model"), "{r}");
+    }
+
+    #[test]
+    fn import_trace_and_export_tools() {
+        let dir = std::env::temp_dir().join("stencilcraft-mcp-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("square.png");
+        image::RgbaImage::from_fn(30, 30, |x, y| {
+            if (10..20).contains(&x) && (10..20).contains(&y) {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        })
+        .save(&png)
+        .unwrap();
+        let mut session = Session::default();
+        let call = |session: &mut Session,
+                    name: &str,
+                    args: serde_json::Value|
+         -> serde_json::Value {
+            let line = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}});
+            let out: serde_json::Value = serde_json::from_str(
+                &session
+                    .handle_stdio_line(&line.to_string())
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(out["result"]["isError"], false, "{name}: {out}");
+            serde_json::from_str(out["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        let imported = call(
+            &mut session,
+            "import_file",
+            serde_json::json!({"path": png.to_string_lossy()}),
+        );
+        let id = imported["images"][0].as_u64().unwrap();
+        call(
+            &mut session,
+            "image_remove_background",
+            serde_json::json!({"id": id, "tolerance": 5}),
+        );
+        call(
+            &mut session,
+            "image_trace",
+            serde_json::json!({"id": id, "options": {"threshold": 50, "mode": "outer-edge"}}),
+        );
+        assert_eq!(session.engine.doc.shape_count(), 1);
+        for (tool, name) in [
+            ("export_pdf", "out.pdf"),
+            ("export_image", "out.png"),
+            ("export_image", "out.jpg"),
+        ] {
+            let path = dir.join(name);
+            call(
+                &mut session,
+                tool,
+                serde_json::json!({"path": path.to_string_lossy(), "dpi": 96}),
+            );
+            assert!(std::fs::metadata(&path).unwrap().len() > 0);
+        }
+        let bad = session
+            .handle_line(r#"{"id":9,"method":"image.trace","params":{"id":424242}}"#)
+            .unwrap()
+            .unwrap();
+        assert!(bad.contains("\"ok\":false"), "{bad}");
+        let bad = session
+            .handle_line(r#"{"id":9,"method":"export.image","params":{"path":"x.gif"}}"#)
+            .unwrap()
+            .unwrap();
+        assert!(bad.contains("\"ok\":false"), "{bad}");
     }
 
     #[test]

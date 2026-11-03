@@ -22,13 +22,14 @@ to the process. The control socket listens on `127.0.0.1` only, but it has no au
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `command_execute`, and the
-replicate/offset tools `shapes_replicate_side`, `shapes_replicate_array`,
-`shapes_replicate_fill`, `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset`
-(see [Replicate and offset](#replicate-and-offset)). Their
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `machines_list`, `machine_capabilities`,
-`machine_dry_run`,
-and `command_execute`. Their
+`export_dxf`, `export_gcode`, `export_pdf`, `export_image`, `import_file`, `tile_run`,
+`tile_preview`, `command_execute`, the machine tools `machines_list`, `machine_capabilities`
+and `machine_dry_run` (see [Cutting machines](#cutting-machines)), the replicate/offset tools
+`shapes_replicate_side`, `shapes_replicate_array`, `shapes_replicate_fill`,
+`shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset` (see
+[Replicate and offset](#replicate-and-offset)), and the image tools `image_trace`,
+`image_remove_background`, `image_set_bounds` and `image_remove` (see
+[Import and trace](#import-and-trace)). Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -161,6 +162,11 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `machines.list` | `{}` | array of machines: `{id, name, vendor, protocol, support, usb, firmware, cut_width_mm, cut_length_mm, media_width_mm, mats, tool_holders, tools, max_force_gf, force{min,max,unit}, speed{min,max,unit}, roll_feed, bluetooth, regmarks, quad_regmarks, overcut, multi_pass, notes}` (`null` = undocumented) |
 | `machine.capabilities` | `{model}` | that machine's full capabilities row |
 | `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, truncated, transcript: [..], path}` |
+| `export.pdf` | `{path}` | `{path}` |
+| `export.image` | `{path, dpi?}` (`.png`, `.jpg`/`.jpeg`; dpi default 300, up to 4800) | `{path, dpi}` |
+| `import.file` | `{path, fit_to_page?, join?, join_tolerance?, dpi?}` | `{shapes: [id], images: [id]}` |
+| `image.trace` | `{id, options?, style?}` | `{ShapesAdded: {ids}}` |
+| `image.remove-background` | `{id, tolerance}` | `{ImageChanged: {id}}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 | `shapes.replicate-side` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
 | `shapes.replicate-array` | `{ids, axis, count, gap_mm}` | `{ShapesAdded: {ids}}` |
@@ -223,3 +229,40 @@ for a spooler, for example). Every value is validated against the model: an out-
 force, speed, depth, tool, holder, mat or a design outside the cut area is a normal tool error
 naming the knob and range — never clamped. There is deliberately **no** MCP method that sends
 to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a person.
+
+## Import and trace
+
+`import_file` adds a file to the **current** document (undoable): SVG, DXF, PDF, EPS/PS
+and Illustrator `.ai` vector paths become cut shapes (as is, 1:1, unless `fit_to_page`
+scales them to the board), with open paths whose ends meet within `join_tolerance` mm
+(default 0.05) joined into polylines unless `join: false`. Raster files (PNG, JPEG, BMP,
+GIF first frame, TIFF, WebP) are placed as an image object sized at `dpi` (default 96) to
+trace; HEIC/HEIF is refused with a message. Files over 64 MiB, images over 10,000 px a
+side or 16 million pixels, and more than 200,000 paths are errors, never crashes. Only
+path geometry is read from vector files: fills, text, embedded images and symbol
+instances are dropped.
+
+`image_trace` turns a placed image into closed paths. `options` (all optional):
+
+| Option | Range | Default | Meaning |
+| --- | --- | --- | --- |
+| `threshold` | 0–100 % | 50 | pixels darker than this (alpha over white) are traced |
+| `despeckle` | px area | 4 | islands and pinholes smaller than this are dropped |
+| `low_pass` | 0–50 px | 0 | blur radius before thresholding |
+| `high_pass` | 0–50 px | 0 | edge filter radius (traces outlines of large dark areas) |
+| `colour_range` | `{hue_min, hue_max, min_saturation}` | none | trace by hue (degrees, wraps when min > max) instead of brightness |
+| `smoothing` | 0–50 px | 1 | simplification tolerance (0 keeps the pixel staircase) |
+| `corner_threshold` | 0–180° | 60 | vertices turning at least this much stay sharp; others are rounded |
+| `mode` | `all-edges`, `outer-edge`, `detach` | `all-edges` | outlines and holes; outlines only; or trace and remove the traced pixels from the image |
+
+`style` is `cut` (default) or `engrave`. Outer contours have positive shoelace area in
+document coordinates (y down) and holes negative. `image_remove_background` flood-fills
+from the border through colours within `tolerance` % of the border's dominant colour and
+makes them transparent. The underlying engine commands are `image.place`, `image.remove`,
+`image.set-bounds {id, x, y, width, height}`, `image.trace` and `image.remove-background`,
+all reachable through `command_execute` too.
+
+`export_pdf` writes one vector page the size of the board (cut red, engrave blue; placed
+images are not written yet). `export_image` renders the board, images included, to PNG or
+JPEG at `dpi` (render capped at 64 million pixels).
+

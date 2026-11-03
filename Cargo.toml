@@ -16,6 +16,10 @@ thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
+base64 = "0.22"
+# Raster import/trace; every decoder here is pure Rust (MIT/Apache) and builds for wasm.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "tiff", "webp"] }
+tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 # ui
 egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
@@ -32,6 +36,11 @@ craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
 vectorcraft-geom = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 vectorcraft-pathops = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+# VectorCraft's readers (already in the tree through vectorcraft-engine) for DXF/PDF/EPS/AI import.
+vectorcraft-doc = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+vectorcraft-cad = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+vectorcraft-pdf = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
+vectorcraft-eps = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 # internal
 stencilcraft-geom = { path = "crates/geom" }
 stencilcraft-doc = { path = "crates/doc" }
@@ -39,6 +48,9 @@ stencilcraft-kerf = { path = "crates/kerf" }
 stencilcraft-tiling = { path = "crates/tiling" }
 stencilcraft-svg = { path = "crates/svg" }
 stencilcraft-dxf = { path = "crates/dxf" }
+stencilcraft-raster = { path = "crates/raster" }
+stencilcraft-import = { path = "crates/import" }
+stencilcraft-pdf = { path = "crates/pdf" }
 stencilcraft-gcode = { path = "crates/gcode" }
 stencilcraft-generate = { path = "crates/generate" }
 stencilcraft-engine = { path = "crates/engine" }

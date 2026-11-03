@@ -54,6 +54,7 @@ fn base_document(board: Board, kerf: KerfSettings, layers: Vec<Layer>) -> Docume
         kerf,
         layers,
         next_shape_id: id_top + 1,
+        images: Vec::new(),
     }
 }
 

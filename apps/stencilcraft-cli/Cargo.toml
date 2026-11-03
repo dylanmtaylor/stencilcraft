@@ -20,6 +20,9 @@ stencilcraft-dxf = { workspace = true }
 stencilcraft-engine = { workspace = true }
 stencilcraft-machine = { workspace = true }
 stencilcraft-gcode = { workspace = true }
+stencilcraft-import = { workspace = true }
+stencilcraft-pdf = { workspace = true }
+stencilcraft-raster = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-mcp = { workspace = true }
 stencilcraft-svg = { workspace = true }

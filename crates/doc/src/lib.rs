@@ -205,6 +205,57 @@ impl Shape {
     }
 }
 
+/// Most placed raster images one document may hold.
+pub const MAX_IMAGES: usize = 256;
+/// Most base64 PNG bytes one placed image may carry (about 96 MiB of PNG).
+pub const MAX_IMAGE_DATA: usize = 128 * 1024 * 1024;
+
+/// A placed raster image (a trace source, never cut). Pixels are PNG, base64-encoded so
+/// the document stays JSON; `Arc` keeps undo snapshots from copying the bytes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RasterImage {
+    /// Shares the shape id counter, so an id names one object in the document.
+    pub id: u64,
+    pub name: String,
+    pub x_mm: f64,
+    pub y_mm: f64,
+    pub width_mm: f64,
+    pub height_mm: f64,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub png_base64: std::sync::Arc<str>,
+}
+
+impl RasterImage {
+    fn validate(&self) -> Result<(), DocError> {
+        for (value, what) in [
+            (self.x_mm, "image x"),
+            (self.y_mm, "image y"),
+            (self.width_mm, "image width"),
+            (self.height_mm, "image height"),
+        ] {
+            check_finite_mm(value, what)?;
+        }
+        if self.width_mm <= 0.0
+            || self.height_mm <= 0.0
+            || self.width_px == 0
+            || self.height_px == 0
+        {
+            return Err(DocError::Model(format!(
+                "image {}: width and height must be positive",
+                self.id
+            )));
+        }
+        if self.png_base64.len() > MAX_IMAGE_DATA {
+            return Err(DocError::Model(format!(
+                "image {}: pixel data exceeds the 128 MiB limit",
+                self.id
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// A StencilCraft document: artboard, kerf configuration, layers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -214,6 +265,9 @@ pub struct Document {
     /// Next free shape id; maintained by whoever mutates the document.
     #[serde(default)]
     pub next_shape_id: u64,
+    /// Placed raster images, bottom first, drawn under the cut layers.
+    #[serde(default)]
+    pub images: Vec<RasterImage>,
 }
 
 impl Default for Document {
@@ -223,6 +277,7 @@ impl Default for Document {
             kerf: KerfSettings::default(),
             layers: vec![Layer::new("cut", CutStyle::Cut)],
             next_shape_id: 1,
+            images: Vec::new(),
         }
     }
 }
@@ -285,6 +340,28 @@ impl Document {
         Ok(shape)
     }
 
+    /// Places a raster image with the next object id and returns that id.
+    pub fn push_image(&mut self, mut image: RasterImage) -> Result<u64, DocError> {
+        if self.images.len() >= MAX_IMAGES {
+            return Err(DocError::Model(format!(
+                "a document holds at most {MAX_IMAGES} images"
+            )));
+        }
+        image.id = self.next_shape_id;
+        image.validate()?;
+        self.next_shape_id = self
+            .next_shape_id
+            .checked_add(1)
+            .ok_or_else(|| DocError::Model("shape ids exhausted".to_string()))?;
+        let id = image.id;
+        self.images.push(image);
+        Ok(id)
+    }
+
+    pub fn get_image(&self, id: u64) -> Option<&RasterImage> {
+        self.images.iter().find(|image| image.id == id)
+    }
+
     /// Checks the board is a sane sheet: positive, finite dimensions.
     pub fn validate(&self) -> Result<(), DocError> {
         check_finite_mm(self.board.width_mm, "board width")?;
@@ -300,7 +377,12 @@ impl Document {
                 "kerf: width cannot be negative".to_string(),
             ));
         }
-        Ok(())
+        if self.images.len() > MAX_IMAGES {
+            return Err(DocError::Model(format!(
+                "a document holds at most {MAX_IMAGES} images"
+            )));
+        }
+        self.images.iter().try_for_each(RasterImage::validate)
     }
 
     /// Serialises with the format header. The header wraps the document so a reader
@@ -313,6 +395,7 @@ impl Document {
             "kerf": self.kerf,
             "layers": self.layers,
             "next-shape-id": self.next_shape_id,
+            "images": self.images,
         });
         serde_json::to_string_pretty(&wrapper).map_err(|e| DocError::Structure {
             path: "output".to_string(),
@@ -369,11 +452,16 @@ fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
         .transpose()
         .map_err(|e| structure_err(path, &e))?
         .unwrap_or(1);
+    let images: Vec<RasterImage> = match value.get("images") {
+        None => Vec::new(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| structure_err(path, &e))?,
+    };
     let doc = Document {
         board,
         kerf,
         layers,
         next_shape_id,
+        images,
     };
     doc.validate()?;
     Ok(doc)
@@ -498,6 +586,30 @@ mod tests {
             Document::load_json(json),
             Err(DocError::Structure { ref message, .. }) if message.contains("kerf")
         ));
+    }
+
+    #[test]
+    fn images_round_trip_and_share_the_id_counter() {
+        let mut doc = sample();
+        let id = doc
+            .push_image(RasterImage {
+                id: 0,
+                name: "photo".to_string(),
+                x_mm: 0.0,
+                y_mm: 0.0,
+                width_mm: 10.0,
+                height_mm: 5.0,
+                width_px: 2,
+                height_px: 1,
+                png_base64: "AAAA".into(),
+            })
+            .unwrap();
+        assert_eq!(id, 2);
+        let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
+        assert_eq!(back, doc);
+        let mut bad = doc.clone();
+        bad.images[0].width_mm = -1.0;
+        assert!(bad.validate().is_err());
     }
 
     #[test]

@@ -16,11 +16,14 @@ stencilcraft-dxf = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-machine = { workspace = true }
+stencilcraft-import = { workspace = true }
+stencilcraft-pdf = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-studio = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 
 [dev-dependencies]
+image = { workspace = true }
 stencilcraft-testkit = { workspace = true }
 
 [lints]

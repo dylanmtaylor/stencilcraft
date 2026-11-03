@@ -135,6 +135,10 @@ cargo run --release -p stencilcraft-cli -- print-cut --in logo.stencilcraft --ou
 ```
 
 The trace path supports bounded PNG/JPEG inputs; its default physical scale is 96 dpi.
+The newer `import` and `trace` commands also read DXF, PDF, EPS/AI and BMP/GIF/TIFF/WebP,
+and `trace` takes threshold, despeckle, filter, colour-range and mode options
+(`stencilcraft-cli trace --help`); `run --export out.pdf|out.png --dpi 600` adds PDF and
+raster exports.
 Print & Cut export requires printing at actual size. Optical-sensor reading and automatic
 machine alignment are not implemented yet; see [the alignment limitations](docs/print-cut.md).
 

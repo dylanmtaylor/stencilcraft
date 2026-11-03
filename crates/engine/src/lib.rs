@@ -241,6 +241,42 @@ pub enum Command {
     /// Clear the document to a fresh board.
     #[serde(rename = "document.new")]
     DocumentNew { width_mm: f64, height_mm: f64 },
+
+    /// Place a raster image (pixels as base64 PNG; `id` is assigned). Hosts build it
+    /// with `stencilcraft_raster::place` from a decoded file.
+    #[serde(rename = "image.place")]
+    ImagePlace {
+        image: stencilcraft_doc::RasterImage,
+    },
+
+    #[serde(rename = "image.remove")]
+    ImageRemove { id: u64 },
+
+    /// Move/resize a placed image, millimetres.
+    #[serde(rename = "image.set-bounds")]
+    ImageSetBounds {
+        id: u64,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    },
+
+    /// Trace a placed image into closed paths (`options` as
+    /// `stencilcraft_raster::TraceOptions`; every field optional). Detach mode also
+    /// clears the traced pixels from the image.
+    #[serde(rename = "image.trace")]
+    ImageTrace {
+        id: u64,
+        #[serde(default)]
+        options: stencilcraft_raster::TraceOptions,
+        #[serde(default = "cut_style")]
+        style: CutStyle,
+    },
+
+    /// Make the image's border-connected background transparent (`tolerance` 0–100 %).
+    #[serde(rename = "image.remove-background")]
+    ImageRemoveBackground { id: u64, tolerance: f64 },
     /// Break a shape's path at one node: a closed contour opens there, an open one splits in
     /// two (both pieces stay in the shape; `shapes.release-compound` separates them).
     #[serde(rename = "path.break")]
@@ -387,6 +423,10 @@ pub enum Command {
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
+fn cut_style() -> CutStyle {
+    CutStyle::Cut
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BooleanOperation {
@@ -479,6 +519,15 @@ pub enum Effect {
         height_mm: f64,
     },
     DocumentReset,
+    ImageAdded {
+        id: u64,
+    },
+    ImageRemoved {
+        id: u64,
+    },
+    ImageChanged {
+        id: u64,
+    },
     /// Shapes whose paths or flags changed in place.
     ShapesEdited {
         ids: Vec<u64>,
@@ -637,6 +686,11 @@ impl Engine {
                 | Command::ShapesSetStyle { .. }
                 | Command::LayerSetVisible { .. }
                 | Command::LayerRemove { .. }
+                | Command::ImagePlace { .. }
+                | Command::ImageRemove { .. }
+                | Command::ImageSetBounds { .. }
+                | Command::ImageTrace { .. }
+                | Command::ImageRemoveBackground { .. }
                 | Command::PathBreak { .. }
                 | Command::PathJoin { .. }
                 | Command::PathClose { .. }
@@ -1262,8 +1316,55 @@ impl Engine {
                     kerf: self.doc.kerf.clone(),
                     layers: vec![stencilcraft_doc::Layer::new("cut", CutStyle::Cut)],
                     next_shape_id: 1,
+                    images: Vec::new(),
                 };
                 Ok(Effect::DocumentReset)
+            }
+            Command::ImagePlace { image } => Ok(Effect::ImageAdded {
+                id: self.doc.push_image(image).map_err(invalid("image.place"))?,
+            }),
+            Command::ImageRemove { id } => {
+                let before = self.doc.images.len();
+                self.doc.images.retain(|image| image.id != id);
+                if self.doc.images.len() == before {
+                    return Err(no_image("image.remove", id));
+                }
+                Ok(Effect::ImageRemoved { id })
+            }
+            Command::ImageSetBounds {
+                id,
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let image = self
+                    .doc
+                    .images
+                    .iter_mut()
+                    .find(|image| image.id == id)
+                    .ok_or_else(|| no_image("image.set-bounds", id))?;
+                image.x_mm = x;
+                image.y_mm = y;
+                image.width_mm = width;
+                image.height_mm = height;
+                self.doc.validate().map_err(invalid("image.set-bounds"))?;
+                Ok(Effect::ImageChanged { id })
+            }
+            Command::ImageTrace { id, options, style } => self.trace_image(id, &options, style),
+            Command::ImageRemoveBackground { id, tolerance } => {
+                let image = self
+                    .doc
+                    .get_image(id)
+                    .ok_or_else(|| no_image("image.remove-background", id))?;
+                let pixels = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| stencilcraft_raster::remove_background(&pixels, tolerance))
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid("image.remove-background"))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = pixels;
+                }
+                Ok(Effect::ImageChanged { id })
             }
             Command::PathBreak { id, contour, node } => self.edit_anchors(id, "path.break", |p| {
                 path_edit::break_at(p, NodeRef { contour, node })
@@ -1676,6 +1777,60 @@ impl Engine {
             .map_err(|error| EngineError::Invalid(format!("{NAME}: {error}")))?;
         self.sync_doc_from_session()?;
         Ok(Effect::ShapesEdited { ids })
+    }
+
+    /// Trace in pixel space, map onto the image's placement, add the paths to the top
+    /// layer of `style`; detach replaces the image's pixels.
+    fn trace_image(
+        &mut self,
+        id: u64,
+        options: &stencilcraft_raster::TraceOptions,
+        style: CutStyle,
+    ) -> Result<Effect, EngineError> {
+        let image = self
+            .doc
+            .get_image(id)
+            .ok_or_else(|| no_image("image.trace", id))?
+            .clone();
+        let pixels = stencilcraft_raster::image_pixels(&image).map_err(invalid("image.trace"))?;
+        let traced =
+            stencilcraft_raster::trace(&pixels, options).map_err(invalid("image.trace"))?;
+        let (sx, sy) = (
+            image.width_mm / f64::from(image.width_px),
+            image.height_mm / f64::from(image.height_px),
+        );
+        let map = |p: kurbo::Point| kurbo::Point::new(image.x_mm + p.x * sx, image.y_mm + p.y * sy);
+        let layer = match self
+            .doc
+            .layers
+            .iter()
+            .rposition(|layer| layer.kind == style)
+        {
+            Some(index) => index,
+            None => {
+                self.doc.layers.push(stencilcraft_doc::Layer::new(
+                    match style {
+                        CutStyle::Cut => "cut",
+                        CutStyle::Engrave => "engrave",
+                    },
+                    style,
+                ));
+                self.doc.layers.len() - 1
+            }
+        };
+        let mut ids = Vec::with_capacity(traced.contours.len());
+        for contour in &traced.contours {
+            let path = stencilcraft_raster::contour_path(contour, options.corner_threshold, map);
+            ids.push(self.doc.push_shape(layer, path, style)?.id);
+        }
+        if let Some(detached) = traced.detached {
+            let replaced = stencilcraft_raster::with_pixels(&image, &detached)
+                .map_err(invalid("image.trace"))?;
+            if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                *slot = replaced;
+            }
+        }
+        Ok(Effect::ShapesAdded { ids })
     }
 
     fn apply_pathfinder(
@@ -2450,6 +2605,14 @@ impl Engine {
         self.restore_history_entry(&next);
         true
     }
+}
+
+fn invalid<E: std::fmt::Display>(command: &'static str) -> impl Fn(E) -> EngineError {
+    move |error| EngineError::Invalid(format!("{command}: {error}"))
+}
+
+fn no_image(command: &str, id: u64) -> EngineError {
+    EngineError::Invalid(format!("{command}: no image with id {id}"))
 }
 
 /// Non-empty, duplicate-free shape ids, in the order given.
@@ -3932,6 +4095,71 @@ mod tests {
         assert!(engine.can_redo());
         assert!(engine.redo());
         assert_eq!(engine.doc.layers.len(), 1);
+    }
+
+    #[test]
+    fn image_place_trace_detach_and_undo() {
+        // A 20×20 px image at 10 px/mm with a dark 10 px square in the middle.
+        let pixels = image::RgbaImage::from_fn(20, 20, |x, y| {
+            if (5..15).contains(&x) && (5..15).contains(&y) {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        });
+        let mut placed = stencilcraft_raster::place(&pixels, "sq", 254.0).unwrap();
+        placed.x_mm = 5.0;
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("expected ImageAdded");
+        };
+        let json = serde_json::json!({"command": "image.trace", "params": {"id": id, "options": {"mode": "detach"}}});
+        let command: Command = serde_json::from_value(json).unwrap();
+        let Effect::ShapesAdded { ids } = engine.run(command).unwrap() else {
+            panic!("expected ShapesAdded");
+        };
+        assert_eq!(ids.len(), 1);
+        let bounds = engine.doc.get_shape(ids[0]).unwrap().bounds().unwrap();
+        assert!(
+            (bounds.x0 - 5.5).abs() < 1e-6 && (bounds.y0 - 0.5).abs() < 1e-6,
+            "{bounds:?}"
+        );
+        assert!((bounds.width() - 1.0).abs() < 1e-6, "{bounds:?}");
+        let detached = stencilcraft_raster::image_pixels(&engine.doc.images[0]).unwrap();
+        assert_eq!(detached.get_pixel(10, 10)[3], 0);
+        assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 0);
+        let restored = stencilcraft_raster::image_pixels(&engine.doc.images[0]).unwrap();
+        assert_eq!(restored.get_pixel(10, 10)[3], 255);
+        engine
+            .run(Command::ImageRemoveBackground {
+                id,
+                tolerance: 10.0,
+            })
+            .unwrap();
+        assert!(
+            engine
+                .run(Command::ImageTrace {
+                    id: 999,
+                    options: Default::default(),
+                    style: CutStyle::Cut
+                })
+                .is_err()
+        );
+        assert!(
+            engine
+                .run(Command::ImageSetBounds {
+                    id,
+                    x: 0.0,
+                    y: 0.0,
+                    width: -1.0,
+                    height: 1.0
+                })
+                .is_err()
+        );
+        engine.run(Command::ImageRemove { id }).unwrap();
+        assert!(engine.doc.images.is_empty());
     }
 
     /// An engine holding one 10 × 5 mm rectangle (id 1) at (10, 20) on a 200 × 100 board.

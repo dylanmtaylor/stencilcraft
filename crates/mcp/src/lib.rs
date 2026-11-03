@@ -346,6 +346,16 @@ impl Session {
                     .map_err(|e: EngineError| ProtocolError::Bad(e.to_string()))
                     .map(stencilcraft_effect_json)
             }
+            command if ENGINE_TOOLS.iter().any(|(_, name, _)| *name == command) => {
+                let command: Command = serde_json::from_value(
+                    serde_json::json!({"command": command, "params": params}),
+                )
+                .map_err(|e| ProtocolError::Bad(format!("bad {command} parameters: {e}")))?;
+                self.engine
+                    .run(command)
+                    .map_err(|e: EngineError| ProtocolError::Bad(e.to_string()))
+                    .map(stencilcraft_effect_json)
+            }
             other => Err(ProtocolError::Bad(format!("unknown method: {other}"))),
         }
     }
@@ -367,7 +377,72 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "tile_run" => Some("tile.run"),
         "tile_preview" => Some("tile.preview"),
         "command_execute" => Some("command.execute"),
-        _ => None,
+        _ => ENGINE_TOOLS
+            .iter()
+            .find(|(tool, _, _)| *tool == name)
+            .map(|(_, command, _)| *command),
+    }
+}
+
+/// Tools that are one engine command each: (tool name, command name, description).
+/// Their arguments are the command's params, and each is also a legacy method.
+const ENGINE_TOOLS: [(&str, &str, &str); 6] = [
+    (
+        "shapes_replicate_side",
+        "shapes.replicate-side",
+        "Copy the shapes `ids` once to the `side` (left, right, above, below), edge to edge with `gap_mm` between.",
+    ),
+    (
+        "shapes_replicate_array",
+        "shapes.replicate-array",
+        "Make a row (axis horizontal) or column (axis vertical) of `count` items (2-1000, the selection included), `gap_mm` apart.",
+    ),
+    (
+        "shapes_replicate_fill",
+        "shapes.replicate-fill",
+        "Fill the board with as many copies of the selection as fit whole on its grid, `gap_mm` apart.",
+    ),
+    (
+        "shapes_mirror_copy",
+        "shapes.mirror-copy",
+        "Add a mirrored copy of the selection on `side` (left/right flip horizontally, above/below vertically), `gap_mm` away.",
+    ),
+    (
+        "shapes_rotate_copies",
+        "shapes.rotate-copies",
+        "Radial array: `count` items (2-1000, the selection included) rotated evenly about the selection's centre.",
+    ),
+    (
+        "shapes_offset",
+        "shapes.offset",
+        "Add an offset outline of each shape: positive `distance_mm` grows, negative is an internal offset. Optional `join` (miter, round, bevel; default miter) and `miter_limit` (corner limit, >= 1, default 4).",
+    ),
+];
+
+fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
+    use serde_json::json;
+    let ids = json!({"type": "array", "items": {"type": "integer"}});
+    let number = json!({"type": "number"});
+    let side = json!({"type": "string", "enum": ["left", "right", "above", "below"]});
+    let count = json!({"type": "integer", "minimum": 2, "maximum": 1000});
+    match command {
+        "shapes.replicate-side" | "shapes.mirror-copy" => (
+            json!({"ids": ids, "side": side, "gap_mm": number}),
+            json!(["ids", "side", "gap_mm"]),
+        ),
+        "shapes.replicate-array" => (
+            json!({"ids": ids, "axis": {"type": "string", "enum": ["horizontal", "vertical"]}, "count": count, "gap_mm": number}),
+            json!(["ids", "axis", "count", "gap_mm"]),
+        ),
+        "shapes.replicate-fill" => (
+            json!({"ids": ids, "gap_mm": number}),
+            json!(["ids", "gap_mm"]),
+        ),
+        "shapes.rotate-copies" => (json!({"ids": ids, "count": count}), json!(["ids", "count"])),
+        _ => (
+            json!({"ids": ids, "distance_mm": number, "join": {"type": "string", "enum": ["miter", "round", "bevel"]}, "miter_limit": number}),
+            json!(["ids", "distance_mm"]),
+        ),
     }
 }
 
@@ -445,8 +520,13 @@ fn mcp_tools() -> Vec<serde_json::Value> {
             json!(["command"]),
         ),
     ];
+    let engine_specs = ENGINE_TOOLS.iter().map(|(name, command, description)| {
+        let (properties, required) = engine_tool_schema(command);
+        (*name, *description, properties, required)
+    });
     specs
         .into_iter()
+        .chain(engine_specs)
         .map(|(name, description, properties, required)| {
             json!({
                 "name": name, "description": description,
@@ -625,6 +705,106 @@ mod tests {
             .unwrap();
         assert!(r.contains("\"ok\":true"), "{r}");
         assert_eq!(session.engine.doc.shape_count(), 1);
+    }
+
+    #[test]
+    fn replicate_and_offset_tools_run_engine_commands() {
+        let mut session = Session::default();
+        let call = |session: &mut Session, id: u32, name: &str, args: &str| {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":{id},"method":"tools/call","params":{{"name":"{name}","arguments":{args}}}}}"#
+            );
+            let value: serde_json::Value =
+                serde_json::from_str(&session.handle_stdio_line(&line).unwrap().unwrap()).unwrap();
+            value["result"]["isError"].as_bool().unwrap()
+        };
+        let list: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect();
+        for (tool, _, _) in ENGINE_TOOLS {
+            assert!(names.contains(&tool), "{tool} listed");
+        }
+        session
+            .engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            })
+            .unwrap();
+        assert!(!call(
+            &mut session,
+            2,
+            "shapes_replicate_side",
+            r#"{"ids":[1],"side":"right","gap_mm":1}"#
+        ));
+        assert!(!call(
+            &mut session,
+            3,
+            "shapes_replicate_array",
+            r#"{"ids":[1],"axis":"vertical","count":3,"gap_mm":0}"#
+        ));
+        assert!(!call(
+            &mut session,
+            4,
+            "shapes_mirror_copy",
+            r#"{"ids":[1],"side":"left","gap_mm":0}"#
+        ));
+        assert!(!call(
+            &mut session,
+            5,
+            "shapes_rotate_copies",
+            r#"{"ids":[1],"count":6}"#
+        ));
+        assert!(!call(
+            &mut session,
+            6,
+            "shapes_offset",
+            r#"{"ids":[1],"distance_mm":-1,"join":"round"}"#
+        ));
+        assert!(!call(
+            &mut session,
+            7,
+            "shapes_replicate_fill",
+            r#"{"ids":[1],"gap_mm":50}"#
+        ));
+        let shapes = session.engine.doc.shape_count();
+        assert!(call(
+            &mut session,
+            8,
+            "shapes_rotate_copies",
+            r#"{"ids":[1],"count":0}"#
+        ));
+        assert!(call(
+            &mut session,
+            9,
+            "shapes_offset",
+            r#"{"ids":[1],"distance_mm":1,"join":"spiky"}"#
+        ));
+        assert!(call(
+            &mut session,
+            10,
+            "shapes_replicate_side",
+            r#"{"ids":[]}"#
+        ));
+        assert_eq!(session.engine.doc.shape_count(), shapes);
+        // The same commands answer as legacy methods.
+        let r = session
+            .handle_line(r#"{"id":11,"method":"shapes.replicate-side","params":{"ids":[1],"side":"below","gap_mm":0}}"#)
+            .unwrap()
+            .unwrap();
+        assert!(r.contains("\"ok\":true"), "{r}");
     }
 
     #[test]

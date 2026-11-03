@@ -846,6 +846,21 @@ impl StencilApp {
                 let _ = job.reply.send(reply.to_string());
                 continue;
             }
+            if let Some((id, kerf_preview, theme)) = view_request(&job.line) {
+                if let Some(on) = kerf_preview {
+                    self.kerf_preview = on;
+                }
+                if let Some(theme) = theme {
+                    self.theme = theme;
+                }
+                let dark = self.theme == stencilcraft_ui_egui::ColorTheme::Dark;
+                let reply = serde_json::json!({"id": id, "ok": true, "result": {
+                    "kerf_preview": self.kerf_preview,
+                    "theme": if dark { "dark" } else { "light" },
+                }});
+                let _ = job.reply.send(reply.to_string());
+                continue;
+            }
             // The session owns the engine while it handles one request, then hands
             // it back: the document, undo history and counters all survive.
             let engine = std::mem::take(&mut self.engine);
@@ -3382,6 +3397,32 @@ fn select_request(line: &str) -> Option<(serde_json::Value, Vec<u64>)> {
     Some((value.get("id").cloned().unwrap_or_default(), ids))
 }
 
+/// The request id, kerf-preview switch and colour theme of an `app.view` control request
+/// (`{"method":"app.view","params":{"kerf_preview":true,"theme":"light"}}`); each setting is
+/// optional and an unrecognised theme name leaves the theme alone.
+fn view_request(
+    line: &str,
+) -> Option<(
+    serde_json::Value,
+    Option<bool>,
+    Option<stencilcraft_ui_egui::ColorTheme>,
+)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("method")?.as_str()? != "app.view" {
+        return None;
+    }
+    let params = value.get("params");
+    let kerf_preview = params
+        .and_then(|p| p.get("kerf_preview"))
+        .and_then(serde_json::Value::as_bool);
+    let theme = match params.and_then(|p| p.get("theme")).and_then(|t| t.as_str()) {
+        Some("dark") => Some(stencilcraft_ui_egui::ColorTheme::Dark),
+        Some("light") => Some(stencilcraft_ui_egui::ColorTheme::Light),
+        _ => None,
+    };
+    Some((value.get("id").cloned().unwrap_or_default(), kerf_preview, theme))
+}
+
 /// Capture the next painted frame to a PNG at `path`, then answer `job`.
 fn request_screenshot(ctx: &egui::Context, path: String, job: control::Job) {
     let id = serde_json::from_str::<serde_json::Value>(&job.line)
@@ -3505,6 +3546,16 @@ mod tests {
             select_request(r#"{"method":"app.select","params":{}}"#),
             None
         );
+        let (id, kerf, theme) = view_request(
+            r#"{"id":2,"method":"app.view","params":{"kerf_preview":true,"theme":"light"}}"#,
+        )
+        .unwrap();
+        assert_eq!((id, kerf), (serde_json::json!(2), Some(true)));
+        assert!(theme == Some(stencilcraft_ui_egui::ColorTheme::Light));
+        let (_, kerf, theme) =
+            view_request(r#"{"method":"app.view","params":{"theme":"pink"}}"#).unwrap();
+        assert!(kerf.is_none() && theme.is_none());
+        assert!(view_request(r#"{"method":"app.select","params":{}}"#).is_none());
         let open = r#"{"id":1,"method":"doc.open","params":{"path":"a.stencilcraft"}}"#;
         assert_eq!(
             document_path_request(open, r#"{"id":1,"ok":true,"result":{}}"#),

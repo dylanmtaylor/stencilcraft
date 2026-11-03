@@ -4944,6 +4944,7 @@ dependencies = [
  "stencilcraft-engine",
  "stencilcraft-gcode",
  "stencilcraft-geom",
+ "stencilcraft-import",
  "stencilcraft-kerf",
  "stencilcraft-machine",
  "stencilcraft-mcp",

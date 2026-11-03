@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M4: Delete and Backspace remove selected shapes in Make as
+  well as the canvas, while text input keeps keyboard focus.
+
 - 2026-11-03 — M3: USB outcomes and errors are shown at the top of Make
   and scrolled into view after communication; hardware cutting remains unverified.
 

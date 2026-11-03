@@ -1256,6 +1256,17 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        // Buttons and other controls can retain keyboard focus after a click. Only
+        // text edits should consume Delete as text rather than removing shapes.
+        if !ctx.text_edit_focused()
+            && ctx.input_mut(|input| {
+                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+            })
+        {
+            self.delete_selection();
+            return;
+        }
         if self.send_mode || ctx.egui_wants_keyboard_input() {
             return;
         }
@@ -1353,11 +1364,6 @@ impl StencilApp {
             self.view.zoom = 1.0;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
             self.duplicate_selection();
-        } else if ctx.input_mut(|input| {
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-                || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
-        }) {
-            self.delete_selection();
         } else if ctx.input_mut(|input| {
             input.consume_key(cmd_shift, egui::Key::Z)
                 || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
@@ -4726,7 +4732,12 @@ mod tests {
 
     #[test]
     fn delete_and_backspace_remove_selected_shapes() {
-        for key in [egui::Key::Delete, egui::Key::Backspace] {
+        for (key, send_mode) in [
+            (egui::Key::Delete, false),
+            (egui::Key::Backspace, false),
+            (egui::Key::Delete, true),
+            (egui::Key::Backspace, true),
+        ] {
             let ctx = egui::Context::default();
             let mut app = StencilApp::new(None);
             app.run_command(Command::ShapeAddRect {
@@ -4736,6 +4747,7 @@ mod tests {
                 height: 8.0,
             });
             app.set_selection([1]);
+            app.send_mode = send_mode;
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     events: vec![egui::Event::Key {
@@ -4752,6 +4764,52 @@ mod tests {
             output.textures_delta.clear();
             assert_eq!(app.engine.doc.shape_count(), 0);
             assert!(app.selected_shapes.is_empty());
+        }
+    }
+
+    #[test]
+    fn delete_preserves_text_input_but_works_with_button_focus() {
+        for text_focus in [true, false] {
+            let ctx = egui::Context::default();
+            let mut app = StencilApp::new(None);
+            app.run_command(Command::ShapeAddRect {
+                x: 3.0,
+                y: 4.0,
+                width: 12.0,
+                height: 8.0,
+            });
+            app.set_selection([1]);
+            let mut text = String::from("abc");
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                if text_focus {
+                    ui.text_edit_singleline(&mut text).request_focus();
+                } else {
+                    ui.button("Control").request_focus();
+                }
+            });
+            output.textures_delta.clear();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Delete,
+                        physical_key: Some(egui::Key::Delete),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    app.handle_keyboard_shortcuts(ui.ctx());
+                    if text_focus {
+                        ui.text_edit_singleline(&mut text);
+                    } else {
+                        let _ = ui.button("Control");
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            assert_eq!(app.engine.doc.shape_count(), usize::from(text_focus));
         }
     }
 

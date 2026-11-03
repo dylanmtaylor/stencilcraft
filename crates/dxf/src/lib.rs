@@ -5,6 +5,10 @@
 //! flattened — the DXF subset here has no arc/spline entities (`docs/gaps.md` 5).
 //! Each layer carries a colour index so CAM tools that key operations off layer
 //! colour (cut vs score) read the file the way it was meant: cut red, engrave blue.
+//! The canvas has a downward-growing Y axis; DXF model space uses an upward-growing
+//! Y axis. At export, the board top maps to its height and its bottom maps to zero.
+//! Autodesk describes LWPOLYLINE vertex coordinates and its default extrusion at
+//! <https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-DXF/files/GUID-748FC305-F3F2-4F74-825A-61F04D757A50.htm>.
 //! A hidden layer is written with a negative colour index, the DXF way of saying
 //! "layer off".
 //! Group codes one per line, values one per line, exactly as the DXF reference's
@@ -83,7 +87,13 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
                 (CutStyle::Cut, _) | (_, CutStyle::Cut) => true,
                 (CutStyle::Engrave, CutStyle::Engrave) => false,
             };
-            push_polyline(&mut out, &shape.cut_path(), &dxf_layer, closed)?;
+            push_polyline(
+                &mut out,
+                &shape.cut_path(),
+                &dxf_layer,
+                closed,
+                doc.board.height_mm,
+            )?;
         }
     }
     pair(&mut out, 0, "ENDSEC")?;
@@ -121,6 +131,7 @@ fn push_polyline(
     path: &kurbo::BezPath,
     layer: &str,
     closed: bool,
+    board_height_mm: f64,
 ) -> Result<(), DxfError> {
     let lines = path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS);
     for pl in &lines {
@@ -148,7 +159,9 @@ fn push_polyline(
                 return Err(DxfError::Write("dxf: a vertex is not finite".to_string()));
             }
             w(out, 10, format!("{:.6}", p.x))?;
-            w(out, 20, format!("{:.6}", p.y))?;
+            let y = stencilcraft_geom::artboard_y_to_cartesian(p.y, board_height_mm)
+                .map_err(|error| DxfError::Write(error.to_string()))?;
+            w(out, 20, format!("{y:.6}"))?;
         }
     }
     Ok(())
@@ -214,6 +227,31 @@ mod tests {
         let dxf = export(&doc).unwrap();
         assert!(dxf.contains("STENCILCRAFT-SCORING-PASS"), "{dxf}");
         assert!(dxf.contains("\n70\n0\n"), "open flag for engrave");
+    }
+
+    #[test]
+    fn export_flips_y_about_the_board_bottom_for_asymmetric_art() {
+        let mut doc = Document::default();
+        doc.board.height_mm = 100.0;
+        let mut path = kurbo::BezPath::new();
+        path.move_to((10.0, 20.0));
+        path.line_to((40.0, 20.0));
+        path.line_to((10.0, 70.0));
+        path.close_path();
+        doc.push_shape(0, path, CutStyle::Cut).unwrap();
+        let dxf = export(&doc).unwrap();
+        assert!(dxf.contains("10\n10.000000\n20\n80.000000\n10\n40.000000\n20\n80.000000\n10\n10.000000\n20\n30.000000\n"), "{dxf}");
+    }
+
+    #[test]
+    fn rejects_coordinate_overflow_when_reflecting_y() {
+        let mut doc = Document::default();
+        doc.board.height_mm = f64::MAX;
+        let mut path = kurbo::BezPath::new();
+        path.move_to((0.0, -f64::MAX));
+        path.line_to((1.0, 0.0));
+        doc.push_shape(0, path, CutStyle::Cut).unwrap();
+        assert!(matches!(export(&doc), Err(DxfError::Write(_))));
     }
 
     #[test]

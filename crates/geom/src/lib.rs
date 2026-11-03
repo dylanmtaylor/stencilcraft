@@ -3,7 +3,7 @@
 //!
 //! The bottom layer of the workspace (L1 in `docs/architecture.md`): nothing here
 //! depends on the document model, kerf, exports or the engine. All coordinates are
-//! millimetres in an artboard-like space with y up.
+//! millimetres; coordinate-axis orientation is defined at each format boundary.
 
 pub use kurbo::{
     Affine, BezPath, Circle, CubicBez, Ellipse, Line, ParamCurve, Point, QuadBez, Rect, Shape, Vec2,
@@ -30,6 +30,16 @@ pub const fn inches_to_mm(inches: f64) -> f64 {
 /// Converts document millimetres to inches at a display boundary.
 pub const fn mm_to_inches(mm: f64) -> f64 {
     mm / MM_PER_INCH
+}
+
+/// Map an artboard's downward-growing Y coordinate to a Cartesian Y coordinate.
+///
+/// The board's top is `height_mm` and its bottom is zero in the resulting space.
+/// Values outside the board remain outside; non-finite inputs or results are rejected.
+pub fn artboard_y_to_cartesian(y_mm: f64, height_mm: f64) -> Result<f64> {
+    check_finite_mm(y_mm, "artboard y")?;
+    check_finite_mm(height_mm, "artboard height")?;
+    check_finite_mm(height_mm - y_mm, "cartesian y")
 }
 
 /// Rejects a non-finite millimetre length before it can poison a document.

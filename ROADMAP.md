@@ -101,6 +101,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 - 2026-11-03 — Reconciled the standing gaps list with merged command and desktop
   coverage. Engine-only features remain marked as incomplete desktop workflows.
+- 2026-11-03 — DXF export reflects canvas Y coordinates at the board height, preserving
+  asymmetric artwork orientation in Cartesian CAD viewers and the DXF import round trip.
+  DXF import still normalizes artwork to its extents and does not preserve page margins.
 
 - 2026-11-03 — Document model and commands add groups, layer ordering, page metadata,
   guides, grid and snap settings, local library and recovery helpers, and project

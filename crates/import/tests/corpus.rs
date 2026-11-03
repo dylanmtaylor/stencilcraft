@@ -112,6 +112,48 @@ fn dxf_reads_every_entity_and_joins_lines() {
 }
 
 #[test]
+fn dxf_round_trip_preserves_asymmetric_art_orientation() {
+    let mut doc = Document::default();
+    doc.board.width_mm = 100.0;
+    doc.board.height_mm = 100.0;
+    let mut path = kurbo::BezPath::new();
+    path.move_to((10.0, 20.0));
+    path.line_to((40.0, 20.0));
+    path.line_to((10.0, 70.0));
+    path.close_path();
+    doc.push_shape(0, path, CutStyle::Cut).unwrap();
+    let dxf = stencilcraft_dxf::export(&doc).unwrap();
+    let back = import_bytes(dxf.as_bytes(), "asymmetric.dxf", &ImportOptions::default()).unwrap();
+    let shape = &back.layers[0].shapes[0];
+    let bounds = shape.bounds().unwrap();
+    let points: Vec<_> = shape
+        .path
+        .elements()
+        .iter()
+        .filter_map(|e| e.end_point())
+        .map(|p| (p.x - bounds.x0, p.y - bounds.y0))
+        .collect();
+    // The two points at the top and one at bottom-left survive import, even if
+    // the importer normalizes the whole artboard's origin.
+    assert!(
+        points.iter().any(|(x, y)| x.abs() < 1e-5 && y.abs() < 1e-5),
+        "{points:?}"
+    );
+    assert!(
+        points
+            .iter()
+            .any(|(x, y)| (x - 30.0).abs() < 1e-5 && y.abs() < 1e-5),
+        "{points:?}"
+    );
+    assert!(
+        points
+            .iter()
+            .any(|(x, y)| x.abs() < 1e-5 && (y - 50.0).abs() < 1e-5),
+        "{points:?}"
+    );
+}
+
+#[test]
 fn dxf_round_trips_our_exporter() {
     let doc = sample_doc();
     let dxf = stencilcraft_dxf::export(&doc).unwrap();

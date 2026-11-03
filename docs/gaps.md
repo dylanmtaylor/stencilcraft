@@ -50,9 +50,11 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    sort by colour do the right thing. Import reads LINE, LWPOLYLINE (bulges), POLYLINE,
    CIRCLE, ARC, ELLIPSE, SPLINE and more through VectorCraft's DXF reader, with "fit to
    page" / as-is and endpoint joining, and a mutation corpus. Missing: arc entities
-   (export flattens curves into line segments), block/INSERT reuse on export, and the
-   exporter writes the document's y-down coordinates straight into DXF's y-up space, so
-   the art is mirrored in CAD tools (a round trip through our importer flips it).
+   (export flattens curves into line segments) and block/INSERT reuse on export. DXF
+   export preserves canvas orientation using a board-height Y reflection. The DXF
+   importer normalizes the artwork to its extents, so absolute page offsets and blank
+   margins do not round-trip. Axis conventions elsewhere, including tile previews, still
+   need a separate audit.
 6. **Engine**: VectorCraft backs StencilCraft shape creation, transforms, Pathfinder,
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
    document and metadata snapshots. Node-level path commands (break, join, close,

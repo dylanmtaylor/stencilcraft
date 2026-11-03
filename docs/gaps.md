@@ -80,8 +80,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     between layers. Attach (keep positions on the mat) and Contour (turn off single
     sub-paths) build on these.
 18. **Snapping and guides**: there is a grid display but no snapping to the grid,
-    objects or guides. Also missing: guides and a measure tool. Units are mm only, with
-    no inch display.
+    objects or guides (Silhouette Studio has smart snapping on by default). Also missing:
+    guides, a measure tool, and width/height callouts that follow a shape while it is
+    drawn. Units are mm only, with no inch display (Silhouette Studio defaults to
+    inches).
 19. **Text**: the Text tool places built-in single-line bitmap lettering only. Missing:
     user/system fonts (through `CRAFT_FONTS_DIR`, never bundled), size and spacing
     controls, text that can be edited after placing, text on a path or arc, and a
@@ -92,23 +94,36 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 21. **Cut job settings**: missing test cut, overcut, cut order/path sorting, custom saved
     materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
     Also missing: weed lines and borders, and more operation types (pen, score,
-    perforate).
+    perforate). Also missing: Send modes that set one row of settings per line or fill
+    colour, assigning lines to tool holder 1 or 2 (or skipping them) on the cut preview,
+    and advanced material settings (acceleration, track enhancing, kraft-blade loop
+    corners).
 22. **Machine connection**: the only transport is serial/CDC, and only from the CLI.
     Missing: USB bulk (`nusb`), Bluetooth, device discovery, live status, load/unload,
-    pause and cancel, a Make-screen mat preview, multi-cutter output and batch jobs.
+    pause and cancel, a Make-screen mat preview, a machine card with firmware and status
+    in the app, a packet-size setting, multi-cutter output and batch jobs.
     Driving Cricut machines is out of scope (no public specification).
 23. **Path editing tools**: missing freehand and smoothed freehand, arc, knife, eraser,
     break/join/close path, release compound path, simplify, flip/mirror buttons, a
-    clipboard, and warp.
+    clipboard, Paste in Front, Select by Color, Detach Lines, a rotation handle on the
+    selection, a reference-point picker for the X/Y fields, a preference for what a tool
+    does after use, and warp.
 24. **Trace**: threshold silhouette only. Missing: image filters, outer-edge-only trace,
     trace & detach, background removal, a live preview of the trace area, and
     multi-colour trace to layers.
-25. **Print & Cut, beyond item 3**: missing printing from the app, mark size and position
-    options, bleed, fill colour/gradient for printed artwork, Flatten, print size checks
+25. **Print & Cut, beyond item 3**: missing printing from the app (resolution, preview),
+    a printable-area border on the canvas, mark size and position options, bleed,
+    printing cut lines, fill colour/gradient for printed artwork, Flatten, print size checks
     and calibration. Scan-to-cut is low priority.
 26. **Formats**: missing DXF import (see item 5), PDF import, PDF/PNG/JPG export and
-    placed raster images for printing. Proprietary `.studio`/`.studio3` and AI/CDR
+    placed raster images for printing. There is no autosave or crash recovery. Proprietary `.studio`/`.studio3` and AI/CDR
     formats are out of scope.
-27. **Documents and preferences**: one board per document, with no pages or tabs. No
+27. **Documents and preferences**: one board per document and one document per window,
+    with no tabs. No Home screen (new/recent) and no simplified starter workspace. No
     default machine/material preferences, no UI language choice and no local design
     library beyond Recent. The browser/mobile client is item 9.
+28. **Line and fill styles for pens and specialty tools**: shapes are only cut or
+    engrave. Missing: dashed lines with joins and caps, solid/gradient/pattern fills,
+    sketch (hatch) and stipple fills for pens, and emboss/deboss/foil patterns. Low
+    priority: a pop-up card strut generator, a spelling check for text, and image
+    effects on placed rasters.

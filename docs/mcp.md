@@ -64,7 +64,7 @@ produces a response with `id: null`. No request may abort the session on a bad p
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `doc.open` | `{path}` | `{layers: n, shapes: n}` |
+| `doc.open` | `{path}`: a `.stencilcraft` file, or a Silhouette Studio `.studio`/`.studio3` to import | `{layers: n, shapes: n, warnings: [..]}` |
 | `doc.save` | `{path}` | `{path}` |
 | `doc.summary` | `{}` | `{layers, shapes, kerf_mm, board: [w, h]}` |
 | `kerf.apply` | `{width_mm}` | `{width_mm}` |

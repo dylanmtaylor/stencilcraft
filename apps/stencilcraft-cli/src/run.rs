@@ -186,7 +186,7 @@ fn parse_count(flag: &str, value: &str) -> Result<u32, PipelineError> {
 pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
-    let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
+    let doc = crate::load_document(&input)?;
     let reports =
         pipeline::run_pipeline(&doc, req.kerf_mm, req.tiling.as_ref(), &export, &req.gcode)
             .map_err(|e| e.to_string())?;

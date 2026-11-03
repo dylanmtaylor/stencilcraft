@@ -207,14 +207,18 @@ impl Session {
         match method {
             "doc.open" => {
                 let path = str_param(params, "path")?;
-                let doc = stencilcraft_doc::load_from(path.as_str())
-                    .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                let (doc, warnings) = open_document(path.as_str())?;
                 let result = serde_json::json!({
                     "layers": doc.layers.len(),
                     "shapes": doc.shape_count(),
+                    "warnings": warnings,
                 });
                 self.engine = Engine::new(doc);
-                self.last_path = Some(path.to_string());
+                // An imported foreign file is never a save target.
+                self.last_path = path
+                    .to_ascii_lowercase()
+                    .ends_with(".stencilcraft")
+                    .then(|| path.to_string());
                 Ok(result)
             }
             "doc.save" => {
@@ -378,7 +382,7 @@ fn mcp_tools() -> Vec<serde_json::Value> {
     let specs = [
         (
             "doc_open",
-            "Open a native StencilCraft document, replacing the current document.",
+            "Open a native StencilCraft document, or import a Silhouette Studio .studio/.studio3 document, replacing the current document.",
             json!({"path": path}),
             json!(["path"]),
         ),
@@ -458,6 +462,19 @@ fn mcp_tools() -> Vec<serde_json::Value> {
 
 fn stencilcraft_effect_json(effect: stencilcraft_engine::Effect) -> serde_json::Value {
     serde_json::to_value(effect).unwrap_or(serde_json::Value::Null)
+}
+
+/// Native documents load as is; Silhouette Studio documents are imported, with the
+/// reader's notes about skipped records returned alongside.
+fn open_document(path: &str) -> Result<(stencilcraft_doc::Document, Vec<String>), ProtocolError> {
+    match stencilcraft_doc::format::read_path(&[&stencilcraft_studio::StudioHandler], path)
+        .map_err(ProtocolError::Bad)?
+    {
+        Some(read) => Ok((read.value, read.warnings)),
+        None => stencilcraft_doc::load_from(path)
+            .map(|doc| (doc, Vec::new()))
+            .map_err(|e| ProtocolError::Bad(e.to_string())),
+    }
 }
 
 fn str_param(params: &serde_json::Value, key: &str) -> Result<String, ProtocolError> {
@@ -599,6 +616,23 @@ mod tests {
         let r = session.handle_line("not json").unwrap().unwrap();
         assert!(r.contains("\"id\":null"), "{r}");
         assert!(r.contains("\"ok\":false"), "{r}");
+    }
+
+    #[test]
+    fn doc_open_rejects_a_damaged_studio_file_and_survives() {
+        let path = write_tmp("damaged.studio3", "silhouette05;\0\0\0 not really");
+        let mut session = Session::default();
+        let r = session
+            .handle_line(&format!(
+                r#"{{"id":1,"method":"doc.open","params":{{"path":"{path}"}}}}"#
+            ))
+            .unwrap()
+            .unwrap();
+        assert!(
+            r.contains("\"ok\":false") && r.contains("Silhouette"),
+            "{r}"
+        );
+        assert!(session.last_path.is_none());
     }
 
     #[test]

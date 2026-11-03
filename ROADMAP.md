@@ -88,6 +88,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
+  size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only
+  from files we saved ourselves (`docs/formats/silhouette-studio.md`). It sits behind the new
+  `FormatHandler` seam (`docs/formats/README.md`) and is wired into CLI `import`/`--in` and
+  MCP `doc.open`, with a truncation and bit-flip corpus. Protected store designs are
+  rejected. Curves and writing are still to come.
+
 - 2026-11-02 — Canvas navigation uses the shared status bar: Fit, Center and zoom
   controls move below the canvas, leaving more room for the artwork. The zoom slider
   remains anchored at the canvas center and is covered by a desktop UI test.

@@ -11,6 +11,7 @@
 //! design) is rejected instead of guessed at. Records we do not understand are skipped.
 
 use kurbo::{BezPath, Point};
+use stencilcraft_doc::format::{Capabilities, Converted, Fidelity, FormatHandler};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 
 /// Largest file we read (store designs and our samples are far smaller).
@@ -323,4 +324,37 @@ fn u64_at(d: &[u8], at: usize) -> Option<u64> {
 
 fn f32_at(d: &[u8], at: usize) -> Option<f32> {
     u32_at(d, at).map(f32::from_bits)
+}
+
+/// The Silhouette Studio handler for the shared format seam (`.studio` and `.studio3`).
+pub struct StudioHandler;
+
+impl FormatHandler for StudioHandler {
+    fn name(&self) -> &'static str {
+        "Silhouette Studio (.studio, .studio3)"
+    }
+    fn extensions(&self) -> &'static [&'static str] {
+        &["studio", "studio3"]
+    }
+    fn sniff(&self, bytes: &[u8]) -> bool {
+        sniff(bytes).is_some()
+    }
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            read: Fidelity::Lossy,
+            write: Fidelity::None,
+            notes: &[
+                "Reads straight-sided outlines (as closed paths) and the page size.",
+                "Curves, open paths, text, colours, layers and cut settings are not read yet.",
+                "Protected or encrypted store designs are rejected, never decrypted.",
+            ],
+        }
+    }
+    fn read(&self, bytes: &[u8], name: &str) -> Result<Converted<Document>, String> {
+        let got = import(bytes, name).map_err(|e| e.to_string())?;
+        Ok(Converted {
+            value: got.doc,
+            warnings: got.warnings,
+        })
+    }
 }

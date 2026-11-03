@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: Make limits mat choices to the selected cutter catalog and
+  clears an incompatible mat when the cutter changes.
+
 - 2026-11-03 — M3: Linux cutter access setup generates udev rules for catalogued
   USB IDs; active-session access and Flatpak permissions are documented.
 

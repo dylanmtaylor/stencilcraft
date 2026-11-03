@@ -311,3 +311,5 @@ If necessary reconnect the cutter and click **Find USB cutters** again. Check
 Flatpak additionally requires `--device=usb` and a rebuilt application containing
 the USB workflow; see [development](development.md#flatpak-usb-access).
 The catalog and generated rule cover known USB IDs only, not all manufacturers.
+
+Make filters loaded-mat choices by the selected model; an incompatible previous mat resets to no mat, so select the mat actually loaded.

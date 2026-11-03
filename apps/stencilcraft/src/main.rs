@@ -374,6 +374,13 @@ pub const MAT_CHOICES: &[(stencilcraft_machine::Mat, &str)] = &[
     (stencilcraft_machine::Mat::Portrait8_5x12, "8.5×12 portrait"),
 ];
 
+fn mat_supported(
+    caps: Option<&stencilcraft_machine::Capabilities>,
+    mat: stencilcraft_machine::Mat,
+) -> bool {
+    mat == stencilcraft_machine::Mat::None || caps.is_some_and(|c| c.mats.contains(&mat))
+}
+
 pub fn mat_label(mat: stencilcraft_machine::Mat) -> &'static str {
     MAT_CHOICES
         .iter()
@@ -3079,27 +3086,6 @@ impl StencilApp {
         {
             self.send.model = model;
         }
-        if !self.send.device.is_empty() && !self.send.bbox_only {
-            ui.add(Text::new("Load the mat and set blade depth on the cutter. Send cuts all visible paths with holder 1."));
-            for (label, send) in [
-                ("Validate USB cut", false),
-                ("Send cut to selected USB cutter", true),
-            ] {
-                if ui.add(Button::new(label)).clicked() {
-                    self.start_hardware(
-                        stencilcraft_engine::HardwareCommand::Cut {
-                            model: self.send.model.id().into(),
-                            location: self.send.device.clone(),
-                            mat: self.mat,
-                            force: u32::from(self.send.pressure_override),
-                            speed: u32::from(self.send.speed_override),
-                            send,
-                        },
-                        ui.ctx().clone(),
-                    );
-                }
-            }
-        }
 
         ui.add(Text::new("Model"));
         let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
@@ -3107,9 +3093,18 @@ impl StencilApp {
             model_select = model_select.option(*model, *label);
         }
         let _ = model_select.show(ui);
+        let caps = stencilcraft_machine::DeviceRegistry::builtin().by_id(self.send.model.id());
+        if !mat_supported(caps, self.mat) {
+            self.mat = stencilcraft_machine::Mat::None;
+            self.send.summary = Some(vec![
+                "The previous mat is unavailable for this model. Select your loaded mat.".into(),
+            ]);
+        }
         let mut mat_select = Select::new("send-mat", "Loaded mat", &mut self.mat);
         for (mat, label) in MAT_CHOICES {
-            mat_select = mat_select.option(*mat, *label);
+            if mat_supported(caps, *mat) {
+                mat_select = mat_select.option(*mat, *label);
+            }
         }
         let _ = mat_select.show(ui);
         ui.add(Text::new("Material"));
@@ -3145,6 +3140,28 @@ impl StencilApp {
         }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         Divider::horizontal().show(ui);
+        if !self.send.device.is_empty() && !self.send.bbox_only {
+            ui.add(Text::new("Load the mat and set blade depth on the cutter. Send cuts all visible paths with holder 1."));
+            for (label, send) in [
+                ("Validate USB cut", false),
+                ("Send cut to selected USB cutter", true),
+            ] {
+                if ui.add(Button::new(label)).clicked() {
+                    self.start_hardware(
+                        stencilcraft_engine::HardwareCommand::Cut {
+                            model: self.send.model.id().into(),
+                            location: self.send.device.clone(),
+                            mat: self.mat,
+                            force: u32::from(self.send.pressure_override),
+                            speed: u32::from(self.send.speed_override),
+                            send,
+                        },
+                        ui.ctx().clone(),
+                    );
+                }
+            }
+        }
+
         if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
         }
@@ -4127,6 +4144,19 @@ impl eframe::App for StencilApp {
 mod tests {
     use super::*;
     use craft_ui::docking::{Action, Placement};
+
+    #[test]
+    fn mats_follow_machine_capabilities() {
+        use stencilcraft_machine::{DeviceRegistry, Mat};
+        let registry = DeviceRegistry::builtin();
+        let cameo = registry.by_id("cameo-4");
+        let pro = registry.by_id("cameo-4-pro");
+        assert!(mat_supported(cameo, Mat::Cameo12x12));
+        assert!(!mat_supported(cameo, Mat::CameoPro24x24));
+        assert!(mat_supported(pro, Mat::CameoPro24x24));
+        assert!(mat_supported(cameo, Mat::None));
+        assert!(!mat_supported(None, Mat::Cameo12x12));
+    }
 
     #[test]
     fn window_control_methods_parse_and_ignore_everything_else() {

@@ -35,6 +35,47 @@ tool error naming the knob. For example, `command_execute` accepts
 see `crates/engine/src/lib.rs` for the complete serde-tagged command set. Undo and redo
 accept `{"command":"edit.undo"}` and `{"command":"edit.redo"}`.
 
+## Path editing, compound paths, flags and queries
+
+Each command below is also a dedicated MCP tool (the command name with `.`/`-` turned into
+`_`, e.g. `path_simplify`) whose arguments are the command's params, and can be applied
+headlessly with `stencilcraft-cli run --in IN --command '<json>' … --export OUT`
+(repeatable; each effect is printed as one JSON line). Every editing command is one undo
+step (`edit.undo`); queries are not recorded. Bad ids, indices or numbers return an error
+and leave the document unchanged. A shape that is locked rejects every editing command
+until `shapes.set-locked {locked: false}`.
+
+A node is addressed as `{"contour": c, "node": n}`: contour `c` of the shape's path and
+node `n` along it, counted as `query.node-count` counts them (a closed contour does not
+repeat its first node). Segment `s` runs from node `s` to the next.
+
+| Command / tool | Params | Effect |
+| --- | --- | --- |
+| `path.break` / `path_break` | `{id, contour, node}` | Closed contour opens at the node; open one splits in two (pieces stay in the shape). |
+| `path.join` / `path_join` | `{a, b, a_contour?, b_contour?, a_end?, b_end?}` | Joins two open contours (`b` consumed; may be another contour of `a`). Ends `start`/`end` default to the nearest pair; coincident ends merge, otherwise a line joins them. |
+| `path.close` / `path_close` | `{id, contour?}` | Closes an open contour. |
+| `path.average-nodes` / `path_average_nodes` | `{id, nodes, axis}` | `axis`: `horizontal` (same y), `vertical` (same x), `both`. |
+| `path.merge-nodes` / `path_merge_nodes` | `{id, nodes}` | Moves nodes to their centroid; neighbours on a contour fuse into one corner node. |
+| `path.delete-nodes` / `path_delete_nodes` | `{id, nodes}` | Removes nodes, refitting the neighbouring curve. Deleting the whole path is an error. |
+| `path.set-node-type` / `path_set_node_type` | `{id, nodes, kind}` | `corner` retracts handles; `smooth` makes collinear handles. |
+| `path.set-segment` / `path_set_segment` | `{id, contour, segment, kind}` | `line` or `curve` (handles placed on the line, so the shape is unchanged until edited). |
+| `path.simplify` / `path_simplify` | `{ids, tolerance_mm}` | Refits with fewer nodes within `tolerance_mm` (0 < t ≤ 1000) of the original. |
+| `path.outline-stroke` / `path_outline_stroke` | `{ids, width_mm, join?, cap?, miter_limit?}` | Replaces each path with the filled outline of its stroke. `join`: `miter` (default), `round`, `bevel`; `cap`: `butt` (default), `round`, `square`; miter limit 1–100 (default 4). |
+| `shapes.to-path` / `shapes_to_path` | `{ids}` | Live rectangle/ellipse/polygon/star primitives become plain paths. |
+| `shapes.make-compound` / `shapes_make_compound` | `{ids}` | One compound path in the bottom-most shape's id and style. |
+| `shapes.release-compound` / `shapes_release_compound` | `{ids}` | Release Compound Path / Detach: one shape per contour; returns `ShapesAdded` with every id. |
+| `shape.pathfinder` / `shape_pathfinder` | `{ids, operation}` | Adds `subtract-all` (every other shape subtracted from the bottom one) to `union`, `difference`, `intersect`, `xor` (exclude), `divide`, `trim`, `merge`, `crop`, `outline`, `minus-back`. |
+| `shapes.set-locked` / `shapes_set_locked` | `{ids, locked}` | Locked shapes reject edits and are left out of selections. |
+| `shapes.set-hidden` / `shapes_set_hidden` | `{ids, hidden}` | Hidden shapes are not exported (SVG, DXF, G-code, tiling, cut) or selected. |
+| `query.node-count` / `query_node_count` | `{ids?}` | `{"NodeCount": {shapes, contours, nodes, linear, bezier}}`; all shapes when `ids` is empty. A node with any handle counts as bezier. |
+| `select.same-fill` / `select_same_fill` | `{id}` | `{"Selection": {ids}}`: selectable shapes with the same operation colour that are likewise filled (closed) or open. |
+| `select.same-stroke` / `select_same_stroke` | `{id}` | Selectable shapes with the same operation colour (every outline is stroked in it). |
+| `select.inverse` / `select_inverse` | `{ids}` | Selectable shapes not in `ids`. |
+
+"Selectable" means not hidden, not locked, and on a visible layer. The document stores one
+operation colour (cut/engrave) per shape, so fill and stroke differ only in whether open
+paths count.
+
 Legacy requests use one line in and one line out; logging goes to stderr only.
 
 ## Legacy envelope

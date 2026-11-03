@@ -44,7 +44,12 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    into line segments), block/INSERT reuse, and a reader.
 6. **Engine**: VectorCraft backs StencilCraft shape creation, transforms, Pathfinder,
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
-   document and metadata snapshots. The model still has no explicit persistent selection,
+   document and metadata snapshots. Node-level path commands (break, join, close,
+   average/merge, delete, corner/smooth, line/curve segment), simplify, outline stroke,
+   compound make/release, Subtract All, lock/hide flags and selection/node-count queries
+   exist as engine commands and MCP tools (`docs/mcp.md`); the desktop menus do not call
+   them yet. Shapes carry one operation colour, so "same fill" and "same stroke" differ
+   only by open vs closed paths. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
 7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
 8. **Agent surface**: the CLI offers MCP stdio tools and legacy JSON-lines control, including

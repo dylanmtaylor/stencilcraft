@@ -17,6 +17,8 @@ pub struct RunRequest {
     pub tile_marks: bool,
     /// Cut profile for `.gcode` exports; other formats ignore it.
     pub gcode: GcodeSettings,
+    /// `--command JSON` (repeatable): engine commands applied in order before export.
+    pub commands: Vec<stencilcraft_engine::Command>,
 }
 
 impl Default for RunRequest {
@@ -30,6 +32,7 @@ impl Default for RunRequest {
             tile_prefix: None,
             tile_marks: false,
             gcode: GcodeSettings::default(),
+            commands: Vec::new(),
         }
     }
 }
@@ -51,6 +54,12 @@ impl RunRequest {
             let mut advance = 2;
             match flag {
                 "--in" => req.input = Some(value()?.to_string()),
+                "--command" => {
+                    let v = value()?;
+                    req.commands.push(serde_json::from_str(v).map_err(|e| {
+                        PipelineError::User(format!("--command {v}: {e}"))
+                    })?);
+                }
                 "--apply-kerf" => {
                     let v = value()?;
                     req.kerf_mm = Some(v.trim().parse().map_err(|_| {
@@ -126,7 +135,7 @@ impl RunRequest {
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
                     println!(
-                        "flags: --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
+                        "flags: --command JSON (repeatable) --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
                     );
                     println!(
                         "       --feed MM_PER_MIN --power S --engrave-power S --passes N --ramp --laser-mode dynamic|constant"
@@ -186,7 +195,15 @@ fn parse_count(flag: &str, value: &str) -> Result<u32, PipelineError> {
 pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
-    let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
+    let mut doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
+    if !req.commands.is_empty() {
+        let mut engine = stencilcraft_engine::Engine::new(doc);
+        for command in req.commands {
+            let effect = engine.run(command).map_err(|e| e.to_string())?;
+            println!("{}", serde_json::to_string(&effect).unwrap_or_default());
+        }
+        doc = engine.doc;
+    }
     let reports =
         pipeline::run_pipeline(&doc, req.kerf_mm, req.tiling.as_ref(), &export, &req.gcode)
             .map_err(|e| e.to_string())?;
@@ -211,6 +228,22 @@ mod tests {
         let ok =
             RunRequest::parse(&args(&["--in", "a.stencilcraft", "--export", "out.svg"])).unwrap();
         assert_eq!(ok.input.as_deref(), Some("a.stencilcraft"));
+    }
+
+    #[test]
+    fn engine_commands_parse_and_bad_ones_are_named() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--command",
+            r#"{"command":"path.simplify","params":{"ids":[1],"tolerance_mm":0.1}}"#,
+            "--export",
+            "b.svg",
+        ]))
+        .unwrap();
+        assert_eq!(ok.commands.len(), 1);
+        let bad = RunRequest::parse(&args(&["--in", "a", "--command", "{", "--export", "b"]));
+        assert!(matches!(bad, Err(PipelineError::User(ref m)) if m.contains("--command")));
     }
 
     #[test]

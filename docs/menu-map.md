@@ -100,9 +100,9 @@ Expand and Offset Path.
 | Align › To Key Object | — | AI | missing | `shapes.align` + *proposed key-object field* |
 | Align › Space Horizontally / Vertically | — | SS | have | `shapes.distribute` |
 | Align › Distribute Spacing by Value… | — | AI | missing | *proposed `shapes.distribute` {gap_mm}* |
-| Rotate › 15° steps, 90°, 180°, custom… | — | SS | partial: ±15° | `shapes.transform` {degrees} |
-| Replicate › Duplicate left/right/above/below, rows, columns, fill page, mirror, rotate copies | — | SS | missing | *proposed `shapes.replicate`* |
-| Transform › Move…, Scale…, Rotate…, Shear… | — | AI | partial: move/scale/rotate fields in Properties | `shapes.transform`; shear *proposed* |
+| Rotate › 15° steps, 90°, 180°, custom… | — | SS | have (custom angle in the Transform panel) | `shapes.transform` {degrees} |
+| Replicate › Duplicate left/right/above/below, rows, columns, fill page, mirror, rotate copies | — | SS | have (menu + Replicate panel) | `shapes.replicate-side/-array/-fill`, `shapes.mirror-copy`, `shapes.rotate-copies` |
+| Transform › Move…, Scale…, Rotate…, Shear… | — | AI | partial: move/scale/rotate in the Transform panel; shear missing | `shapes.transform`; shear *proposed* |
 | Transform Again | Ctrl+Shift+D (*ours*; AI's Ctrl+D is Duplicate here) | AI | missing | app: replay the last `shapes.transform` |
 | Transform Each… | Ctrl+Alt+Shift+D | AI | missing | *proposed `shapes.transform-each`* |
 | Modify › Weld | Ctrl+Shift+W | SS | have | `shape.pathfinder` union |
@@ -120,22 +120,22 @@ Expand and Offset Path.
 | Group | Ctrl+G | SS | missing | *proposed `shapes.group`* |
 | Ungroup | Ctrl+Shift+G | SS | missing | *proposed `shapes.ungroup`* |
 | Attach / Detach (keep positions on the mat) | — | DS | missing | *proposed `shapes.attach`* |
-| Lock | Ctrl+2 | AI | missing | *proposed `shapes.set-locked`* |
-| Unlock All | Ctrl+Alt+2 | AI | missing | *proposed `shapes.set-locked`* |
-| Hide | Ctrl+3 | AI | missing | *proposed `shapes.set-hidden`* |
-| Show All | Ctrl+Alt+3 | AI | missing | *proposed `shapes.set-hidden`* |
-| Convert to Path | — | SS | have (shapes are paths already) | — |
-| Make Compound Path | Ctrl+E | SS | partial (Merge/Unite) | *proposed `shapes.compound`* |
-| Release Compound Path | Ctrl+Shift+E | SS | missing | *proposed `shapes.release-compound`* |
+| Lock | Ctrl+2 | AI | have | `shapes.set-locked` |
+| Unlock All | Ctrl+Alt+2 | AI | have | `shapes.set-locked` |
+| Hide | Ctrl+3 | AI | have | `shapes.set-hidden` |
+| Show All | Ctrl+Alt+3 | AI | have | `shapes.set-hidden` |
+| Convert to Path | — | SS | have | `shapes.to-path` |
+| Make Compound Path | Ctrl+E | SS | have | `shapes.make-compound` |
+| Release Compound Path | Ctrl+Shift+E | SS | have | `shapes.release-compound` |
 | Clipping Mask › Make | Ctrl+7 | AI | missing | *proposed `shapes.clip`* |
 | Clipping Mask › Release | Ctrl+Alt+7 | AI | missing | *proposed `shapes.unclip`* |
-| Simplify | Ctrl+J | SS | missing | *proposed `shapes.simplify`* |
-| Path › Join | Ctrl+Shift+J (*ours*; AI's Ctrl+J is Simplify here) | AI | missing | *proposed `path.join`* |
-| Path › Average | Ctrl+Alt+J | AI | missing | *proposed `path.average`* |
-| Path › Break at Point | — | SS (Point Editing) | missing | *proposed `path.break`* |
-| Path › Close Path | — | AI | missing | *proposed `path.close`* |
-| Path › Offset Path… | — | AI / SS Offset | missing (kerf only) | *proposed `shapes.offset`* on `stencilcraft-kerf` |
-| Path › Outline Stroke | — | AI | missing | *proposed `shapes.outline-stroke`* |
+| Simplify | Ctrl+J | SS | have (tolerance in Point Editing) | `path.simplify` |
+| Path › Join | Ctrl+Shift+J (*ours*; AI's Ctrl+J is Simplify here) | AI | have | `path.join` |
+| Path › Average | Ctrl+Alt+J | AI | have | `path.average-nodes` |
+| Path › Break at Point | — | SS (Point Editing) | have | `path.break` |
+| Path › Close Path | — | AI | have | `path.close` |
+| Path › Offset Path… | — | AI / SS Offset | have (Offset panel) | `shapes.offset` |
+| Path › Outline Stroke | — | AI | have (width in the Modify panel) | `path.outline-stroke` |
 | Expand | — | AI | missing | *proposed `shapes.expand`* |
 | Contour (hide sub-paths) | — | DS | missing | *proposed `shape.set-subpath-enabled`* |
 | Flatten (for Print Then Cut) | — | DS | missing | *proposed `shapes.flatten`* |
@@ -171,9 +171,9 @@ We add the Illustrator Select menu.
 | --- | --- | --- | --- | --- |
 | All | Ctrl+A | SS | have | app selection |
 | Deselect | Ctrl+Shift+A | SS | have (Esc) | app selection |
-| Inverse | — | AI | missing | app selection |
+| Inverse | — | AI | have | `select.inverse` |
 | Select by Color… | — | SS | missing | app selection |
-| Same › Fill Color, Stroke Color, Stroke Weight | — | AI | missing | app selection |
+| Same › Fill Color, Stroke Color, Stroke Weight | — | AI | partial: fill and stroke | `select.same-fill`, `select.same-stroke` |
 | Same › Operation (cut, engrave, score…) | — | ours | missing | app selection |
 | Same › Layer | — | AI | missing | app selection |
 | Next Object Above / Below | Ctrl+Alt+] / Ctrl+Alt+[ | AI | missing | app selection |
@@ -186,7 +186,7 @@ Image Effects panels. Here they are actions that open the matching panel.
 
 | Item | Shortcut | Source | Status | Implementation |
 | --- | --- | --- | --- | --- |
-| Offset… / Internal Offset… | — | SS | missing (kerf only) | *proposed `shapes.offset`* |
+| Offset… / Internal Offset… | — | SS | have (Offset panel with live preview) | `shapes.offset` |
 | Kerf Compensation… | — | ours | have | `kerf.set` |
 | Bridges… (keep counters attached) | — | ours | missing | *proposed `shapes.bridge`* |
 | Weed Lines and Border… | — | SS Business | missing | *proposed `shapes.weed-lines`* |
@@ -254,15 +254,15 @@ Silhouette users expect every right-column panel to be listed here.
 | Image Effects | — | SS | missing | app |
 | Text Style | — | SS | missing | *proposed `text.set-style`* |
 | Spelling | F7 | SS | missing | app |
-| Transform | — | SS | partial (Properties fields, Align/Distribute menu) | `shapes.transform`, `shapes.align`, `shapes.distribute` |
-| Replicate | — | SS | missing | *proposed `shapes.replicate`* |
-| Modify | — | SS | have (Pathfinder menu) | `shape.pathfinder` |
-| Offset | — | SS | missing | *proposed `shapes.offset`* |
+| Transform | — | SS | have (align, rotate, scale, move by value) | `shapes.transform`, `shapes.align`, `shapes.distribute` |
+| Replicate | — | SS | have | `shapes.replicate-*`, `shapes.mirror-copy`, `shapes.rotate-copies` |
+| Modify | — | SS | have (weld family, Pathfinder, compound paths, outline stroke) | `shape.pathfinder`, `shapes.make-compound`, `path.outline-stroke` |
+| Offset | — | SS | have (distance, internal, corner, limit, preview) | `shapes.offset` |
 | Pop up | — | SS | missing | *proposed `shapes.popup`* |
 | Stipple / Sketch | — | SS | missing | *proposed `shapes.hatch-fill`* |
 | Print & Cut (Registration Marks) | Ctrl+F3 | SS | partial (marks toggle, export) | app: `print-cut` |
-| Layers | — | SS Designer/DS/AI | partial | `layer.add/remove/set-visible` |
-| Point Editing | — | SS | partial (direct select, convert point) | `shape.set-path` |
+| Layers | — | SS Designer/DS/AI | partial (per-object eye and lock) | `layer.add/remove/set-visible`, `shapes.set-hidden/-locked` |
+| Point Editing | — | SS | have (double-click to edit; delete, break, corner/smooth, flat/curve, simplify, node count) | `path.*`, `shape.set-path`, `query.node-count` |
 | Pathfinder | — | AI/VC | have (Object › Pathfinder) | `shape.pathfinder` |
 | Align | — | AI/VC | have (Object › Align) | `shapes.align` |
 | Swatches | — | AI | missing | app + *proposed `shapes.set-fill`* |

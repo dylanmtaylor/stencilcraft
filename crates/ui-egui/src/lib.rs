@@ -467,7 +467,7 @@ pub fn paint_document(
         if !layer.visible {
             continue;
         }
-        for shape in &layer.shapes {
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
             if selection.selected_shapes.contains(&shape.id) {
                 color = palette.selection;
@@ -838,6 +838,7 @@ pub fn select_shapes_in_rect(
         .iter()
         .filter(|layer| layer.visible)
         .flat_map(|layer| layer.shapes.iter())
+        .filter(|shape| is_selectable(shape))
         .filter(|shape| {
             let Some(bounds) = shape.bounds() else {
                 return false;
@@ -977,6 +978,38 @@ fn segments_intersect(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2, d: egui::Pos2
     o1 * o2 <= 0.0 && o3 * o4 <= 0.0
 }
 
+/// Whether the canvas may pick `shape`: hidden and locked shapes are left out of clicks, boxes
+/// and lassos (the layers panel still lists them, with eye and lock toggles).
+pub fn is_selectable(shape: &stencilcraft_doc::Shape) -> bool {
+    !shape.hidden && !shape.locked
+}
+
+/// Paint `paths` (millimetres) as solid hairlines in `color`: the live preview of an effect
+/// (Offset) before it is applied.
+pub fn paint_preview_paths(
+    painter: &egui::Painter,
+    view: &View,
+    paths: &[kurbo::BezPath],
+    color: egui::Color32,
+) {
+    let width = 1.5_f32.max(0.4 * view.zoom);
+    for path in paths {
+        for pl in stencilcraft_geom::path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+        {
+            let mut screen: Vec<egui::Pos2> =
+                pl.points.iter().map(|p| view.world_to_screen(*p)).collect();
+            if pl.closed
+                && let Some(first) = screen.first().copied()
+            {
+                screen.push(first);
+            }
+            if screen.len() >= 2 {
+                painter.add(egui::Shape::line(screen, (width, color)));
+            }
+        }
+    }
+}
+
 /// Find the topmost visible shape whose flattened outline is within the screen-space
 /// tolerance of `pointer`. Returns its stable document id.
 pub fn hit_test_shape(
@@ -990,7 +1023,7 @@ pub fn hit_test_shape(
     }
     let tolerance_sq = tolerance_px.max(0.0).powi(2);
     for layer in doc.layers.iter().rev().filter(|layer| layer.visible) {
-        for shape in layer.shapes.iter().rev() {
+        for shape in layer.shapes.iter().rev().filter(|shape| is_selectable(shape)) {
             let polylines = stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
@@ -1223,6 +1256,15 @@ mod tests {
         assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), Some(2));
         assert_eq!(hit_test_shape(&doc, &view, interior, 3.0), None);
         assert_eq!(hit_test_shape(&doc, &view, edge, f32::NAN), None);
+        // Locked and hidden shapes fall through to the one below, and box selection skips them.
+        doc.layers[0].shapes[1].locked = true;
+        assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), Some(1));
+        doc.layers[0].shapes[0].hidden = true;
+        assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), None);
+        let all = egui::Rect::from_min_max(egui::pos2(-1e4, -1e4), egui::pos2(1e4, 1e4));
+        assert!(select_shapes_in_rect(&doc, &view, all, SelectionMode::Intersect).is_empty());
+        doc.layers[0].shapes[0].hidden = false;
+        doc.layers[0].shapes[1].locked = false;
         doc.layers[0].visible = false;
         assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), None);
     }

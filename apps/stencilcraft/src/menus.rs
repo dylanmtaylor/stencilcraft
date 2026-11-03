@@ -8,9 +8,10 @@ use craft_ui::controls::Kbd;
 use craft_ui::menu::{MenuEntry, MenuItem};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use stencilcraft_doc::CutStyle;
-use stencilcraft_engine::{Alignment, BooleanOperation, DistributionAxis};
+use stencilcraft_engine::{Alignment, BooleanOperation, DistributionAxis, NodeAxis};
 
-use crate::{StencilApp, TopMenuAction as A};
+use crate::panels::{EditAction as E, ScreenSide};
+use crate::{StencilApp, TopMenuAction as A, WorkspacePanel as P};
 
 /// The tooltip of an item whose command does not exist yet.
 pub const NOT_YET: &str = "Not yet implemented";
@@ -54,6 +55,19 @@ fn todo_key(label: &str, modifiers: Modifiers, key: Key) -> MenuEntry<A> {
         .shortcut(kbd(modifiers, key))
         .enabled(false)
         .tooltip(NOT_YET)
+        .into()
+}
+
+/// An editing action enabled only when `enabled`.
+fn edit(label: &str, action: E, enabled: bool) -> MenuEntry<A> {
+    when(label, A::Edit(action), enabled)
+}
+
+/// An editing action with its shortcut.
+fn edit_key(label: &str, action: E, enabled: bool, modifiers: Modifiers, key: Key) -> MenuEntry<A> {
+    item(label, A::Edit(action))
+        .shortcut(kbd(modifiers, key))
+        .enabled(enabled)
         .into()
 }
 
@@ -194,6 +208,7 @@ fn edit(app: &StencilApp) -> Vec<MenuEntry<A>> {
 fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
     let any = !app.selected_shapes.is_empty();
     let many = app.selected_shapes.len() >= 2;
+    let nodes = !app.path_selection.anchors.is_empty();
     let pathfinder = |label: &str, op: BooleanOperation| when(label, A::Pathfinder(op), many);
     let align = |label: &str, a: Alignment| when(label, A::Align(a), many);
     vec![
@@ -252,23 +267,25 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Replicate",
             vec![
-                todo("Duplicate Left"),
-                todo("Duplicate Right"),
-                todo("Duplicate Above"),
-                todo("Duplicate Below"),
-                todo("Row of Copies…"),
-                todo("Column of Copies…"),
-                todo("Fill Page"),
-                todo("Mirror Copies"),
-                todo("Rotate Copies…"),
+                edit("Duplicate Left", E::Duplicate(ScreenSide::Left), any),
+                edit("Duplicate Right", E::Duplicate(ScreenSide::Right), any),
+                edit("Duplicate Above", E::Duplicate(ScreenSide::Above), any),
+                edit("Duplicate Below", E::Duplicate(ScreenSide::Below), any),
+                edit("Row of Copies", E::Array(DistributionAxis::Horizontal), any),
+                edit("Column of Copies", E::Array(DistributionAxis::Vertical), any),
+                edit("Fill Page", E::FillPage, any),
+                edit("Mirror Copies", E::Mirror(ScreenSide::Right), any),
+                edit("Rotate Copies", E::RotateCopies, any),
+                SEP,
+                item("Replicate Options…", A::ShowPanel(P::Replicate)).into(),
             ],
         ),
         sub(
             "Transform",
             vec![
-                todo("Move…"),
-                todo("Scale…"),
-                todo("Rotate…"),
+                item("Move…", A::ShowPanel(P::Transform)).into(),
+                item("Scale…", A::ShowPanel(P::Transform)).into(),
+                item("Rotate…", A::ShowPanel(P::Transform)).into(),
                 todo("Shear…"),
                 SEP,
                 todo_key("Transform Again", cmd_shift(), Key::D),
@@ -283,6 +300,7 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     .enabled(many)
                     .into(),
                 pathfinder("Subtract", BooleanOperation::Difference),
+                pathfinder("Subtract All", BooleanOperation::SubtractAll),
                 pathfinder("Intersect", BooleanOperation::Intersect),
                 pathfinder("Exclude", BooleanOperation::Xor),
                 pathfinder("Divide", BooleanOperation::Divide),
@@ -294,6 +312,8 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 pathfinder("Minus Back", BooleanOperation::MinusBack),
                 SEP,
                 todo("Detach Lines"),
+                SEP,
+                item("Modify Panel…", A::ShowPanel(P::Modify)).into(),
             ],
         ),
         sub(
@@ -309,14 +329,14 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
         todo_key("Group", CMD, Key::G),
         todo_key("Ungroup", cmd_shift(), Key::G),
         todo("Attach / Detach"),
-        todo_key("Lock", CMD, Key::Num2),
-        todo_key("Unlock All", cmd_alt(), Key::Num2),
-        todo_key("Hide", CMD, Key::Num3),
-        todo_key("Show All", cmd_alt(), Key::Num3),
+        edit_key("Lock", E::Lock, any, CMD, Key::Num2),
+        edit_key("Unlock All", E::UnlockAll, true, cmd_alt(), Key::Num2),
+        edit_key("Hide", E::Hide, any, CMD, Key::Num3),
+        edit_key("Show All", E::ShowAll, true, cmd_alt(), Key::Num3),
         SEP,
-        todo("Convert to Path"),
-        todo_key("Make Compound Path", CMD, Key::E),
-        todo_key("Release Compound Path", cmd_shift(), Key::E),
+        edit("Convert to Path", E::ToPath, any),
+        edit_key("Make Compound Path", E::MakeCompound, many, CMD, Key::E),
+        edit_key("Release Compound Path", E::ReleaseCompound, any, cmd_shift(), Key::E),
         sub(
             "Clipping Mask",
             vec![
@@ -324,17 +344,21 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 todo_key("Release", cmd_alt(), Key::Num7),
             ],
         ),
-        todo_key("Simplify", CMD, Key::J),
+        edit_key("Simplify", E::Simplify, any, CMD, Key::J),
         sub(
             "Path",
             vec![
-                todo_key("Join", cmd_shift(), Key::J),
-                todo_key("Average", cmd_alt(), Key::J),
-                todo("Break at Point"),
-                todo("Close Path"),
+                edit_key("Join", E::Join, any, cmd_shift(), Key::J),
+                edit_key("Average", E::Average(NodeAxis::Both), nodes, cmd_alt(), Key::J),
+                edit("Break at Point", E::Break, nodes),
+                edit("Close Path", E::Close, any),
+                edit("Merge Points", E::MergeNodes, nodes),
+                edit("Delete Points", E::DeleteNodes, nodes),
                 SEP,
-                todo("Offset Path…"),
-                todo("Outline Stroke"),
+                edit("Offset Path…", E::Offset { internal: false }, true),
+                edit("Outline Stroke", E::OutlineStroke, any),
+                SEP,
+                item("Point Editing Panel…", A::ShowPanel(P::Points)).into(),
             ],
         ),
         todo("Expand"),
@@ -380,8 +404,8 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
             vec![
                 when("Operation (Cut / Engrave)", A::SelectSameStyle, any),
                 when("Layer", A::SelectSameLayer, any),
-                todo("Fill Color"),
-                todo("Stroke Color"),
+                edit("Fill Color", E::SelectSameFill, any),
+                edit("Stroke Color", E::SelectSameStroke, any),
                 todo("Stroke Weight"),
             ],
         ),
@@ -395,8 +419,8 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
 
 fn effect() -> Vec<MenuEntry<A>> {
     vec![
-        todo("Offset…"),
-        todo("Internal Offset…"),
+        item("Offset…", A::Edit(E::Offset { internal: false })).into(),
+        item("Internal Offset…", A::Edit(E::Offset { internal: true })).into(),
         item("Kerf Compensation…", A::ToggleKerfPreview).into(),
         todo("Bridges…"),
         todo("Weed Lines and Border…"),
@@ -509,15 +533,15 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         todo("Image Effects"),
         todo("Text Style"),
         todo("Spelling"),
-        item("Transform", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
-        todo("Replicate"),
-        item("Modify", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
-        todo("Offset"),
+        item("Transform", A::ShowPanel(P::Transform)).into(),
+        item("Replicate", A::ShowPanel(P::Replicate)).into(),
+        item("Modify", A::ShowPanel(P::Modify)).into(),
+        item("Offset", A::ShowPanel(P::Offset)).into(),
         todo("Pop up"),
         todo("Sketch"),
         todo("Specialty"),
         item("Print & Cut", A::TogglePrintCutMarks).into(),
-        item("Point Editing", A::DirectSelectTool).into(),
+        item("Point Editing", A::ShowPanel(P::Points)).into(),
         item("Layers", A::ShowPanel(crate::WorkspacePanel::Layers)).into(),
         SEP,
         item("Properties", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
@@ -643,6 +667,46 @@ mod tests {
             "Inverse",
         ] {
             assert!(items.iter().any(|(l, ..)| l == wanted), "missing {wanted}");
+        }
+        // Items whose engine commands exist now dispatch them instead of the placeholder.
+        for wired in [
+            "Duplicate Left",
+            "Fill Page",
+            "Rotate Copies",
+            "Lock",
+            "Unlock All",
+            "Hide",
+            "Show All",
+            "Convert to Path",
+            "Make Compound Path",
+            "Release Compound Path",
+            "Simplify",
+            "Join",
+            "Break at Point",
+            "Offset Path…",
+            "Outline Stroke",
+            "Internal Offset…",
+            "Subtract All",
+            "Fill Color",
+            "Stroke Color",
+            "Replicate",
+            "Offset",
+        ] {
+            let found: Vec<_> = items.iter().filter(|(l, ..)| l == wired).collect();
+            assert!(!found.is_empty(), "missing {wired}");
+            assert!(
+                found.iter().all(|(_, _, command)| *command != A::NotYet),
+                "{wired} is still a placeholder"
+            );
+        }
+        // Items still waiting for an engine command stay planned.
+        for planned in ["Flip Horizontal", "Bring to Front", "Shear…", "Detach Lines"] {
+            assert!(
+                items
+                    .iter()
+                    .any(|(l, enabled, command)| l == planned && !enabled && *command == A::NotYet),
+                "{planned} should stay planned"
+            );
         }
     }
 }

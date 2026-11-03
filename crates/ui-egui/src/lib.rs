@@ -994,7 +994,8 @@ pub fn paint_preview_paths(
 ) {
     let width = 1.5_f32.max(0.4 * view.zoom);
     for path in paths {
-        for pl in stencilcraft_geom::path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+        for pl in
+            stencilcraft_geom::path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
         {
             let mut screen: Vec<egui::Pos2> =
                 pl.points.iter().map(|p| view.world_to_screen(*p)).collect();
@@ -1023,7 +1024,12 @@ pub fn hit_test_shape(
     }
     let tolerance_sq = tolerance_px.max(0.0).powi(2);
     for layer in doc.layers.iter().rev().filter(|layer| layer.visible) {
-        for shape in layer.shapes.iter().rev().filter(|shape| is_selectable(shape)) {
+        for shape in layer
+            .shapes
+            .iter()
+            .rev()
+            .filter(|shape| is_selectable(shape))
+        {
             let polylines = stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,

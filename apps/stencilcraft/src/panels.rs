@@ -13,11 +13,11 @@ use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::patterns::{AlignBar, Panel};
 use craft_ui::primitives::{Content, Text};
 use eframe::egui;
-use stencilcraft_geom::BezPath;
 use stencilcraft_engine::{
-    BooleanOperation, Command, DistributionAxis, Effect, NodeAxis, NodeRef, NodeType,
-    SegmentType, Side,
+    BooleanOperation, Command, DistributionAxis, Effect, NodeAxis, NodeRef, NodeType, SegmentType,
+    Side,
 };
+use stencilcraft_geom::BezPath;
 use stencilcraft_kerf::JoinStyle;
 
 use crate::{AlignCommand, StencilApp, align_command};
@@ -221,15 +221,19 @@ pub fn bounds_command(ids: Vec<u64>, from: [f64; 4], to: [f64; 4]) -> Option<Com
     let (scale_x, scale_y) = (scale(to[2], from[2]), scale(to[3], from[3]));
     let dx_mm = (to[0] + to[2] / 2.0) - (from[0] + from[2] / 2.0);
     let dy_mm = (to[1] + to[3] / 2.0) - (from[1] + from[3] / 2.0);
-    let finite = [scale_x, scale_y, dx_mm, dy_mm].iter().all(|v| v.is_finite());
-    (finite && scale_x > 0.0 && scale_y > 0.0 && !ids.is_empty()).then_some(Command::ShapesTransform {
-        ids,
-        dx_mm,
-        dy_mm,
-        scale_x,
-        scale_y,
-        degrees: 0.0,
-    })
+    let finite = [scale_x, scale_y, dx_mm, dy_mm]
+        .iter()
+        .all(|v| v.is_finite());
+    (finite && scale_x > 0.0 && scale_y > 0.0 && !ids.is_empty()).then_some(
+        Command::ShapesTransform {
+            ids,
+            dx_mm,
+            dy_mm,
+            scale_x,
+            scale_y,
+            degrees: 0.0,
+        },
+    )
 }
 
 /// The engine's node addresses for the Direct Select anchors (contours and nodes are counted
@@ -453,11 +457,9 @@ impl StencilApp {
                 let contour = self.path_selection.anchors.first().map_or(0, |k| k.subpath);
                 self.run_command(Command::PathClose { id, contour });
             }
-            EditAction::Average(axis) => self.node_command(|id, nodes| Command::PathAverageNodes {
-                id,
-                nodes,
-                axis,
-            }),
+            EditAction::Average(axis) => {
+                self.node_command(|id, nodes| Command::PathAverageNodes { id, nodes, axis })
+            }
             EditAction::MergeNodes => {
                 self.node_command(|id, nodes| Command::PathMergeNodes { id, nodes });
                 self.path_selection.anchors.clear();
@@ -499,7 +501,9 @@ impl StencilApp {
                 });
             }
             EditAction::SelectSameFill | EditAction::SelectSameStroke => {
-                let Some(id) = self.selected_shape else { return };
+                let Some(id) = self.selected_shape else {
+                    return;
+                };
                 let command = if action == EditAction::SelectSameFill {
                     Command::SelectSameFill { id }
                 } else {
@@ -545,15 +549,30 @@ impl StencilApp {
         let state = &mut self.panels;
         let _ = Panel::new("stencilcraft-replicate-panel").show(ui, |ui| {
             labelled(ui, "Spacing", |ui| {
-                number(ui, "rep-gap", "Spacing", &mut state.gap_mm, 0.0..=1000.0, "{n} mm", &numbers);
+                number(
+                    ui,
+                    "rep-gap",
+                    "Spacing",
+                    &mut state.gap_mm,
+                    0.0..=1000.0,
+                    "{n} mm",
+                    &numbers,
+                );
             });
-            for (id, title, mirror) in [("rep-dup", "Duplicate", false), ("rep-mirror", "Mirror", true)] {
+            for (id, title, mirror) in [
+                ("rep-dup", "Duplicate", false),
+                ("rep-mirror", "Mirror", true),
+            ] {
                 let _ = SectionHeader::new(id, title).show(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         for side in ScreenSide::ALL {
                             let label = format!("{title} {}", side.label());
                             let b = Button::new(side.label())
-                                .icon(if mirror { Icon::SymmetryVertical } else { side.icon() })
+                                .icon(if mirror {
+                                    Icon::SymmetryVertical
+                                } else {
+                                    side.icon()
+                                })
                                 .size(ControlSize::Sm)
                                 .enabled(any);
                             if ui.add(b).on_hover_text(label).clicked() {
@@ -569,7 +588,15 @@ impl StencilApp {
             }
             let _ = SectionHeader::new("rep-array", "Rows and columns").show(ui, |ui| {
                 labelled(ui, "Copies", |ui| {
-                    number(ui, "rep-copies", "Copies", &mut state.copies, 2.0..=1000.0, "{n}", &numbers);
+                    number(
+                        ui,
+                        "rep-copies",
+                        "Copies",
+                        &mut state.copies,
+                        2.0..=1000.0,
+                        "{n}",
+                        &numbers,
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     if button(ui, "Row", any) {
@@ -579,7 +606,12 @@ impl StencilApp {
                         action = Some(EditAction::Array(DistributionAxis::Vertical));
                     }
                     if ui
-                        .add(Button::new("Fill Page").icon(Icon::Grid).size(ControlSize::Sm).enabled(any))
+                        .add(
+                            Button::new("Fill Page")
+                                .icon(Icon::Grid)
+                                .size(ControlSize::Sm)
+                                .enabled(any),
+                        )
                         .clicked()
                     {
                         action = Some(EditAction::FillPage);
@@ -588,7 +620,15 @@ impl StencilApp {
             });
             let _ = SectionHeader::new("rep-rotate", "Rotate copies").show(ui, |ui| {
                 labelled(ui, "Count", |ui| {
-                    number(ui, "rep-rot", "Rotate count", &mut state.rotate_count, 2.0..=1000.0, "{n}", &numbers);
+                    number(
+                        ui,
+                        "rep-rot",
+                        "Rotate count",
+                        &mut state.rotate_count,
+                        2.0..=1000.0,
+                        "{n}",
+                        &numbers,
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     for n in [2.0, 4.0, 6.0, 8.0] {
@@ -598,7 +638,12 @@ impl StencilApp {
                         }
                     }
                     if ui
-                        .add(Button::new("Rotate").icon(Icon::RotateCw).size(ControlSize::Sm).enabled(any))
+                        .add(
+                            Button::new("Rotate")
+                                .icon(Icon::RotateCw)
+                                .size(ControlSize::Sm)
+                                .enabled(any),
+                        )
                         .clicked()
                     {
                         action = Some(EditAction::RotateCopies);
@@ -671,7 +716,15 @@ impl StencilApp {
                 .size(ControlSize::Sm)
                 .show(ui);
             labelled(ui, "Distance", |ui| {
-                number(ui, "offset-distance", "Offset distance", &mut draft.distance_mm, 0.01..=1000.0, "{n} mm", &numbers);
+                number(
+                    ui,
+                    "offset-distance",
+                    "Offset distance",
+                    &mut draft.distance_mm,
+                    0.01..=1000.0,
+                    "{n} mm",
+                    &numbers,
+                );
             });
             labelled(ui, "Corner", |ui| {
                 let _ = Segmented::new("offset-join", "Corner", &mut draft.join)
@@ -683,7 +736,15 @@ impl StencilApp {
             });
             if draft.join == JoinStyle::Miter {
                 labelled(ui, "Corner limit", |ui| {
-                    number(ui, "offset-limit", "Corner limit", &mut draft.limit, 1.0..=100.0, "{n} ×", &numbers);
+                    number(
+                        ui,
+                        "offset-limit",
+                        "Corner limit",
+                        &mut draft.limit,
+                        1.0..=100.0,
+                        "{n} ×",
+                        &numbers,
+                    );
                 });
             }
             if let Some(error) = &error {
@@ -691,7 +752,11 @@ impl StencilApp {
             }
             ui.horizontal(|ui| {
                 cancel = ui
-                    .add(Button::new("Cancel").size(ControlSize::Sm).enabled(draft.armed))
+                    .add(
+                        Button::new("Cancel")
+                            .size(ControlSize::Sm)
+                            .enabled(draft.armed),
+                    )
                     .clicked();
                 apply = ui
                     .add(
@@ -781,14 +846,25 @@ impl StencilApp {
             });
             let _ = SectionHeader::new("modify-stroke", "Outline stroke").show(ui, |ui| {
                 labelled(ui, "Width", |ui| {
-                    number(ui, "modify-stroke-w", "Stroke width", stroke, 0.01..=1000.0, "{n} mm", &numbers);
+                    number(
+                        ui,
+                        "modify-stroke-w",
+                        "Stroke width",
+                        stroke,
+                        0.01..=1000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
                 });
                 if button(ui, "Outline Stroke", count >= 1) {
                     action = Some(EditAction::OutlineStroke);
                 }
             });
             if count < 2 {
-                hint(ui, "Select two or more shapes to weld, subtract or intersect.");
+                hint(
+                    ui,
+                    "Select two or more shapes to weld, subtract or intersect.",
+                );
             }
         });
         if let Some(op) = op {
@@ -805,15 +881,28 @@ impl StencilApp {
         let nodes = !self.path_selection.anchors.is_empty();
         let segment = self.path_selection.segment.is_some() || nodes;
         let counts = (!ids.is_empty())
-            .then(|| self.engine.run(Command::QueryNodeCount { ids: ids.clone() }).ok())
+            .then(|| {
+                self.engine
+                    .run(Command::QueryNodeCount { ids: ids.clone() })
+                    .ok()
+            })
             .flatten();
         let numbers = self.locale_numbers.clone();
         let mut action = None;
         let tolerance = &mut self.panels.simplify_mm;
         let _ = Panel::new("stencilcraft-points-panel").show(ui, |ui| {
-            let label = if editing { "Stop Editing Points" } else { "Edit Points" };
+            let label = if editing {
+                "Stop Editing Points"
+            } else {
+                "Edit Points"
+            };
             if ui
-                .add(Button::new(label).icon(Icon::DirectSelect).size(ControlSize::Sm).enabled(!ids.is_empty() || editing))
+                .add(
+                    Button::new(label)
+                        .icon(Icon::DirectSelect)
+                        .size(ControlSize::Sm)
+                        .enabled(!ids.is_empty() || editing),
+                )
                 .clicked()
             {
                 action = Some(EditAction::TogglePointEdit);
@@ -847,7 +936,11 @@ impl StencilApp {
                 ui.horizontal_wrapped(|ui| {
                     for (label, a, enabled) in [
                         ("Make Flat", EditAction::Segment(SegmentType::Line), segment),
-                        ("Make Curve", EditAction::Segment(SegmentType::Curve), segment),
+                        (
+                            "Make Curve",
+                            EditAction::Segment(SegmentType::Curve),
+                            segment,
+                        ),
                         ("Close Path", EditAction::Close, !ids.is_empty()),
                         ("Join", EditAction::Join, !ids.is_empty()),
                     ] {
@@ -859,7 +952,15 @@ impl StencilApp {
             });
             let _ = SectionHeader::new("points-path", "Path").show(ui, |ui| {
                 labelled(ui, "Tolerance", |ui| {
-                    number(ui, "points-tol", "Simplify tolerance", tolerance, 0.001..=1000.0, "{n} mm", &numbers);
+                    number(
+                        ui,
+                        "points-tol",
+                        "Simplify tolerance",
+                        tolerance,
+                        0.001..=1000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     if button(ui, "Simplify", !ids.is_empty()) {
@@ -904,17 +1005,26 @@ impl StencilApp {
                 };
                 center = button(ui, "Center to Page", any);
             });
-            let transform = |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| Command::ShapesTransform {
-                ids: ids.clone(),
-                dx_mm: dx,
-                dy_mm: dy,
-                scale_x: sx,
-                scale_y: sy,
-                degrees: deg,
-            };
+            let transform =
+                |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| Command::ShapesTransform {
+                    ids: ids.clone(),
+                    dx_mm: dx,
+                    dy_mm: dy,
+                    scale_x: sx,
+                    scale_y: sy,
+                    degrees: deg,
+                };
             let _ = SectionHeader::new("transform-rotate", "Rotate").show(ui, |ui| {
                 labelled(ui, "Angle", |ui| {
-                    number(ui, "transform-deg", "Rotation angle", &mut state.rotate_deg, -360.0..=360.0, "{n}°", &numbers);
+                    number(
+                        ui,
+                        "transform-deg",
+                        "Rotation angle",
+                        &mut state.rotate_deg,
+                        -360.0..=360.0,
+                        "{n}°",
+                        &numbers,
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     for deg in [-90.0, -45.0, 45.0, 90.0, 180.0] {
@@ -930,7 +1040,15 @@ impl StencilApp {
             let _ = SectionHeader::new("transform-scale", "Scale").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let [mut w, mut h] = state.scale_pct;
-                    let wc = number(ui, "transform-sw", "Scale width", &mut w, 1.0..=10_000.0, "{n} %", &numbers);
+                    let wc = number(
+                        ui,
+                        "transform-sw",
+                        "Scale width",
+                        &mut w,
+                        1.0..=10_000.0,
+                        "{n} %",
+                        &numbers,
+                    );
                     let _ = craft_ui::controls::LinkButton::new(
                         "transform-scale-link",
                         &mut state.scale_linked,
@@ -938,7 +1056,15 @@ impl StencilApp {
                     )
                     .size(ControlSize::Sm)
                     .show(ui);
-                    let hc = number(ui, "transform-sh", "Scale height", &mut h, 1.0..=10_000.0, "{n} %", &numbers);
+                    let hc = number(
+                        ui,
+                        "transform-sh",
+                        "Scale height",
+                        &mut h,
+                        1.0..=10_000.0,
+                        "{n} %",
+                        &numbers,
+                    );
                     if state.scale_linked && wc {
                         h = w;
                     } else if state.scale_linked && hc {
@@ -962,9 +1088,25 @@ impl StencilApp {
                 ui.horizontal(|ui| {
                     let [mut dx, mut dy] = state.move_mm;
                     ui.add(Text::new("X").role(TypeRole::Label));
-                    number(ui, "transform-dx", "Move horizontally", &mut dx, -10_000.0..=10_000.0, "{n} mm", &numbers);
+                    number(
+                        ui,
+                        "transform-dx",
+                        "Move horizontally",
+                        &mut dx,
+                        -10_000.0..=10_000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
                     ui.add(Text::new("Y").role(TypeRole::Label));
-                    number(ui, "transform-dy", "Move vertically", &mut dy, -10_000.0..=10_000.0, "{n} mm", &numbers);
+                    number(
+                        ui,
+                        "transform-dy",
+                        "Move vertically",
+                        &mut dy,
+                        -10_000.0..=10_000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
                     state.move_mm = [dx, dy];
                 });
                 if button(ui, "Move", any) {
@@ -993,17 +1135,35 @@ mod tests {
     fn width_edits_resize_about_the_reference_point() {
         let b = [10.0, 20.0, 40.0, 20.0];
         // Top left stays put; linked height follows.
-        assert_eq!(edit_bounds(b, Anchor9::TopLeft, 2, 80.0, true), [10.0, 20.0, 80.0, 40.0]);
+        assert_eq!(
+            edit_bounds(b, Anchor9::TopLeft, 2, 80.0, true),
+            [10.0, 20.0, 80.0, 40.0]
+        );
         // Centre stays put; unlinked height stays.
-        assert_eq!(edit_bounds(b, Anchor9::Center, 2, 80.0, false), [-10.0, 20.0, 80.0, 20.0]);
+        assert_eq!(
+            edit_bounds(b, Anchor9::Center, 2, 80.0, false),
+            [-10.0, 20.0, 80.0, 20.0]
+        );
         // Bottom right fixed, height edit.
-        assert_eq!(edit_bounds(b, Anchor9::BottomRight, 3, 10.0, false), [10.0, 30.0, 40.0, 10.0]);
+        assert_eq!(
+            edit_bounds(b, Anchor9::BottomRight, 3, 10.0, false),
+            [10.0, 30.0, 40.0, 10.0]
+        );
         // X and Y place the reference point.
-        assert_eq!(edit_bounds(b, Anchor9::Center, 0, 0.0, true), [-20.0, 20.0, 40.0, 20.0]);
-        assert_eq!(edit_bounds(b, Anchor9::Bottom, 1, 100.0, true), [10.0, 80.0, 40.0, 20.0]);
+        assert_eq!(
+            edit_bounds(b, Anchor9::Center, 0, 0.0, true),
+            [-20.0, 20.0, 40.0, 20.0]
+        );
+        assert_eq!(
+            edit_bounds(b, Anchor9::Bottom, 1, 100.0, true),
+            [10.0, 80.0, 40.0, 20.0]
+        );
         // A line has no height to keep in proportion.
         let line = [0.0, 0.0, 10.0, 0.0];
-        assert_eq!(edit_bounds(line, Anchor9::TopLeft, 3, 5.0, true), [0.0, 0.0, 10.0, 5.0]);
+        assert_eq!(
+            edit_bounds(line, Anchor9::TopLeft, 3, 5.0, true),
+            [0.0, 0.0, 10.0, 5.0]
+        );
     }
 
     #[test]

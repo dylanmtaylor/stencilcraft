@@ -1116,10 +1116,26 @@ impl StencilApp {
             ),
             (cmd_shift, egui::Key::E, panels::EditAction::ReleaseCompound),
             (cmd_shift, egui::Key::J, panels::EditAction::Join),
-            (egui::Modifiers::COMMAND, egui::Key::Num2, panels::EditAction::Lock),
-            (egui::Modifiers::COMMAND, egui::Key::Num3, panels::EditAction::Hide),
-            (egui::Modifiers::COMMAND, egui::Key::E, panels::EditAction::MakeCompound),
-            (egui::Modifiers::COMMAND, egui::Key::J, panels::EditAction::Simplify),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::Num2,
+                panels::EditAction::Lock,
+            ),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::Num3,
+                panels::EditAction::Hide,
+            ),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::E,
+                panels::EditAction::MakeCompound,
+            ),
+            (
+                egui::Modifiers::COMMAND,
+                egui::Key::J,
+                panels::EditAction::Simplify,
+            ),
         ];
         if let Some(action) = edit_keys.into_iter().find_map(|(modifiers, key, action)| {
             ctx.input_mut(|input| input.consume_key(modifiers, key))
@@ -1980,7 +1996,8 @@ impl StencilApp {
                                     .unit(Unit::new("{n} mm"))
                                     .show(ui);
                                     if let Some(
-                                        EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+                                        EditEvent::Commit { value, .. }
+                                        | EditEvent::Set { value, .. },
                                     ) = edit.event
                                     {
                                         bound_edit = Some((b, i, value));
@@ -2036,9 +2053,7 @@ impl StencilApp {
         }
         if let Some((from, field, value)) = bound_edit {
             let to = panels::edit_bounds(from, pivot, field, value, link_aspect);
-            if let Some(command) =
-                panels::bounds_command(self.selected_shapes.clone(), from, to)
-            {
+            if let Some(command) = panels::bounds_command(self.selected_shapes.clone(), from, to) {
                 self.run_command(command);
             }
         }
@@ -3420,7 +3435,11 @@ fn view_request(
         Some("light") => Some(stencilcraft_ui_egui::ColorTheme::Light),
         _ => None,
     };
-    Some((value.get("id").cloned().unwrap_or_default(), kerf_preview, theme))
+    Some((
+        value.get("id").cloned().unwrap_or_default(),
+        kerf_preview,
+        theme,
+    ))
 }
 
 /// Capture the next painted frame to a PNG at `path`, then answer `job`.

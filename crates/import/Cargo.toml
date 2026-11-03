@@ -1,0 +1,28 @@
+[package]
+name = "stencilcraft-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "StencilCraft file import: SVG, DXF, PDF, EPS/AI vectors and raster images into a document"
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+tiny-skia = { workspace = true }
+stencilcraft-doc = { workspace = true }
+stencilcraft-dxf = { workspace = true }
+stencilcraft-geom = { workspace = true }
+stencilcraft-pdf = { workspace = true }
+stencilcraft-raster = { workspace = true }
+stencilcraft-svg = { workspace = true }
+vectorcraft-cad = { workspace = true }
+vectorcraft-doc = { workspace = true }
+vectorcraft-eps = { workspace = true }
+vectorcraft-pdf = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

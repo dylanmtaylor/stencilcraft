@@ -114,6 +114,9 @@ fn layers() -> Result<(), String> {
         "crates/mcp",
         "crates/testkit",
         "crates/machine",
+        "crates/raster",
+        "crates/import",
+        "crates/pdf",
     ] {
         let text = std::fs::read_to_string(format!("{manifest}/Cargo.toml"))
             .map_err(|e| format!("xtask layers: {manifest}: {e}"))?;
@@ -125,7 +128,14 @@ fn layers() -> Result<(), String> {
             }
         }
         // Exports must not pull in the engine (keep them independent serializers).
-        if ["crates/svg", "crates/dxf", "crates/gcode"].contains(&manifest)
+        if [
+            "crates/svg",
+            "crates/dxf",
+            "crates/gcode",
+            "crates/pdf",
+            "crates/import",
+        ]
+        .contains(&manifest)
             && text.contains("stencilcraft-engine")
         {
             fails.push(format!(

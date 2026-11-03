@@ -627,6 +627,8 @@ pub struct StencilApp {
     pub control_port: Option<u16>,
     /// Queued control requests, handled on the UI thread against `engine`.
     pub control_jobs: Option<control::Jobs>,
+    /// The design-system theme resolved for `theme`, rebuilt when the user switches mode.
+    pub installed_theme: Option<(stencilcraft_ui_egui::ColorTheme, craft_ui::theme::Base)>,
 }
 
 #[derive(Clone, Debug)]
@@ -767,13 +769,14 @@ impl StencilApp {
             settings_store: None,
             control_port: None,
             control_jobs: None,
+            installed_theme: None,
         }
     }
 
     /// Run queued `--control` requests against the document on screen. The socket
     /// hands work to the UI thread, so an agent edits what the user sees (and the
     /// user can undo it) instead of a private copy of the file.
-    fn drain_control_requests(&mut self) {
+    fn drain_control_requests(&mut self, ctx: &egui::Context) {
         let Some(jobs) = self.control_jobs.as_ref() else {
             return;
         };
@@ -782,6 +785,10 @@ impl StencilApp {
             pending.push(job);
         }
         for job in pending {
+            if let Some(path) = screenshot_request(&job.line) {
+                request_screenshot(ctx, path, job);
+                continue;
+            }
             // The session owns the engine while it handles one request, then hands
             // it back: the document, undo history and counters all survive.
             let engine = std::mem::take(&mut self.engine);
@@ -3238,18 +3245,60 @@ pub fn apply_canvas_view_command(
     }
 }
 
+/// The output path of an `app.screenshot` control request (`{"method":"app.screenshot",
+/// "params":{"path":…}}`), the one control method the window answers itself: the MCP session
+/// is headless and has no frame to capture.
+fn screenshot_request(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("method")?.as_str()? != "app.screenshot" {
+        return None;
+    }
+    Some(value.get("params")?.get("path")?.as_str()?.to_string())
+}
+
+/// Capture the next painted frame to a PNG at `path`, then answer `job`.
+fn request_screenshot(ctx: &egui::Context, path: String, job: control::Job) {
+    let id = serde_json::from_str::<serde_json::Value>(&job.line)
+        .ok()
+        .and_then(|v| v.get("id").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let callback = egui::ScreenshotCallback::new(move |image| {
+        let [w, h] = image.size;
+        let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+        let saved = u32::try_from(w)
+            .ok()
+            .zip(u32::try_from(h).ok())
+            .and_then(|(w, h)| image::RgbaImage::from_raw(w, h, bytes))
+            .ok_or_else(|| "screenshot: malformed image".to_string())
+            .and_then(|img| {
+                img.save(&path)
+                    .map_err(|e| format!("screenshot: {path}: {e}"))
+            });
+        let reply = match saved {
+            Ok(()) => {
+                serde_json::json!({"id": id, "ok": true, "result": {"path": path, "size": [w, h]}})
+            }
+            Err(e) => serde_json::json!({"id": id, "ok": false, "error": e}),
+        };
+        let _ = job.reply.send(reply.to_string());
+    });
+    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(callback));
+    ctx.request_repaint();
+}
+
 impl eframe::App for StencilApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "recent_files", &self.recent_files);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        craft_ui::theme::install(ui.ctx(), &craft_ui::theme::Base::suite_default());
-        self.drain_control_requests();
-        ui.ctx().set_theme(match self.theme {
-            stencilcraft_ui_egui::ColorTheme::Dark => egui::ThemePreference::Dark,
-            stencilcraft_ui_egui::ColorTheme::Light => egui::ThemePreference::Light,
-        });
+        if self.installed_theme.as_ref().map(|(t, _)| *t) != Some(self.theme) {
+            self.installed_theme = Some((self.theme, stencilcraft_ui_egui::theme_base(self.theme)));
+        }
+        if let Some((_, base)) = &self.installed_theme {
+            craft_ui::theme::install(ui.ctx(), base);
+        }
+        self.drain_control_requests(ui.ctx());
         self.handle_keyboard_shortcuts(ui.ctx());
 
         self.top_panel(ui);

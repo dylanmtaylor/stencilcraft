@@ -4897,6 +4897,7 @@ dependencies = [
  "image",
  "rfd",
  "serde",
+ "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
  "stencilcraft-engine",

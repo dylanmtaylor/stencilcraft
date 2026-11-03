@@ -13,6 +13,48 @@ pub enum ColorTheme {
     Light,
 }
 
+/// StencilCraft's suite theme: VectorCraft's Modern slate greys with the coral accent, as a
+/// `craft-design-theme` file the design system resolves like any built-in.
+const THEME_JSON: &[u8] = include_bytes!("stencilcraft-theme.json");
+
+/// The design-system theme base StencilCraft installs each frame (`craft_ui::theme::install`),
+/// in `theme`'s mode at the Compact size. Falls back to the suite default if the bundled theme
+/// file ever fails to parse.
+pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
+    use craft_theme::{
+        AppDefaults, ModeChoice, Size, SuiteChoice, SystemAppearance, ThemeId, ThemePair,
+    };
+    let own = craft_theme::format::parse(THEME_JSON)
+        .ok()
+        .map(|file| file.theme);
+    let id = own
+        .as_ref()
+        .map_or_else(ThemeId::suite_default, |t| t.id.clone());
+    let defaults = AppDefaults {
+        theme: ThemePair::same(id),
+        mode: match theme {
+            ColorTheme::Dark => ModeChoice::Dark,
+            ColorTheme::Light => ModeChoice::Light,
+        },
+        size: Size::Compact,
+        sizes: Default::default(),
+    };
+    craft_ui::theme::Base::resolve(
+        &SuiteChoice::default().with_defaults(&defaults),
+        SystemAppearance::default(),
+        &defaults,
+        None,
+        &mut |wanted| {
+            own.clone().filter(|t| t.id == *wanted).or_else(|| {
+                craft_theme::builtins()
+                    .iter()
+                    .find(|t| t.id == *wanted)
+                    .cloned()
+            })
+        },
+    )
+}
+
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
@@ -994,6 +1036,16 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
 mod tests {
     use super::*;
     use stencilcraft_testkit::simple_square;
+
+    #[test]
+    fn bundled_theme_parses_and_resolves_in_both_modes() {
+        assert!(craft_theme::format::parse(THEME_JSON).is_ok());
+        for theme in [ColorTheme::Dark, ColorTheme::Light] {
+            let base = theme_base(theme);
+            assert_eq!(base.inputs.dark.id.as_str(), "stencilcraft.modern");
+            assert_eq!(base.inputs.light.id.as_str(), "stencilcraft.modern");
+        }
+    }
 
     #[test]
     fn palettes_keep_the_design_legible_in_both_themes() {

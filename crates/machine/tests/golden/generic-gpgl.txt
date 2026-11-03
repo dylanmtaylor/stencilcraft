@@ -1,0 +1,10 @@
+# Generic GP-GL plotter (generic-gpgl) protocol=gpgl
+M50,50
+D50,150
+D150,150
+D150,50
+D50,50
+M50,200
+D150,300
+D150,200
+M150,0

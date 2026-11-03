@@ -1,0 +1,26 @@
+# Silhouette Portrait 3 (portrait-3) protocol=silhouette-cameo4
+TG3
+FN0
+TB50,0
+\0,0
+Z365800,4060
+FX10,1
+TJ0
+!5,1
+FC0,1,1
+FE0,1
+FF1,0,1
+FF1,1,1
+FX10,1
+TJ3
+FC18,1,1
+M100,100
+D100,300
+D300,300
+D300,100
+D100,100
+M100,400
+D300,600
+D300,400
+M300,0
+SO0

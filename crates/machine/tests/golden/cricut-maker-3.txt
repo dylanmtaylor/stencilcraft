@@ -1,0 +1,2 @@
+# Cricut Maker 3 (cricut-maker-3) protocol=unsupported
+error: limit: cricut-maker-3: this machine's protocol is not implemented (Proprietary protocol: not implemented. Export SVG and upload to Design Space.). Export SVG/DXF instead.

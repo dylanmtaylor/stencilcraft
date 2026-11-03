@@ -142,7 +142,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     placed raster images for printing. There is no autosave or crash recovery. Proprietary `.studio`/`.studio3` and AI/CDR
     formats are out of scope.
 27. **Documents and preferences**: one board per document and one document per window,
-    with no tabs. No Home screen (new/recent) and no simplified starter workspace. No
+    with no tabs. File › New opens a New Document dialog with size/mat/laser presets and
+    recent sizes, but presets add no starter geometry yet (card fold score, tag hole,
+    print-and-cut marks) and there are no saved user presets. No Home screen and no
+    simplified starter workspace. No
     default machine/material preferences, no UI language choice and no local design
     library beyond Recent. The browser/mobile client is item 9.
 28. **Line and fill styles for pens and specialty tools**: shapes are only cut or
@@ -172,7 +175,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
       `.studio3`/GSD import waits on an owner decision.
     - Cricut machines are pending the owner's decision and a legal review.
 35. **Multiple boards**: one board per document. Missing: Illustrator-style artboards,
-    a template-based new document, and Save Selection As.
+    and Save Selection As (template-based new documents: item 27).
 36. **View aids**: missing smart guides, snap to point, guides (make, release, lock),
     outline view, Show Print/Cut Border, rotated page view and zoom to selection.
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.

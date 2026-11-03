@@ -73,6 +73,26 @@ aspect-lock link; the canvas shows W/H while drawing a shape and X/Y/W/H while d
 one. Hidden shapes are not drawn; hidden and locked shapes are skipped by clicks, boxes
 and lassos, and the Layers panel lists every object with eye and lock toggles.
 
+## New Document dialog
+
+File › New… (Ctrl/Cmd+N), File › New from Template… (Ctrl/Cmd+Shift+N, opens on Vinyl) and
+starting the app without a file show New Document (`apps/stencilcraft/src/new_doc.rs`). It
+follows Illustrator's New Document and the suite's craft-ui `NewDocumentDialog` (same width
+and card tokens, Create/Close footer), not Silhouette's starter carousel:
+
+- Tabs: Recent (sizes created before, kept in settings, then a few defaults), Cut Mats (one
+  card per machine-crate `Mat`), Vinyl, Paper & Card, Print & Cut, Laser. The kinds follow
+  Silhouette's project starters (docs/observations/silhouette-studio.md) with our own names.
+- Cards: the page outline at its aspect plus a code-drawn mark (mat grid, fold line, tag
+  hole, registration marks, crosshair…), name and size line. Click picks, double-click
+  creates, arrows move between cards.
+- Preset Details: Name (title bar and Save's default file name), Width, Height, Units
+  (mm/in; the document stays mm), Orientation, Cutting Mat, Machine, Kerf. Create is
+  disabled while a value is out of range.
+- Create runs `document.new` and `kerf.set` through the engine and sets the canvas mat and
+  Send machine. If the current document has changed since it was opened, saved, or created,
+  a confirmation lets the user cancel and save it before replacing it.
+
 ## Mat backdrop behaviour
 
 - The mat paints behind the design sheet, mats at pixel-corner aligned to the

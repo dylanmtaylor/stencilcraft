@@ -99,6 +99,14 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-02 — New Document dialog (M1.3): File › New… (Ctrl/Cmd+N), New from Template…
+  (Ctrl/Cmd+Shift+N) and app start without a file open an Illustrator-style dialog: tabs
+  (Recent, Cut Mats, Vinyl, Paper & Card, Print & Cut, Laser) over a grid of preset cards
+  with code-drawn thumbnails, and a Preset Details column (name, width, height, units,
+  orientation, cutting mat, machine, kerf) with Create/Close. Create runs `document.new` and
+  `kerf.set`; recent sizes persist in settings. Built from craft-ui's dialog, tokens and
+  controls (`apps/stencilcraft/src/new_doc.rs`, 8 tests). Presets set board, mat and kerf
+  only; starter geometry (card fold score, tag hole) is still missing (docs/gaps.md 27).
 - 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
   size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only
   from files we saved ourselves (`docs/formats/silhouette-studio.md`). It sits behind the new

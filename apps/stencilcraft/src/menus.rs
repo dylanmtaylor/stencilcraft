@@ -110,8 +110,10 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .collect()
     };
     vec![
-        item("New", A::NewDoc).shortcut(kbd(CMD, Key::N)).into(),
-        todo_key("New from Template…", cmd_shift(), Key::N),
+        item("New…", A::NewDoc).shortcut(kbd(CMD, Key::N)).into(),
+        item("New from Template…", A::NewFromTemplate)
+            .shortcut(kbd(cmd_shift(), Key::N))
+            .into(),
         item("Open…", A::OpenDoc).shortcut(kbd(CMD, Key::O)).into(),
         sub("Open Recent", recent),
         todo("Open Recovered…"),

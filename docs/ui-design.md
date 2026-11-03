@@ -29,19 +29,22 @@ clean-room posture and the full feature inventory). The structure is borrowed; t
 
 ## StencilCraft visual conventions
 
-- Chrome comes from craft-libs' design system (aiongg/craft-libs `design-system`): the
-  `stencilcraft.modern` theme file (`crates/ui-egui/src/stencilcraft-theme.json`, VectorCraft's
-  Modern slate greys with the coral accent) is resolved by `craft_ui::theme` and installed
-  every frame. Panels use `Inspector`, `SectionHeader`, `PropertyRow`, `AlignBar`, `ListRow`;
+- Chrome comes from craft-libs' design system (aiongg/craft-libs `design-system`), resolved by
+  `craft_ui::theme` and installed every frame. Dark (the default for new installs; a saved
+  `dark_theme` preference wins) uses the suite built-in `craft.pro` dark: charcoal `323232`
+  panels on `1E1E1E`, blue accent `378EF0`. Light uses the `stencilcraft.modern` theme file
+  (`crates/ui-egui/src/stencilcraft-theme.json`, VectorCraft's Modern Light with the coral
+  accent). Panels use `Inspector`, `SectionHeader`, `PropertyRow`, `AlignBar`, `ListRow`;
   dialogs use `craft_ui::dialog::Dialog`; menus use `MenuBar`/`PressMenu` (`docs/menu-map.md`).
 
-- Slate canvas shared with the suite chrome (VectorCraft Modern Dark:
-  canvas `101217`, mat `181B22`, board `272C36`; light: canvas `DFE3E9`,
-  mat `F3F5F8`, paper-white board), sober panel styling, no gradients, no
-  comic helpers, no mascot buttons.
+- Canvas after the reference cutting-software dark look: mid-grey pasteboard `646464`, the
+  mat a light-grey `E0E0E0` rounded rectangle (5 mm rim, 10 mm top rim), a paper-white page
+  inside it with a thin `378EF0` blue border (light: canvas `DFE3E9`, mat `F3F5F8`, same
+  white page and border). An up arrow in the top rim marks the mat's feed edge. Sober panel styling, no gradients, no comic helpers, no mascot
+  buttons.
 - Hairline `1.5px`-min production strokes: cut = coral `E8573F` (light:
   `D9472F`), kerf preview = blue `3F88E8` (light: `1473E6`), engrave =
-  `969FAF` (light: `58606E`). Selection is suite blue `4F80FF`; coral
+  `58606E` in both (the page is white in both). Selection is suite blue `4F80FF`; coral
   `F06A52` marks what is on/active.
 - A single status line at the bottom, terse, machine-readable-ish.
 - All actions flow through engine `Command`s / transports — the UI stays thin.

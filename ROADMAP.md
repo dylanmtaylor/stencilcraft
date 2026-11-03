@@ -107,6 +107,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
   `kerf.set`; recent sizes persist in settings. Built from craft-ui's dialog, tokens and
   controls (`apps/stencilcraft/src/new_doc.rs`, 8 tests). Presets set board, mat and kerf
   only; starter geometry (card fold score, tag hole) is still missing (docs/gaps.md 27).
+- 2026-11-02 — canvas restyled after the reference app's dark look (dark stays the default
+  for new installs): charcoal craft `pro` dark chrome, mid-grey pasteboard, light-grey
+  rounded mat with a rim and up arrow indicating its feed edge, white page with a thin blue border (`docs/ui-design.md`). Appearance estimated, not measured.
+
 - 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
   size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only
   from files we saved ourselves (`docs/formats/silhouette-studio.md`). It sits behind the new

@@ -49,6 +49,8 @@ Every observation names the date and the app version it was made against. A row 
 
 ## Versions and sources
 
+Raw notes from driving Silhouette Studio are in [`observations/silhouette-studio.md`](observations/silhouette-studio.md).
+
 | App | Version under study | Platform | Public documentation |
 | --- | --- | --- | --- |
 | Silhouette Studio | 5.0.x; observed: 5.0.539 Basic edition, Windows 11 VM, 2026-11-02 | Windows | [Silhouette Studio overview](https://www.silhouetteamerica.com/silhouette-studio), [software suite and editions](https://www.silhouetteamerica.com/software), [support knowledge base: Studio features](https://silhouetteamerica.freshdesk.com/support/solutions/folders/35000233809), [file types and features by edition](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000282776-file-types-and-features), [Designer Edition features](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000273383-designer-edition-features), the in-app Help › User's Manual |

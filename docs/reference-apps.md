@@ -262,6 +262,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Device discovery and status | both | Find connected cutters; show ready/loaded/tool status | partial: status query decoded; no discovery or live status in the UI | replicate | pending |
 | Load/unload media, pause, cancel | both | Machine controls during a job | missing | replicate | pending |
 | Multi-cutter support | SS (Business) | Send jobs to several machines at once | missing | replicate later | pending |
+| Batch / queued jobs | SS (Business) | Queue several designs or repeats as one job | missing | replicate | pending |
 | Cricut machine protocol | DS | Driving Cricut machines | out of scope | won't do: no public specification; would need protocol work we don't do | pending |
 | Firmware updates | both | Update the machine firmware from the app | out of scope | won't do: vendor firmware | pending |
 
@@ -289,6 +290,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | PDF/PNG/JPG export | SS (Business) | Save as PDF or image | missing | replicate (PDF first) | pending |
 | DXF export | — | StencilCraft's own | have (R14, flattened) | — | — |
 | G-code export | — | StencilCraft's own | have | — | — |
+| Plugins for external design tools | SS (Silhouette Connect) | Send straight from Illustrator/CorelDRAW to the cutter | missing | reimagine: CLI/MCP and SVG/PDF interchange; never tie the core to proprietary software | pending |
 | Cloud-only save | DS | Projects saved to the vendor cloud | out of scope | won't do: account system; we save open, local files | pending |
 
 Sources: [Silhouette, *File Types and Features*](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000282776-file-types-and-features), [Cricut, *Image uploads: unsupported items*](https://help.cricut.com/hc/en-us/articles/360009553213-Image-uploads-unsupported-items).
@@ -338,7 +340,7 @@ These are the rows marked **missing** above. Rows marked partial are not listed.
 - **Cut settings**: custom materials, per-layer settings, test cut, overcut, cut order,
   mat-free strategy, weed lines.
 - **Machine**: mat preview, Bluetooth transport, load/unload/pause/cancel controls,
-  multi-cutter.
-- **Formats**: DXF import, PDF import, PDF/PNG/JPG export.
+  multi-cutter, batch jobs.
+- **Formats**: DXF import, PDF import, PDF/PNG/JPG export, external design-tool plugins.
 - **Preferences**: language.
 - **Platforms**: browser/mobile client.

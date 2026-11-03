@@ -44,6 +44,9 @@ pub enum ProjectTemplate {
     EmbossedCard,
     EmbossedSticker,
     CoinCase,
+    FauxLeatherTray,
+    LeatherEarrings,
+    LeatherKeychain,
 }
 
 /// What a new-project picker shows for one template.
@@ -64,7 +67,7 @@ const TAG: &[&str] = &["preset", "width_mm", "height_mm", "hole_mm"];
 const PAGE: &[&str] = &["preset"];
 
 impl ProjectTemplate {
-    pub const ALL: [ProjectTemplate; 22] = [
+    pub const ALL: [ProjectTemplate; 25] = [
         ProjectTemplate::Blank,
         ProjectTemplate::Card,
         ProjectTemplate::Emboss,
@@ -87,6 +90,9 @@ impl ProjectTemplate {
         ProjectTemplate::EmbossedCard,
         ProjectTemplate::EmbossedSticker,
         ProjectTemplate::CoinCase,
+        ProjectTemplate::FauxLeatherTray,
+        ProjectTemplate::LeatherEarrings,
+        ProjectTemplate::LeatherKeychain,
     ];
 
     pub fn info(self) -> TemplateInfo {
@@ -114,6 +120,9 @@ impl ProjectTemplate {
             T::EmbossedCard => ("Embossed card", "A folding card with an embossed frame on its front.", "starter", CARD),
             T::EmbossedSticker => ("Embossed sticker", "A 3 in round sticker with an embossed inner ring.", "starter", SIZE),
             T::CoinCase => ("Coin case", "A flat coin-pouch net: cut outline with score lines to fold.", "starter", SIZE),
+            T::FauxLeatherTray => ("Faux leather tray", "A 6 × 6 in tray: score the 1 in walls, punch the corner holes and snap them together.", "starter", SIZE),
+            T::LeatherEarrings => ("Leather earrings", "A mirrored pair of leaf earrings, each with a punch hole for the hook.", "starter", SIZE),
+            T::LeatherKeychain => ("Leather keychain", "A 1 × 10 in strap scored to fold in half, with punch holes that meet for a rivet.", "starter", SIZE),
         };
         TemplateInfo {
             id: self,
@@ -288,6 +297,9 @@ pub fn new_from_template(
         T::MetalEngravedDecor => Some(inch(8.0, 10.0)),
         T::EmbossedSticker => Some(inch(3.0, 3.0)),
         T::CoinCase => Some((90.0, 180.0)),
+        T::FauxLeatherTray => Some(inch(6.0, 6.0)),
+        T::LeatherEarrings => Some(inch(3.0, 2.5)),
+        T::LeatherKeychain => Some(inch(1.0, 10.0)),
         _ => None,
     };
     let item = match item {
@@ -468,6 +480,80 @@ pub fn new_from_template(
             }
             media(&mut b, "cardstock");
         }
+        T::FauxLeatherTray => {
+            let wall = (r.width().min(r.height()) / 6.0).min(INCH_MM);
+            let base = r.inset(-wall);
+            b.add("cut", CutStyle::Cut, rect_path(r))?;
+            // Walls fold up along the base edges; the score runs edge to edge.
+            for (a, c) in [
+                ((r.x0, base.y0), (r.x1, base.y0)),
+                ((r.x0, base.y1), (r.x1, base.y1)),
+                ((base.x0, r.y0), (base.x0, r.y1)),
+                ((base.x1, r.y0), (base.x1, r.y1)),
+            ] {
+                b.add(
+                    "score",
+                    CutStyle::Engrave,
+                    dashed(Point::new(a.0, a.1), Point::new(c.0, c.1)),
+                )?;
+            }
+            // Two punch points per corner, one on each wall, that meet when pinched.
+            let hole = 4.0;
+            for (cx, cy, sx, sy) in [
+                (r.x0, r.y0, 1.0, 1.0),
+                (r.x1, r.y0, -1.0, 1.0),
+                (r.x0, r.y1, 1.0, -1.0),
+                (r.x1, r.y1, -1.0, -1.0),
+            ] {
+                for (dx, dy) in [(wall * 1.5, wall / 2.0), (wall / 2.0, wall * 1.5)] {
+                    let p = Point::new(cx + sx * dx, cy + sy * dy);
+                    b.add("cut", CutStyle::Cut, circle(p, hole))?;
+                }
+            }
+            media(&mut b, "faux leather");
+        }
+        T::LeatherEarrings => {
+            // An asymmetric leaf in the left half, and its mirror image in the right.
+            let w = r.width() * 0.4;
+            let h = r.height();
+            let leaf = |x0: f64, flip: f64| {
+                let x = |u: f64| x0 + w / 2.0 + flip * (u - 0.5) * w;
+                polygon(&[
+                    (x(0.5), r.y0),
+                    (x(1.0), r.y0 + 0.35 * h),
+                    (x(0.6), r.y1),
+                    (x(0.0), r.y0 + 0.6 * h),
+                ])
+            };
+            let left = r.x0;
+            let right = r.x1 - w;
+            for (x0, flip) in [(left, 1.0), (right, -1.0)] {
+                b.add("cut", CutStyle::Cut, leaf(x0, flip))?;
+                let hole = Point::new(x0 + w / 2.0, r.y0 + 0.1 * h);
+                b.add("cut", CutStyle::Cut, circle(hole, 2.0))?;
+            }
+            media(&mut b, "leather");
+        }
+        T::LeatherKeychain => {
+            b.add("cut", CutStyle::Cut, rect_path(r))?;
+            let (a, c) = if r.height() >= r.width() {
+                (Point::new(r.x0, center.y), Point::new(r.x1, center.y))
+            } else {
+                (Point::new(center.x, r.y0), Point::new(center.x, r.y1))
+            };
+            b.add("score", CutStyle::Engrave, dashed(a, c))?;
+            // One hole near each end: they meet when the strap folds.
+            let hole = (r.width().min(r.height()) * 0.25).min(5.0);
+            let end = r.width().min(r.height()) / 2.0;
+            let (p, q) = if r.height() >= r.width() {
+                (Point::new(center.x, r.y0 + end), Point::new(center.x, r.y1 - end))
+            } else {
+                (Point::new(r.x0 + end, center.y), Point::new(r.x1 - end, center.y))
+            };
+            b.add("cut", CutStyle::Cut, circle(p, hole))?;
+            b.add("cut", CutStyle::Cut, circle(q, hole))?;
+            media(&mut b, "leather");
+        }
     }
     let mut doc = b.doc;
     if b.grouped.len() >= 2 {
@@ -579,5 +665,15 @@ mod tests {
         let coin = t(ProjectTemplate::CoinCase);
         assert_eq!(coin.layers.iter().find(|l| l.name == "score").unwrap().shapes.len(), 2);
         assert!(t(ProjectTemplate::Stamping).board_setup.mirror);
+        let tray = t(ProjectTemplate::FauxLeatherTray);
+        assert_eq!(tray.layers[0].shapes.len(), 9, "outline + 8 punch points");
+        assert_eq!(tray.board_setup.media.as_deref(), Some("faux leather"));
+        let ear = t(ProjectTemplate::LeatherEarrings);
+        let a = ear.layers[0].shapes[0].bounds().unwrap();
+        let b = ear.layers[0].shapes[2].bounds().unwrap();
+        assert!((a.width() - b.width()).abs() < 1e-9 && (a.height() - b.height()).abs() < 1e-9);
+        let key = t(ProjectTemplate::LeatherKeychain);
+        assert_eq!(key.layers[0].shapes.len(), 3);
+        assert_eq!(key.group_shapes(1).len(), 4);
     }
 }

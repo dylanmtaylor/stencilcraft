@@ -16,7 +16,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
 | UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
 | Agent surface | working | CLI `run`/MCP tools and legacy JSON-lines control; desktop `--control` drives the visible document |
-| Machine control | preliminary | Graphtec/Silhouette encoder + dry-run `cut` CLI (docs/machine.md); no real-hardware transport yet |
+| Machine control | preliminary | 32-model catalog (Silhouette/Graphtec, Graphtec CE, generic GP-GL/HP-GL/DMPL), limit-checked encoders, `nusb` USB transport behind `usb` (untested on hardware), no Bluetooth (docs/machine.md) |
 | Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
@@ -46,9 +46,9 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
    but containment still tests flattened vertices.
 4. Bridge generation prototype (M3 early): algorithm notes in `docs/bridges.md`.
 5. G-code profiles: material/machine presets, separate first/last pass, Z knife mode.
-6. Machine control (docs/machine.md): USB-bulk `nusb` transport for the `0b4d` device
-   family, Bluetooth RFCOMM/BLE, registration marks (print-and-cut), mat-free path
-   sorting for knife-pressure relief.
+6. Machine control (docs/machine.md): hardware validation of the USB transport and the
+   registration-mark session, Bluetooth RFCOMM/BLE, mat-free path sorting for
+   knife-pressure relief.
 
 ## Silhouette Studio feature TODO
 
@@ -72,8 +72,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 - [ ] Expand design formats and project interoperability, including DXF import and a
   documented strategy for proprietary Studio3 files (do not reverse-engineer protected
   formats without an appropriate public specification).
-- [ ] Grow machine support: USB bulk, Bluetooth, more model generations, device discovery,
-  live status, registration-mark protocol, and mat-free knife path ordering.
+- [ ] Grow machine support: Bluetooth, hardware-verified USB and registration marks,
+  Curio/Graphtec CE USB ids, and mat-free knife path ordering. (Catalog, USB transport,
+  discovery, status query and registration-mark commands landed 2026-11-02.)
 - [ ] Add cloud/account features: sign-in, library sync, purchased-design management and
   offline cache; decide on a compatible service and data/rights model before implementation.
 - [ ] Add a design marketplace or catalog only with original or permissively licensed
@@ -114,6 +115,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
   depth; `--tile-prefix` is honoured; the desktop `--control` socket now runs requests against
   the visible document.
 
+- 2026-11-02 — cutters: catalog of 32 machines (Portrait 1-4, CAMEO 1-5 incl. Plus/Pro/
+  Alpha, Curio 1/2 export-only, Craft Robo, Graphtec CE6000/CE7000/CE LITE, generic
+  GP-GL/HP-GL/DMPL) with unknowns left unknown; `encode_job` rejects out-of-range force,
+  speed, tool, holder, depth, mat and area; passes, line-segment overcut, AutoBlade depth,
+  track enhancing, registration marks; `nusb` USB transport (`usb` feature), `machines` /
+  `devices` CLI, MCP `machines_list` / `machine_dry_run`; per-model golden transcripts.
+  Cricut documented as export-only.
 - 2026-11-01 — MCP stdio JSON-RPC initialization, tool discovery and calls for the existing
   headless session, preserving legacy JSON-lines control.
 

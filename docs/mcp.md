@@ -22,7 +22,8 @@ to the process. The control socket listens on `127.0.0.1` only, but it has no au
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, and `command_execute`. Their
+`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `machines_list`, `machine_dry_run`,
+and `command_execute`. Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -73,5 +74,17 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `export.gcode` | `{path, feed?, power?, engrave_power?, passes?, ramp?, mode?}` | `{path}` |
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
+| `machines.list` | `{}` | array of machines: `{id, name, dialect, usb, cut_width_mm, cut_length_mm, media_width_mm, mats, tool_holders, tools, max_force_gf, force{min,max}, speed{min,max}, bluetooth, regmarks, quad_regmarks, notes}` (`null` = undocumented) |
+| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, path?}` | `{model, dialect, commands, bytes, bbox_mm, registration_wait, truncated, transcript: [..], path}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 
+
+## Cutting machines
+
+`machines_list` returns the catalog from `docs/machine.md`. `machine_dry_run` encodes the
+current document for one model and returns the transcript (first 5000 commands; `truncated`
+says if there were more); with `path` it also writes the exact byte stream (HP-GL/DMPL files
+for a spooler, for example). Every value is validated against the model: an out-of-range
+force, speed, depth, tool, holder, mat or a design outside the cut area is a normal tool error
+naming the knob and range — never clamped. There is deliberately **no** MCP method that sends
+to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a person.

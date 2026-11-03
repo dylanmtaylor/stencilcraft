@@ -10,6 +10,11 @@ pub const MAX_PASSES: u8 = 10;
 pub const MAX_OPERATIONS: usize = 64;
 /// Largest line-segment overcut the encoder accepts, mm.
 pub const MAX_OVERCUT_MM: f64 = 2.0;
+/// Largest closed-contour (software) overcut past the start point, mm.
+pub const MAX_CLOSED_OVERCUT_MM: f64 = 5.0;
+/// Cut-order sorting is quadratic in the path count; above this it falls back
+/// to a plain feed-axis sort (no nesting check).
+pub const MAX_SORT_PATHS: usize = 5_000;
 /// `FC` (blade offset) tops out around 46 SU on the device (community note).
 pub const MAX_BLADE_DIAMETER_MM: f64 = 2.3;
 
@@ -99,6 +104,39 @@ pub struct Registration {
     pub quad: bool,
 }
 
+/// Cut order within each operation (the reference's Send preferences:
+/// No Sort | Maximize Speed | Minimize Roller Movement).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CutOrder {
+    /// Document order.
+    None,
+    /// Nearest-neighbour: next path is the one starting closest to the head.
+    Speed,
+    /// Sort by the top (feed-axis) edge so the media moves one way. The
+    /// reference's default.
+    #[default]
+    Roller,
+}
+
+impl CutOrder {
+    pub fn parse(s: &str) -> Option<CutOrder> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" | "no-sort" => Some(CutOrder::None),
+            "speed" | "maximize-speed" => Some(CutOrder::Speed),
+            "roller" | "minimize-roller-movement" => Some(CutOrder::Roller),
+            _ => None,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            CutOrder::None => "none",
+            CutOrder::Speed => "speed",
+            CutOrder::Roller => "roller",
+        }
+    }
+}
+
 /// A complete, vendor-neutral cut job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CutJob {
@@ -120,6 +158,17 @@ pub struct CutJob {
     pub media_id: Option<u16>,
     /// Cut only the bounding rectangle (placement preview).
     pub bbox_only: bool,
+    /// Path order within each operation.
+    pub order: CutOrder,
+    /// Cut contours inside a closed path before that path, so parts don't
+    /// shift (reference default: on).
+    pub interior_first: bool,
+    /// Extend each closed contour past its start point by this much, mm
+    /// (software overcut; 0 = off). Not applied to pen operations.
+    pub closed_overcut_mm: f64,
+    /// Flip horizontally about the media centre (heat-transfer vinyl is cut
+    /// face down). Applied at job build time, never to the document.
+    pub mirror: bool,
 }
 
 impl Default for CutJob {
@@ -136,6 +185,10 @@ impl Default for CutJob {
             track_enhancing: false,
             media_id: None,
             bbox_only: false,
+            order: CutOrder::default(),
+            interior_first: true,
+            closed_overcut_mm: 0.0,
+            mirror: false,
         }
     }
 }
@@ -237,6 +290,193 @@ pub(crate) fn overcut_path(path: &[(f64, f64)], o: f64) -> Vec<(f64, f64)> {
     out
 }
 
+fn is_closed(path: &[(f64, f64)]) -> bool {
+    path.len() > 2 && path.first() == path.last()
+}
+
+/// Even-odd point-in-polygon test.
+fn point_in(p: (f64, f64), poly: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    for w in poly.windows(2) {
+        let [a, b] = w else { continue };
+        if (a.1 > p.1) != (b.1 > p.1) && p.0 < a.0 + (p.1 - a.1) * (b.0 - a.0) / (b.1 - a.1) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// `outer` is closed and encloses `inner` (strict bbox containment plus the
+/// first point inside).
+fn encloses(outer: &[(f64, f64)], ob: BBoxMm, inner: &[(f64, f64)], ib: BBoxMm) -> bool {
+    is_closed(outer)
+        && ib.0 > ob.0
+        && ib.1 > ob.1
+        && ib.2 < ob.2
+        && ib.3 < ob.3
+        && inner.first().is_some_and(|&p| point_in(p, outer))
+}
+
+/// Order one operation's paths. Greedy: with `interior_first` a path is
+/// ready once every path it encloses is cut; among ready paths `order` picks
+/// document order, the nearest start to the head, or the top edge.
+pub fn order_paths(paths: Paths, order: CutOrder, interior_first: bool) -> Paths {
+    let n = paths.len();
+    if n < 2 || (order == CutOrder::None && !interior_first) {
+        return paths;
+    }
+    let bbs: Vec<BBoxMm> = paths
+        .iter()
+        .map(|p| find_bbox(core::slice::from_ref(p)).unwrap_or((0.0, 0.0, 0.0, 0.0)))
+        .collect();
+    let top = |i: usize| bbs.get(i).map_or((0.0, 0.0), |b| (b.0, b.1));
+    let by_top = |a: &usize, b: &usize| {
+        let (ta, tb) = (top(*a), top(*b));
+        ta.0.total_cmp(&tb.0)
+            .then(ta.1.total_cmp(&tb.1))
+            .then(a.cmp(b))
+    };
+    let mut idx: Vec<usize> = (0..n).collect();
+    if n > MAX_SORT_PATHS {
+        // shortcut: no nesting check or nearest-neighbour above MAX_SORT_PATHS; upgrade with a spatial index.
+        if order != CutOrder::None {
+            idx.sort_by(by_top);
+        }
+        return pick(paths, &idx);
+    }
+    // containers[i] = closed paths enclosing i; blockers[j] = uncut paths inside j.
+    let mut containers: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut blockers = vec![0usize; n];
+    if interior_first {
+        for (i, (inner, ib)) in paths.iter().zip(&bbs).enumerate() {
+            for (j, (outer, ob)) in paths.iter().zip(&bbs).enumerate() {
+                if i != j && encloses(outer, *ob, inner, *ib) {
+                    if let Some(c) = containers.get_mut(i) {
+                        c.push(j);
+                    }
+                    if let Some(b) = blockers.get_mut(j) {
+                        *b += 1;
+                    }
+                }
+            }
+        }
+    }
+    let mut done = vec![false; n];
+    let mut head = (0.0, 0.0);
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let ready = |i: &usize| !done.get(*i).copied().unwrap_or(true);
+        let dist = |i: usize| {
+            paths
+                .get(i)
+                .and_then(|p| p.first())
+                .map_or(f64::INFINITY, |&(x, y)| (x - head.0).hypot(y - head.1))
+        };
+        let candidates = idx
+            .iter()
+            .copied()
+            .filter(|i| ready(i) && blockers.get(*i).copied().unwrap_or(0) == 0);
+        let next = match order {
+            CutOrder::None => candidates.min(),
+            CutOrder::Roller => candidates.min_by(by_top),
+            CutOrder::Speed => {
+                candidates.min_by(|a, b| dist(*a).total_cmp(&dist(*b)).then(a.cmp(b)))
+            }
+        };
+        // Strict bbox containment rules out cycles; fall back anyway.
+        let Some(k) = next.or_else(|| idx.iter().copied().find(ready)) else {
+            break;
+        };
+        if let Some(d) = done.get_mut(k) {
+            *d = true;
+        }
+        for &c in containers.get(k).map_or(&[][..], Vec::as_slice) {
+            if let Some(b) = blockers.get_mut(c) {
+                *b = b.saturating_sub(1);
+            }
+        }
+        if let Some(&p) = paths.get(k).and_then(|p| p.last()) {
+            head = p;
+        }
+        out.push(k);
+    }
+    pick(paths, &out)
+}
+
+fn pick(paths: Paths, order: &[usize]) -> Paths {
+    let mut slots: Vec<Option<Vec<(f64, f64)>>> = paths.into_iter().map(Some).collect();
+    order
+        .iter()
+        .filter_map(|&i| slots.get_mut(i).and_then(Option::take))
+        .collect()
+}
+
+/// Continue a closed contour past its start for `d` mm along its first
+/// segments (at most one lap). Open paths are returned unchanged.
+pub fn extend_closed(path: &[(f64, f64)], d: f64) -> Vec<(f64, f64)> {
+    let mut out = path.to_vec();
+    if !is_closed(path) || d <= 0.0 {
+        return out;
+    }
+    let mut left = d;
+    for w in path.windows(2) {
+        let [a, b] = w else { continue };
+        let l = (b.0 - a.0).hypot(b.1 - a.1);
+        if l >= left {
+            let t = left / l;
+            out.push((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+            break;
+        }
+        out.push(*b);
+        left -= l;
+    }
+    out
+}
+
+/// Width the mirror flips about: loaded media, then mat, then machine.
+fn mirror_width(caps: &Capabilities, job: &CutJob) -> Option<f64> {
+    job.media_size_mm
+        .map(|(w, _)| w)
+        .or_else(|| (job.mat != Mat::None).then(|| job.mat.extent_mm().1))
+        .or(caps.cut_width_mm.or(caps.media_width_mm))
+}
+
+/// Apply the job-level settings (cut order, closed-contour overcut, mirror)
+/// to every operation's paths. Validate the result again: a mirrored design
+/// must still fit.
+pub fn apply_job_settings(caps: &Capabilities, job: &CutJob) -> Result<CutJob, MachineError> {
+    let flip = if job.mirror {
+        let Some(w) = mirror_width(caps, job) else {
+            return Err(MachineError::Limit(format!(
+                "{}: mirror needs a known media width: pass the loaded media size",
+                caps.id
+            )));
+        };
+        // About the media centre, in job coordinates (origin is offset from the media's left).
+        Some(w - 2.0 * job.origin_right_mm)
+    } else {
+        None
+    };
+    let mut out = job.clone();
+    for op in &mut out.operations {
+        let pen = op.is_pen();
+        let paths = core::mem::take(&mut op.paths);
+        let mut paths = order_paths(paths, job.order, job.interior_first);
+        for p in &mut paths {
+            if !pen && job.closed_overcut_mm > 0.0 {
+                *p = extend_closed(p, job.closed_overcut_mm);
+            }
+            if let Some(w) = flip {
+                for pt in p.iter_mut() {
+                    pt.0 = w - pt.0;
+                }
+            }
+        }
+        op.paths = paths;
+    }
+    Ok(out)
+}
+
 /// Check a job against a machine. Each message names the knob and the
 /// allowed range so CLI/MCP users can fix the request.
 pub fn validate(caps: &Capabilities, job: &CutJob) -> Result<(), MachineError> {
@@ -266,6 +506,17 @@ pub fn validate(caps: &Capabilities, job: &CutJob) -> Result<(), MachineError> {
     }
     if job.origin_down_mm < 0.0 || job.origin_right_mm < 0.0 {
         return limit("negative origin offset".to_string());
+    }
+    if !job.closed_overcut_mm.is_finite()
+        || !(0.0..=MAX_CLOSED_OVERCUT_MM).contains(&job.closed_overcut_mm)
+    {
+        return limit(format!(
+            "closed-contour overcut {} mm outside 0..={MAX_CLOSED_OVERCUT_MM}",
+            job.closed_overcut_mm
+        ));
+    }
+    if job.mirror && job.registration.is_some() {
+        return limit("mirror can't be combined with registration marks".to_string());
     }
     let holders = caps.tool_holders.unwrap_or(1);
     let mut count = 0usize;

@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Shape drawing now paints a live outline while dragging stars,
+  polygons, ellipses and rectangles, using the same command as the final shape.
+
 - 2026-11-03 — Desktop USB submission: discover catalogued cutters, select a device,
   validate visible paths and submit through the existing machine session on a worker
   thread. USB enabled by default in desktop builds. Hardware testing pending (Cameo 4

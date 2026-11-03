@@ -148,7 +148,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     validation. Desktop discovery and explicit USB submission are available; live status, Bluetooth, interactive mat preview,
     multi-cutter output and batch jobs remain open. Cricut hardware control is out of
     scope without a public protocol.
-23. **Path editing tools**: missing freehand and smoothed freehand, arc, knife, eraser,
+23. **Path editing tools**: shape creation has a live drag outline matching the committed geometry. missing freehand and smoothed freehand, arc, knife, eraser,
     break/join/close path, release compound path, simplify, flip/mirror buttons, a
     clipboard, Paste in Front, Select by Color, Detach Lines, a rotation handle on the
     selection, a reference-point picker for the X/Y fields, a preference for what a tool

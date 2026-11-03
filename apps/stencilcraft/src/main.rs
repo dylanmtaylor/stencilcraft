@@ -1709,64 +1709,60 @@ impl StencilApp {
         start: stencilcraft_geom::Point,
         end: stencilcraft_geom::Point,
     ) {
+        if let Some(command) = self.dragged_shape_command(start, end) {
+            self.run_command(command);
+            self.select_latest_shape();
+        }
+    }
+
+    fn dragged_shape_command(
+        &self,
+        start: stencilcraft_geom::Point,
+        end: stencilcraft_geom::Point,
+    ) -> Option<Command> {
         let x = start.x.min(end.x);
         let y = start.y.min(end.y);
         let w = (start.x - end.x).abs();
         let h = (start.y - end.y).abs();
         if w < 1.0 && h < 1.0 {
-            return;
+            return None;
         }
         match self.active_tool {
-            ActiveTool::Rect => {
-                self.run_command(Command::ShapeAddRect {
-                    x,
-                    y,
-                    width: w.max(2.0),
-                    height: h.max(2.0),
-                });
-                self.select_latest_shape();
-            }
-            ActiveTool::RoundedRect => {
-                self.run_command(Command::ShapeAddRoundedRect {
-                    x,
-                    y,
-                    width: w.max(2.0),
-                    height: h.max(2.0),
-                    radius: (w.min(h) * 0.15).clamp(1.0, 15.0),
-                });
-                self.select_latest_shape();
-            }
-            ActiveTool::Ellipse => {
-                self.run_command(Command::ShapeAddEllipse {
-                    x,
-                    y,
-                    width: w.max(2.0),
-                    height: h.max(2.0),
-                });
-                self.select_latest_shape();
-            }
-            ActiveTool::Polygon => {
-                self.run_command(Command::ShapeAddPolygon {
-                    cx: (start.x + end.x) / 2.0,
-                    cy: (start.y + end.y) / 2.0,
-                    radius: (w.max(h) / 2.0).max(2.0),
-                    sides: 6,
-                    rotation: 0.0,
-                });
-                self.select_latest_shape();
-            }
-            ActiveTool::Star => {
-                self.run_command(Command::ShapeAddStar {
-                    cx: (start.x + end.x) / 2.0,
-                    cy: (start.y + end.y) / 2.0,
-                    radius: (w.max(h) / 2.0).max(3.0),
-                    inner_radius: (w.max(h) / 4.0).max(1.5),
-                    points: 5,
-                    rotation: 0.0,
-                });
-                self.select_latest_shape();
-            }
-            _ => {}
+            ActiveTool::Rect => Some(Command::ShapeAddRect {
+                x,
+                y,
+                width: w.max(2.0),
+                height: h.max(2.0),
+            }),
+            ActiveTool::RoundedRect => Some(Command::ShapeAddRoundedRect {
+                x,
+                y,
+                width: w.max(2.0),
+                height: h.max(2.0),
+                radius: (w.min(h) * 0.15).clamp(1.0, 15.0),
+            }),
+            ActiveTool::Ellipse => Some(Command::ShapeAddEllipse {
+                x,
+                y,
+                width: w.max(2.0),
+                height: h.max(2.0),
+            }),
+            ActiveTool::Polygon => Some(Command::ShapeAddPolygon {
+                cx: (start.x + end.x) / 2.0,
+                cy: (start.y + end.y) / 2.0,
+                radius: (w.max(h) / 2.0).max(2.0),
+                sides: 6,
+                rotation: 0.0,
+            }),
+            ActiveTool::Star => Some(Command::ShapeAddStar {
+                cx: (start.x + end.x) / 2.0,
+                cy: (start.y + end.y) / 2.0,
+                radius: (w.max(h) / 2.0).max(3.0),
+                inner_radius: (w.max(h) / 4.0).max(1.5),
+                points: 5,
+                rotation: 0.0,
+            }),
+            _ => None,
         }
     }
 
@@ -3573,11 +3569,32 @@ impl StencilApp {
                         .show(ui.ctx(), pointer);
                 }
             }
+            if let (Some(start), Some(end)) = (self.shape_drag_start, self.shape_drag_current)
+                && let Some(command) = self.dragged_shape_command(start, end)
+            {
+                let mut preview =
+                    stencilcraft_engine::Engine::new(stencilcraft_doc::Document::default());
+                if preview.run(command).is_ok() {
+                    let paths: Vec<_> = preview
+                        .doc
+                        .layers
+                        .iter()
+                        .flat_map(|layer| layer.shapes.iter().map(|shape| shape.path.clone()))
+                        .collect();
+                    stencilcraft_ui_egui::paint_preview_paths(
+                        &painter,
+                        &view,
+                        &paths,
+                        stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+                    );
+                }
+            }
             if response.drag_stopped()
                 && let (Some(start), Some(end)) =
                     (self.shape_drag_start.take(), self.shape_drag_current.take())
             {
                 self.commit_dragged_shape(start, end);
+                ui.ctx().request_repaint();
             }
         }
 

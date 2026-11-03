@@ -158,7 +158,12 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
     let doc = if input.to_ascii_lowercase().ends_with(".svg") {
         let contents = std::fs::read_to_string(&input)
             .map_err(|e| format!("{input}: could not read SVG: {e}"))?;
-        stencilcraft_svg::import(&contents, &input).map_err(|e| e.to_string())?
+        let imported =
+            stencilcraft_svg::import_with_warnings(&contents, &input).map_err(|e| e.to_string())?;
+        for warning in &imported.warnings {
+            eprintln!("{input}: {warning}");
+        }
+        imported.document
     } else {
         load_document(&input)?
     };

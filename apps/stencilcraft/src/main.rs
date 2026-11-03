@@ -1239,10 +1239,22 @@ impl StencilApp {
         let result = std::fs::read_to_string(&path)
             .map_err(|error| format!("{name}: could not read SVG: {error}"))
             .and_then(|svg| {
-                stencilcraft_svg::import(&svg, &name).map_err(|error| error.to_string())
+                stencilcraft_svg::import_with_warnings(&svg, &name)
+                    .map_err(|error| error.to_string())
             });
         match result {
-            Ok(imported) => self.add_imported_shapes(imported, &name),
+            Ok(imported) => {
+                self.add_imported_shapes(imported.document, &name);
+                // Skipped text, masks and filters must reach the user, not vanish.
+                if let Some(first) = imported.warnings.first() {
+                    let more = imported.warnings.len() - 1;
+                    self.status = if more == 0 {
+                        format!("{}; warning: {first}", self.status)
+                    } else {
+                        format!("{}; warning: {first} (+{more} more)", self.status)
+                    };
+                }
+            }
             Err(error) => self.status = error,
         }
     }

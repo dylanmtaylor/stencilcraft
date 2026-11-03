@@ -8,6 +8,7 @@
 //! API is already the one the actors use, so swapping in a shared-structure
 //! stack later must not touch any caller.
 
+pub mod document;
 mod path_edit;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -350,6 +351,11 @@ pub enum Command {
         #[serde(default)]
         ids: Vec<u64>,
     },
+    /// Document and canvas commands (groups, arrange, layers, pages, guides, snapping,
+    /// measuring, selection, clipboard, repeat transforms, metadata): see `document.rs`.
+    /// Untagged, so they keep the same `{"command", "params"}` shape as the rest.
+    #[serde(untagged)]
+    Document(document::DocumentCommand),
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -454,6 +460,7 @@ pub enum Effect {
         ids: Vec<u64>,
     },
     NodeCount(NodeCount),
+    Document(document::DocumentEffect),
 }
 
 /// Undo/redo snapshots StencilCraft's production document; VectorCraft still owns the reusable
@@ -544,6 +551,7 @@ pub struct Engine {
     node_shapes: BTreeMap<u64, u64>,
     node_layers: BTreeMap<u64, usize>,
     layer_nodes: Vec<NodeId>,
+    document_state: document::EditorState,
 }
 
 impl Default for Engine {
@@ -562,6 +570,7 @@ impl Engine {
             node_shapes: BTreeMap::new(),
             node_layers: BTreeMap::new(),
             layer_nodes: Vec::new(),
+            document_state: document::EditorState::default(),
         };
         engine.sync_session_from_doc();
         engine
@@ -584,11 +593,12 @@ impl Engine {
             | Command::SelectSameFill { .. }
             | Command::SelectSameStroke { .. }
             | Command::SelectInverse { .. } => return self.query(&command),
+            Command::Document(command) => return document::run(self, command),
             _ => {}
         }
         if let Some(id) = edit_targets(&command)
             .into_iter()
-            .find(|id| self.doc.get_shape(*id).is_some_and(|shape| shape.locked))
+            .find(|id| self.doc.shape_locked(*id))
         {
             return Err(EngineError::Invalid(format!(
                 "shape {id} is locked; unlock it first"
@@ -1228,6 +1238,7 @@ impl Engine {
                     kerf: self.doc.kerf.clone(),
                     layers: vec![stencilcraft_doc::Layer::new("cut", CutStyle::Cut)],
                     next_shape_id: 1,
+                    ..Document::default()
                 };
                 Ok(Effect::DocumentReset)
             }
@@ -1318,6 +1329,9 @@ impl Engine {
             | Command::SelectSameFill { .. }
             | Command::SelectSameStroke { .. }
             | Command::SelectInverse { .. } => self.query(&command),
+            Command::Document(_) => Err(EngineError::Internal(
+                "document commands run through document::run".to_string(),
+            )),
         }
     }
 
@@ -1389,7 +1403,7 @@ impl Engine {
         self.doc
             .layers
             .iter()
-            .filter(|layer| layer.visible)
+            .filter(|layer| layer.visible && !layer.locked)
             .flat_map(|layer| &layer.shapes)
             .filter(|shape| !shape.hidden && !shape.locked)
     }
@@ -2058,7 +2072,7 @@ impl Engine {
                 .doc
                 .layers
                 .iter()
-                .rposition(|layer| layer.kind == *style)
+                .rposition(|layer| layer.kind == *style && layer.takes_new_shapes())
                 .ok_or_else(|| EngineError::Internal(format!("{command}: missing style layer")))?;
             let layer_id = self.layer_nodes.get(layer_index).copied().ok_or_else(|| {
                 EngineError::Internal(format!("{command}: missing VectorCraft layer mapping"))
@@ -2312,7 +2326,7 @@ impl Engine {
             .doc
             .layers
             .iter()
-            .rposition(|layer| layer.kind == style)
+            .rposition(|layer| layer.kind == style && layer.takes_new_shapes())
         {
             return Ok(index);
         }
@@ -2324,7 +2338,7 @@ impl Engine {
         self.doc
             .layers
             .iter()
-            .rposition(|layer| layer.kind == style)
+            .rposition(|layer| layer.kind == style && layer.takes_new_shapes())
             .ok_or_else(|| EngineError::Internal(format!("{command}: missing new style layer")))
     }
 

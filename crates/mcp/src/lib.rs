@@ -398,6 +398,9 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
     let number = json!({"type": "number"});
     let side = json!({"type": "string", "enum": ["left", "right", "above", "below"]});
     let count = json!({"type": "integer", "minimum": 2, "maximum": 1000});
+    let integer = json!({"type": "integer", "minimum": 0});
+    let string = json!({"type": "string"});
+    let boolean = json!({"type": "boolean"});
     match command {
         "shapes.replicate-side" | "shapes.mirror-copy" => (
             json!({"ids": ids, "side": side, "gap_mm": number}),
@@ -415,6 +418,129 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
         "shapes.offset" => (
             json!({"ids": ids, "distance_mm": number, "join": {"type": "string", "enum": ["miter", "round", "bevel"]}, "miter_limit": number}),
             json!(["ids", "distance_mm"]),
+        ),
+        "group.create" => (
+            json!({"ids": ids, "groups": ids, "name": string}),
+            json!([]),
+        ),
+        "group.ungroup" | "group.members" | "group.of" | "page.remove" | "guide.remove"
+        | "select.by-layer" => {
+            let key = if command.starts_with("group") { "id" } else { "index" };
+            let mut properties = json!({});
+            properties[key] = integer.clone();
+            (properties, json!([key]))
+        }
+        "group.rename" => (json!({"id": integer, "name": string}), json!(["id", "name"])),
+        "shapes.arrange" => (
+            json!({"ids": ids, "order": {"type": "string", "enum": ["front", "back", "forward", "backward"]}}),
+            json!(["ids", "order"]),
+        ),
+        "shapes.move-to-layer" => (
+            json!({"ids": ids, "layer": integer}),
+            json!(["ids", "layer"]),
+        ),
+        "layer.move" => (
+            json!({"from": integer, "to": integer}),
+            json!(["from", "to"]),
+        ),
+        "layer.rename" => (
+            json!({"index": integer, "name": string}),
+            json!(["index", "name"]),
+        ),
+        "layer.set-locked" | "guide.set-locked" => (
+            json!({"index": integer, "locked": boolean}),
+            json!(["index", "locked"]),
+        ),
+        "layer.set-template" => (
+            json!({"index": integer, "template": boolean}),
+            json!(["index", "template"]),
+        ),
+        "layer.set-color" => (
+            json!({"index": integer, "color": {"type": ["string", "null"]}}),
+            json!(["index", "color"]),
+        ),
+        "layer.color-sync" => (
+            json!({"tolerance": number, "merge": boolean}),
+            json!(["tolerance"]),
+        ),
+        "page.add" | "page.set" => {
+            let mut properties = json!({
+                "preset": {"type": "string", "enum": ["letter", "a4", "mat-12x12", "mat-12x24", "joy-mat-4.5x6.5", "joy-mat-4.5x12", "joy-xtra-mat-8.5x12", "custom"]},
+                "width_mm": number, "height_mm": number,
+                "orientation": {"type": "string", "enum": ["portrait", "landscape"]},
+                "name": string, "mat": string, "media": string, "color": string,
+            });
+            if command == "page.set" {
+                properties["index"] = integer.clone();
+                (properties, json!(["index"]))
+            } else {
+                (properties, json!([]))
+            }
+        }
+        "guide.add" => (
+            json!({"axis": {"type": "string", "enum": ["horizontal", "vertical"]}, "position_mm": number}),
+            json!(["axis", "position_mm"]),
+        ),
+        "guide.move" => (
+            json!({"index": integer, "position_mm": number}),
+            json!(["index", "position_mm"]),
+        ),
+        "guide.clear" | "select.all" | "select.none" | "document.update-thumbnail" => {
+            (json!({}), json!([]))
+        }
+        "grid.set" => (
+            json!({"spacing_mm": number, "subdivisions": integer, "visible": boolean}),
+            json!(["spacing_mm", "subdivisions"]),
+        ),
+        "snap.set" => (
+            json!({"grid": boolean, "guides": boolean, "objects": boolean, "spacing": boolean, "tolerance_mm": number}),
+            json!([]),
+        ),
+        "snap.point" => (
+            json!({"x": number, "y": number, "width": number, "height": number, "exclude": ids, "tolerance_mm": number}),
+            json!(["x", "y"]),
+        ),
+        "measure.distance" => {
+            let point = json!({"type": "array", "items": number, "minItems": 2, "maxItems": 2});
+            (json!({"from": point, "to": point}), json!(["from", "to"]))
+        }
+        "query.dimensions" | "clipboard.copy" | "clipboard.cut" | "transform.again" => {
+            (json!({"ids": ids}), json!(["ids"]))
+        }
+        "select.by-color" => (
+            json!({"color": string, "tolerance": number}),
+            json!(["color"]),
+        ),
+        "select.by-operation" => (
+            json!({"style": {"type": "string", "enum": ["cut", "engrave"]}}),
+            json!(["style"]),
+        ),
+        "clipboard.paste" => (
+            json!({"mode": {"type": "string", "enum": ["offset", "in-place", "in-front"]}, "offset_mm": number}),
+            json!([]),
+        ),
+        "transform.each" => (
+            json!({"ids": ids, "dx_mm": number, "dy_mm": number, "scale_x": number, "scale_y": number, "degrees": number, "each": boolean}),
+            json!(["ids"]),
+        ),
+        "shapes.align-to-key" => (
+            json!({"ids": ids, "key": integer, "alignment": {"type": "string", "enum": ["left", "horizontal-center", "right", "top", "vertical-center", "bottom"]}}),
+            json!(["ids", "key", "alignment"]),
+        ),
+        "shapes.distribute-spacing" => (
+            json!({"ids": ids, "axis": {"type": "string", "enum": ["horizontal", "vertical"]}, "gap_mm": number}),
+            json!(["ids", "axis", "gap_mm"]),
+        ),
+        "document.set-meta" => (json!({"title": string, "notes": string}), json!([])),
+        "document.new-from-template" => (
+            json!({
+                "template": {"type": "string", "enum": ["blank", "card", "gift-tag", "emboss", "sketch", "stamp", "stipple", "print-and-cut"]},
+                "params": {"type": "object", "properties": {
+                    "preset": string, "width_mm": number, "height_mm": number,
+                    "fold": {"type": "string", "enum": ["vertical", "horizontal"]}, "hole_mm": number,
+                }},
+            }),
+            json!(["template"]),
         ),
         _ => (json!({}), json!([])),
     }
@@ -552,6 +678,211 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "shapes_offset",
         "shapes.offset",
         "Add an offset outline of each shape: positive `distance_mm` grows, negative is an internal offset. Optional `join` (miter, round, bevel; default miter) and `miter_limit` (corner limit, >= 1, default 4).",
+    ),
+    (
+        "group_create",
+        "group.create",
+        "Group shapes and/or groups (two or more members sharing one parent). Args: ids?, groups?, name?.",
+    ),
+    (
+        "group_ungroup",
+        "group.ungroup",
+        "Dissolve a group; members move to its parent. Args: id.",
+    ),
+    (
+        "group_rename",
+        "group.rename",
+        "Rename a group. Args: id, name.",
+    ),
+    (
+        "group_members",
+        "group.members",
+        "Ids of every shape inside a group, nested groups included. Args: id.",
+    ),
+    (
+        "group_of",
+        "group.of",
+        "The outermost group of a shape and the shapes a click on it selects. Args: id.",
+    ),
+    (
+        "shapes_arrange",
+        "shapes.arrange",
+        "Stacking order within each shape's layer. Args: ids, order (front, back, forward, backward).",
+    ),
+    (
+        "shapes_move_to_layer",
+        "shapes.move-to-layer",
+        "Move shapes to the top of a layer; they take its operation. Args: ids, layer.",
+    ),
+    (
+        "layer_move",
+        "layer.move",
+        "Reorder layers. Args: from, to (indices).",
+    ),
+    (
+        "layer_rename",
+        "layer.rename",
+        "Rename a layer. Args: index, name.",
+    ),
+    (
+        "layer_set_locked",
+        "layer.set-locked",
+        "Lock or unlock a layer. Args: index, locked.",
+    ),
+    (
+        "layer_set_template",
+        "layer.set-template",
+        "Make a layer a template (guide) layer: shown, never exported or cut. Args: index, template.",
+    ),
+    (
+        "layer_set_color",
+        "layer.set-color",
+        "Set (#rrggbb) or clear (null) a layer's material colour. Args: index, color.",
+    ),
+    (
+        "layer_color_sync",
+        "layer.color-sync",
+        "Color Sync: layers within `tolerance` (RGB distance 0-442) of an earlier layer take its colour; `merge` also merges layers that then share colour and operation.",
+    ),
+    (
+        "page_add",
+        "page.add",
+        "Add a page beside the others. Args: preset? (letter, a4, mat-12x12, mat-12x24, joy-mat-4.5x6.5, joy-mat-4.5x12, joy-xtra-mat-8.5x12, custom), width_mm?, height_mm?, orientation? (portrait, landscape), name?, mat?, media?, color?.",
+    ),
+    (
+        "page_set",
+        "page.set",
+        "Change a page (0 is the main board); omitted fields keep their value, an empty label clears it. Args: index plus page_add's args.",
+    ),
+    (
+        "page_remove",
+        "page.remove",
+        "Remove an extra page (index >= 1). Args: index.",
+    ),
+    (
+        "guide_add",
+        "guide.add",
+        "Add a ruler guide. Args: axis (horizontal: y = position, vertical: x = position), position_mm.",
+    ),
+    (
+        "guide_move",
+        "guide.move",
+        "Move an unlocked guide. Args: index, position_mm.",
+    ),
+    (
+        "guide_set_locked",
+        "guide.set-locked",
+        "Lock or unlock a guide. Args: index, locked.",
+    ),
+    (
+        "guide_remove",
+        "guide.remove",
+        "Remove an unlocked guide. Args: index.",
+    ),
+    (
+        "guide_clear",
+        "guide.clear",
+        "Remove every unlocked guide.",
+    ),
+    (
+        "grid_set",
+        "grid.set",
+        "Grid spacing (0.01-10000 mm) and subdivisions (1-100). Args: spacing_mm, subdivisions, visible?.",
+    ),
+    (
+        "snap_set",
+        "snap.set",
+        "Snapping targets. Args: grid?, guides?, objects?, spacing?, tolerance_mm?.",
+    ),
+    (
+        "snap_point",
+        "snap.point",
+        "Snap a point, or a moving box (width/height > 0, x/y its smallest corner), to the grid, guides, shape and page edges/centres and equal spacing. Args: x, y, width?, height?, exclude? (ids), tolerance_mm?.",
+    ),
+    (
+        "measure_distance",
+        "measure.distance",
+        "Distance and angle between two points. Args: from [x, y], to [x, y].",
+    ),
+    (
+        "query_dimensions",
+        "query.dimensions",
+        "Combined bounds of shapes. Args: ids.",
+    ),
+    (
+        "select_all",
+        "select.all",
+        "Ids of every selectable shape outside template layers.",
+    ),
+    (
+        "select_none",
+        "select.none",
+        "The empty selection.",
+    ),
+    (
+        "select_by_color",
+        "select.by-color",
+        "Selectable shapes on layers whose colour is within `tolerance` of `color` (#rrggbb).",
+    ),
+    (
+        "select_by_operation",
+        "select.by-operation",
+        "Selectable shapes with an operation. Args: style (cut, engrave).",
+    ),
+    (
+        "select_by_layer",
+        "select.by-layer",
+        "Selectable shapes on a layer. Args: index.",
+    ),
+    (
+        "clipboard_copy",
+        "clipboard.copy",
+        "Copy shapes (and groups wholly inside them) to the engine clipboard. Args: ids.",
+    ),
+    (
+        "clipboard_cut",
+        "clipboard.cut",
+        "Copy shapes, then remove them. Args: ids.",
+    ),
+    (
+        "clipboard_paste",
+        "clipboard.paste",
+        "Paste. Args: mode? (offset (default), in-place, in-front), offset_mm? (default 5).",
+    ),
+    (
+        "transform_each",
+        "transform.each",
+        "Move/scale/rotate shapes about their combined centre, or with `each` about each object's own centre (a group is one object); remembered for transform_again. Args: ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?.",
+    ),
+    (
+        "transform_again",
+        "transform.again",
+        "Repeat the last transform_each on shapes. Args: ids.",
+    ),
+    (
+        "shapes_align_to_key",
+        "shapes.align-to-key",
+        "Align objects to a key shape that stays still. Args: ids, key, alignment (left, horizontal-center, right, top, vertical-center, bottom).",
+    ),
+    (
+        "shapes_distribute_spacing",
+        "shapes.distribute-spacing",
+        "Space objects a fixed gap apart, keeping the first. Args: ids, axis (horizontal, vertical), gap_mm.",
+    ),
+    (
+        "document_set_meta",
+        "document.set-meta",
+        "Set the document title and/or notes. Args: title?, notes?.",
+    ),
+    (
+        "document_update_thumbnail",
+        "document.update-thumbnail",
+        "Store a fresh SVG thumbnail in the document.",
+    ),
+    (
+        "document_new_from_template",
+        "document.new-from-template",
+        "Replace the document with a project template. Args: template (blank, card, gift-tag, emboss, sketch, stamp, stipple, print-and-cut), params? {preset?, width_mm?, height_mm?, fold? (vertical, horizontal), hole_mm?}.",
     ),
 ];
 
@@ -858,6 +1189,40 @@ mod tests {
             .unwrap();
         assert!(r.contains("\"ok\":true"), "{r}");
         assert_eq!(session.engine.doc.shape_count(), 1);
+    }
+
+    #[test]
+    fn document_tools_run_engine_commands() {
+        let mut session = Session::default();
+        let call = |session: &mut Session, name: &str, args: &str| -> serde_json::Value {
+            let line = format!(
+                r#"{{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{{"name":"{name}","arguments":{args}}}}}"#
+            );
+            let value: serde_json::Value =
+                serde_json::from_str(&session.handle_stdio_line(&line).unwrap().unwrap()).unwrap();
+            assert_eq!(value["result"]["isError"], false, "{name}: {value}");
+            serde_json::from_str(value["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+        };
+        call(&mut session, "document_new_from_template", r#"{"template":"card"}"#);
+        assert_eq!(session.engine.doc.shape_count(), 2);
+        let group = call(&mut session, "group_of", r#"{"id":1}"#);
+        assert_eq!(group["Document"]["GroupOf"]["ids"], serde_json::json!([1, 2]));
+        call(&mut session, "page_add", r#"{"preset":"a4","orientation":"landscape"}"#);
+        assert_eq!(session.engine.doc.pages.len(), 1);
+        call(&mut session, "guide_add", r#"{"axis":"vertical","position_mm":10}"#);
+        call(&mut session, "guide_clear", "{}");
+        let snapped = call(&mut session, "snap_point", r#"{"x":25.7,"y":300,"tolerance_mm":1}"#);
+        assert!(snapped["Document"]["Snap"]["x"].is_number());
+        let all = call(&mut session, "select_all", "{}");
+        assert_eq!(all["Selection"]["ids"], serde_json::json!([1, 2]));
+        call(&mut session, "clipboard_copy", r#"{"ids":[1]}"#);
+        call(&mut session, "clipboard_paste", r#"{"mode":"in-front"}"#);
+        assert_eq!(session.engine.doc.shape_count(), 3);
+        // Bad arguments are tool errors, not crashes.
+        let line = r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"page_remove","arguments":{"index":0}}}"#;
+        let value: serde_json::Value =
+            serde_json::from_str(&session.handle_stdio_line(line).unwrap().unwrap()).unwrap();
+        assert_eq!(value["result"]["isError"], true);
     }
 
     #[test]

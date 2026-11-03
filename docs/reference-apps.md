@@ -611,3 +611,20 @@ These are the rows marked **missing** above. Rows marked partial are not listed.
   autosave recovery.
 - **Preferences**: language, print resolution and preview.
 - **Platforms**: browser/mobile client.
+- **SS paid editions**: PDF import/export, PNG/JPG export, layers panel, cut by layer,
+  rhinestone, sketch effect, custom gradient/pattern fills, eraser/knife options,
+  eyedropper, measure, shear/distort, lattice, font creator, glyphs, weld on cut, roll
+  feed/mat-free, cross-stitch, embroidery import, advanced warp, Flexishapes, puzzle
+  generator, AI/EPS/CDR import, multi-cutter, nesting, weed lines, job queue.
+- **DS full inventory**: Home, templates, Smart Guides, history panel, deboss/wave/
+  perforate/foil operations, arrange, font picker, size, letter/line space, alignment,
+  curve, ungroup to letters, print fill, patterns, warp, group, attach, flatten, contour,
+  Colour Sync, layer reorder, mat preview and arrangement, mirror per mat, project copies,
+  tool prompts, go/pause/unload, Print Then Cut size limit and flow, calibration, remove
+  background, erase/restore cleanup, uploaded-images library, project collections.
+- **Formats**: `.studio3`/`.studio`/GSP/GSD (owner decision), DXF, PDF, AI, EPS, CDR, BMP,
+  GIF, TIFF, HEIC and WebP import, PDF/PNG/JPEG export, embroidery import, system fonts,
+  pattern images.
+- **Cutters**: Silhouette SD, CAMEO 1/2, CAMEO 5 Alpha, Portrait 1/2, Curio 1/2, Craft
+  ROBO CC200/CC300, Graphtec CE/CB; USB-bulk and Bluetooth transports for every model.
+  All Cricut machines are missing and pending the owner's decision.

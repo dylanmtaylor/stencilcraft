@@ -228,8 +228,9 @@ means the smaller y.
 | `clipboard.copy` | `{ids}` | Engine clipboard (not saved, not undone); groups wholly inside the copy come along. |
 | `clipboard.cut` | `{ids}` | Copy, then remove. |
 | `clipboard.paste` | `{mode?, offset_mm?}` | `offset` (default, right and down by `offset_mm`, default 5), `in-place` (top of the layer), `in-front` (directly above each original). New ids; copied groups are recreated. |
-| `transform.each` | `{ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?}` | Scale and rotate about the selection's centre, or with `each` about each object's own centre (a group is one object), then move. Remembered. |
-| `transform.again` | `{ids}` | Repeats the last `transform.each` on `ids`. |
+| `transform.each` | `{ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?, shear_degrees?, shear_axis?}` | Shear, scale and rotate about the selection's centre, or with `each` about each object's own centre (a group is one object), then move. A negative scale flips. Remembered. |
+| `transform.again` | `{ids}` | Repeats the last `transform.each` or `shapes.shear` on `ids`. |
+| `shapes.shear` | `{ids, degrees, axis}` | Slants about the selection's centre, \|degrees\| ≤ 89: `horizontal` shifts x by tan(degrees) × (y − centre y), `vertical` shifts y with x. Remembered. |
 | `shapes.align-to-key` | `{ids, key, alignment}` | The key (with its group) stays still; others align to it. |
 | `shapes.distribute-spacing` | `{ids, axis, gap_mm}` | The first object stays; the rest follow `gap_mm` apart. |
 | `document.set-meta` | `{title?, notes?}` | Title up to 1 KiB, notes up to 64 KiB. |

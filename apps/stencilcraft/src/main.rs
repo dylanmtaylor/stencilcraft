@@ -39,6 +39,7 @@ use craft_ui::title_bar::{Frame, LeadingEnd, Title, TitleBar};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use stencilcraft_doc::CutStyle;
+use stencilcraft_engine::document::{DocumentCommand, TransformRequest};
 use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis};
 
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
@@ -265,6 +266,11 @@ pub enum TopMenuAction {
     Distribute(DistributionAxis),
     /// Rotate the selection by whole degrees (positive is clockwise on screen).
     RotateBy(i16),
+    /// Mirror the selection in place: `Horizontal` swaps left and right.
+    Flip(DistributionAxis),
+    /// Align the selection to the last-selected shape, which stays still.
+    AlignToKey(Alignment),
+    TransformAgain,
     CenterToPage,
     SetStyle(CutStyle),
     PlaceText,
@@ -1104,6 +1110,8 @@ impl StencilApp {
             self.handle_edit_action(action);
         } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::A)) {
             self.handle_menu_action(TopMenuAction::Deselect);
+        } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::D)) {
+            self.handle_menu_action(TopMenuAction::TransformAgain);
         } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::W)) {
             self.handle_menu_action(TopMenuAction::Pathfinder(BooleanOperation::Union));
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::L)) {
@@ -1748,19 +1756,41 @@ impl StencilApp {
                 });
             }
             TopMenuAction::RotateBy(degrees) => {
-                let degrees = f64::from(degrees);
-                if self.selected_shapes.len() > 1 {
-                    self.run_command(Command::ShapesTransform {
+                self.run_command(Command::Document(DocumentCommand::TransformEach(
+                    TransformRequest {
                         ids: self.selected_shapes.clone(),
-                        dx_mm: 0.0,
-                        dy_mm: 0.0,
-                        scale_x: 1.0,
-                        scale_y: 1.0,
-                        degrees,
-                    });
-                } else if let Some(id) = self.selected_shape {
-                    self.run_command(Command::ShapeRotate { id, degrees });
+                        degrees: f64::from(degrees),
+                        ..TransformRequest::default()
+                    },
+                )));
+            }
+            TopMenuAction::Flip(axis) => {
+                let (scale_x, scale_y) = match axis {
+                    DistributionAxis::Horizontal => (-1.0, 1.0),
+                    DistributionAxis::Vertical => (1.0, -1.0),
+                };
+                self.run_command(Command::Document(DocumentCommand::TransformEach(
+                    TransformRequest {
+                        ids: self.selected_shapes.clone(),
+                        scale_x,
+                        scale_y,
+                        ..TransformRequest::default()
+                    },
+                )));
+            }
+            TopMenuAction::AlignToKey(alignment) => {
+                if let Some(key) = self.selected_shape {
+                    self.run_command(Command::Document(DocumentCommand::ShapesAlignToKey {
+                        ids: self.selected_shapes.clone(),
+                        key,
+                        alignment,
+                    }));
                 }
+            }
+            TopMenuAction::TransformAgain => {
+                self.run_command(Command::Document(DocumentCommand::TransformAgain {
+                    ids: self.selected_shapes.clone(),
+                }));
             }
             TopMenuAction::CenterToPage => {
                 for alignment in [Alignment::HorizontalCenter, Alignment::VerticalCenter] {
@@ -3785,6 +3815,34 @@ mod tests {
             app.engine.doc.get_shape(1).unwrap().bounds(),
             app.engine.doc.get_shape(2).unwrap().bounds()
         );
+    }
+
+    #[test]
+    fn flip_rotate_again_and_key_align_menu_actions() {
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 30.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 10.0,
+                height: 20.0,
+            });
+        }
+        let bounds = |app: &StencilApp, id| app.engine.doc.get_shape(id).unwrap().bounds().unwrap();
+        app.set_selection([1]);
+        let before = bounds(&app, 1);
+        app.handle_menu_action(TopMenuAction::Flip(DistributionAxis::Horizontal));
+        assert_eq!(bounds(&app, 1), before, "flipped in place");
+        app.handle_menu_action(TopMenuAction::RotateBy(90));
+        app.handle_menu_action(TopMenuAction::TransformAgain);
+        // Two quarter turns: back to 10 wide, 20 tall.
+        assert!((bounds(&app, 1).width() - 10.0).abs() < 1e-9);
+        // Key = last selected (shape 1) stays; shape 2 moves to its left edge.
+        app.set_selection([2, 1]);
+        let key = bounds(&app, 1);
+        app.handle_menu_action(TopMenuAction::AlignToKey(Alignment::Left));
+        assert_eq!(bounds(&app, 1), key);
+        assert!((bounds(&app, 2).x0 - key.x0).abs() < 1e-9);
     }
 
     #[test]

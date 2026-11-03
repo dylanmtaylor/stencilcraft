@@ -189,9 +189,18 @@ pub enum DocumentCommand {
     /// object's own centre; a group counts as one object. Remembered for `transform.again`.
     #[serde(rename = "transform.each")]
     TransformEach(TransformRequest),
-    /// Repeat the last `transform.each` on shapes `ids`.
+    /// Repeat the last `transform.each` or `shapes.shear` on shapes `ids`.
     #[serde(rename = "transform.again")]
     TransformAgain { ids: Vec<u64> },
+    /// Slant shapes about their combined centre by `degrees` (|degrees| <= 89):
+    /// `horizontal` moves x by tan(degrees) * (y - centre y), `vertical` moves y by
+    /// tan(degrees) * (x - centre x). Remembered for `transform.again`.
+    #[serde(rename = "shapes.shear")]
+    ShapesShear {
+        ids: Vec<u64>,
+        degrees: f64,
+        axis: DistributionAxis,
+    },
     /// Align objects to the key shape `key` (which, with its group, stays still).
     #[serde(rename = "shapes.align-to-key")]
     ShapesAlignToKey {
@@ -275,7 +284,7 @@ pub struct PageRequest {
     pub color: Option<String>,
 }
 
-/// A transform for `transform.each`: scale and rotation about a centre, then a move.
+/// A transform for `transform.each`: shear, scale and rotation about a centre, then a move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransformRequest {
     #[serde(default)]
@@ -293,10 +302,35 @@ pub struct TransformRequest {
     /// About each object's own centre instead of the selection's.
     #[serde(default)]
     pub each: bool,
+    /// Shear angle, applied before scale and rotation (see `shapes.shear`); |degrees| <= 89.
+    #[serde(default)]
+    pub shear_degrees: f64,
+    #[serde(default = "horizontal")]
+    pub shear_axis: DistributionAxis,
+}
+
+impl Default for TransformRequest {
+    fn default() -> Self {
+        Self {
+            ids: Vec::new(),
+            dx_mm: 0.0,
+            dy_mm: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            degrees: 0.0,
+            each: false,
+            shear_degrees: 0.0,
+            shear_axis: DistributionAxis::Horizontal,
+        }
+    }
 }
 
 fn one() -> f64 {
     1.0
+}
+
+fn horizontal() -> DistributionAxis {
+    DistributionAxis::Horizontal
 }
 
 /// A snapping request. With zero `width`/`height`, (`x`, `y`) is a point; otherwise it is
@@ -871,6 +905,15 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             };
             transform(engine, TransformRequest { ids, ..last })
         }
+        DocumentCommand::ShapesShear { ids, degrees, axis } => {
+            let request = TransformRequest {
+                ids,
+                shear_degrees: degrees,
+                shear_axis: axis,
+                ..TransformRequest::default()
+            };
+            transform(engine, request)
+        }
         DocumentCommand::ShapesAlignToKey {
             ids,
             key,
@@ -1352,13 +1395,15 @@ fn transform(engine: &mut Engine, request: TransformRequest) -> Result<Effect, E
     if !(scale_ok(request.scale_x)
         && scale_ok(request.scale_y)
         && request.degrees.is_finite()
+        && request.shear_degrees.is_finite()
+        && request.shear_degrees.abs() <= 89.0
         && request.dx_mm.is_finite()
         && request.dy_mm.is_finite()
         && request.dx_mm.abs() <= MAX_DISTANCE_MM
         && request.dy_mm.abs() <= MAX_DISTANCE_MM)
     {
         return Err(invalid(format!(
-            "{NAME}: moves must be finite, scales finite and non-zero (|s| 1e-6 to 1e6), degrees finite"
+            "{NAME}: moves must be finite, scales finite and non-zero (|s| 1e-6 to 1e6), degrees finite, shear within ±89°"
         )));
     }
     let objects = if request.each {
@@ -1366,11 +1411,17 @@ fn transform(engine: &mut Engine, request: TransformRequest) -> Result<Effect, E
     } else {
         vec![editable_ids(engine, &request.ids, NAME)?]
     };
+    let tan = request.shear_degrees.to_radians().tan();
+    let shear = match request.shear_axis {
+        DistributionAxis::Horizontal => Affine::skew(tan, 0.0),
+        DistributionAxis::Vertical => Affine::skew(0.0, tan),
+    };
     for object in &objects {
         let c = bounds_of(engine, object, NAME)?.center();
         let affine = Affine::translate((request.dx_mm + c.x, request.dy_mm + c.y))
             * Affine::rotate(request.degrees.to_radians())
             * Affine::scale_non_uniform(request.scale_x, request.scale_y)
+            * shear
             * Affine::translate((-c.x, -c.y));
         apply_affine(engine, object, affine, NAME)?;
     }
@@ -1769,7 +1820,13 @@ mod tests {
                 scale_y: 1.0,
                 degrees: 0.0,
                 each: true,
+                ..TransformRequest::default()
             }),
+            DocumentCommand::ShapesShear {
+                ids: vec![1],
+                degrees: 20.0,
+                axis: DistributionAxis::Vertical,
+            },
         ];
         for command in samples {
             let wrapped = Command::Document(command);
@@ -2482,6 +2539,7 @@ mod tests {
                 scale_y: 2.0,
                 degrees: 0.0,
                 each: true,
+                ..TransformRequest::default()
             }),
         );
         // Each square doubled about its own centre.
@@ -2499,6 +2557,7 @@ mod tests {
                 scale_y: 1.0,
                 degrees: 0.0,
                 each: false,
+                ..TransformRequest::default()
             }),
         );
         run(&mut e, DocumentCommand::TransformAgain { ids: vec![3] });
@@ -2529,6 +2588,7 @@ mod tests {
                 scale_y: 1.0,
                 degrees: 180.0,
                 each: true,
+                ..TransformRequest::default()
             }),
         );
         let after = bounds(&e, 1).union(bounds(&e, 2));
@@ -2545,6 +2605,7 @@ mod tests {
             scale_y: 1.0,
             degrees: 0.0,
             each: false,
+            ..TransformRequest::default()
         };
         assert!(
             e.run(Command::Document(DocumentCommand::TransformEach(bad)))
@@ -2557,6 +2618,54 @@ mod tests {
                 }))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn shear_slants_about_the_centre_and_repeats() {
+        let mut e = three();
+        let before = bounds(&e, 1);
+        run(
+            &mut e,
+            DocumentCommand::ShapesShear {
+                ids: vec![1],
+                degrees: 45.0,
+                axis: DistributionAxis::Horizontal,
+            },
+        );
+        // A 45° horizontal shear widens the box by its height; the height and centre stay.
+        let b = bounds(&e, 1);
+        assert!((b.width() - before.width() - before.height()).abs() < 1e-9);
+        assert!((b.height() - before.height()).abs() < 1e-9);
+        assert!((b.center() - before.center()).hypot() < 1e-9);
+        run(&mut e, DocumentCommand::TransformAgain { ids: vec![1] });
+        assert!((bounds(&e, 1).width() - before.width() - 2.0 * before.height()).abs() < 1e-9);
+        e.run(Command::Undo).unwrap();
+        e.run(Command::Undo).unwrap();
+        assert_eq!(bounds(&e, 1), before);
+        run(
+            &mut e,
+            DocumentCommand::ShapesShear {
+                ids: vec![2],
+                degrees: -45.0,
+                axis: DistributionAxis::Vertical,
+            },
+        );
+        let b = bounds(&e, 2);
+        assert!((b.height() - 2.0 * b.width()).abs() < 1e-9, "{b:?}");
+        for degrees in [90.0, -120.0, f64::NAN] {
+            let bad = DocumentCommand::ShapesShear {
+                ids: vec![3],
+                degrees,
+                axis: DistributionAxis::Horizontal,
+            };
+            assert!(e.run(Command::Document(bad)).is_err());
+        }
+        let missing = DocumentCommand::ShapesShear {
+            ids: vec![99],
+            degrees: 10.0,
+            axis: DistributionAxis::Horizontal,
+        };
+        assert!(e.run(Command::Document(missing)).is_err());
     }
 
     #[test]

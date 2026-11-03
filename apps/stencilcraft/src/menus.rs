@@ -216,7 +216,14 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
     vec![
         sub(
             "Mirror",
-            vec![todo("Flip Horizontal"), todo("Flip Vertical")],
+            vec![
+                when(
+                    "Flip Horizontal",
+                    A::Flip(DistributionAxis::Horizontal),
+                    any,
+                ),
+                when("Flip Vertical", A::Flip(DistributionAxis::Vertical), any),
+            ],
         ),
         sub(
             "Arrange",
@@ -240,7 +247,21 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 align("Bottom", Alignment::Bottom),
                 SEP,
                 when("Center to Page", A::CenterToPage, any),
-                todo("To Key Object"),
+                // The key is the last shape selected (shift-click it last).
+                sub(
+                    "To Key Object",
+                    [
+                        ("Left", Alignment::Left),
+                        ("Center", Alignment::HorizontalCenter),
+                        ("Right", Alignment::Right),
+                        ("Top", Alignment::Top),
+                        ("Middle", Alignment::VerticalCenter),
+                        ("Bottom", Alignment::Bottom),
+                    ]
+                    .into_iter()
+                    .map(|(label, a)| when(label, A::AlignToKey(a), many))
+                    .collect(),
+                ),
                 SEP,
                 when(
                     "Space Horizontally",
@@ -252,7 +273,11 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     A::Distribute(DistributionAxis::Vertical),
                     many,
                 ),
-                todo("Distribute Spacing by Value…"),
+                when(
+                    "Distribute Spacing by Value…",
+                    A::ShowPanel(P::Transform),
+                    many,
+                ),
             ],
         ),
         sub(
@@ -292,10 +317,13 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("Move…", A::ShowPanel(P::Transform)).into(),
                 item("Scale…", A::ShowPanel(P::Transform)).into(),
                 item("Rotate…", A::ShowPanel(P::Transform)).into(),
-                todo("Shear…"),
+                item("Shear…", A::ShowPanel(P::Transform)).into(),
                 SEP,
-                todo_key("Transform Again", cmd_shift(), Key::D),
-                todo("Transform Each…"),
+                item("Transform Again", A::TransformAgain)
+                    .shortcut(kbd(cmd_shift(), Key::D))
+                    .enabled(any)
+                    .into(),
+                item("Transform Each…", A::ShowPanel(P::Transform)).into(),
             ],
         ),
         sub(
@@ -706,6 +734,12 @@ mod tests {
             "Outline Stroke",
             "Internal Offset…",
             "Subtract All",
+            "Flip Horizontal",
+            "Flip Vertical",
+            "Shear…",
+            "Transform Again",
+            "Transform Each…",
+            "Distribute Spacing by Value…",
             "Fill Color",
             "Stroke Color",
             "Replicate",
@@ -719,12 +753,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in [
-            "Flip Horizontal",
-            "Bring to Front",
-            "Shear…",
-            "Detach Lines",
-        ] {
+        for planned in ["Bring to Front", "Detach Lines", "Zoom to Selection"] {
             assert!(
                 items
                     .iter()

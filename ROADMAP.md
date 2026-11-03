@@ -108,6 +108,11 @@ Completed items should be marked here only when behavior is usable end-to-end.
   vinyl, as `stencilcraft-cli cut` flags and `machine.dry_run` params (gaps 21, 30;
   behaviour from our Send-preferences observation notes, measured by unit tests only, no
   hardware run).
+- 2026-11-03 — Transform power tools reach the desktop: `shapes.shear` (also a
+  `transform.each` field), Flip Horizontal/Vertical, Transform Again (Ctrl+Shift+D),
+  Transform Each (panel checkbox), Align › To Key Object and Distribute Spacing by Value.
+  The Transform panel and Rotate menu now use the remembered `transform.each`, so Transform
+  Again repeats them. Measured: engine tests cover shear geometry, repeat, undo and refusal.
 - 2026-11-03 — Silhouette Studio documents: the reader now reads each object's
   page-coordinate outline, which brings in open paths (lines), compound paths and text
   (as glyph outlines), and rotated and grouped objects at their on-page positions. This

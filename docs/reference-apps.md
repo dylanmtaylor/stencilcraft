@@ -149,7 +149,7 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 | --- | --- | --- | --- | --- | --- |
 | Select, multi-select, box/lasso | both | Pick objects; add to the selection with a modifier | have: click/box/lasso, additive multi-select | replicate | 2026-11-02, SS 5.0.539: 8-handle bounding box; Select All and Deselect All in the Edit menu; a drag box selects shapes it touches by default (a preference); many selected shapes share one bounding box. DS: docs only (sign-in required) |
 | Move, rotate, scale, exact size/position fields | both | Transform panel with numeric fields | have: `shape.move/rotate/scale/set-bounds`, `shapes.transform` | replicate | 2026-11-02, SS 5.0.539: Transform panel with Align, Scale, Rotate and Move tabs; the options bar also has W/H/X/Y fields (own row). DS: docs only (sign-in required) |
-| Flip/mirror | both | Mirror horizontally/vertically | partial: possible through `shapes.transform` with negative scale; no menu item or button | replicate | 2026-11-02, SS 5.0.539: Object menu has a Mirror submenu. DS: docs only (sign-in required) |
+| Flip/mirror | both | Mirror horizontally/vertically | have: Object › Mirror › Flip Horizontal/Vertical (`transform.each`, scale −1) | replicate | 2026-11-02, SS 5.0.539: Object menu has a Mirror submenu. DS: docs only (sign-in required) |
 | Duplicate, cut/copy/paste | both | Copy objects; paste in place | partial: `shapes.duplicate`; no clipboard | replicate | 2026-11-02, SS 5.0.539: Cut/Copy/Paste and Duplicate (Ctrl+D) in the Edit menu; Paste in Front is its own row. DS: docs only (sign-in required) |
 | Group/ungroup | both | Treat objects as one unit | engine: nested groups (`group.create/ungroup`, `group.of`), saved and exported as SVG `<g>`; UI not wired | replicate | 2026-11-02, SS 5.0.539: Group and Ungroup in the Object menu, the toolbar and the selection options bar. DS: docs only (sign-in required) |
 | Compound path make/release | SS | Join paths into one shape with holes | partial: Pathfinder Merge/Union makes compound shapes; no release | replicate | 2026-11-02, SS 5.0.539: Make/Release Compound Path in the Object menu and the Modify panel |
@@ -226,7 +226,7 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Align to page/mat | SS | Align against the media instead of the selection | have: `to_board` | replicate | 2026-11-02, SS 5.0.539: centre to page in the Align tab and the options bar |
 | Distribute horizontally/vertically | both | Even spacing | have: `shapes.distribute` | replicate | 2026-11-02, SS 5.0.539: Distribute horizontally/vertically in the Align tab. DS: docs only (sign-in required) |
 | Centre to page | SS | Put the selection in the middle of the media | have (align to board, both axes) | replicate | 2026-11-02, SS 5.0.539: centre to page and centre on each other in the Align tab |
-| Spacing by a set value | SS | Exact gap between objects | missing | replicate | 2026-11-02, SS 5.0.539: Basic has only even distribution (Space Horizontally / Space Vertically); no spacing-by-value control |
+| Spacing by a set value | SS | Exact gap between objects | have: `shapes.distribute-spacing`, Transform panel Spacing field | replicate | 2026-11-02, SS 5.0.539: Basic has only even distribution (Space Horizontally / Space Vertically); no spacing-by-value control |
 
 ## Layers and objects
 
@@ -467,7 +467,7 @@ repeat a row in the area tables above, so this table can be read on its own.
 | Eraser and knife options | Designer (to confirm) | Eraser size and shape, knife in straight, curved or polyline mode | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Eyedropper tool | Designer (to confirm) | Copy fill and line style from one shape to another | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Rulers and measure tool | Designer | Measure distances and angles on the canvas | partial: rulers only | replicate | not present in Basic; from vendor docs (not observed) |
-| Shear and distort | Designer | Slant a shape or drag its corners freely | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Shear and distort | Designer | Slant a shape or drag its corners freely | partial: shear (`shapes.shear`, Transform panel); free distort missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Lattice | Designer (to confirm) | Turn a shape into a lattice of cut-out holes | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Font creator | Designer (to confirm) | Draw your own font, one glyph at a time, including single-line fonts | missing | replicate (writes a user font file; nothing bundled) | not present in Basic; from vendor docs (not observed) |
 | Glyphs panel | Designer | Insert special characters of the current font | missing | replicate | not present in Basic; from vendor docs (not observed) |
@@ -558,7 +558,7 @@ against the engine command set on main (2026-11-02).
 | Cut, copy, paste | Edit bar | Clipboard ([library](cricut-design-space/edit-bar.md#edit-menu-cut-copy-paste)) | partial: duplicate only | replicate | docs only (sign-in required) |
 | Align and distribute | Edit bar | Align 2+ objects; distribute evenly ([library](cricut-design-space/edit-bar.md#align)) | have: `shapes.align`, `shapes.distribute` | replicate | docs only (sign-in required) |
 | Arrange | Edit bar | To back, backward, forward, to front ([library](cricut-design-space/edit-bar.md#arrange)) | partial: engine/MCP `shapes.arrange`; complete desktop controls remain open | replicate | docs only (sign-in required) |
-| Flip | Edit bar | Flip horizontal/vertical ([library](cricut-design-space/edit-bar.md#flip--mirror)) | partial: `shapes.transform` negative scale; `shapes.mirror-copy` makes a copy | replicate | docs only (sign-in required) |
+| Flip | Edit bar | Flip horizontal/vertical ([library](cricut-design-space/edit-bar.md#flip--mirror)) | have: Object › Mirror (`transform.each` scale −1); `shapes.mirror-copy` makes a copy | replicate | docs only (sign-in required) |
 | Size | Edit bar | Exact W/H, 0.1 steps, proportion lock ([library](cricut-design-space/edit-bar.md#size)) | have: size fields with aspect link | replicate | docs only (sign-in required) |
 | Rotate | Edit bar | Exact angle, 1° steps ([library](cricut-design-space/edit-bar.md#rotate)) | have: `shape.rotate`, `shapes.transform` | replicate | docs only (sign-in required) |
 | Position | Edit bar | Exact X/Y ([library](cricut-design-space/edit-bar.md#position)) | have: `shape.set-bounds` | replicate | docs only (sign-in required) |

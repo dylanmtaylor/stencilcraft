@@ -801,8 +801,12 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             json!([]),
         ),
         "transform.each" => (
-            json!({"ids": ids, "dx_mm": number, "dy_mm": number, "scale_x": number, "scale_y": number, "degrees": number, "each": boolean}),
+            json!({"ids": ids, "dx_mm": number, "dy_mm": number, "scale_x": number, "scale_y": number, "degrees": number, "each": boolean, "shear_degrees": number, "shear_axis": {"type": "string", "enum": ["horizontal", "vertical"]}}),
             json!(["ids"]),
+        ),
+        "shapes.shear" => (
+            json!({"ids": ids, "degrees": number, "axis": {"type": "string", "enum": ["horizontal", "vertical"]}}),
+            json!(["ids", "degrees", "axis"]),
         ),
         "shapes.align-to-key" => (
             json!({"ids": ids, "key": integer, "alignment": {"type": "string", "enum": ["left", "horizontal-center", "right", "top", "vertical-center", "bottom"]}}),
@@ -1344,12 +1348,17 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
     (
         "transform_each",
         "transform.each",
-        "Move/scale/rotate shapes about their combined centre, or with `each` about each object's own centre (a group is one object); remembered for transform_again. Args: ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?.",
+        "Move/scale/rotate/shear shapes about their combined centre, or with `each` about each object's own centre (a group is one object); remembered for transform_again. Negative scales flip. Args: ids, dx_mm?, dy_mm?, scale_x?, scale_y?, degrees?, each?, shear_degrees? (|x| <= 89), shear_axis? (horizontal, vertical).",
     ),
     (
         "transform_again",
         "transform.again",
-        "Repeat the last transform_each on shapes. Args: ids.",
+        "Repeat the last transform_each or shapes_shear on shapes. Args: ids.",
+    ),
+    (
+        "shapes_shear",
+        "shapes.shear",
+        "Slant shapes about their combined centre; remembered for transform_again. Args: ids, degrees (|x| <= 89), axis (horizontal: x shifts with y; vertical: y shifts with x).",
     ),
     (
         "shapes_align_to_key",

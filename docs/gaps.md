@@ -170,8 +170,12 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 32. **Path construction**: the engine now has `path.join`, `path.average-nodes`,
     `path.break`, `path.close`, `shapes.make-compound` and `shapes.release-compound`.
     Missing: clipping masks (make/release) and menu/UI wiring for the path commands.
-33. **Transform power tools**: missing Transform Again, Transform Each, shear, align to a
-    key object and distribute spacing by a set value.
+33. **Transform power tools**: Transform Again, Transform Each, shear, flip, align to a
+    key object and distribute spacing by value now run from the menus and the Transform
+    panel, which also has Silhouette's 33/50/100/200/300 % Scale presets. Missing: a
+    key-object picker (the key is the last shape selected), Rotate To (an absolute angle
+    needs a stored per-shape rotation), and the Ctrl+Alt+Shift+D shortcut. Move To with a
+    reference point is the options bar's X/Y fields and pivot.
 34. **More cutters and formats** (see the Cutters and File formats tables in
     [`reference-apps.md`](reference-apps.md)): the model catalog and USB transport have
     expanded but need hardware validation, and not every model is supported. The readers

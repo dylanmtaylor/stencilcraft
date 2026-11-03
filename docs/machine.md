@@ -95,3 +95,8 @@ learned by the community, chiefly from:
   no code ported.
 - `pklaus/Silhouette-Cutting-Plotters` — protocol notes and media table.
 - The `robocut` lineage both of the above credit.
+
+These GPL drivers are read as *specifications only*. Observing what a vendor app sends to a
+machine during a normal job is also allowed. Disassembling, decompiling or debugging
+vendor binaries is not. The full clean-room posture is in
+[`reference-apps.md`](reference-apps.md#clean-room-posture).

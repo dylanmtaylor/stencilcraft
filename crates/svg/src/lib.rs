@@ -74,7 +74,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
             },
             vis
         );
-        for shape in &layer.shapes {
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let d = path_to_svg_d(&shape.path)?;
             let _ = writeln!(
                 svg,
@@ -230,7 +230,7 @@ pub fn export_tile_preview(
             if !layer.visible {
                 continue;
             }
-            for shape in &layer.shapes {
+            for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
                 let d = path_to_svg_d(&shape.path)?;
                 let _ = writeln!(
                     svg,
@@ -1892,6 +1892,19 @@ mod tests {
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(svg.contains("class=\"stencilcraft-cut\""));
+    }
+
+    #[test]
+    fn hidden_shapes_are_not_exported() {
+        let mut doc = Document::default();
+        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0), CutStyle::Cut)
+            .unwrap();
+        doc.push_shape(0, rect(50.0, 50.0, 5.0, 5.0), CutStyle::Cut)
+            .unwrap();
+        doc.layers[0].shapes[1].hidden = true;
+        let svg = export(&doc).unwrap();
+        assert!(svg.contains("d=\"M10"), "{svg}");
+        assert!(!svg.contains("d=\"M50"), "{svg}");
     }
 
     fn preview_piece(w: f64, h: f64, style: CutStyle) -> Document {

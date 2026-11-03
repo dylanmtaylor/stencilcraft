@@ -1,5 +1,6 @@
-//! `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]
-//!      [--tile-prefix PREFIX] [--tile-marks] --export OUT`
+//! `run --in FILE [--command JSON]... [--apply-kerf MM] [--kerf-join miter|round|bevel]
+//!      [--kerf-limit N] [--tile-sheet WxH] [--overlap MM] [--tile-prefix PREFIX]
+//!      [--tile-marks] --export OUT`
 
 use super::pipeline::{self, PipelineError, Tiling};
 use stencilcraft_gcode::GcodeSettings;
@@ -17,6 +18,11 @@ pub struct RunRequest {
     pub tile_marks: bool,
     /// Cut profile for `.gcode` exports; other formats ignore it.
     pub gcode: GcodeSettings,
+    /// `--kerf-join` / `--kerf-limit`: corner handling for `--apply-kerf`.
+    pub kerf_options: stencilcraft_kerf::OffsetOptions,
+    /// `--command JSON`, in order: engine commands run on the document before kerf
+    /// and export (e.g. `{"command":"shapes.replicate-fill","params":{...}}`).
+    pub commands: Vec<stencilcraft_engine::Command>,
 }
 
 impl Default for RunRequest {
@@ -30,6 +36,8 @@ impl Default for RunRequest {
             tile_prefix: None,
             tile_marks: false,
             gcode: GcodeSettings::default(),
+            kerf_options: stencilcraft_kerf::OffsetOptions::default(),
+            commands: Vec::new(),
         }
     }
 }
@@ -51,11 +59,40 @@ impl RunRequest {
             let mut advance = 2;
             match flag {
                 "--in" => req.input = Some(value()?.to_string()),
+                "--command" => {
+                    let v = value()?;
+                    req.commands.push(
+                        serde_json::from_str(v)
+                            .map_err(|e| PipelineError::User(format!("--command {v}: {e}")))?,
+                    );
+                }
                 "--apply-kerf" => {
                     let v = value()?;
                     req.kerf_mm = Some(v.trim().parse().map_err(|_| {
                         PipelineError::User(format!("--apply-kerf {v}: expected a number of mm"))
                     })?);
+                }
+                "--kerf-join" => {
+                    let v = value()?;
+                    req.kerf_options.join =
+                        stencilcraft_kerf::JoinStyle::parse(v).ok_or_else(|| {
+                            PipelineError::User(format!(
+                                "--kerf-join {v}: expected miter, round or bevel"
+                            ))
+                        })?;
+                }
+                "--kerf-limit" => {
+                    let v = value()?;
+                    req.kerf_options.miter_limit = v
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|limit| limit.is_finite() && *limit >= 1.0)
+                        .ok_or_else(|| {
+                            PipelineError::User(format!(
+                                "--kerf-limit {v}: expected a number of at least 1"
+                            ))
+                        })?;
                 }
                 "--tile-sheet" => {
                     let (w, h) = pipeline::parse_sheet_size(value()?)?;
@@ -126,7 +163,10 @@ impl RunRequest {
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
                     println!(
-                        "flags: --apply-kerf MM --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
+                        "flags: --apply-kerf MM --kerf-join miter|round|bevel --kerf-limit N --tile-sheet WxH --overlap MM --tile-prefix PREFIX --tile-marks"
+                    );
+                    println!(
+                        "       --command JSON (repeatable; an engine command such as shapes.replicate-fill, run before kerf)"
                     );
                     println!(
                         "       --feed MM_PER_MIN --power S --engrave-power S --passes N --ramp --laser-mode dynamic|constant"
@@ -186,10 +226,20 @@ fn parse_count(flag: &str, value: &str) -> Result<u32, PipelineError> {
 pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
-    let doc = crate::load_document(&input)?;
-    let reports =
-        pipeline::run_pipeline(&doc, req.kerf_mm, req.tiling.as_ref(), &export, &req.gcode)
-            .map_err(|e| e.to_string())?;
+    let mut engine = stencilcraft_engine::Engine::new(crate::load_document(&input)?);
+    for command in req.commands {
+        let effect = engine.run(command).map_err(|e| format!("--command: {e}"))?;
+        println!("{}", serde_json::to_string(&effect).unwrap_or_default());
+    }
+    let reports = pipeline::run_pipeline(
+        &engine.doc,
+        req.kerf_mm,
+        &req.kerf_options,
+        req.tiling.as_ref(),
+        &export,
+        &req.gcode,
+    )
+    .map_err(|e| e.to_string())?;
     for r in reports {
         println!("{r}");
     }
@@ -211,6 +261,22 @@ mod tests {
         let ok =
             RunRequest::parse(&args(&["--in", "a.stencilcraft", "--export", "out.svg"])).unwrap();
         assert_eq!(ok.input.as_deref(), Some("a.stencilcraft"));
+    }
+
+    #[test]
+    fn engine_commands_parse_and_bad_ones_are_named() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--command",
+            r#"{"command":"path.simplify","params":{"ids":[1],"tolerance_mm":0.1}}"#,
+            "--export",
+            "b.svg",
+        ]))
+        .unwrap();
+        assert_eq!(ok.commands.len(), 1);
+        let bad = RunRequest::parse(&args(&["--in", "a", "--command", "{", "--export", "b"]));
+        assert!(matches!(bad, Err(PipelineError::User(ref m)) if m.contains("--command")));
     }
 
     #[test]
@@ -290,6 +356,47 @@ mod tests {
                 Err(err) => err.to_string(),
             };
             assert!(err.contains(flags[0]), "{flags:?} -> {err}");
+        }
+    }
+
+    #[test]
+    fn kerf_join_limit_and_commands_parse() {
+        let ok = RunRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--export",
+            "b.svg",
+            "--kerf-join",
+            "round",
+            "--kerf-limit",
+            "2.5",
+            "--command",
+            r#"{"command":"shapes.rotate-copies","params":{"ids":[1],"count":6}}"#,
+        ]))
+        .unwrap();
+        assert_eq!(ok.kerf_options.join, stencilcraft_kerf::JoinStyle::Round);
+        assert_eq!(ok.kerf_options.miter_limit, 2.5);
+        assert_eq!(
+            ok.commands,
+            vec![stencilcraft_engine::Command::ShapesRotateCopies {
+                ids: vec![1],
+                count: 6
+            }]
+        );
+        let plain = RunRequest::parse(&args(&["--in", "a", "--export", "b"])).unwrap();
+        assert_eq!(
+            plain.kerf_options,
+            stencilcraft_kerf::OffsetOptions::default()
+        );
+        for flags in [
+            vec!["--kerf-join", "spiky"],
+            vec!["--kerf-limit", "0.5"],
+            vec!["--kerf-limit", "NaN"],
+            vec!["--command", "{\"command\":\"shapes.nope\"}"],
+        ] {
+            let mut argv = args(&["--in", "a", "--export", "b"]);
+            argv.extend(flags.iter().map(|s| s.to_string()));
+            assert!(RunRequest::parse(&argv).is_err(), "{flags:?}");
         }
     }
 

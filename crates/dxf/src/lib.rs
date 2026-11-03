@@ -77,7 +77,7 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
     pair(&mut out, 2, "ENTITIES")?;
     for layer in &doc.layers {
         let dxf_layer = layer_name(&layer.name);
-        for shape in &layer.shapes {
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let closed = match (shape.style, layer.kind) {
                 (CutStyle::Cut, _) | (_, CutStyle::Cut) => true,
                 (CutStyle::Engrave, CutStyle::Engrave) => false,

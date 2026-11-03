@@ -1,0 +1,2 @@
+# Silhouette Curio (curio) protocol=export-only
+error: limit: curio: no documented machine protocol (No public protocol description or USB id: export SVG/DXF and send from the vendor's software.). Export SVG/DXF instead.

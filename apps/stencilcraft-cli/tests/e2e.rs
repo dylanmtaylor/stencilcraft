@@ -388,7 +388,9 @@ fn cut_dry_run_prints_a_valid_transcript() {
     let program = stdout.split("program:\n").nth(1).unwrap_or("");
     assert!(!program.is_empty(), "transcript has program:");
     let lines: Vec<&str> = program.lines().collect();
-    assert_eq!(lines.first(), Some(&"J1"), "setup starts with tool select");
+    // Observed Cameo 4 order: mat block first, then the tool select.
+    assert_eq!(lines.first(), Some(&"TG9"), "setup starts with mat select");
+    assert!(lines.contains(&"J1"), "tool select appears");
     assert!(
         lines.iter().any(|l| l.starts_with("FX")),
         "tool selection appears"

@@ -1,0 +1,23 @@
+# Silhouette SD 1 (silhouette-sd-1) protocol=silhouette-legacy
+FW102
+!5
+FX10
+FC18
+FY1
+FN0
+TB50,0
+\0,0
+Z6000,6000
+L0
+FE0,0
+FF0,0,0
+M100,100
+D100,300
+D300,300
+D300,100
+D100,100
+M100,400
+D300,600
+D300,400
+M300,0
+SO0

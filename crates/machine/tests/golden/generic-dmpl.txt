@@ -1,0 +1,9 @@
+# Generic DMPL cutter (generic-dmpl) protocol=dmpl
+;:
+EC1
+U197,394
+D591,394,591,0,197,0,197,394
+U787,394
+D1181,0,787,0
+U0,0
+@

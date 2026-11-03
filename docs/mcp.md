@@ -26,6 +26,9 @@ The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `exp
 replicate/offset tools `shapes_replicate_side`, `shapes_replicate_array`,
 `shapes_replicate_fill`, `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset`
 (see [Replicate and offset](#replicate-and-offset)). Their
+`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `machines_list`, `machine_capabilities`,
+`machine_dry_run`,
+and `command_execute`. Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -117,6 +120,9 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `export.gcode` | `{path, feed?, power?, engrave_power?, passes?, ramp?, mode?}` | `{path}` |
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
+| `machines.list` | `{}` | array of machines: `{id, name, vendor, protocol, support, usb, firmware, cut_width_mm, cut_length_mm, media_width_mm, mats, tool_holders, tools, max_force_gf, force{min,max,unit}, speed{min,max,unit}, roll_feed, bluetooth, regmarks, quad_regmarks, overcut, multi_pass, notes}` (`null` = undocumented) |
+| `machine.capabilities` | `{model}` | that machine's full capabilities row |
+| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, truncated, transcript: [..], path}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
 | `shapes.replicate-side` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
 | `shapes.replicate-array` | `{ids, axis, count, gap_mm}` | `{ShapesAdded: {ids}}` |
@@ -165,3 +171,16 @@ cannot (legacy envelope only):
 A successful `doc.open` or `doc.save` through the socket also updates the window title and
 the recent-files list, as File › Open and Save do.
 
+
+## Cutting machines
+
+`machines_list` returns every registry row (`crates/machine/machines.toml`, see
+`docs/machine-architecture.md`), including Cricut slots marked `unsupported`;
+`machine_capabilities` returns one. Force/speed are in the machine's own units
+(`force.unit` / `speed.unit`). `machine_dry_run` encodes the
+current document for one model and returns the transcript (first 5000 commands; `truncated`
+says if there were more); with `path` it also writes the exact byte stream (HP-GL/DMPL files
+for a spooler, for example). Every value is validated against the model: an out-of-range
+force, speed, depth, tool, holder, mat or a design outside the cut area is a normal tool error
+naming the knob and range — never clamped. There is deliberately **no** MCP method that sends
+to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a person.

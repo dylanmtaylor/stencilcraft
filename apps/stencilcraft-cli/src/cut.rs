@@ -1,13 +1,19 @@
-//! `stencilcraft-cli cut` — send a document to a cutting machine.
+//! `stencilcraft-cli cut` — encode a document for any registry machine.
 //!
-//! Dry-run by default: encodes the full Graphtec command stream and prints a
-//! readable transcript without touching hardware. A real send needs
-//! `--device PATH` and a CLI built with `--features stencilcraft-cli/serial`.
+//! Dry-run by default: validates every setting against the machine's
+//! capabilities and prints a one-command-per-line transcript without touching
+//! hardware. `--out FILE` writes the exact byte stream to a file. Only
+//! `--device DEV` sends: `usb[:BUS-ADDR]` (`--features usb`), a serial path
+//! (`--features serial`), `tcp:HOST:PORT`, `file:PATH` or `stdout`. Also
+//! `machines` (registry, capabilities) and `devices` (USB discovery, probing).
 
 use stencilcraft_doc::Document;
 use stencilcraft_geom as geom;
 use stencilcraft_machine as machine;
-use stencilcraft_machine::{CutProgram, CutSettings, Mat, Media, Model, PlotOptions};
+use stencilcraft_machine::{
+    Capabilities, CutJob, CutProgram, CutSettings, DeviceRegistry, MachineDriver, Mat, Media,
+    PlotOptions, Registration, ToolKind, TransportSpec,
+};
 
 /// Errors from the cut subcommand; printed to stderr as the process message.
 #[derive(Debug)]
@@ -27,350 +33,314 @@ impl core::fmt::Display for CutError {
     }
 }
 
-#[derive(Debug, Clone)]
+fn user(e: impl core::fmt::Display) -> CutError {
+    CutError::User(format!("cut: {e}"))
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct CutRequest {
     pub input: Option<String>,
     /// Media preset name prefix or ID (default: vinyl sticker).
     pub media: Option<String>,
-    pub pressure: Option<u8>,
-    pub speed: Option<u8>,
+    /// Force steps or laser power, per the machine's `force.unit`.
+    pub pressure: Option<u32>,
+    /// Speed steps or mm/min, per the machine's `speed.unit`.
+    pub speed: Option<u32>,
     pub pen: bool,
+    /// `None` = the machine's largest documented mat.
     pub mat: Option<Mat>,
     /// Plot a bounding-box preview rectangle instead of the design.
     pub bbox_only: bool,
     pub model_name: Option<String>,
-    /// Serial device path for a real send (needs the `serial` feature).
+    /// Extra machine table (same shape as the built-in `machines.toml`).
+    pub machines_file: Option<String>,
+    /// Real send target; see `TransportSpec::parse`.
     pub device: Option<String>,
+    /// Write the encoded stream to this file instead of printing it.
+    pub out: Option<String>,
     pub track_enhancing: bool,
-}
-
-impl Default for CutRequest {
-    fn default() -> Self {
-        CutRequest {
-            input: None,
-            media: None,
-            pressure: None,
-            speed: None,
-            pen: false,
-            mat: Some(Mat::CameoPro24x24),
-            bbox_only: false,
-            model_name: None,
-            device: None,
-            track_enhancing: false,
-        }
-    }
+    pub tool: Option<ToolKind>,
+    pub holder: Option<u8>,
+    pub depth: Option<u8>,
+    pub passes: Option<u8>,
+    pub overcut_mm: Option<f64>,
+    pub media_size: Option<(f64, f64)>,
+    pub registration: Option<Registration>,
 }
 
 impl CutRequest {
     pub fn parse(args: &[String]) -> Result<CutRequest, CutError> {
         let mut req = CutRequest::default();
+        let mut regmark_search = false;
+        let mut regmark_quad = false;
         let mut i = 0;
-        while i < args.len() {
-            let advance = match args[i].as_str() {
-                "--in" => {
-                    req.input = Some(value(args, i, "--in")?.to_string());
-                    2
-                }
-                "--media" => {
-                    req.media = Some(value(args, i, "--media")?.to_string());
-                    2
-                }
-                "--pressure" => {
-                    let v = value(args, i, "--pressure")?;
-                    req.pressure = Some(v.trim().parse().map_err(|_| {
-                        CutError::User(format!("--pressure {v}: expected a count"))
-                    })?);
-                    2
-                }
-                "--speed" => {
-                    let v = value(args, i, "--speed")?;
-                    req.speed =
-                        Some(v.trim().parse().map_err(|_| {
-                            CutError::User(format!("--speed {v}: expected a number"))
-                        })?);
-                    2
-                }
+        while let Some(arg) = args.get(i) {
+            let mut take = || -> Result<&str, CutError> {
+                i += 1;
+                args.get(i)
+                    .map(String::as_str)
+                    .ok_or_else(|| user(format!("{arg} needs a value")))
+            };
+            match arg.as_str() {
+                "--in" => req.input = Some(take()?.to_string()),
+                "--media" => req.media = Some(take()?.to_string()),
+                "--pressure" | "--force" => req.pressure = Some(num(arg, take()?)?),
+                "--speed" => req.speed = Some(num(arg, take()?)?),
+                "--depth" => req.depth = Some(num(arg, take()?)?),
+                "--holder" => req.holder = Some(num(arg, take()?)?),
+                "--passes" => req.passes = Some(num(arg, take()?)?),
+                "--overcut" => req.overcut_mm = Some(num(arg, take()?)?),
                 "--mat" => {
-                    req.mat = Some(parse_mat(value(args, i, "--mat")?)?);
-                    2
+                    let v = take()?;
+                    req.mat = Some(Mat::parse(v).ok_or_else(|| {
+                        user(format!(
+                            "--mat {v}: use none, 12x12, 12x24, 8x12, 15x15, 24x24 or 8.5x12"
+                        ))
+                    })?);
                 }
-                "--model" => {
-                    req.model_name = Some(value(args, i, "--model")?.to_string());
-                    2
+                "--tool" => {
+                    let v = take()?;
+                    req.tool = Some(ToolKind::parse(v).ok_or_else(|| {
+                        user(format!(
+                            "--tool {v}: use autoblade, ratchet, deep-cut, kraft, rotary, \
+                             punch, pen, emboss, deboss, etch, drag-blade, knife-blade, \
+                             foil, score, perforate, engrave or laser"
+                        ))
+                    })?);
                 }
-                "--device" => {
-                    req.device = Some(value(args, i, "--device")?.to_string());
-                    2
+                "--media-size" => req.media_size = Some(pair(arg, take()?, 'x')?),
+                "--regmarks" => {
+                    let v = take()?;
+                    let parts: Vec<f64> = v
+                        .split(',')
+                        .map(|p| p.trim().parse::<f64>())
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| user(format!("--regmarks {v}: expected W,L,X,Y in mm")))?;
+                    let [w, l, x, y] = parts.as_slice() else {
+                        return Err(user(format!("--regmarks {v}: expected W,L,X,Y in mm")));
+                    };
+                    req.registration = Some(Registration {
+                        width_mm: *w,
+                        length_mm: *l,
+                        origin_right_mm: *x,
+                        origin_down_mm: *y,
+                        search: false,
+                        quad: false,
+                    });
                 }
-                "--pen" => {
-                    req.pen = true;
-                    1
-                }
-                "--track-enhancing" => {
-                    req.track_enhancing = true;
-                    1
-                }
-                "--bbox" => {
-                    req.bbox_only = true;
-                    1
-                }
+                "--regmark-search" => regmark_search = true,
+                "--regmark-quad" => regmark_quad = true,
+                "--model" | "--machine" => req.model_name = Some(take()?.to_string()),
+                "--machines" => req.machines_file = Some(take()?.to_string()),
+                "--device" => req.device = Some(take()?.to_string()),
+                "--out" => req.out = Some(take()?.to_string()),
+                "--pen" => req.pen = true,
+                "--track-enhancing" => req.track_enhancing = true,
+                "--bbox" => req.bbox_only = true,
                 "-h" | "--help" => {
                     print_cut_help();
                     return Err(CutError::HelpPrinted);
                 }
                 other => {
-                    return Err(CutError::User(format!(
-                        "cut: unknown flag {other} (see `stencilcraft-cli cut --help`)"
+                    return Err(user(format!(
+                        "unknown flag {other} (see `stencilcraft-cli cut --help`)"
                     )));
                 }
-            };
-            i += advance;
+            }
+            i += 1;
+        }
+        if let Some(reg) = req.registration.as_mut() {
+            reg.search = regmark_search || regmark_quad;
+            reg.quad = regmark_quad;
+        } else if regmark_search || regmark_quad {
+            return Err(user("--regmark-search needs --regmarks W,L,X,Y"));
         }
         if req.input.is_none() {
-            return Err(CutError::User("cut: --in FILE is required".to_string()));
+            return Err(user("--in FILE is required"));
         }
         Ok(req)
     }
 }
 
-fn value<'a>(args: &'a [String], i: usize, flag: &str) -> Result<&'a str, CutError> {
-    args.get(i + 1)
-        .map(String::as_str)
-        .ok_or_else(|| CutError::User(format!("cut: {flag} needs a value")))
+fn num<T: core::str::FromStr>(flag: &str, v: &str) -> Result<T, CutError> {
+    v.trim()
+        .parse()
+        .map_err(|_| user(format!("{flag} {v}: expected a number")))
 }
 
-fn parse_mat(s: &str) -> Result<Mat, CutError> {
-    match s.to_ascii_lowercase().as_str() {
-        "none" => Ok(Mat::None),
-        "12x12" => Ok(Mat::Cameo12x12),
-        "12x24" => Ok(Mat::Cameo12x24),
-        "8x12" | "portrait8x12" => Ok(Mat::Portrait8x12),
-        "15x15" => Ok(Mat::CameoPlus15x15),
-        "24x24" => Ok(Mat::CameoPro24x24),
-        "8.5x12" => Ok(Mat::Portrait8_5x12),
-        other => Err(CutError::User(format!(
-            "cut: --mat {other}: use none, 12x12, 12x24, 8x12, 15x15, 24x24 or 8.5x12"
-        ))),
+fn pair(flag: &str, v: &str, sep: char) -> Result<(f64, f64), CutError> {
+    let (a, b) = v
+        .split_once(sep)
+        .ok_or_else(|| user(format!("{flag} {v}: expected A{sep}B")))?;
+    Ok((num(flag, a)?, num(flag, b)?))
+}
+
+/// The built-in registry, plus a user table when given.
+pub fn registry(machines_file: Option<&str>) -> Result<DeviceRegistry, CutError> {
+    if let Some(e) = DeviceRegistry::builtin_error() {
+        return Err(user(e));
     }
-}
-
-fn parse_model(name: &str) -> Result<Model, CutError> {
-    Model::from_version(&name.replace('-', " ")).ok_or_else(|| {
-        CutError::User(format!(
-            "cut: --model {name}: unknown model. Known: cameo-4, cameo-4-plus, \
-                 cameo-4-pro, cameo-5, cameo-5-plus, cameo-pro-mk2, cameo-3, \
-                 portrait-3, portrait-4"
-        ))
-    })
-}
-
-/// Resolve the effective media + overrides into settings.
-pub fn resolve_settings(req: &CutRequest) -> Result<(Media, CutSettings), CutError> {
-    let media = match &req.media {
-        Some(spec) => {
-            let by_name = machine::MEDIA_PRESETS.iter().copied().find(|m| {
-                m.name
-                    .to_ascii_lowercase()
-                    .starts_with(&spec.to_ascii_lowercase())
-            });
-            let found = by_name.or_else(|| {
-                spec.trim()
-                    .parse::<u16>()
-                    .ok()
-                    .and_then(machine::Media::by_id)
-            });
-            found.ok_or_else(|| {
-                CutError::User(format!(
-                    "cut: --media {spec}: no preset matches (try `vinyl`, `cardstock`, \
-                     an ID from `--help`, or `custom` with --pressure/--speed)"
-                ))
-            })?
+    match machines_file {
+        None => Ok(DeviceRegistry::builtin().clone()),
+        Some(path) => {
+            let text = std::fs::read_to_string(path).map_err(|e| user(format!("{path}: {e}")))?;
+            DeviceRegistry::builtin()
+                .with_overrides(&text)
+                .map_err(user)
         }
-        None => machine::Media::by_id(102)
-            .ok_or_else(|| CutError::User("cut: default vinyl preset is missing".to_string()))?,
+    }
+}
+
+/// Resolve a machine by registry id (`cameo-4-pro`) or firmware name (`CAMEO 4 PRO`).
+pub fn resolve_machine(reg: &DeviceRegistry, name: &str) -> Result<Capabilities, CutError> {
+    reg.by_id(name)
+        .or_else(|| reg.by_firmware(name))
+        .cloned()
+        .ok_or_else(|| {
+            user(format!(
+                "--model {name}: unknown machine (see `stencilcraft-cli machines`)"
+            ))
+        })
+}
+
+/// Resolve a media preset by name prefix or numeric id.
+pub fn resolve_media(spec: Option<&str>) -> Result<Media, CutError> {
+    let Some(spec) = spec else {
+        return Media::by_id(102).ok_or_else(|| user("default vinyl preset is missing"));
     };
-    let mut settings = CutSettings::from_media(&media);
-    settings.pen = req.pen;
-    settings.track_enhancing = req.track_enhancing;
+    let lower = spec.to_ascii_lowercase();
+    machine::MEDIA_PRESETS
+        .iter()
+        .copied()
+        .find(|m| m.name.to_ascii_lowercase().starts_with(&lower))
+        .or_else(|| spec.trim().parse::<u16>().ok().and_then(Media::by_id))
+        .ok_or_else(|| {
+            user(format!(
+                "--media {spec}: no preset matches (try `vinyl`, `cardstock`, \
+                 an ID from `--help`, or `custom` with --force/--speed)"
+            ))
+        })
+}
+
+/// Build the vendor-neutral job for a machine from the request and paths.
+pub fn build_job(
+    req: &CutRequest,
+    caps: &Capabilities,
+    paths: &[Vec<(f64, f64)>],
+) -> Result<(Media, CutJob), CutError> {
+    let media = resolve_media(req.media.as_deref())?;
+    let mut s = CutSettings::for_caps(caps, &media);
+    s.pen = req.pen;
+    s.track_enhancing = req.track_enhancing;
     if let Some(mat) = req.mat {
-        settings.mat = mat;
+        s.mat = mat;
     }
-    if let Some(p) = req.pressure {
-        settings.pressure = Some(p);
+    if req.depth.is_some() {
+        s.depth = req.depth;
     }
-    if let Some(s) = req.speed {
-        settings.speed = Some(s);
+    s.tool = req.tool;
+    s.toolholder = req.holder.unwrap_or(1);
+    s.passes = req.passes.unwrap_or(1);
+    s.overcut_mm = req.overcut_mm.unwrap_or(0.0);
+    s.media_size_mm = req.media_size;
+    s.registration = req.registration;
+    let mut job = s.to_job(paths, &PlotOptions::default(), req.bbox_only);
+    // Force/speed go straight into the job: their units are machine-specific
+    // and may exceed the Silhouette step range (laser power 0-1000, mm/min).
+    for op in &mut job.operations {
+        if req.pressure.is_some() {
+            op.settings.force = req.pressure;
+        }
+        if req.speed.is_some() {
+            op.settings.speed = req.speed;
+        }
     }
-    Ok((media, settings))
+    Ok((media, job))
 }
 
 /// Flatten every visible shape into machine paths (document mm coordinates:
 /// x right, y down).
 pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
     let mut paths = Vec::new();
-    for layer in &doc.layers {
-        if !layer.visible {
-            continue;
-        }
+    for layer in doc.layers.iter().filter(|l| l.visible) {
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            for pl in geom::path_to_polylines(&shape.path, geom::DEFAULT_FLATTEN_STEPS) {
-                if pl.points.len() < 2 {
-                    continue;
-                }
-                let mut path: Vec<(f64, f64)> = pl.points.iter().map(|p| (p.x, p.y)).collect();
-                if pl.closed
-                    && let Some(first) = pl.points.first()
-                {
-                    path.push((first.x, first.y));
-                }
-                paths.push(path);
-            }
+            let polylines = geom::path_to_polylines(&shape.path, geom::DEFAULT_FLATTEN_STEPS);
+            paths.extend(machine::paths_from_polylines(&polylines));
         }
     }
     paths
 }
 
-/// Encode the cut program for this request and document.
+/// Validate and encode the request for its machine.
 pub fn encode(
     req: &CutRequest,
     doc: &Document,
-) -> Result<(CutProgram, Media, CutSettings, Model), CutError> {
-    let model = match &req.model_name {
-        Some(name) => parse_model(name)?,
-        None => Model::Cameo4Pro,
-    };
-    let (media, settings) = resolve_settings(req)?;
+) -> Result<(CutProgram, Media, CutJob, Capabilities), CutError> {
+    let reg = registry(req.machines_file.as_deref())?;
+    let caps = resolve_machine(&reg, req.model_name.as_deref().unwrap_or("cameo-4-pro"))?;
     let paths = flatten_document(doc);
     if paths.is_empty() {
-        return Err(CutError::User(
-            "cut: document has no visible shapes to cut".to_string(),
-        ));
+        return Err(user("document has no visible shapes to cut"));
     }
-    let program = machine::encode_cut(
-        model,
-        &settings,
-        &paths,
-        &PlotOptions::default(),
-        req.bbox_only,
-    );
-    Ok((program, media, settings, model))
+    let (media, job) = build_job(req, &caps, &paths)?;
+    let program = machine::dry_run(&caps, &job).map_err(user)?;
+    Ok((program, media, job, caps))
 }
 
 /// Run the cut request; returns lines to print.
 pub fn run(req: &CutRequest, doc: &Document) -> Result<Vec<String>, CutError> {
-    let (program, media, settings, model) = encode(req, doc)?;
-    let stream_len = program.to_stream().len();
-
-    if let Some(device) = &req.device {
-        real_send(&program, device, &media, model)?;
-        let mut out = vec![format!("sent {stream_len} bytes to {device}")];
+    let (program, media, job, caps) = encode(req, doc)?;
+    let mut out = header(&program, &media, &caps, &job);
+    if let Some(path) = &req.out {
+        std::fs::write(path, program.to_stream()).map_err(|e| user(format!("{path}: {e}")))?;
         out.push(format!(
-            "model: {model:?}, media: {} (ID {}), mat: {:?}",
-            media.name, media.id, settings.mat
+            "wrote {} bytes to {path}",
+            program.to_stream().len()
         ));
-        if let Some(bb) = program.bbox_mm {
-            out.push(format!(
-                "cut area: {:.1} x {:.1} mm",
-                bb.3 - bb.1,
-                bb.2 - bb.0
-            ));
+    }
+    if let Some(device) = &req.device {
+        // The deliberate hardware step: the driver validates again before sending.
+        let transport = TransportSpec::parse(device)
+            .and_then(|spec| spec.open())
+            .map_err(user)?;
+        let mut driver = MachineDriver::new(caps, transport);
+        let mut wait = || std::thread::sleep(core::time::Duration::from_millis(2000));
+        let report = driver
+            .send(&job, &mut machine::WaitFn(&mut wait))
+            .map_err(user)?;
+        let _ = driver.close();
+        out.push(format!("sent {} bytes to {device}", report.bytes));
+        if let Some(v) = report.version {
+            out.push(format!("device firmware: {v}"));
         }
-        Ok(out)
-    } else {
-        Ok(dry_transcript(&program, &media, model, &settings))
+    } else if req.out.is_none() {
+        out.push("program:".to_string());
+        out.extend(program.transcript());
     }
+    Ok(out)
 }
 
-/// Actually write the program to a serial device: init escape, version query
-/// with confirmation, ready-poll, then the stream. Everything returns; nothing
-/// panics.
-#[cfg(feature = "serial")]
-fn real_send(
-    program: &CutProgram,
-    device: &str,
-    media: &Media,
-    model: Model,
-) -> Result<(), CutError> {
-    use machine::Transport as _;
-    let mut transport =
-        machine::SerialTransport::open(device, 9600).map_err(|e| CutError::User(e.to_string()))?;
-    // Palaver: initialize, then ask who we are talking to.
-    transport
-        .write(machine::ESC_INIT.as_bytes())
-        .map_err(|e| CutError::User(e.to_string()))?;
-    transport
-        .write(b"FG\x03")
-        .map_err(|e| CutError::User(e.to_string()))?;
-    let mut buf = [0u8; 64];
-    let n = transport
-        .read(&mut buf)
-        .map_err(|e| CutError::User(e.to_string()))?;
-    let version: String = String::from_utf8_lossy(&buf[..n])
-        .trim_end_matches('\u{3}')
-        .trim()
-        .to_string();
-    if let Some(actual) = Model::from_version(&version)
-        && actual != model
-    {
-        return Err(CutError::User(format!(
-            "cut: device reports {version:?} ({actual:?}) but --model was {model:?}. \
-             Please align your --model argument."
-        )));
-    }
-    // Poll status until ready.
-    for _ in 0..15 {
-        transport
-            .write(machine::ESC_STATUS.as_bytes())
-            .map_err(|e| CutError::User(e.to_string()))?;
-        let n = transport
-            .read(&mut buf)
-            .map_err(|e| CutError::User(e.to_string()))?;
-        match machine::parse_status(&buf[..n]) {
-            machine::DeviceStatus::Ready => break,
-            machine::DeviceStatus::Unloaded => {
-                return Err(CutError::User(
-                    "cut: media not loaded — load material and retry".to_string(),
-                ));
-            }
-            // Moving / unknown: poll again after a pause.
-            _ => std::thread::sleep(core::time::Duration::from_millis(2000)),
-        }
-    }
-    machine::send_program(&mut transport, program).map_err(|e| CutError::User(e.to_string()))
-}
-
-/// Without the serial feature a real send cannot happen; say so calmly.
-#[cfg(not(feature = "serial"))]
-fn real_send(
-    program: &CutProgram,
-    device: &str,
-    media: &Media,
-    model: Model,
-) -> Result<(), CutError> {
-    let _ = (program, device, media, model);
-    Err(CutError::User(
-        "cut: --device needs serial support: \
-         cargo run --features stencilcraft-cli/serial"
-            .to_string(),
-    ))
-}
-
-fn dry_transcript(
-    program: &CutProgram,
-    media: &Media,
-    model: Model,
-    settings: &CutSettings,
-) -> Vec<String> {
-    let mut out = Vec::new();
-    out.push(format!(
-        "dry run: encoded {} commands (~{} bytes) for {model:?}",
+fn header(program: &CutProgram, media: &Media, caps: &Capabilities, job: &CutJob) -> Vec<String> {
+    let mut out = vec![format!(
+        "dry run: encoded {} commands (~{} bytes) for {} [{}]",
         program.commands.len(),
-        program.to_stream().len()
-    ));
-    out.push(format!(
-        "media: {} (ID {}), pressure: {:?}, speed: {:?}, mat: {:?}",
-        media.name, media.id, settings.pressure, settings.speed, settings.mat
-    ));
+        program.to_stream().len(),
+        caps.name,
+        caps.protocol.id()
+    )];
+    if let Some(op) = job.operations.first() {
+        out.push(format!(
+            "media: {} (ID {}), force: {:?}, speed: {:?}, mat: {}, holder: {}, tool: {}, passes: {}",
+            media.name,
+            media.id,
+            op.settings.force,
+            op.settings.speed,
+            job.mat.id(),
+            op.holder,
+            op.tool.map_or("(as loaded)", ToolKind::id),
+            op.settings.passes
+        ));
+    }
     if let Some(bb) = program.bbox_mm {
         out.push(format!(
             "cut area: {:.1} x {:.1} mm — use --bbox for a preview rectangle",
@@ -378,28 +348,37 @@ fn dry_transcript(
             bb.2 - bb.0
         ));
     }
-    out.push("program:".to_string());
-    for command in &program.commands {
-        out.push(command.to_ascii());
-    }
     out
 }
 
 fn print_cut_help() {
     println!("usage: stencilcraft-cli cut --in FILE [flags]");
     println!();
+    println!("  --model ID        registry id (default cameo-4-pro; see `machines`)");
+    println!("  --machines FILE   extra machine table (machines.toml format)");
     println!("  --media NAME|ID   preset prefix or ID (vinyl, cardstock, 102, …)");
-    println!("  --pressure N      override pressure (1..33)");
-    println!("  --speed N         override speed (1..30 on Cameo 4)");
+    println!("  --force N         force steps / laser power (--pressure is an alias)");
+    println!("  --speed N         speed steps or mm/min, per the machine");
+    println!("  --tool TOOL       autoblade, ratchet, deep-cut, kraft, rotary, punch, pen, …");
+    println!("  --holder N        tool holder 1 or 2 (two-holder machines)");
+    println!("  --depth N         AutoBlade depth 0..10 (holder 1)");
+    println!("  --passes N        cut each path N times (1..10)");
+    println!("  --overcut MM      line-segment overcut at sharp corners (0..2 mm)");
     println!("  --mat MAT         none, 12x12, 12x24, 8x12, 15x15, 24x24, 8.5x12");
-    println!("  --model MODEL     cameo-4-pro (default), cameo-4, portrait-4, …");
+    println!("  --media-size WxL  loaded media in mm (required where the cut width is unknown)");
+    println!("  --regmarks W,L,X,Y  print & cut: mark spacing and first-mark position, mm");
+    println!("  --regmark-search  automatic optical search (TB123); --regmark-quad for 4 marks");
     println!("  --pen             pen mode");
-    println!("  --track-enhancing roller cycles (needs pressure >= 19)");
+    println!("  --track-enhancing roller cycles (needs force >= 19)");
     println!("  --bbox            preview rectangle instead of the design");
-    println!("  --device PATH     real send over serial (needs the serial feature)");
-    println!("Default: dry run — transcript printed, one command per line.");
+    println!("  --out FILE        write the encoded stream to FILE (no hardware)");
+    println!("  --device DEV      REAL SEND: usb[:BUS-ADDR] (--features usb),");
+    println!("                    /dev/ttyUSB0[@BAUD] or serial:PATH (--features serial),");
+    println!("                    tcp:HOST:PORT, file:PATH, stdout");
+    println!("Default: dry run — transcript printed, one command per line. Values outside");
+    println!("the machine's documented limits are rejected, never clamped.");
     println!();
-    println!("Media presets (ID: name — pressure/speed):");
+    println!("Media presets (ID: name — force/speed):");
     for m in machine::MEDIA_PRESETS {
         match (m.pressure, m.speed) {
             (Some(p), Some(s)) => println!("  {:>3}: {} — {p}/{s}", m.id, m.name),
@@ -417,11 +396,139 @@ pub fn execute(args: &[String]) -> Result<(), String> {
     };
     let input = req.input.clone().unwrap_or_default();
     let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
-    let lines = run(&req, &doc).map_err(|e| e.to_string())?;
-    for line in lines {
+    for line in run(&req, &doc).map_err(|e| e.to_string())? {
         println!("{line}");
     }
     Ok(())
+}
+
+/// `machines [--json] [--machines FILE] [show ID]`: the registry.
+pub fn machines_command(args: &[String]) -> Result<(), String> {
+    let mut json = false;
+    let mut file = None;
+    let mut show = None;
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        match a.as_str() {
+            "--json" => json = true,
+            "--machines" => {
+                i += 1;
+                file = Some(
+                    args.get(i)
+                        .ok_or("machines: --machines needs a file")?
+                        .clone(),
+                );
+            }
+            "show" => {
+                i += 1;
+                show = Some(args.get(i).ok_or("machines: show needs an id")?.clone());
+            }
+            other => return Err(format!("machines: unknown argument {other}")),
+        }
+        i += 1;
+    }
+    let reg = registry(file.as_deref()).map_err(|e| e.to_string())?;
+    if let Some(id) = show {
+        let caps = resolve_machine(&reg, &id).map_err(|e| e.to_string())?;
+        let v = serde_json::to_value(&caps).map_err(|e| e.to_string())?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    if json {
+        let v = serde_json::to_value(reg.machines()).map_err(|e| e.to_string())?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+        );
+        return Ok(());
+    }
+    let mm = |v: Option<f64>| v.map_or("?".to_string(), |v| format!("{v}"));
+    let range = |r: &Option<machine::Range>| {
+        r.as_ref()
+            .map_or("panel".to_string(), |r| format!("{}-{}", r.min, r.max))
+    };
+    println!(
+        "{:<22} {:<18} {:<12} {:<10} {:>7} {:>7} {:>4} {:>7} {:>7}",
+        "id", "protocol", "support", "usb", "width", "length", "hold", "force", "speed"
+    );
+    for s in reg.machines() {
+        println!(
+            "{:<22} {:<18} {:<12} {:<10} {:>7} {:>7} {:>4} {:>7} {:>7}",
+            s.id,
+            s.protocol.id(),
+            format!("{:?}", s.support).to_ascii_lowercase(),
+            s.usb.as_deref().unwrap_or("?"),
+            mm(s.cut_width_mm.or(s.media_width_mm)),
+            mm(s.cut_length_mm),
+            s.tool_holders.map_or("?".to_string(), |h| h.to_string()),
+            range(&s.force),
+            range(&s.speed),
+        );
+    }
+    println!("? = not publicly documented. `machines show ID` prints full capabilities.");
+    Ok(())
+}
+
+/// `devices [--status] [--probe DEV]`: USB discovery (needs `--features usb`)
+/// and read-only probing of any port. Probing and status queries never move
+/// the head.
+pub fn devices_command(args: &[String]) -> Result<(), String> {
+    let reg = registry(None).map_err(|e| e.to_string())?;
+    if let Some(i) = args.iter().position(|a| a == "--probe") {
+        let dev = args.get(i + 1).ok_or("devices: --probe needs a device")?;
+        let mut t = TransportSpec::parse(dev)
+            .and_then(|s| s.open())
+            .map_err(|e| e.to_string())?;
+        let found = reg.probe(t.as_mut()).map_err(|e| e.to_string())?;
+        println!(
+            "{dev}: {}",
+            found.map_or("no known machine answered", |c| c.id.as_str())
+        );
+        return Ok(());
+    }
+    usb_devices(&reg, args.iter().any(|a| a == "--status"))
+}
+
+#[cfg(feature = "usb")]
+fn usb_devices(reg: &DeviceRegistry, status: bool) -> Result<(), String> {
+    let all = machine::list_usb_devices().map_err(|e| e.to_string())?;
+    if all.is_empty() {
+        println!("no cutter-vendor USB devices found");
+    }
+    for dev in all {
+        let caps = reg.by_usb(dev.vendor_id, dev.product_id);
+        println!(
+            "usb:{} {:04x}:{:04x} {} {}",
+            dev.location,
+            dev.vendor_id,
+            dev.product_id,
+            caps.map_or("(not in registry)", |c| c.id.as_str()),
+            dev.product.as_deref().unwrap_or("")
+        );
+        if status && let Some(caps) = caps {
+            let t = TransportSpec::Usb(Some(dev.location.clone()))
+                .open()
+                .map_err(|e| e.to_string())?;
+            let mut driver = MachineDriver::new(caps.clone(), t);
+            match driver.status() {
+                Ok(s) => println!("  status: {s:?}"),
+                Err(e) => println!("  status: {e}"),
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "usb"))]
+fn usb_devices(_reg: &DeviceRegistry, _status: bool) -> Result<(), String> {
+    Err(
+        "devices needs USB support: cargo run -p stencilcraft-cli --features usb -- devices \
+         (or probe a port: devices --probe /dev/ttyUSB0)"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -429,95 +536,145 @@ mod tests {
     use super::*;
     use stencilcraft_testkit::starter;
 
-    #[test]
-    fn flag_parsing_covers_request_surface() {
-        let args = vec![
-            "--in".to_string(),
-            "a.stencilcraft".to_string(),
-            "--media".to_string(),
-            "cardstock".to_string(),
-            "--pressure".to_string(),
-            "19".to_string(),
-            "--speed".to_string(),
-            "8".to_string(),
-            "--pen".to_string(),
-            "--bbox".to_string(),
-        ];
-        let req = CutRequest::parse(&args).expect("parses");
-        assert_eq!(req.input.as_deref(), Some("a.stencilcraft"));
-        assert_eq!(req.media.as_deref(), Some("cardstock"));
-        assert_eq!(req.pressure, Some(19));
-        assert_eq!(req.speed, Some(8));
-        assert!(req.pen);
-        assert!(req.bbox_only);
+    fn args(s: &[&str]) -> Vec<String> {
+        s.iter().map(|a| a.to_string()).collect()
     }
 
     #[test]
-    fn missing_input_is_a_calm_error() {
-        let req = CutRequest::parse(&[]).expect_err("no --in given");
-        assert!(req.to_string().contains("--in FILE is required"));
+    fn flag_parsing_covers_request_surface() {
+        let req = CutRequest::parse(&args(&[
+            "--in",
+            "a.stencilcraft",
+            "--media",
+            "cardstock",
+            "--pressure",
+            "19",
+            "--speed",
+            "8",
+            "--pen",
+            "--bbox",
+            "--tool",
+            "autoblade",
+            "--holder",
+            "2",
+            "--depth",
+            "3",
+            "--passes",
+            "2",
+            "--overcut",
+            "0.5",
+            "--media-size",
+            "300x500",
+            "--regmarks",
+            "180,230,15,20",
+            "--regmark-search",
+        ]))
+        .expect("parses");
+        assert_eq!(req.input.as_deref(), Some("a.stencilcraft"));
+        assert_eq!(req.media.as_deref(), Some("cardstock"));
+        assert_eq!((req.pressure, req.speed), (Some(19), Some(8)));
+        assert!(req.pen && req.bbox_only);
+        assert_eq!(req.tool, Some(ToolKind::AutoBlade));
+        assert_eq!(
+            (req.holder, req.depth, req.passes),
+            (Some(2), Some(3), Some(2))
+        );
+        assert_eq!(req.overcut_mm, Some(0.5));
+        assert_eq!(req.media_size, Some((300.0, 500.0)));
+        let reg = req.registration.expect("regmarks");
+        assert!(reg.search && !reg.quad);
+        assert_eq!(reg.width_mm, 180.0);
+    }
+
+    #[test]
+    fn bad_flags_are_calm_errors() {
+        assert!(
+            CutRequest::parse(&[])
+                .expect_err("no --in")
+                .to_string()
+                .contains("--in FILE is required")
+        );
+        assert!(CutRequest::parse(&args(&["--in", "a", "--tool", "warp"])).is_err());
+        assert!(CutRequest::parse(&args(&["--in", "a", "--regmarks", "1,2"])).is_err());
+        assert!(CutRequest::parse(&args(&["--in", "a", "--regmark-search"])).is_err());
+        assert!(CutRequest::parse(&args(&["--in", "a", "--speed"])).is_err());
     }
 
     #[test]
     fn media_specs_resolve() {
-        let req = CutRequest {
-            media: Some("vinyl".to_string()),
-            ..CutRequest::default()
-        };
-        let (media, settings) = resolve_settings(&req).expect("vinyl");
-        assert_eq!(media.id, 102);
-        assert_eq!(settings.pressure, Some(10));
-        let req = CutRequest {
-            media: Some("102".to_string()),
-            ..CutRequest::default()
-        };
-        let (media, _) = resolve_settings(&req).expect("by id");
-        assert_eq!(media.id, 102);
-        let req = CutRequest {
-            media: Some("unobtanium".to_string()),
-            ..CutRequest::default()
-        };
-        assert!(resolve_settings(&req).is_err());
+        assert_eq!(resolve_media(Some("vinyl")).expect("vinyl").id, 102);
+        assert_eq!(resolve_media(Some("102")).expect("by id").id, 102);
+        assert!(resolve_media(Some("unobtanium")).is_err());
     }
 
     #[test]
-    fn mat_parses() {
-        assert_eq!(parse_mat("24x24").expect("pro mat"), Mat::CameoPro24x24);
+    fn machines_resolve_by_id_or_firmware_name() {
+        let reg = registry(None).expect("registry");
+        assert_eq!(resolve_machine(&reg, "cameo-3").expect("id").id, "cameo-3");
         assert_eq!(
-            parse_mat("8.5x12").expect("portrait mat"),
-            Mat::Portrait8_5x12
+            resolve_machine(&reg, "CAMEO 4 PRO").expect("fw").id,
+            "cameo-4-pro"
         );
-        assert!(parse_mat("11x11").is_err());
+        assert!(resolve_machine(&reg, "warp-plotter").is_err());
     }
 
     #[test]
     fn starter_document_flattens_with_outline_paths() {
-        let doc = starter();
-        let paths = flatten_document(&doc);
+        let paths = flatten_document(&starter());
         assert!(!paths.is_empty(), "starter doc should yield cut paths");
-        for path in paths {
-            assert!(path.len() >= 2, "each path has at least two points");
-        }
+        assert!(paths.iter().all(|p| p.len() >= 2));
     }
 
     #[test]
     fn encode_returns_cameo4pro_by_default() {
-        let doc = starter();
-        let req = CutRequest::default();
-        let (_, _, settings, model) = encode(&req, &doc).expect("encodes");
-        assert_eq!(model, Model::Cameo4Pro);
-        assert_eq!(settings.mat, Mat::CameoPro24x24);
+        let (_, _, job, caps) = encode(&CutRequest::default(), &starter()).expect("encodes");
+        assert_eq!(caps.id, "cameo-4-pro");
+        assert_eq!(job.mat, Mat::CameoPro24x24);
     }
 
     #[test]
     fn dry_run_transcript_starts_with_header_and_setup() {
-        let doc = starter();
-        let req = CutRequest::default();
-        let lines = run(&req, &doc).expect("dry runs");
+        let lines = run(&CutRequest::default(), &starter()).expect("dry runs");
         assert!(lines[0].starts_with("dry run: encoded"));
-        assert!(lines.iter().any(|l| l.starts_with("dry run: encoded")));
-        // The program section includes the tool select and media pressure.
         assert!(lines.iter().any(|l| l == "J1"));
         assert!(lines.iter().any(|l| l.starts_with("FX")));
+    }
+
+    #[test]
+    fn out_of_range_force_is_rejected_not_clamped() {
+        let req = CutRequest {
+            pressure: Some(34),
+            ..CutRequest::default()
+        };
+        let err = run(&req, &starter()).expect_err("force 34");
+        assert!(err.to_string().contains("force 34 outside 1..=33"));
+    }
+
+    #[test]
+    fn cricut_is_a_slot_not_a_driver() {
+        let req = CutRequest {
+            model_name: Some("cricut-maker-3".to_string()),
+            ..CutRequest::default()
+        };
+        let err = run(&req, &starter()).expect_err("unsupported");
+        assert!(err.to_string().contains("not implemented"), "{err}");
+    }
+
+    #[test]
+    fn generic_hpgl_spools_to_a_file_device() {
+        let path =
+            std::env::temp_dir().join(format!("stencilcraft-cut-{}.plt", std::process::id()));
+        let req = CutRequest {
+            model_name: Some("generic-hpgl".to_string()),
+            media_size: Some((1000.0, 1000.0)),
+            mat: Some(Mat::None),
+            device: Some(format!("file:{}", path.display())),
+            ..CutRequest::default()
+        };
+        let lines = run(&req, &starter()).expect("hpgl");
+        assert!(lines.iter().any(|l| l.starts_with("sent ")));
+        let bytes = std::fs::read(&path).expect("written");
+        assert!(bytes.starts_with(b"IN;\nSP1;\n"));
+        let _ = std::fs::remove_file(&path);
     }
 }

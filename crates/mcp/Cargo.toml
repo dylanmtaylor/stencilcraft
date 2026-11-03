@@ -13,7 +13,9 @@ stencilcraft-doc = { workspace = true }
 stencilcraft-engine = { workspace = true }
 stencilcraft-gcode = { workspace = true }
 stencilcraft-dxf = { workspace = true }
+stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
+stencilcraft-machine = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 

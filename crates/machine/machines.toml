@@ -1,0 +1,600 @@
+# StencilCraft machine registry: one [[machine]] per model. Adding a model is
+# data, not code: pick an existing `protocol`, fill in what is documented, and
+# leave everything else out — a missing value means "not publicly documented",
+# and the encoder then refuses (never guesses). Users can add or override
+# entries with their own file of the same shape (`--machines FILE`).
+#
+# Fields:
+#   id, name, vendor        identity (id is the CLI/MCP handle)
+#   protocol                silhouette-legacy | silhouette-cameo3 | silhouette-cameo4 |
+#                           gpgl | hpgl | dmpl | gcode | export-only | unsupported
+#   support                 supported | experimental | export-only | unsupported
+#   usb = "vvvv:pppp"       USB vendor:product id
+#   firmware                substring of the firmware (`FG`) reply identifying it
+#   cut_width_mm/cut_length_mm, media_width_mm
+#   roll_feed               cuts from a roll / without a mat
+#   mats                    TG mat ids: 12x12 12x24 8x12 15x15 24x24 8.5x12
+#   tool_holders, tools     see ToolKind ids in docs/machine-architecture.md
+#   force/speed = { min, max, unit }   ranges the encoder may send; absent = panel only
+#   max_force_gf, bluetooth, regmarks, quad_regmarks, notes
+#
+# Sources per row: docs/machine.md ("What is verified vs unknown").
+
+# ---------------------------------------------------------------- Silhouette
+
+[[machine]]
+id = "portrait"
+name = "Silhouette Portrait"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:1123"
+cut_width_mm = 206.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["8x12"]
+tool_holders = 1
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+bluetooth = false
+regmarks = true
+
+[[machine]]
+id = "portrait-2"
+name = "Silhouette Portrait 2"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:1132"
+firmware = "PORTRAIT2"
+cut_width_mm = 203.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["8x12"]
+tool_holders = 1
+tools = ["autoblade", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+regmarks = true
+notes = "AutoBlade depth is not commandable in this dialect; set it by hand. Listed in the community Bluetooth name table, unconfirmed."
+
+[[machine]]
+id = "portrait-3"
+name = "Silhouette Portrait 3"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:113a"
+firmware = "PORTRAIT3"
+cut_width_mm = 203.0
+cut_length_mm = 18290.0
+roll_feed = true
+mats = ["8x12"]
+tool_holders = 1
+tools = ["autoblade", "ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "portrait-4"
+name = "Silhouette Portrait 4"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:113f"
+firmware = "PORTRAIT4"
+cut_width_mm = 216.0
+cut_length_mm = 18290.0
+roll_feed = true
+mats = ["8x12", "8.5x12"]
+tool_holders = 1
+tools = ["autoblade", "ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo"
+name = "Silhouette CAMEO"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:1121"
+cut_width_mm = 304.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 1
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+bluetooth = false
+regmarks = true
+notes = "Physical left margin of 9 mm (community table)."
+
+[[machine]]
+id = "cameo-2"
+name = "Silhouette CAMEO 2"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:112b"
+cut_width_mm = 304.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 1
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+bluetooth = false
+regmarks = true
+
+[[machine]]
+id = "cameo-3"
+name = "Silhouette CAMEO 3"
+vendor = "Silhouette"
+protocol = "silhouette-cameo3"
+usb = "0b4d:112f"
+firmware = "CAMEO3"
+cut_width_mm = 304.8
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "pen"]
+max_force_gf = 210
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo-4"
+name = "Silhouette CAMEO 4"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1137"
+firmware = "CAMEO 4"
+cut_width_mm = 304.8
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+max_force_gf = 5000
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo-4-plus"
+name = "Silhouette CAMEO 4 Plus"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1138"
+firmware = "CAMEO 4 PLUS"
+cut_width_mm = 372.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24", "15x15"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+max_force_gf = 5000
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+notes = "372 mm cut width is a community estimate."
+
+[[machine]]
+id = "cameo-4-pro"
+name = "Silhouette CAMEO 4 Pro"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1139"
+firmware = "CAMEO 4 PRO"
+cut_width_mm = 600.0
+cut_length_mm = 3000.0
+media_width_mm = 609.6
+roll_feed = true
+mats = ["12x12", "12x24", "24x24"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+max_force_gf = 5000
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo-pro-mk2"
+name = "Silhouette CAMEO Pro MK II"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1146"
+firmware = "CAMEO PRO MARK2"
+cut_width_mm = 609.0
+cut_length_mm = 18290.0
+roll_feed = true
+mats = ["12x12", "12x24", "24x24"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+regmarks = true
+quad_regmarks = true
+
+[[machine]]
+id = "cameo-5"
+name = "Silhouette CAMEO 5"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1140"
+firmware = "CAMEO 5"
+cut_width_mm = 330.2
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo-5-plus"
+name = "Silhouette CAMEO 5 Plus"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "0b4d:1141"
+firmware = "CAMEO 5 PLUS"
+cut_width_mm = 372.0
+cut_length_mm = 3000.0
+roll_feed = true
+mats = ["12x12", "12x24", "15x15"]
+tool_holders = 2
+tools = ["autoblade", "ratchet", "deep-cut", "kraft", "rotary", "punch", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+
+[[machine]]
+id = "cameo-5-alpha"
+name = "Silhouette CAMEO 5 Alpha"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "3844:0001"
+firmware = "CAMEO 5 ALPHA"
+cut_width_mm = 330.2
+cut_length_mm = 3000.0
+roll_feed = true
+tool_holders = 2
+tools = ["autoblade", "pen"]
+force = { min = 1, max = 40, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+quad_regmarks = true
+notes = "Mat support and full tool list not documented; only no-mat is accepted."
+
+[[machine]]
+id = "cameo-5-alpha-plus"
+name = "Silhouette CAMEO 5 Alpha Plus"
+vendor = "Silhouette"
+protocol = "silhouette-cameo4"
+usb = "3844:0002"
+firmware = "CAMEO 5 ALPHA PLUS"
+cut_width_mm = 372.0
+cut_length_mm = 3000.0
+roll_feed = true
+tool_holders = 2
+tools = ["autoblade", "pen"]
+force = { min = 1, max = 40, unit = "steps" }
+speed = { min = 1, max = 30, unit = "steps" }
+bluetooth = true
+regmarks = true
+quad_regmarks = true
+notes = "Mat support and full tool list not documented; only no-mat is accepted."
+
+[[machine]]
+id = "curio"
+name = "Silhouette Curio"
+vendor = "Silhouette"
+protocol = "export-only"
+support = "export-only"
+tools = ["emboss", "etch", "pen"]
+notes = "No public protocol description or USB id: export SVG/DXF and send from the vendor's software."
+
+[[machine]]
+id = "curio-2"
+name = "Silhouette Curio 2"
+vendor = "Silhouette"
+protocol = "export-only"
+support = "export-only"
+tools = ["emboss", "deboss", "etch", "pen"]
+notes = "No public protocol description or USB id: export SVG/DXF and send from the vendor's software."
+
+[[machine]]
+id = "craft-robo-cc200-20"
+name = "Graphtec Craft Robo CC200-20"
+vendor = "Graphtec"
+protocol = "silhouette-legacy"
+usb = "0b4d:110a"
+cut_width_mm = 200.0
+cut_length_mm = 1000.0
+tool_holders = 1
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+regmarks = true
+
+[[machine]]
+id = "craft-robo-cc300-20"
+name = "Graphtec Craft Robo CC300-20"
+vendor = "Graphtec"
+protocol = "silhouette-legacy"
+usb = "0b4d:111a"
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+notes = "Cut area not documented: pass the loaded media size."
+
+[[machine]]
+id = "silhouette-sd-1"
+name = "Silhouette SD 1"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:111c"
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+notes = "Cut area not documented: pass the loaded media size."
+
+[[machine]]
+id = "silhouette-sd-2"
+name = "Silhouette SD 2"
+vendor = "Silhouette"
+protocol = "silhouette-legacy"
+usb = "0b4d:111d"
+tools = ["ratchet", "pen"]
+force = { min = 1, max = 33, unit = "steps" }
+speed = { min = 1, max = 10, unit = "steps" }
+notes = "Cut area not documented: pass the loaded media size."
+
+# ----------------------------------------------------------- Graphtec CE pro
+
+[[machine]]
+id = "graphtec-ce6000-40"
+name = "Graphtec CE6000-40"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 484.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed ranges are not published for GP-GL on this series: set them on the panel. USB product id not publicly documented: use a serial port."
+
+[[machine]]
+id = "graphtec-ce6000-60"
+name = "Graphtec CE6000-60"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 712.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce6000-120"
+name = "Graphtec CE6000-120"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 1346.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce7000-40"
+name = "Graphtec CE7000-40"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 484.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+max_force_gf = 450
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce7000-60"
+name = "Graphtec CE7000-60"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 712.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+max_force_gf = 450
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce7000-130"
+name = "Graphtec CE7000-130"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 1372.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+max_force_gf = 450
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce7000-160"
+name = "Graphtec CE7000-160"
+vendor = "Graphtec"
+protocol = "gpgl"
+media_width_mm = 1626.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+max_force_gf = 450
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+[[machine]]
+id = "graphtec-ce-lite-50"
+name = "Graphtec CE LITE-50"
+vendor = "Graphtec"
+protocol = "gpgl"
+cut_width_mm = 498.0
+cut_length_mm = 3000.0
+roll_feed = true
+tools = ["drag-blade", "pen"]
+notes = "Set the panel command mode to GP-GL with 0.1 mm step size. Force and speed on the panel. USB product id not publicly documented."
+
+# ------------------------------------------------------------------ Generic
+
+[[machine]]
+id = "generic-gpgl"
+name = "Generic GP-GL plotter"
+vendor = "Generic"
+protocol = "gpgl"
+roll_feed = true
+tool_holders = 1
+tools = ["drag-blade", "pen"]
+speed = { min = 1, max = 10, unit = "steps" }
+notes = "Any GP-GL plotter at 0.1 mm steps. Speed 1-10 is the GP-GL `!` scale (fraction of the machine's maximum); force is model-specific: set it on the panel. Pass the loaded media size."
+
+[[machine]]
+id = "generic-hpgl"
+name = "Generic HP-GL cutter"
+vendor = "Generic"
+protocol = "hpgl"
+roll_feed = true
+tool_holders = 1
+tools = ["drag-blade", "pen"]
+notes = "Roland, USCutter, Vinyl Express and most sign cutters in HP-GL mode. Force and speed on the panel. Pass the loaded media size."
+
+[[machine]]
+id = "generic-dmpl"
+name = "Generic DMPL cutter"
+vendor = "Generic"
+protocol = "dmpl"
+support = "experimental"
+roll_feed = true
+tool_holders = 1
+tools = ["drag-blade", "pen"]
+notes = "Experimental: DMPL framing is not verified against a published manual. Test on scrap. Force and speed on the panel. Pass the loaded media size."
+
+[[machine]]
+id = "grbl-laser"
+name = "Grbl laser / knife (G-code)"
+vendor = "Generic"
+protocol = "gcode"
+tool_holders = 1
+tools = ["laser", "drag-blade", "pen"]
+force = { min = 0, max = 1000, unit = "S (spindle/laser power, Grbl $30=1000)" }
+speed = { min = 1, max = 60000, unit = "mm/min" }
+notes = "Grbl-style G-code over USB-CDC serial. Force maps to laser power S. Pass the work area as the media size. Pause (!), resume (~) and cancel (Ctrl-X) are Grbl real-time commands."
+
+# ------------------------------------------------------------------- Cricut
+# Driver slots only. The Cricut machine protocol is proprietary, reportedly
+# encrypted and tied to the vendor's cloud app; implementing it needs an owner
+# decision and legal review. Capabilities below are from public product pages,
+# unverified. Workaround: export SVG/DXF/PNG and upload to Design Space.
+
+[[machine]]
+id = "cricut-joy"
+name = "Cricut Joy"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 114.3
+roll_feed = true
+tools = ["drag-blade", "pen", "foil"]
+bluetooth = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-joy-xtra"
+name = "Cricut Joy Xtra"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 215.9
+roll_feed = true
+tools = ["drag-blade", "pen", "foil"]
+bluetooth = true
+regmarks = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-explore-air-2"
+name = "Cricut Explore Air 2"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 292.1
+cut_length_mm = 596.9
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["drag-blade", "pen", "score", "foil"]
+bluetooth = true
+regmarks = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-explore-3"
+name = "Cricut Explore 3"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 292.1
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["drag-blade", "pen", "score", "foil"]
+bluetooth = true
+regmarks = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-maker"
+name = "Cricut Maker"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 292.1
+cut_length_mm = 596.9
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["drag-blade", "rotary", "knife-blade", "score", "deboss", "engrave", "perforate", "pen", "foil"]
+bluetooth = true
+regmarks = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-maker-3"
+name = "Cricut Maker 3"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 292.1
+roll_feed = true
+mats = ["12x12", "12x24"]
+tool_holders = 2
+tools = ["drag-blade", "rotary", "knife-blade", "score", "deboss", "engrave", "perforate", "pen", "foil"]
+bluetooth = true
+regmarks = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."
+
+[[machine]]
+id = "cricut-venture"
+name = "Cricut Venture"
+vendor = "Cricut"
+protocol = "unsupported"
+support = "unsupported"
+cut_width_mm = 609.6
+roll_feed = true
+tool_holders = 2
+tools = ["drag-blade", "pen", "score", "foil"]
+bluetooth = true
+notes = "Proprietary protocol: not implemented. Export SVG and upload to Design Space."

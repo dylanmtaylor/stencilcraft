@@ -1,0 +1,9 @@
+# Generic HP-GL cutter (generic-hpgl) protocol=hpgl
+IN;
+SP1;
+PU200,400;
+PD600,400,600,0,200,0,200,400;
+PU800,400;
+PD1200,0,800,0;
+PU;
+SP0;

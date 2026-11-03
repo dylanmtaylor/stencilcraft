@@ -4,11 +4,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Cutting-machine control for StencilCraft: model/media/mat tables, Graphtec ASCII command encoder, transport layer"
+description = "Vendor-neutral cutting-machine drivers for StencilCraft: capabilities registry (machines.toml), protocols (GP-GL, HP-GL, DMPL, G-code), transports"
 
 [dependencies]
 stencilcraft-geom = { workspace = true }
+serde = { workspace = true }
+# The machine table (`machines.toml`); MIT OR Apache-2.0, wasm-buildable.
+toml = { version = "1", default-features = false, features = ["std", "serde", "parse"] }
 serialport = { version = "4", optional = true, default-features = false }
+nusb = { version = "0.2.7", optional = true }
 
 [features]
 default = []
@@ -16,6 +20,9 @@ default = []
 # via an OS-paired /dev/rfcomm*, etc.). Everything else in this crate is
 # dependency-free so dry runs and tests build anywhere.
 serial = ["dep:serialport"]
+# USB bulk transport for the Silhouette/Graphtec 0b4d (and 3844) vendor family via
+# `nusb` (MIT OR Apache-2.0, pure Rust). Off by default: dry runs need nothing.
+usb = ["dep:nusb"]
 
 [dev-dependencies]
 stencilcraft-testkit = { workspace = true }

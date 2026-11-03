@@ -28,6 +28,7 @@ stencilcraft-testkit = { workspace = true }
 
 [features]
 serial = ["stencilcraft-machine/serial"]
+usb = ["stencilcraft-machine/usb"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

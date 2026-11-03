@@ -6,13 +6,14 @@ use craft_draw::ui::pen::PathSelection;
 use craft_theme::TypeRole;
 use craft_ui::canvas::quad::Anchor9;
 use craft_ui::composites::SectionHeader;
-use craft_ui::controls::{Button, ButtonVariant, ControlSize, NumberField, Segmented};
+use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, NumberField, Segmented};
 use craft_ui::edit::EditEvent;
 use craft_ui::icons::Icon;
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::patterns::{AlignBar, Panel};
 use craft_ui::primitives::{Content, Text};
 use eframe::egui;
+use stencilcraft_engine::document::{DocumentCommand, TransformRequest};
 use stencilcraft_engine::{
     BooleanOperation, Command, DistributionAxis, Effect, NodeAxis, NodeRef, NodeType, SegmentType,
     Side,
@@ -165,6 +166,11 @@ pub struct PanelState {
     pub rotate_deg: f64,
     pub scale_pct: [f64; 2],
     pub scale_linked: bool,
+    pub shear_deg: f64,
+    /// Transform each object about its own centre (Transform Each).
+    pub each: bool,
+    /// Distribute Spacing by Value's gap.
+    pub spacing_mm: f64,
     /// The options bar's reference point for X/Y/W/H.
     pub pivot: Anchor9,
 }
@@ -184,6 +190,9 @@ impl Default for PanelState {
             rotate_deg: 45.0,
             scale_pct: [100.0, 100.0],
             scale_linked: true,
+            shear_deg: 15.0,
+            each: false,
+            spacing_mm: 5.0,
             pivot: Anchor9::TopLeft,
         }
     }
@@ -1004,16 +1013,56 @@ impl StencilApp {
                     None => None,
                 };
                 center = button(ui, "Center to Page", any);
+                labelled(ui, "Spacing", |ui| {
+                    number(
+                        ui,
+                        "transform-spacing",
+                        "Distribute spacing",
+                        &mut state.spacing_mm,
+                        0.0..=10_000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for (label, axis) in [
+                        ("Space Horizontally", DistributionAxis::Horizontal),
+                        ("Space Vertically", DistributionAxis::Vertical),
+                    ] {
+                        if button(ui, label, many) {
+                            command = Some(Command::Document(
+                                DocumentCommand::ShapesDistributeSpacing {
+                                    ids: ids.clone(),
+                                    axis,
+                                    gap_mm: state.spacing_mm,
+                                },
+                            ));
+                        }
+                    }
+                });
             });
-            let transform =
-                |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| Command::ShapesTransform {
+            let _ = Checkbox::bool(
+                "Transform each object about its own centre",
+                &mut state.each,
+            )
+            .show(ui);
+            let each = state.each;
+            // `transform.each` is remembered, so Transform Again repeats any of these.
+            let request = |dx_mm: f64, dy_mm: f64, scale_x: f64, scale_y: f64, degrees: f64| {
+                TransformRequest {
                     ids: ids.clone(),
-                    dx_mm: dx,
-                    dy_mm: dy,
-                    scale_x: sx,
-                    scale_y: sy,
-                    degrees: deg,
-                };
+                    dx_mm,
+                    dy_mm,
+                    scale_x,
+                    scale_y,
+                    degrees,
+                    each,
+                    ..TransformRequest::default()
+                }
+            };
+            let transform = |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| {
+                Command::Document(DocumentCommand::TransformEach(request(dx, dy, sx, sy, deg)))
+            };
             let _ = SectionHeader::new("transform-rotate", "Rotate").show(ui, |ui| {
                 labelled(ui, "Angle", |ui| {
                     number(
@@ -1073,7 +1122,7 @@ impl StencilApp {
                     state.scale_pct = [w, h];
                 });
                 ui.horizontal_wrapped(|ui| {
-                    for pct in [50.0, 200.0] {
+                    for pct in [33.0, 50.0, 100.0, 200.0, 300.0] {
                         if button(ui, &format!("{pct:.0}%"), any) {
                             command = Some(transform(0.0, 0.0, pct / 100.0, pct / 100.0, 0.0));
                         }
@@ -1081,6 +1130,35 @@ impl StencilApp {
                     if button(ui, "Scale", any) {
                         let [w, h] = state.scale_pct;
                         command = Some(transform(0.0, 0.0, w / 100.0, h / 100.0, 0.0));
+                    }
+                });
+            });
+            let _ = SectionHeader::new("transform-shear", "Shear").show(ui, |ui| {
+                labelled(ui, "Angle", |ui| {
+                    number(
+                        ui,
+                        "transform-shear-deg",
+                        "Shear angle",
+                        &mut state.shear_deg,
+                        -89.0..=89.0,
+                        "{n}°",
+                        &numbers,
+                    );
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for (label, axis) in [
+                        ("Shear Horizontally", DistributionAxis::Horizontal),
+                        ("Shear Vertically", DistributionAxis::Vertical),
+                    ] {
+                        if button(ui, label, any) {
+                            command = Some(Command::Document(DocumentCommand::TransformEach(
+                                TransformRequest {
+                                    shear_degrees: state.shear_deg,
+                                    shear_axis: axis,
+                                    ..request(0.0, 0.0, 1.0, 1.0, 0.0)
+                                },
+                            )));
+                        }
                     }
                 });
             });

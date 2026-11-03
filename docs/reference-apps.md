@@ -360,25 +360,30 @@ Sources: [Silhouette, *File Types and Features*](https://silhouetteamerica.fresh
 
 These are the rows marked **missing** above. Rows marked partial are not listed. The ranked order is in [`gaps.md`](gaps.md).
 
-- **Canvas**: multiple pages/tabs, auto mat layout, guides, snap, measure.
-- **Drawing**: freehand, arc, knife, eraser, parametric shapes, pattern generators.
-- **Text**: typography controls, text on path / curve text, glyphs panel.
-- **Editing**: group/ungroup, break/join/close path, simplify, warp, lock.
+- **Canvas**: Home screen, Starter mode, document tabs, auto mat layout, snap to grid,
+  smart snapping, live dimension callouts, measure.
+- **Drawing**: freehand, arc, knife, eraser, parametric shapes, rhinestone/cross-stitch/puzzle.
+- **Text**: typography controls, text on path / curve text, glyphs panel, spelling check.
+- **Editing**: group/ungroup, break/join/close path, simplify, warp, lock, rotation knob,
+  Paste in Front, Select by Color, action-after-tool-use preference.
 - **Offset**: weld offsets / per-letter offsets.
-- **Trace**: image filters, outer-edge-only trace, background removal, live preview,
-  multi-colour trace.
-- **Pathfinder**: attach, flatten, contour.
-- **Replicate**: directional duplicate, arrays, radial copies, fill page, mirror copy,
-  nesting.
+- **Trace**: image filters, outer-edge-only trace and trace & detach, background removal,
+  live preview, multi-colour trace, image effects.
+- **Pathfinder**: Attach, Flatten, Contour, Detach Lines.
+- **Replicate**: directional duplicate, row/column presets, radial copies, fill page,
+  mirror copy, nesting.
 - **Alignment**: spacing by a set value.
-- **Layers**: reorder, lock, rename, move between layers, colour sync.
-- **Styles**: dashed/perforated lines, fill/gradient for printing, more operation types.
-- **Print & Cut**: mark options, printing from the app, bleed, sensor registration,
-  calibration, print size limits, scan-to-cut.
-- **Cut settings**: custom materials, per-layer settings, test cut, overcut, cut order,
-  mat-free strategy, weed lines.
-- **Machine**: mat preview, Bluetooth transport, load/unload/pause/cancel controls,
-  multi-cutter, batch jobs.
-- **Formats**: DXF import, PDF import, PDF/PNG/JPG export, external design-tool plugins.
-- **Preferences**: language.
+- **Layers**: reorder, lock, move between layers, Colour Sync.
+- **Styles**: dashed lines and joins/caps, fill/gradient/pattern, print cut lines,
+  sketch and stipple fills, specialty (emboss/deboss/foil) tools, pop-up card generator.
+- **Print & Cut**: mark options, show print border, printing from the app, bleed, sensor
+  registration, calibration, print size limits, scan-to-cut.
+- **Cut settings**: custom materials, per-layer settings, advanced material settings,
+  test cut, overcut, cut order, mat-free strategy, weed lines.
+- **Machine**: Send sub-modes by colour, tool-holder line assignment, mat preview,
+  Bluetooth transport, load/unload/pause/cancel controls, packet size, multi-cutter, batch
+  jobs.
+- **Formats**: DXF import, PDF import, PDF/PNG/JPG export, external design-tool plugins,
+  autosave recovery.
+- **Preferences**: language, print resolution and preview.
 - **Platforms**: browser/mobile client.

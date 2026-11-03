@@ -3,6 +3,8 @@
 //! from a `CutJob`; nothing reaches a protocol without passing `validate`.
 
 use crate::{Capabilities, MachineError, Mat, ProtocolId, ToolKind};
+use stencilcraft_geom as geom;
+use vectorcraft_geom::{FillRule, PathData};
 
 /// Hard caps on job size from untrusted documents.
 pub const MAX_POINTS: usize = 2_000_000;
@@ -78,6 +80,10 @@ pub struct Operation {
     /// Polylines in mm, `(x right, y down)`, origin at the media's top-left.
     pub paths: Vec<Vec<(f64, f64)>>,
     pub settings: OpSettings,
+    /// Source document layer ("" = not split by layer).
+    pub layer: String,
+    /// The layer's line colour, `#rrggbb`.
+    pub color: Option<String>,
 }
 
 impl Operation {
@@ -169,6 +175,9 @@ pub struct CutJob {
     /// Flip horizontally about the media centre (heat-transfer vinyl is cut
     /// face down). Applied at job build time, never to the document.
     pub mirror: bool,
+    /// Unite overlapping closed contours of each operation before cutting so
+    /// overlaps aren't cut twice (weld on cut). The document is untouched.
+    pub weld: bool,
 }
 
 impl Default for CutJob {
@@ -189,7 +198,136 @@ impl Default for CutJob {
             interior_first: true,
             closed_overcut_mm: 0.0,
             mirror: false,
+            weld: false,
         }
+    }
+}
+
+/// Send settings for one document layer: the reference's Send › Cut by Line
+/// Color row (on/off, tool holder, passes, force, speed). `None` keeps the
+/// job's value; overrides are checked against the machine by `validate`.
+#[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LayerSettings {
+    /// Layer name, or `#rrggbb` to match the layer's line colour.
+    pub layer: String,
+    pub skip: bool,
+    #[serde(alias = "tool")]
+    pub holder: Option<u8>,
+    pub passes: Option<u8>,
+    pub force: Option<u32>,
+    pub speed: Option<u32>,
+}
+
+impl LayerSettings {
+    /// Parse `NAME:skip` or `NAME:tool=2,passes=2,force=20,speed=5`
+    /// (`holder=` is an alias of `tool=`).
+    pub fn parse(spec: &str) -> Result<LayerSettings, String> {
+        let (name, rest) = spec
+            .rsplit_once(':')
+            .ok_or_else(|| format!("layer {spec}: expected NAME:SETTINGS"))?;
+        let mut ls = LayerSettings {
+            layer: name.trim().to_string(),
+            ..LayerSettings::default()
+        };
+        for item in rest.split(',').map(str::trim) {
+            let bad = || format!("layer {spec}: bad setting `{item}`");
+            if item.eq_ignore_ascii_case("skip") || item.eq_ignore_ascii_case("off") {
+                ls.skip = true;
+                continue;
+            }
+            let (key, v) = item.split_once('=').ok_or_else(bad)?;
+            let v = v.trim();
+            match key.trim().to_ascii_lowercase().as_str() {
+                "tool" | "holder" => ls.holder = Some(v.parse().map_err(|_| bad())?),
+                "passes" => ls.passes = Some(v.parse().map_err(|_| bad())?),
+                "force" => ls.force = Some(v.parse().map_err(|_| bad())?),
+                "speed" => ls.speed = Some(v.parse().map_err(|_| bad())?),
+                _ => return Err(bad()),
+            }
+        }
+        Ok(ls)
+    }
+
+    fn matches(&self, op: &Operation) -> bool {
+        op.layer == self.layer
+            || (self.layer.starts_with('#')
+                && op
+                    .color
+                    .as_deref()
+                    .is_some_and(|c| c.eq_ignore_ascii_case(&self.layer)))
+    }
+}
+
+/// One document layer's geometry for [`CutJob::split_layers`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LayerPaths {
+    pub name: String,
+    pub color: Option<String>,
+    pub paths: Paths,
+}
+
+impl CutJob {
+    /// Cut by layer: replace the job's single operation with one per layer
+    /// (same tool settings), apply `settings` (skip, holder, passes, force,
+    /// speed), then merge neighbouring operations whose settings ended up
+    /// equal, so a job without overrides stays one operation. A setting that
+    /// names no layer is refused; out-of-range values are left to `validate`.
+    pub fn split_layers(
+        &mut self,
+        layers: Vec<LayerPaths>,
+        settings: &[LayerSettings],
+    ) -> Result<(), MachineError> {
+        let Some(template) = self.operations.first().cloned() else {
+            return Ok(());
+        };
+        let ops: Vec<Operation> = layers
+            .into_iter()
+            .map(|l| Operation {
+                layer: l.name,
+                color: l.color,
+                paths: l.paths,
+                ..template.clone()
+            })
+            .collect();
+        if let Some(ls) = settings
+            .iter()
+            .find(|ls| !ops.iter().any(|o| ls.matches(o)))
+        {
+            let names: Vec<&str> = ops.iter().map(|o| o.layer.as_str()).collect();
+            return Err(MachineError::Limit(format!(
+                "layer `{}` is not in the document (layers: {})",
+                ls.layer,
+                names.join(", ")
+            )));
+        }
+        let mut out: Vec<Operation> = Vec::new();
+        'ops: for mut op in ops {
+            let matching: Vec<&LayerSettings> =
+                settings.iter().filter(|ls| ls.matches(&op)).collect();
+            for ls in matching {
+                if ls.skip {
+                    continue 'ops;
+                }
+                op.holder = ls.holder.unwrap_or(op.holder);
+                op.settings.passes = ls.passes.unwrap_or(op.settings.passes);
+                op.settings.force = ls.force.or(op.settings.force);
+                op.settings.speed = ls.speed.or(op.settings.speed);
+            }
+            match out.last_mut() {
+                Some(prev)
+                    if prev.kind == op.kind
+                        && prev.tool == op.tool
+                        && prev.holder == op.holder
+                        && prev.settings == op.settings =>
+                {
+                    prev.paths.append(&mut op.paths);
+                }
+                _ => out.push(op),
+            }
+        }
+        self.operations = out;
+        Ok(())
     }
 }
 
@@ -433,6 +571,85 @@ pub fn extend_closed(path: &[(f64, f64)], d: f64) -> Vec<(f64, f64)> {
     out
 }
 
+/// Weld on cut: unite overlapping closed contours so shared regions are cut
+/// once. Contours are grouped into shapes by nesting (a contour inside an odd
+/// number of others is a hole of its innermost enclosing contour), each shape
+/// is filled even-odd and the shapes are united with the Pathfinder/Weld
+/// boolean engine. Open paths pass through; a union the engine refuses keeps
+/// the paths as they are.
+pub fn weld_paths(paths: Paths) -> Paths {
+    // shortcut: the nesting pass is quadratic, so above MAX_SORT_PATHS weld is skipped; upgrade with a spatial index.
+    if paths.len() < 2 || paths.len() > MAX_SORT_PATHS {
+        return paths;
+    }
+    let (closed, open): (Paths, Paths) = paths.iter().cloned().partition(|p| is_closed(p));
+    if closed.len() < 2 {
+        return paths;
+    }
+    let bbs: Vec<BBoxMm> = closed
+        .iter()
+        .map(|p| find_bbox(core::slice::from_ref(p)).unwrap_or((0.0, 0.0, 0.0, 0.0)))
+        .collect();
+    let parents: Vec<Vec<usize>> = (0..closed.len())
+        .map(|i| {
+            (0..closed.len())
+                .filter(|&j| {
+                    i != j
+                        && match (closed.get(j), bbs.get(j), closed.get(i), bbs.get(i)) {
+                            (Some(o), Some(ob), Some(p), Some(pb)) => encloses(o, *ob, p, *pb),
+                            _ => false,
+                        }
+                })
+                .collect()
+        })
+        .collect();
+    let depth = |i: usize| parents.get(i).map_or(0, Vec::len);
+    // Each even-depth contour starts a shape; odd-depth contours join the
+    // innermost enclosing one.
+    let mut shapes: Vec<geom::BezPath> = vec![geom::BezPath::new(); closed.len()];
+    for (i, p) in closed.iter().enumerate() {
+        let owner = if depth(i) % 2 == 0 {
+            i
+        } else {
+            parents
+                .get(i)
+                .and_then(|ps| ps.iter().copied().max_by_key(|&j| depth(j)))
+                .unwrap_or(i)
+        };
+        let Some(bp) = shapes.get_mut(owner) else {
+            continue;
+        };
+        for (k, &(x, y)) in p.iter().enumerate() {
+            let pt = geom::Point::new(x, y);
+            if k == 0 {
+                bp.move_to(pt);
+            } else {
+                bp.line_to(pt);
+            }
+        }
+        bp.close_path();
+    }
+    let data: Vec<PathData> = shapes
+        .iter()
+        .filter(|b| !b.elements().is_empty())
+        .map(PathData::from_bezpath)
+        .collect();
+    let inputs: Vec<(&PathData, FillRule)> = data.iter().map(|d| (d, FillRule::EvenOdd)).collect();
+    match vectorcraft_pathops::try_unite_all(&inputs) {
+        Ok(united) if !united.subpaths.is_empty() => {
+            let polylines =
+                geom::path_to_polylines(&united.to_bezpath(), geom::DEFAULT_FLATTEN_STEPS);
+            let mut out = crate::paths_from_polylines(&polylines);
+            for p in &mut out {
+                p.dedup();
+            }
+            out.extend(open);
+            out
+        }
+        _ => paths,
+    }
+}
+
 /// Width the mirror flips about: loaded media, then mat, then machine.
 fn mirror_width(caps: &Capabilities, job: &CutJob) -> Option<f64> {
     job.media_size_mm
@@ -441,7 +658,7 @@ fn mirror_width(caps: &Capabilities, job: &CutJob) -> Option<f64> {
         .or(caps.cut_width_mm.or(caps.media_width_mm))
 }
 
-/// Apply the job-level settings (cut order, closed-contour overcut, mirror)
+/// Apply the job-level settings (weld, cut order, closed-contour overcut, mirror)
 /// to every operation's paths. Validate the result again: a mirrored design
 /// must still fit.
 pub fn apply_job_settings(caps: &Capabilities, job: &CutJob) -> Result<CutJob, MachineError> {
@@ -460,7 +677,10 @@ pub fn apply_job_settings(caps: &Capabilities, job: &CutJob) -> Result<CutJob, M
     let mut out = job.clone();
     for op in &mut out.operations {
         let pen = op.is_pen();
-        let paths = core::mem::take(&mut op.paths);
+        let mut paths = core::mem::take(&mut op.paths);
+        if job.weld {
+            paths = weld_paths(paths);
+        }
         let mut paths = order_paths(paths, job.order, job.interior_first);
         for p in &mut paths {
             if !pen && job.closed_overcut_mm > 0.0 {
@@ -521,7 +741,12 @@ pub fn validate(caps: &Capabilities, job: &CutJob) -> Result<(), MachineError> {
     let holders = caps.tool_holders.unwrap_or(1);
     let mut count = 0usize;
     for op in &job.operations {
-        validate_op(caps, op, holders)?;
+        validate_op(caps, op, holders).map_err(|e| match e {
+            MachineError::Limit(m) if !op.layer.is_empty() => {
+                MachineError::Limit(format!("{m} (layer {})", op.layer))
+            }
+            e => e,
+        })?;
         for path in &op.paths {
             count = count.saturating_add(path.len());
             if path.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {

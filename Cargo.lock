@@ -5116,6 +5116,8 @@ dependencies = [
  "stencilcraft-geom",
  "stencilcraft-testkit",
  "toml",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
 ]
 
 [[package]]

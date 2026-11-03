@@ -20,6 +20,7 @@ use craft_ui::controls::{
     Button, ButtonVariant, Checkbox, IconButton, Kbd, NumberField, Select, Slider, SliderScale,
     TextField, ToggleButton,
 };
+use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
 use craft_ui::docking::{
     Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
 };
@@ -28,12 +29,12 @@ use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
 use craft_ui::list::{ListRow, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::menu::{MenuBar, MenuEntry, MenuItem};
+use craft_ui::menu::{MenuBar, MenuEntry, MenuItem, PressMenu};
 use craft_ui::patterns::{
     AlignAction, AlignBar, Inspector, InspectorHeader, LastUsed, OptionsBar, Panel, RailTool,
     StatusBar, ToolRail, ToolSlot,
 };
-use craft_ui::primitives::{Content, Text};
+use craft_ui::primitives::{Content, Divider, Text};
 use craft_ui::title_bar::{Frame, LeadingEnd, Title, TitleBar};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -598,6 +599,7 @@ pub struct StencilApp {
     pub selected_shapes: Vec<u64>,
     pub selected_layer: Option<usize>,
     pub text_dialog: bool,
+    pub text_dialog_state: DialogState<String>,
     pub text_value: String,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
@@ -738,6 +740,7 @@ impl StencilApp {
             selected_shapes: Vec::new(),
             selected_layer: Some(0),
             text_dialog: false,
+            text_dialog_state: DialogState::new(),
             text_value: String::new(),
             canvas_drag_shape: None,
             canvas_selection_start: None,
@@ -1193,30 +1196,31 @@ impl StencilApp {
         if !self.text_dialog {
             return;
         }
-        let mut open = self.text_dialog;
-        let mut add_text = false;
-        let mut cancel = false;
-        egui::Window::new("Place text as cut outlines")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(parent.ctx(), |ui| {
-                ui.label("Places simple single-line engraved lettering (up to 80 characters).");
-                let edit = TextField::new("place-text", "Text to place", &self.text_value)
-                    .char_limit(80)
-                    .show(ui);
-                apply_edit(&mut self.text_value, &mut self.text_before, edit.event);
-                ui.horizontal(|ui| {
-                    if ui.add(Button::new("Cancel")).clicked() {
-                        cancel = true;
-                    }
-                    if ui.add(Button::new("Add text")).clicked() {
-                        add_text = true;
-                    }
-                });
-            });
-        self.text_dialog = open && !add_text && !cancel;
-        if add_text {
+        let mut before = self.text_before.take();
+        let shown = Dialog::new("place-text-dialog", "Place text as cut outlines")
+            .footer(Footer::standard().ok("Add text").cancel("Cancel"))
+            .show(
+                parent.ctx(),
+                &mut self.text_dialog_state,
+                &mut self.text_value,
+                |ui, text| {
+                    ui.add(
+                        Text::new(
+                            "Places simple single-line engraved lettering (up to 80 characters).",
+                        )
+                        .content(Content::Muted),
+                    );
+                    let edit = TextField::new("place-text", "Text to place", text.as_str())
+                        .char_limit(80)
+                        .show(ui);
+                    apply_edit(text, &mut before, edit.event);
+                },
+            );
+        self.text_before = before;
+        if shown.closed {
+            self.text_dialog = false;
+        }
+        if shown.outcome == Some(Outcome::Ok) {
             self.add_text();
         }
     }
@@ -1944,32 +1948,45 @@ impl StencilApp {
                             LeadingEnd::from_ui(ui)
                         },
                         |ui, _| {
+                            // The trailing slot lays out right to left: the switcher comes first
+                            // so it sits at the window edge, then Redo before Undo.
                             ui.horizontal(|ui| {
-                                egui::ComboBox::from_id_salt("workspace-switcher")
-                                    .selected_text("Essentials")
-                                    .width(88.0)
-                                    .show_ui(ui, |ui| {
-                                        if ui.selectable_label(true, "Essentials").clicked() {
-                                            reset_workspace_clicked = true;
-                                        }
-                                        if ui.selectable_label(false, "Reset Workspace").clicked() {
-                                            reset_workspace_clicked = true;
-                                        }
-                                    });
-                                ui.separator();
-                                if ui
-                                    .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
-                                    .clicked()
+                                let workspaces = [
+                                    MenuEntry::from(
+                                        MenuItem::new("Essentials", WorkspaceChoice::Essentials)
+                                            .radio(true),
+                                    ),
+                                    MenuEntry::Separator,
+                                    MenuItem::new("Reset Essentials", WorkspaceChoice::Reset)
+                                        .into(),
+                                ];
+                                let button = ui.add(
+                                    Button::new("Essentials")
+                                        .trailing_icon(Icon::ChevronDown)
+                                        .variant(ButtonVariant::Ghost)
+                                        .size(ControlSize::Sm),
+                                );
+                                if PressMenu::new(&workspaces)
+                                    .show(ui, &button)
+                                    .chosen
+                                    .is_some()
                                 {
-                                    undo_clicked = true;
+                                    reset_workspace_clicked = true;
                                 }
+                                Divider::vertical().show(ui);
                                 if ui
                                     .add(IconButton::new(Icon::Redo, "Redo").enabled(can_redo))
                                     .clicked()
                                 {
                                     redo_clicked = true;
                                 }
-                                ui.separator();
+                                if ui
+                                    .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
+                                    .clicked()
+                                {
+                                    undo_clicked = true;
+                                }
+                                Divider::vertical().show(ui);
                                 if ui
                                     .add(IconButton::new(theme_icon, "Switch Theme"))
                                     .clicked()
@@ -2042,10 +2059,10 @@ impl StencilApp {
                     });
                     bar.body(|ui| {
                         if count == 0 {
-                            ui.label("No selection");
-                            ui.separator();
+                            ui.add(Text::new("No selection"));
+                            Divider::vertical().show(ui);
                             let mut kerf_val = kerf_val_init;
-                            ui.label("Kerf:");
+                            ui.add(Text::new("Kerf:"));
                             let edit =
                                 NumberField::new("opt-kerf", "Kerf", kerf_val, &locale_numbers)
                                     .range(0.0..=2.0)
@@ -2062,14 +2079,14 @@ impl StencilApp {
                         } else if count == 1
                             && let Some(id) = selected_shape_id
                         {
-                            ui.label(format!("Shape #{id}"));
+                            ui.add(Text::new(format!("Shape #{id}")));
                             if let Some(bounds) = shape_bounds {
-                                ui.separator();
-                                ui.label(format!("W: {:.2} mm", bounds.width()));
-                                ui.label(format!("H: {:.2} mm", bounds.height()));
+                                Divider::vertical().show(ui);
+                                ui.add(Text::new(format!("W: {:.2} mm", bounds.width())));
+                                ui.add(Text::new(format!("H: {:.2} mm", bounds.height())));
                             }
                         } else {
-                            ui.label(format!("{count} shapes selected"));
+                            ui.add(Text::new(format!("{count} shapes selected")));
                             if ui.add(Button::new("Unite").size(ControlSize::Sm)).clicked() {
                                 do_unite = true;
                             }
@@ -2092,8 +2109,8 @@ impl StencilApp {
                                 .icon(Icon::Grid)
                                 .size(ControlSize::Sm),
                         );
-                        ui.separator();
-                        ui.label(format!("{object_count} objects"));
+                        Divider::vertical().show(ui);
+                        ui.add(Text::new(format!("{object_count} objects")));
                         let (mode_label, variant) = if send_mode {
                             ("← Design", ButtonVariant::Secondary)
                         } else {
@@ -2124,43 +2141,68 @@ impl StencilApp {
         }
     }
 
-    pub fn workflow_bar(&mut self, parent: &mut egui::Ui) {
-        egui::Panel::top("workflow").show(parent, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(if self.send_mode { "Make" } else { "Design" });
-                ui.separator();
-                ui.label(format!("{} objects", self.engine.doc.shape_count()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (label, destination) = if self.send_mode {
-                        ("← Design", false)
-                    } else {
-                        ("Make →", true)
-                    };
-                    if ui.add(Button::new(label)).clicked() {
-                        self.send_mode = destination;
-                    }
-                    ui.selectable_value(&mut self.send_mode, false, "Canvas");
-                });
-            });
-        });
-    }
-
     pub fn tools_panel(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            ui.small("TOOLS");
-            ui.separator();
-            if ui.add(Button::new("Deselect")).clicked() {
-                self.set_selection([]);
-            }
-            if !self.selected_shapes.is_empty()
-                && ui.add(Button::new("Duplicate selected")).clicked()
-            {
-                self.duplicate_selection();
-            }
-            ui.selectable_value(&mut self.canvas_lasso_mode, false, "▱ Box select");
-            ui.selectable_value(&mut self.canvas_lasso_mode, true, "⌁ Lasso select");
-            if ui.add(Button::new("＋ Rectangle")).clicked() {
+        let has_selection = !self.selected_shapes.is_empty();
+        let mut lasso = self.canvas_lasso_mode;
+        let mut clicked = None;
+        let _ = Panel::new("stencilcraft-tools-panel").show(ui, |ui| {
+            let _ = SectionHeader::new("tools-select", "Select")
+                .collapsible(false)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let _ = ui.add(
+                            ToggleButton::new("Lasso select", &mut lasso)
+                                .icon(Icon::Lasso)
+                                .size(ControlSize::Sm),
+                        );
+                        for (label, icon, enabled, tool) in [
+                            (
+                                "Deselect",
+                                Icon::Close,
+                                has_selection,
+                                ToolsAction::Deselect,
+                            ),
+                            (
+                                "Duplicate",
+                                Icon::Copy,
+                                has_selection,
+                                ToolsAction::Duplicate,
+                            ),
+                            ("Delete", Icon::Trash, has_selection, ToolsAction::Delete),
+                        ] {
+                            let button = Button::new(label)
+                                .icon(icon)
+                                .enabled(enabled)
+                                .size(ControlSize::Sm);
+                            if ui.add(button).clicked() {
+                                clicked = Some(tool);
+                            }
+                        }
+                    });
+                });
+            let _ = SectionHeader::new("tools-add", "Add")
+                .collapsible(false)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (label, icon, tool) in [
+                            ("Rectangle", Icon::Rectangle, ToolsAction::Rectangle),
+                            ("Image", Icon::Image, ToolsAction::Image),
+                            ("Text", Icon::Text, ToolsAction::Text),
+                        ] {
+                            let button = Button::new(label).icon(icon).size(ControlSize::Sm);
+                            if ui.add(button).clicked() {
+                                clicked = Some(tool);
+                            }
+                        }
+                    });
+                });
+        });
+        self.canvas_lasso_mode = lasso;
+        match clicked {
+            Some(ToolsAction::Deselect) => self.set_selection([]),
+            Some(ToolsAction::Duplicate) => self.duplicate_selection(),
+            Some(ToolsAction::Delete) => self.delete_selection(),
+            Some(ToolsAction::Rectangle) => {
                 self.run_command(Command::ShapeAddRect {
                     x: 20.0,
                     y: 20.0,
@@ -2169,29 +2211,17 @@ impl StencilApp {
                 });
                 self.select_latest_shape();
             }
-            if ui.add(Button::new("▧ Image")).clicked()
-                && let Some(path) = rfd::FileDialog::new()
+            Some(ToolsAction::Image) => {
+                if let Some(path) = rfd::FileDialog::new()
                     .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
                     .pick_file()
-            {
-                self.import_image(path);
+                {
+                    self.import_image(path);
+                }
             }
-            if ui.add(Button::new("T Text")).clicked() {
-                self.text_dialog = true;
-            }
-            if ui.add(Button::new("⊖ Delete")).clicked() {
-                self.delete_selection();
-            }
-            ui.separator();
-            if ui.add(Button::new("↶")).clicked() {
-                let _ = self.engine.undo();
-                self.retain_valid_selection();
-            }
-            if ui.add(Button::new("↷")).clicked() {
-                let _ = self.engine.redo();
-                self.retain_valid_selection();
-            }
-        });
+            Some(ToolsAction::Text) => self.text_dialog = true,
+            None => {}
+        }
     }
 
     pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
@@ -2589,13 +2619,13 @@ impl StencilApp {
     }
 
     pub fn send_tab(&mut self, ui: &mut egui::Ui) {
-        ui.label("Model");
+        ui.add(Text::new("Model"));
         let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
         for (model, label) in MODEL_CHOICES {
             model_select = model_select.option(*model, *label);
         }
         let _ = model_select.show(ui);
-        ui.label("Material");
+        ui.add(Text::new("Material"));
         let mut media_select = Select::new("send-material", "Material", &mut self.send.media_index);
         for (i, _) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {
             media_select = media_select.option(i, media_label(i));
@@ -2607,7 +2637,10 @@ impl StencilApp {
             self.send.speed_override = media.speed.unwrap_or(5);
         }
         ui.add_space(4.0);
-        ui.label(format!("Pressure  {}", self.send.pressure_override));
+        ui.add(Text::new(format!(
+            "Pressure  {}",
+            self.send.pressure_override
+        )));
         let mut pressure = f64::from(self.send.pressure_override);
         let edit = Slider::new("send-pressure", "Pressure", pressure, 1.0..=33.0)
             .step(1.0)
@@ -2615,7 +2648,7 @@ impl StencilApp {
         if apply_edit(&mut pressure, &mut self.pressure_before, edit.event) {
             self.send.pressure_override = pressure as u8;
         }
-        ui.label(format!("Speed  {}", self.send.speed_override));
+        ui.add(Text::new(format!("Speed  {}", self.send.speed_override)));
         let mut speed = f64::from(self.send.speed_override);
         let edit = Slider::new("send-speed", "Speed", speed, 1.0..=30.0)
             .step(1.0)
@@ -2624,20 +2657,24 @@ impl StencilApp {
             self.send.speed_override = speed as u8;
         }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
-        ui.separator();
+        Divider::horizontal().show(ui);
         if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
         }
         if let Some(summary) = &self.send.summary {
-            ui.separator();
+            Divider::horizontal().show(ui);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for line in summary {
-                    ui.monospace(line);
+                    ui.add(Text::new(line).role(TypeRole::Mono));
                 }
             });
         }
         ui.add_space(6.0);
-        ui.small("Real sends: stencilcraft-cli cut --in FILE --device PATH");
+        ui.add(
+            Text::new("Real sends: stencilcraft-cli cut --in FILE --device PATH")
+                .role(TypeRole::Caption)
+                .content(Content::Muted),
+        );
     }
 
     /// Encode the visible flattened design through the machine crate and
@@ -3206,7 +3243,7 @@ impl StencilApp {
                                 self.pending_zoom =
                                     Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
                             }
-                            ui.label(format!("{zoom_value:.0}%"));
+                            ui.add(Text::new(format!("{zoom_value:.0}%")));
                             if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
                                 self.pending_zoom = Some((self.view.zoom * 1.2).clamp(0.05, 400.0));
                             }
@@ -3215,7 +3252,7 @@ impl StencilApp {
                         StatusBar::message(ui, &status_msg, false);
                     });
                     bar.trailing(|ui| {
-                        ui.label(format!("Tool: {}", self.active_tool.label()))
+                        ui.add(Text::new(format!("Tool: {}", self.active_tool.label())))
                             .on_hover_text("Space+drag or middle-drag to pan · wheel to zoom");
                     });
                 });
@@ -3238,6 +3275,24 @@ pub fn apply_canvas_view_command(
             view.center_extent(width_mm, height_mm, viewport);
         }
     }
+}
+
+/// A button of the Tools panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolsAction {
+    Deselect,
+    Duplicate,
+    Delete,
+    Rectangle,
+    Image,
+    Text,
+}
+
+/// A row of the title bar's workspace switcher.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceChoice {
+    Essentials,
+    Reset,
 }
 
 /// A quick transform button in the inspector's Transform section.
@@ -4682,7 +4737,7 @@ mod tests {
             let node = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("＋ Rectangle"))
+                .find(|(_, node)| node.label() == Some("Rectangle"))
                 .unwrap();
             assert_eq!(node.1.role(), egui::accesskit::Role::Button);
             let bounds = node.1.bounds().unwrap();
@@ -4703,7 +4758,7 @@ mod tests {
             let node = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Duplicate selected"))
+                .find(|(_, node)| node.label() == Some("Duplicate"))
                 .unwrap();
             assert_eq!(node.1.role(), egui::accesskit::Role::Button);
             let bounds = node.1.bounds().unwrap();

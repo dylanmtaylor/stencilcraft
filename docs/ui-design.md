@@ -61,6 +61,10 @@ clean-room posture and the full feature inventory). The structure is borrowed; t
 - No hardware I/O in the app yet — real sends stay with the CLI
   (`stencilcraft-cli cut --device …`) until the transport story matures.
 
+## Menu bar
+
+The menu structure is in [`menu-map.md`](menu-map.md).
+
 ## Later passes (not now)
 
 - Icons for the tool rail (Cricut-style), node editing palette, multi-tab

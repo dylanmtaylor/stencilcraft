@@ -58,7 +58,10 @@ status (have / partial / missing / out of scope) and our posture (replicate / re
 won't do). It replaced the Silhouette Studio feature TODO list that used to be here. The
 same doc states the clean-room posture: we drive the reference apps through their normal
 UI and read their public documentation, then write our own implementation, never using
-their code or assets. Missing items feed the ranked list in [`docs/gaps.md`](docs/gaps.md).
+their code or assets. Missing items feed the ranked list in [`docs/gaps.md`](docs/gaps.md). The menu bar
+design, with Silhouette Studio's names and order plus Illustrator-grade items, is in
+[`docs/menu-map.md`](docs/menu-map.md). Owner goal: no Silhouette or Cricut feature is
+left undocumented or unreproduced, and every format and cutter they support is covered.
 
 ## Progress log
 

@@ -126,7 +126,7 @@ printf '%s\n' '{"id":1,"method":"doc.summary","params":{}}' | nc 127.0.0.1 7979
 (an oversized board for tiling). Protocol and design notes live in [`docs/`](docs):
 `machine.md` (the Graphtec command stream), `ui-design.md` (Silhouette/Cricut structure
 on our skin), `reference-apps.md` (the reference-app feature inventory and the clean-room
-posture), `architecture.md`, `mcp.md`, `gaps.md`, `development.md`.
+posture), `menu-map.md` (the Silhouette-familiar menu bar), `architecture.md`, `mcp.md`, `gaps.md`, `development.md`.
 
 ## Use it from Claude Code and other agents
 

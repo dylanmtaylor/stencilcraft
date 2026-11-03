@@ -3,7 +3,10 @@
 This is the feature inventory of the two consumer cutting apps StencilCraft is measured
 against. For each feature it gives our own description, StencilCraft's status and how we
 plan to handle it. It replaces the old "Silhouette Studio feature TODO" list in
-[`ROADMAP.md`](../ROADMAP.md). The ranked work list stays in [`gaps.md`](gaps.md).
+[`ROADMAP.md`](../ROADMAP.md). The ranked work list stays in [`gaps.md`](gaps.md), and the menu bar that exposes these
+features is designed in [`menu-map.md`](menu-map.md). Owner goal: no feature of either
+app is left undocumented or unreproduced. Won't-do is kept for proprietary stores and
+content, accounts, DRM, telemetry and vendor firmware.
 
 ## Clean-room posture
 

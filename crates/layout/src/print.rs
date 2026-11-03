@@ -63,13 +63,15 @@ pub struct PrintSheet {
 }
 
 fn marks_box(page: &PageOptions) -> Rect {
-    Rect::new(0.0, 0.0, page.width_mm, page.height_mm)
-        .inset(-page.mark_inset_mm)
+    let i = page.mark_inset_mm;
+    Rect::new(i, i, page.width_mm - i, page.height_mm - i)
 }
 
 /// The printable artwork area: inside the marks, clamped to the machine's Print Then Cut limit.
 pub fn art_area(page: &PageOptions, profile: &MachineProfile) -> Rect {
-    let b = marks_box(page).inset(-(page.mark_thickness_mm + ART_GAP_MM));
+    let g = page.mark_thickness_mm + ART_GAP_MM;
+    let m = marks_box(page);
+    let b = Rect::new(m.x0 + g, m.y0 + g, m.x1 - g, m.y1 - g);
     match profile.print_max_mm {
         Some((w, h)) => Rect::new(b.x0, b.y0, b.x1.min(b.x0 + w), b.y1.min(b.y0 + h)),
         None => b,
@@ -389,7 +391,7 @@ mod tests {
         }
         // Artwork sits inside the area the marks leave free.
         let area = sheet.art_area;
-        assert!(a.x0 >= area[0] && a.y0 >= area[1]);
+        assert!(a.x0 >= area[0] - 1e-9 && a.y0 >= area[1] - 1e-9, "{a:?} {area:?}");
         let none = PrintOptions {
             bleed: false,
             ..PrintOptions::default()

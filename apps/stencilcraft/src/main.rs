@@ -4300,7 +4300,7 @@ mod tests {
         let mut app = StencilApp::new(None);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
         let pointer = egui::pos2(300.0, 250.0);
-        let mut frame = |app: &mut StencilApp, events: Vec<egui::Event>, t: f64| {
+        let frame = |app: &mut StencilApp, events: Vec<egui::Event>, t: f64| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(screen),

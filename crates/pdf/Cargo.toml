@@ -1,0 +1,18 @@
+[package]
+name = "stencilcraft-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "PDF (vector cut/print sheet) export for StencilCraft documents"
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+
+[dev-dependencies]
+vectorcraft-pdf = { workspace = true }
+
+[lints]
+workspace = true

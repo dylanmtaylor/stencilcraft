@@ -10,6 +10,9 @@ pub enum ExportKind {
     Svg,
     Dxf,
     Gcode,
+    Pdf,
+    Png,
+    Jpeg,
 }
 
 impl ExportKind {
@@ -19,6 +22,12 @@ impl ExportKind {
         let lower = name.to_ascii_lowercase();
         if lower.ends_with(".dxf") {
             (Self::Dxf, name.to_string())
+        } else if lower.ends_with(".pdf") {
+            (Self::Pdf, name.to_string())
+        } else if lower.ends_with(".png") {
+            (Self::Png, name.to_string())
+        } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+            (Self::Jpeg, name.to_string())
         } else if lower.ends_with(".gcode") || lower.ends_with(".nc") {
             (Self::Gcode, name.to_string())
         } else if lower.ends_with(".svg") {
@@ -57,6 +66,7 @@ pub fn run_pipeline(
     tiling: Option<&Tiling>,
     export_base: &str,
     gcode: &GcodeSettings,
+    dpi: f64,
 ) -> Result<Vec<String>, PipelineError> {
     let compensated = match kerf_mm {
         Some(k) => {
@@ -72,7 +82,7 @@ pub fn run_pipeline(
     let working = compensated.as_ref().unwrap_or(doc);
 
     let Some(tiling) = tiling else {
-        render(working, export_base, gcode)?;
+        render(working, export_base, gcode, dpi)?;
         return Ok(vec![format!(
             "exported: {export_base} (kerf {:.3} mm)",
             working.kerf.width_mm
@@ -111,17 +121,33 @@ pub fn run_pipeline(
     Ok(reports)
 }
 
-fn render(doc: &Document, path: &str, gcode: &GcodeSettings) -> Result<(), PipelineError> {
+fn render(
+    doc: &Document,
+    path: &str,
+    gcode: &GcodeSettings,
+    dpi: f64,
+) -> Result<(), PipelineError> {
     let (kind, final_name) = ExportKind::from_filename(path);
+    let user = |e: &dyn std::fmt::Display| PipelineError::User(e.to_string());
     let text = match kind {
-        ExportKind::Svg => {
-            stencilcraft_svg::export(doc).map_err(|e| PipelineError::User(e.to_string()))?
+        ExportKind::Pdf => stencilcraft_pdf::export(doc).map_err(|e| user(&e))?,
+        ExportKind::Png | ExportKind::Jpeg => {
+            let format = if matches!(kind, ExportKind::Png) {
+                stencilcraft_import::RenderFormat::Png
+            } else {
+                stencilcraft_import::RenderFormat::Jpeg
+            };
+            stencilcraft_import::render_document(doc, dpi, format).map_err(|e| user(&e))?
         }
-        ExportKind::Dxf => {
-            stencilcraft_dxf::export(doc).map_err(|e| PipelineError::User(e.to_string()))?
-        }
+        ExportKind::Svg => stencilcraft_svg::export(doc)
+            .map_err(|e| user(&e))?
+            .into_bytes(),
+        ExportKind::Dxf => stencilcraft_dxf::export(doc)
+            .map_err(|e| user(&e))?
+            .into_bytes(),
         ExportKind::Gcode => stencilcraft_gcode::export(doc, gcode)
-            .map_err(|e| PipelineError::User(e.to_string()))?,
+            .map_err(|e| user(&e))?
+            .into_bytes(),
     };
     std::fs::write(&final_name, text)
         .map_err(|e| PipelineError::User(format!("{final_name}: {e}")))?;
@@ -184,6 +210,7 @@ mod tests {
             None,
             &out,
             &GcodeSettings::default(),
+            96.0,
         )
         .unwrap();
         assert_eq!(report.len(), 1);
@@ -211,6 +238,7 @@ mod tests {
             Some(&tiling),
             "ignored",
             &GcodeSettings::default(),
+            96.0,
         )
         .unwrap();
         // The diagonal misses the top-left sheet, which is not exported: 3 tiles
@@ -232,6 +260,7 @@ mod tests {
             None,
             "/tmp/never",
             &GcodeSettings::default(),
+            96.0,
         );
         assert!(r.is_err());
     }

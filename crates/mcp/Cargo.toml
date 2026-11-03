@@ -13,11 +13,14 @@ stencilcraft-doc = { workspace = true }
 stencilcraft-engine = { workspace = true }
 stencilcraft-gcode = { workspace = true }
 stencilcraft-dxf = { workspace = true }
+stencilcraft-import = { workspace = true }
 stencilcraft-kerf = { workspace = true }
+stencilcraft-pdf = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 
 [dev-dependencies]
+image = { workspace = true }
 stencilcraft-testkit = { workspace = true }
 
 [lints]

@@ -40,8 +40,12 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    and lead-out, and corner power compensation on acceleration-limited machines.
 5. **DXF**: layers carry operation colours (red cut, blue engrave; hidden layers are
    written with a negative index, the DXF "layer off" convention) so CAM tools that
-   sort by colour do the right thing. Missing: arc entities (export flattens curves
-   into line segments), block/INSERT reuse, and a reader.
+   sort by colour do the right thing. Import reads LINE, LWPOLYLINE (bulges), POLYLINE,
+   CIRCLE, ARC, ELLIPSE, SPLINE and more through VectorCraft's DXF reader, with "fit to
+   page" / as-is and endpoint joining, and a mutation corpus. Missing: arc entities
+   (export flattens curves into line segments), block/INSERT reuse on export, and the
+   exporter writes the document's y-down coordinates straight into DXF's y-up space, so
+   the art is mirrored in CAD tools (a round trip through our importer flips it).
 6. **Engine**: VectorCraft backs StencilCraft shape creation, transforms, Pathfinder,
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
    document and metadata snapshots. The model still has no explicit persistent selection,
@@ -59,11 +63,22 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
 9. **wasm**: no web build.
 10. **ci**: `xtask layers` checks dependencies by reading manifests (cheap and honest),
    but there is no `cleanroom`/`assets` check yet; `ASSETS.md` is enforced by review only.
-11. **Raster trace**: CLI imports bounded PNG/JPEG and traces a configurable dark threshold silhouette into closed cut contours (96 dpi default). UI has dedicated Trace Image tool trigger in the tool rail.
-12. **Packaging**: window icon wired from embedded PNG asset (`APP_ICON_PNG`); Linux packaging tarball and Flatpak scripts (`packaging/linux/package.sh`, `flatpak-bundle.sh`) with `.desktop` and metainfo established.
-13. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the `storytold/craft-libs` design-system revision `053c0043`, with `craft-draw` supplying the Bezier/pen path editing. The app uses shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Layout and visual parity with VectorCraft remain incomplete.
-14. **Typing and dialog behaviour on the new head**: `TextField` buffers typing until Enter, focus loss or commit, and a plain field passes Escape through instead of clearing. The text-dialog test encodes this; any UI that assumed per-keystroke updates should commit explicitly.
-15. **Visual parity with VectorCraft**: both apps share the craft-libs `suite_default` theme and chrome.
+11. **Raster trace**: PNG, JPEG, BMP, GIF, TIFF and WebP import as placed image objects
+   (bounded decoding) and `image.trace` traces them with threshold, despeckle, low/high-pass
+   filters, colour-range mode, smoothing and corner threshold, in all-edges, outer-edge or
+   detach mode, plus background removal (`stencilcraft-raster`). Missing: HEIC/HEIF (no
+   permissively licensed pure-Rust decoder), centreline tracing, multi-colour layered
+   tracing, and curve fitting beyond midpoint quadratics. The desktop UI still uses the
+   older `trace-image` path (`apps/stencilcraft-cli/src/trace.rs`) and does not draw
+   placed images yet.
+12. **PDF/EPS/AI import and PDF/PNG/JPEG export**: vector paths from PDF, EPS/PS and
+   `.ai` come in through VectorCraft's readers; fills, text, images and symbol instances
+   are dropped and every path becomes a cut shape. PDF export writes strokes only (no
+   placed images); PNG/JPEG export renders at a chosen dpi.
+13. **Packaging**: window icon wired from embedded PNG asset (`APP_ICON_PNG`); Linux packaging tarball and Flatpak scripts (`packaging/linux/package.sh`, `flatpak-bundle.sh`) with `.desktop` and metainfo established.
+14. **Craft-libs and desktop UI**: `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, and `craft-atomic` are wired across the desktop application at the `storytold/craft-libs` design-system revision `053c0043`, with `craft-draw` supplying the Bezier/pen path editing. The app uses shared chrome (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `StatusBar`, `DockArea`) and installs the suite default theme, the same base VectorCraft relies on. Layout and visual parity with VectorCraft remain incomplete.
+15. **Typing and dialog behaviour on the new head**: `TextField` buffers typing until Enter, focus loss or commit, and a plain field passes Escape through instead of clearing. The text-dialog test encodes this; any UI that assumed per-keystroke updates should commit explicitly.
+16. **Visual parity with VectorCraft**: both apps share the craft-libs `suite_default` theme and chrome.
     - Top bar: StencilCraft has a Home button and an `Essentials` workspace switcher.
     - Right dock: `Properties` and `Layers` tabs share a dock group; VectorCraft also has an icon strip and Libraries tab.
     - Canvas navigation uses the shared bottom status bar; VectorCraft also shows render and fps stats.

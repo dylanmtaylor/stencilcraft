@@ -22,7 +22,8 @@ to the process. The control socket listens on `127.0.0.1` only, but it has no au
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, and `command_execute`. Their
+`export_dxf`, `export_gcode`, `export_pdf`, `export_image`, `import_file`, `image_trace`,
+`image_remove_background`, `tile_run`, `tile_preview`, and `command_execute`. Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -73,5 +74,46 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `export.gcode` | `{path, feed?, power?, engrave_power?, passes?, ramp?, mode?}` | `{path}` |
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
+| `export.pdf` | `{path}` | `{path}` |
+| `export.image` | `{path, dpi?}` (`.png`, `.jpg`/`.jpeg`; dpi default 300, up to 4800) | `{path, dpi}` |
+| `import.file` | `{path, fit_to_page?, join?, join_tolerance?, dpi?}` | `{shapes: [id], images: [id]}` |
+| `image.trace` | `{id, options?, style?}` | `{ShapesAdded: {ids}}` |
+| `image.remove_background` | `{id, tolerance}` | `{ImageChanged: {id}}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
+
+## Import and trace
+
+`import_file` adds a file to the **current** document (undoable): SVG, DXF, PDF, EPS/PS
+and Illustrator `.ai` vector paths become cut shapes (as is, 1:1, unless `fit_to_page`
+scales them to the board), with open paths whose ends meet within `join_tolerance` mm
+(default 0.05) joined into polylines unless `join: false`. Raster files (PNG, JPEG, BMP,
+GIF first frame, TIFF, WebP) are placed as an image object sized at `dpi` (default 96) to
+trace; HEIC/HEIF is refused with a message. Files over 64 MiB, images over 10,000 px a
+side or 16 million pixels, and more than 200,000 paths are errors, never crashes. Only
+path geometry is read from vector files: fills, text, embedded images and symbol
+instances are dropped.
+
+`image_trace` turns a placed image into closed paths. `options` (all optional):
+
+| Option | Range | Default | Meaning |
+| --- | --- | --- | --- |
+| `threshold` | 0–100 % | 50 | pixels darker than this (alpha over white) are traced |
+| `despeckle` | px area | 4 | islands and pinholes smaller than this are dropped |
+| `low_pass` | 0–50 px | 0 | blur radius before thresholding |
+| `high_pass` | 0–50 px | 0 | edge filter radius (traces outlines of large dark areas) |
+| `colour_range` | `{hue_min, hue_max, min_saturation}` | none | trace by hue (degrees, wraps when min > max) instead of brightness |
+| `smoothing` | 0–50 px | 1 | simplification tolerance (0 keeps the pixel staircase) |
+| `corner_threshold` | 0–180° | 60 | vertices turning at least this much stay sharp; others are rounded |
+| `mode` | `all-edges`, `outer-edge`, `detach` | `all-edges` | outlines and holes; outlines only; or trace and remove the traced pixels from the image |
+
+`style` is `cut` (default) or `engrave`. Outer contours have positive shoelace area in
+document coordinates (y down) and holes negative. `image_remove_background` flood-fills
+from the border through colours within `tolerance` % of the border's dominant colour and
+makes them transparent. The underlying engine commands are `image.place`, `image.remove`,
+`image.set-bounds {id, x, y, width, height}`, `image.trace` and `image.remove-background`,
+all reachable through `command_execute` too.
+
+`export_pdf` writes one vector page the size of the board (cut red, engrave blue; placed
+images are not written yet). `export_image` renders the board, images included, to PNG or
+JPEG at `dpi` (render capped at 64 million pixels).
 

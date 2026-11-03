@@ -4,6 +4,8 @@
 //! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
 //! - `tile-preview --in FILE --sheet WxH --out PAGE.svg` — every sheet on one page
 //! - `import-svg --in FILE.svg --out FILE.stencilcraft` — import SVG into the native document format
+//! - `import --in FILE --out DOC` — SVG/DXF/PDF/EPS/AI vectors or a raster image to place
+//! - `trace --in IMAGE|DOC --out DOC [options]` — trace a placed image into cut contours
 //! - `mcp [--control PORT]` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md);
 //!   with `--control`, requests are relayed to the running desktop app
 //! - `make-starter --out FILE` — write the canonical starter document
@@ -11,6 +13,7 @@
 //! - `help`
 
 mod cut;
+mod import;
 mod mcp_proxy;
 mod pipeline;
 mod print_cut;
@@ -29,6 +32,8 @@ fn main() -> Result<(), String> {
         }
         Some("tile-preview") => tile_preview::execute(&args[1..]),
         Some("import-svg") => import_svg_command(&args[1..]),
+        Some("import") => import::import_command(&args[1..]),
+        Some("trace") => import::trace_command(&args[1..]),
         Some("trace-image") => trace_image_command(&args[1..]),
         Some("print-cut") => print_cut_command(&args[1..]),
         Some("mcp") => mcp_command(&args[1..]),
@@ -241,7 +246,8 @@ fn print_help() {
     println!();
     println!("  run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]");
     println!("      [--tile-prefix PREFIX] [--tile-marks] --export OUT");
-    println!("      Export is .svg, .dxf or .gcode; with --tile-sheet the tiles go");
+    println!("      Export is .svg, .dxf, .gcode, .pdf, .png or .jpg (--dpi N, default 300);");
+    println!("      with --tile-sheet the tiles go");
     println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).");
     println!("      --tile-marks stamps registration brackets and overlap guides on each sheet.");
     println!("      G-code profile: --feed MM_PER_MIN --power S --engrave-power S");
@@ -251,6 +257,14 @@ fn print_help() {
     println!("      Every sheet of the tiling on one framed page, for inspection before cutting.");
     println!("  import-svg --in FILE.svg --out FILE.stencilcraft");
     println!("      Import common SVG shapes/groups/transforms into the native format.");
+    println!(
+        "{}",
+        import::IMPORT_USAGE.replace("usage: stencilcraft-cli ", "  ")
+    );
+    println!(
+        "{}",
+        import::TRACE_USAGE.replace("usage: stencilcraft-cli ", "  ")
+    );
     println!("  trace-image --in IMAGE.png|IMAGE.jpg --out FILE.stencilcraft [--threshold 0..255]");
     println!("      Trace dark raster silhouettes into closed cut contours at 96 dpi.");
     println!("  print-cut --in FILE.stencilcraft --out SHEET.svg");

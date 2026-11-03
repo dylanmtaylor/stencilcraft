@@ -88,6 +88,14 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-02 — Import and trace: `import` (CLI) / `import_file` (MCP) read SVG, DXF,
+  PDF, EPS/PS/AI vector paths (as is or fitted to the page, open paths joined within a
+  tolerance) and PNG/JPEG/BMP/GIF/TIFF/WebP images placed as image objects; `trace` /
+  `image.trace` turn an image into closed, oriented, simplified cut contours with
+  threshold, despeckle, blur/edge filters, colour range, smoothing/corner threshold and
+  all-edges/outer-edge/detach modes, plus background removal. New exports: vector PDF
+  and PNG/JPEG at 300/600/1200/custom dpi. Every reader has a mutation corpus.
+
 - 2026-11-02 — Canvas navigation uses the shared status bar: Fit, Center and zoom
   controls move below the canvas, leaving more room for the artwork. The zoom slider
   remains anchored at the canvas center and is covered by a desktop UI test.

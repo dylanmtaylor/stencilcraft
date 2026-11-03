@@ -17,6 +17,8 @@ pub struct RunRequest {
     pub tile_marks: bool,
     /// Cut profile for `.gcode` exports; other formats ignore it.
     pub gcode: GcodeSettings,
+    /// Pixels per inch for `.png`/`.jpg` exports.
+    pub dpi: f64,
 }
 
 impl Default for RunRequest {
@@ -30,6 +32,7 @@ impl Default for RunRequest {
             tile_prefix: None,
             tile_marks: false,
             gcode: GcodeSettings::default(),
+            dpi: 300.0,
         }
     }
 }
@@ -123,6 +126,12 @@ impl RunRequest {
                     })?;
                 }
                 "--export" => req.export = Some(value()?.to_string()),
+                "--dpi" => {
+                    let v = value()?;
+                    req.dpi = v.trim().parse().map_err(|_| {
+                        PipelineError::User(format!("--dpi {v}: expected pixels per inch"))
+                    })?;
+                }
                 "-h" | "--help" => {
                     println!("usage: stencilcraft-cli run --in FILE [flags] --export OUT");
                     println!(
@@ -131,6 +140,7 @@ impl RunRequest {
                     println!(
                         "       --feed MM_PER_MIN --power S --engrave-power S --passes N --ramp --laser-mode dynamic|constant"
                     );
+                    println!("       --dpi N (PNG/JPEG exports; 300, 600, 1200 …)");
                     std::process::exit(0);
                 }
                 "--" => {
@@ -187,9 +197,15 @@ pub fn execute(req: RunRequest) -> Result<(), String> {
     let input = req.input.clone().unwrap_or_default();
     let export = req.export.clone().unwrap_or_default();
     let doc = stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?;
-    let reports =
-        pipeline::run_pipeline(&doc, req.kerf_mm, req.tiling.as_ref(), &export, &req.gcode)
-            .map_err(|e| e.to_string())?;
+    let reports = pipeline::run_pipeline(
+        &doc,
+        req.kerf_mm,
+        req.tiling.as_ref(),
+        &export,
+        &req.gcode,
+        req.dpi,
+    )
+    .map_err(|e| e.to_string())?;
     for r in reports {
         println!("{r}");
     }

@@ -666,3 +666,47 @@ fn unknown_flag_fails_with_a_message_naming_the_flag() {
     );
     assert!(all.contains("--wednesday"), "flag named: {all}");
 }
+
+#[test]
+fn import_trace_and_raster_pdf_exports() {
+    let dir = fresh_out_dir();
+    let image_path = dir.join("ring.gif");
+    image::RgbaImage::from_fn(40, 40, |x, y| {
+        let d = (x as f64 - 20.0).hypot(y as f64 - 20.0);
+        if (8.0..16.0).contains(&d) {
+            image::Rgba([0, 0, 0, 255])
+        } else {
+            image::Rgba([255, 255, 255, 255])
+        }
+    })
+    .save(&image_path)
+    .expect("GIF fixture written");
+    let placed = dir.join("placed.stencilcraft");
+    let traced = dir.join("traced.stencilcraft");
+    let run = |args: &[&str]| {
+        let out = bin().args(args).output().expect("command starts");
+        expect_exit0(&out, &String::from_utf8_lossy(&out.stdout));
+    };
+    let s = |p: &std::path::Path| p.to_string_lossy().into_owned();
+    run(&["import", "--in", &s(&image_path), "--out", &s(&placed), "--dpi", "254"]);
+    let doc = stencilcraft_doc::load_from(&s(&placed)).expect("placed document");
+    assert_eq!(doc.images.len(), 1);
+    run(&["trace", "--in", &s(&placed), "--out", &s(&traced), "--mode", "outer"]);
+    let doc = stencilcraft_doc::load_from(&s(&traced)).expect("traced document");
+    assert_eq!(doc.shape_count(), 1, "outer-edge mode drops the hole");
+    for name in ["traced.pdf", "traced.png", "traced.jpg", "traced.dxf"] {
+        let target = dir.join(name);
+        run(&["run", "--in", &s(&traced), "--export", &s(&target), "--dpi", "600"]);
+        assert!(std::fs::metadata(&target).expect("export written").len() > 0, "{name}");
+    }
+    // The DXF comes back in through `import` as one closed outline.
+    let back = dir.join("back.stencilcraft");
+    run(&["import", "--in", &s(&dir.join("traced.dxf")), "--out", &s(&back)]);
+    assert_eq!(stencilcraft_doc::load_from(&s(&back)).expect("dxf import").shape_count(), 1);
+    let bad = bin()
+        .args(["trace", "--in", &s(&placed), "--out", &s(&traced), "--threshold", "500"])
+        .output()
+        .expect("starts");
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("threshold"));
+}

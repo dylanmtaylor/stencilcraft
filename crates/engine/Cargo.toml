@@ -13,11 +13,13 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
+stencilcraft-raster = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }
 
 [dev-dependencies]
+image = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

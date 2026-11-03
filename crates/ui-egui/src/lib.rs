@@ -30,8 +30,11 @@ pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
     let id = own
         .as_ref()
         .map_or_else(ThemeId::suite_default, |t| t.id.clone());
+    // Dark chrome is the suite's built-in Pro dark (charcoal #323232 panels, blue accent), the
+    // reference cutting-software look; light keeps StencilCraft Modern.
+    let dark = ThemeId::parse("craft.pro").unwrap_or_else(|_| id.clone());
     let defaults = AppDefaults {
-        theme: ThemePair::same(id),
+        theme: ThemePair { light: id, dark },
         mode: match theme {
             ColorTheme::Dark => ModeChoice::Dark,
             ColorTheme::Light => ModeChoice::Light,
@@ -94,6 +97,8 @@ pub struct Palette {
     pub text: egui::Color32,
     pub accent: egui::Color32,
     pub selection: egui::Color32,
+    /// Thin outline around the design page.
+    pub page_border: egui::Color32,
 }
 
 impl Palette {
@@ -108,10 +113,11 @@ impl Palette {
                 board: Tokens::BOARD,
                 cut_line: Tokens::CUT_LINE,
                 kerf_line: Tokens::KERF_LINE,
-                engrave_line: Tokens::ENGRAVE_LINE,
-                text: Tokens::TEXT,
+                engrave_line: egui::Color32::from_rgb(0x58, 0x60, 0x6e),
+                text: egui::Color32::from_rgb(0x3a, 0x3a, 0x3a),
                 accent: Tokens::ACCENT,
                 selection: Tokens::SELECTION,
+                page_border: Tokens::PAGE_BORDER,
             },
             ColorTheme::Light => Self {
                 canvas_bg: egui::Color32::from_rgb(0xdf, 0xe3, 0xe9),
@@ -126,21 +132,24 @@ impl Palette {
                 text: egui::Color32::from_rgb(0x1b, 0x1f, 0x27),
                 accent: Tokens::ACCENT_LIGHT,
                 selection: Tokens::SELECTION,
+                page_border: Tokens::PAGE_BORDER,
             },
         }
     }
 }
 
 impl Tokens {
-    /// Suite-shared dark canvas hues: VectorCraft Modern Dark pasteboard/panel
-    /// with the Craft coral accent and blue selection. Chrome (craft-ui
-    /// `suite_default`) and canvas now share one source.
-    pub const CANVAS_BG: egui::Color32 = egui::Color32::from_rgb(0x10, 0x12, 0x17);
-    pub const MAT: egui::Color32 = egui::Color32::from_rgb(0x18, 0x1b, 0x22);
-    pub const MAT_GRID: egui::Color32 = egui::Color32::from_rgb(0x26, 0x2b, 0x35);
-    pub const RULER: egui::Color32 = egui::Color32::from_rgb(0x6f, 0x78, 0x8a);
-    pub const GRID: egui::Color32 = egui::Color32::from_rgb(0x23, 0x28, 0x32);
-    pub const BOARD: egui::Color32 = egui::Color32::from_rgb(0x27, 0x2c, 0x36);
+    /// Dark-theme canvas hues, after the reference cutting-software dark look: mid-grey
+    /// pasteboard around charcoal craft `pro` chrome, a light-grey mat and a white page, so the
+    /// design reads as it will on real media.
+    pub const CANVAS_BG: egui::Color32 = egui::Color32::from_rgb(0x64, 0x64, 0x64);
+    pub const MAT: egui::Color32 = egui::Color32::from_rgb(0xe0, 0xe0, 0xe0);
+    pub const MAT_GRID: egui::Color32 = egui::Color32::from_rgb(0xc8, 0xc8, 0xc8);
+    pub const RULER: egui::Color32 = egui::Color32::from_rgb(0x80, 0x80, 0x80);
+    pub const GRID: egui::Color32 = egui::Color32::from_rgb(0xe8, 0xe8, 0xe8);
+    pub const BOARD: egui::Color32 = egui::Color32::WHITE;
+    /// Page outline: craft `pro` accent blue.
+    pub const PAGE_BORDER: egui::Color32 = egui::Color32::from_rgb(0x37, 0x8e, 0xf0);
     pub const CUT_LINE: egui::Color32 = egui::Color32::from_rgb(232, 87, 63);
     pub const KERF_LINE: egui::Color32 = egui::Color32::from_rgb(63, 136, 232);
     pub const ENGRAVE_LINE: egui::Color32 = egui::Color32::from_rgb(0x96, 0x9f, 0xaf);
@@ -274,6 +283,20 @@ impl View {
         egui::Rect::from_min_max(min, max)
     }
 
+    /// The whole mat on screen: the cutting area plus its rim.
+    pub fn mat_frame_rect_screen(&self, backdrop: &MatBackdrop) -> egui::Rect {
+        egui::Rect::from_min_max(
+            self.world_to_screen(stencilcraft_geom::Point::new(
+                -MAT_RIM_SIDE_MM,
+                -MAT_RIM_TOP_MM,
+            )),
+            self.world_to_screen(stencilcraft_geom::Point::new(
+                backdrop.width_mm + MAT_RIM_SIDE_MM,
+                backdrop.height_mm + MAT_RIM_SIDE_MM,
+            )),
+        )
+    }
+
     /// Convert to [`craft_ui::canvas::CanvasView`] for `Rulers`, `BezierOverlay`, `PenDraft`,
     /// `TransformBox`, `CanvasScrollbars`, and `MarqueeDrag`.
     pub fn to_canvas_view(&self, viewport: egui::Rect) -> craft_ui::canvas::CanvasView {
@@ -315,7 +338,21 @@ fn valid_view_extent(width_mm: f64, height_mm: f64, viewport: egui::Rect) -> boo
 /// top and left edges, and the mat label. The sheet paints on top later.
 fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop, palette: Palette) {
     let rect = view.mat_rect_screen(backdrop);
-    painter.rect_filled(rect, 2.0, palette.mat);
+    let frame = view.mat_frame_rect_screen(backdrop);
+    painter.rect_filled(
+        frame,
+        (MAT_RIM_SIDE_MM as f32 * view.zoom).min(12.0),
+        palette.mat,
+    );
+    // The arrow marks the edge fed into the machine. It lives in the top rim,
+    // outside the document, and scales with the mat as the canvas is zoomed.
+    let (head, stem) = mat_feed_arrow(view, backdrop);
+    painter.add(egui::Shape::convex_polygon(
+        head.to_vec(),
+        palette.ruler,
+        egui::Stroke::NONE,
+    ));
+    painter.rect_filled(stem, 0.0, palette.ruler);
 
     let inch_px = (25.4 * view.zoom as f64) as f32;
     if inch_px > 10.0 {
@@ -372,6 +409,23 @@ fn paint_mat(painter: &egui::Painter, view: &View, backdrop: &MatBackdrop, palet
     );
 }
 
+/// The mat's rim around its cutting area; the top rim is deeper.
+const MAT_RIM_SIDE_MM: f64 = 5.0;
+const MAT_RIM_TOP_MM: f64 = 10.0;
+
+fn mat_feed_arrow(view: &View, backdrop: &MatBackdrop) -> ([egui::Pos2; 3], egui::Rect) {
+    let center = backdrop.width_mm / 2.0;
+    let point = |x, y| view.world_to_screen(stencilcraft_geom::Point::new(x, y));
+    (
+        [
+            point(center, -8.0),
+            point(center + 3.0, -4.5),
+            point(center - 3.0, -4.5),
+        ],
+        egui::Rect::from_min_max(point(center - 1.0, -4.5), point(center + 1.0, -2.0)),
+    )
+}
+
 /// Ruler tick length and colour: inch marks are bold, half-inch marks faint.
 fn tick_style(index: f64, palette: Palette) -> (f32, egui::Color32) {
     if index % 2.0 == 0.0 {
@@ -423,7 +477,14 @@ pub fn paint_document(
     if let Some(backdrop) = backdrop {
         paint_mat(painter, view, backdrop, palette);
     }
-    painter.rect_filled(view.board_rect_screen(doc), 2.0, palette.board);
+    let page = view.board_rect_screen(doc);
+    painter.rect_filled(page, 0.0, palette.board);
+    painter.rect_stroke(
+        page,
+        0.0,
+        egui::Stroke::new(1.0, palette.page_border),
+        egui::StrokeKind::Outside,
+    );
 
     // Grid: 10 mm major pitch, drawn only over the board as hairlines.
     if options.show_grid {
@@ -1081,7 +1142,7 @@ mod tests {
         assert!(craft_theme::format::parse(THEME_JSON).is_ok());
         for theme in [ColorTheme::Dark, ColorTheme::Light] {
             let base = theme_base(theme);
-            assert_eq!(base.inputs.dark.id.as_str(), "stencilcraft.modern");
+            assert_eq!(base.inputs.dark.id.as_str(), "craft.pro");
             assert_eq!(base.inputs.light.id.as_str(), "stencilcraft.modern");
         }
     }
@@ -1093,7 +1154,9 @@ mod tests {
         assert_eq!(dark.canvas_bg, Tokens::CANVAS_BG);
         assert_eq!(dark.board, Tokens::BOARD);
         assert_ne!(light.canvas_bg, dark.canvas_bg);
-        assert_ne!(light.board, dark.board);
+        assert_ne!(light.mat, dark.mat);
+        // The page is paper-white in both themes, outlined in blue.
+        assert_eq!(light.board, dark.board);
         // Cut/kerf darken for paper-white boards; selection blue is shared.
         assert_eq!(dark.cut_line, Tokens::CUT_LINE);
         assert_eq!(light.cut_line, Tokens::ACCENT_LIGHT);
@@ -1175,6 +1238,27 @@ mod tests {
         };
         let r = view.board_rect_screen(&doc);
         assert_eq!(r.width(), doc.board.width_mm as f32);
+    }
+
+    #[test]
+    fn feed_arrow_points_up_and_stays_in_mat_top_rim() {
+        let view = View {
+            zoom: 2.0,
+            pan_mm: egui::vec2(10.0, 20.0),
+        };
+        let backdrop = MatBackdrop {
+            width_mm: 300.0,
+            height_mm: 200.0,
+            label: String::new(),
+        };
+        let frame = view.mat_frame_rect_screen(&backdrop);
+        let mat = view.mat_rect_screen(&backdrop);
+        let (head, stem) = mat_feed_arrow(&view, &backdrop);
+        assert!(head.iter().all(|point| frame.contains(*point)));
+        assert!(frame.contains_rect(stem));
+        assert!(head[0].y < head[1].y);
+        assert!(stem.bottom() < mat.top());
+        assert!((head[0].x - mat.center().x).abs() < 0.01);
     }
 
     #[test]

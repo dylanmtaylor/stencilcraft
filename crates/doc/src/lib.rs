@@ -19,6 +19,9 @@ use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};
 
+mod production;
+pub use production::{CombineOp, GroupKind, Operation, SendAssign, ShapeProduction, SourceGroup};
+
 /// Native format name, written into every saved file and checked on load.
 pub const FORMAT_NAME: &str = "stencilcraft";
 /// Current format version; loaders accept exactly what they can read and say so
@@ -184,6 +187,9 @@ pub struct Shape {
     /// `None` is a plain cut or engrave pass by `style`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolOp>,
+    /// Production metadata (operation, colours, attach, contours, combine sources).
+    #[serde(default, skip_serializing_if = "ShapeProduction::is_default")]
+    pub production: ShapeProduction,
 }
 
 /// Score and emboss tool tip.
@@ -523,6 +529,7 @@ impl Document {
             locked: false,
             tool: None,
             text: None,
+            production: ShapeProduction::default(),
         };
         layer.shapes.push(shape.clone());
         Ok(shape)

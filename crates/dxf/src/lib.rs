@@ -83,7 +83,7 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
                 (CutStyle::Cut, _) | (_, CutStyle::Cut) => true,
                 (CutStyle::Engrave, CutStyle::Engrave) => false,
             };
-            push_polyline(&mut out, &shape.path, &dxf_layer, closed)?;
+            push_polyline(&mut out, &shape.cut_path(), &dxf_layer, closed)?;
         }
     }
     pair(&mut out, 0, "ENDSEC")?;

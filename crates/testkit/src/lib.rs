@@ -25,6 +25,7 @@ fn shape(id: u64, path: BezPath, style: CutStyle) -> Shape {
         locked: false,
         tool: None,
         text: None,
+        production: Default::default(),
     }
 }
 

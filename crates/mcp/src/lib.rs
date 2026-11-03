@@ -423,6 +423,7 @@ impl Session {
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
                 Ok(serde_json::json!({ "path": path, "dpi": dpi }))
             }
+            "export.print-sheet" => self.export_print_sheet(params),
             "command.execute" => {
                 let command: Command = serde_json::from_value(params.clone())
                     .map_err(|e| ProtocolError::Bad(format!("bad command parameters: {e}")))?;
@@ -446,6 +447,62 @@ impl Session {
     }
 }
 
+impl Session {
+    fn export_print_sheet(
+        &mut self,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, ProtocolError> {
+        let path = str_param(params, "path")?;
+        let mut options = params.clone();
+        if let Some(map) = options.as_object_mut() {
+            for key in ["path", "format", "dpi"] {
+                map.remove(key);
+            }
+        }
+        let options: stencilcraft_layout::PrintOptions = serde_json::from_value(options)
+            .map_err(|e| ProtocolError::Bad(format!("bad print options: {e}")))?;
+        let sheets = stencilcraft_layout::print_sheets(&self.engine.doc, &options)
+            .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+        let format = params
+            .get("format")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("pdf");
+        let mut written = Vec::new();
+        match format {
+            "pdf" => {
+                std::fs::write(&path, stencilcraft_layout::sheets_to_pdf(&sheets))
+                    .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
+                written.push(path.clone());
+            }
+            "png" => {
+                let dpi = params
+                    .get("dpi")
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(300.0);
+                for (i, sheet) in sheets.iter().enumerate() {
+                    let png = stencilcraft_layout::sheet_to_png(sheet, dpi)
+                        .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                    let file = if sheets.len() == 1 {
+                        path.clone()
+                    } else {
+                        let stem = path.strip_suffix(".png").unwrap_or(&path);
+                        format!("{stem}-{i:02}.png")
+                    };
+                    std::fs::write(&file, png)
+                        .map_err(|e| ProtocolError::Bad(format!("{file}: {e}")))?;
+                    written.push(file);
+                }
+            }
+            other => {
+                return Err(ProtocolError::Bad(format!(
+                    "export.print-sheet: format must be pdf or png, got {other}"
+                )));
+            }
+        }
+        Ok(serde_json::json!({ "paths": written, "sheets": sheets.len() }))
+    }
+}
+
 fn rpc_error(id: serde_json::Value, code: i32, message: &str) -> serde_json::Value {
     serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
@@ -461,6 +518,7 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "export_gcode" => Some("export.gcode"),
         "tile_run" => Some("tile.run"),
         "tile_preview" => Some("tile.preview"),
+        "export_print_sheet" => Some("export.print-sheet"),
         "command_execute" => Some("command.execute"),
         "machines_list" => Some("machines.list"),
         "machine_capabilities" => Some("machine.capabilities"),
@@ -488,6 +546,9 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
     let integer = json!({"type": "integer", "minimum": 0});
     let string = json!({"type": "string"});
     let boolean = json!({"type": "boolean"});
+    let combine = json!({"type": "string", "enum": ["unite", "subtract", "intersect", "exclude"]});
+    let mats = mats_schema();
+    let print = print_schema();
     match command {
         "shapes.replicate-side" | "shapes.mirror-copy" => (
             json!({"ids": ids, "side": side, "gap_mm": number}),
@@ -762,8 +823,97 @@ fn engine_tool_schema(command: &str) -> (serde_json::Value, serde_json::Value) {
             }),
             json!(["template"]),
         ),
+        "shapes.slice" => (json!({"a": integer, "b": integer}), json!(["a", "b"])),
+        "shapes.weld" | "shapes.attach" | "shapes.detach" | "shapes.flatten" => {
+            (json!({"ids": ids}), json!(["ids"]))
+        }
+        "shapes.unflatten" | "shapes.uncombine" => (json!({"id": integer}), json!(["id"])),
+        "shape.contour" => (
+            json!({"id": integer, "contours": {"type": "array", "items": integer}, "hidden": boolean}),
+            json!(["id", "contours", "hidden"]),
+        ),
+        "shapes.combine" => (
+            json!({"ids": ids, "operation": combine}),
+            json!(["ids", "operation"]),
+        ),
+        "shape.set-combine" => (
+            json!({"id": integer, "operation": combine}),
+            json!(["id", "operation"]),
+        ),
+        "shapes.create-sticker" => (
+            json!({"ids": ids, "border_mm": number, "cut": {"type": "string", "enum": ["kiss-cut", "die-cut"]}}),
+            json!(["ids"]),
+        ),
+        "shapes.set-production" => (
+            json!({
+                "ids": ids,
+                "operation": {"type": "string", "enum": ["cut", "kiss-cut", "die-cut", "draw", "score", "engrave", "perforate", "print-then-cut", "guide"]},
+                "line_color": string, "fill_color": string, "material": string,
+                "send": {"type": "string", "enum": ["tool1", "tool1-outline", "tool2", "tool2-outline", "ignore"]},
+                "clear": {"type": "array", "items": {"type": "string", "enum": ["operation", "line-color", "fill-color", "material", "send"]}},
+            }),
+            json!(["ids"]),
+        ),
+        "shapes.move-to-mat" => (
+            json!({"ids": ids, "mat": {"type": ["integer", "null"]}}),
+            json!(["ids", "mat"]),
+        ),
+        "production.machines" => (json!({}), json!([])),
+        "production.mats" => (mats, json!([])),
+        "production.job" => (
+            json!({
+                "mats": {"type": "object", "properties": mats},
+                "cut_by": {"type": "string", "enum": ["operation", "line-color", "fill-color", "layer"]},
+                "groups": {"type": "array", "items": {"type": "object", "properties": {
+                    "key": string, "tool": {"type": "integer", "enum": [1, 2]}, "enabled": boolean,
+                    "passes": integer, "overcut_mm": number}, "required": ["key"]}},
+                "order": {"type": "string", "enum": ["document", "minimize-roller", "by-color", "by-layer", "shortest-travel"]},
+                "inside_first": boolean, "overcut_mm": number, "passes": integer,
+                "test_cut": {"type": "object", "properties": {"mat": integer, "x_mm": number, "y_mm": number, "size_mm": number}, "required": ["x_mm", "y_mm"]},
+                "weed": {"type": "object", "properties": {"margin_mm": number, "lines": boolean}},
+                "origin": {"type": "string", "enum": ["top-left", "top-right", "bottom-left", "bottom-right"]},
+                "feed": {"type": "string", "enum": ["length", "width"]},
+                "after": {"type": "string", "enum": ["return-to-origin", "feed"]},
+                "stipple_order": {"type": "string", "enum": ["default", "edge-to-center", "center-to-edge"]},
+            }),
+            json!([]),
+        ),
+        "production.print-sheet" => (print, json!([])),
         _ => (json!({}), json!([])),
     }
+}
+
+/// Properties of `production.mats` (also `mats` inside job and print options).
+fn mats_schema() -> serde_json::Value {
+    use serde_json::json;
+    let number = json!({"type": "number"});
+    let ints = json!({"type": "array", "items": {"type": "integer"}});
+    json!({
+        "machine": {"type": "string", "description": "Machine profile id (production_machines)"},
+        "mat": {"type": "string", "description": "Mat size name, e.g. 12x12; smallest that fits when unset"},
+        "mat_free": {"type": "boolean"},
+        "copies": {"type": "integer", "minimum": 1, "maximum": 100},
+        "spacing_mm": number,
+        "nest": {"type": "boolean"},
+        "rotation_step_deg": number,
+        "mirror_on": ints,
+        "mirror_off": ints,
+        "page": {"type": "object", "properties": {
+            "width_mm": number, "height_mm": number,
+            "marks": {"type": "string", "enum": ["silhouette", "cricut", "four-corner"]},
+            "mark_length_mm": number, "mark_thickness_mm": number, "mark_inset_mm": number,
+        }},
+    })
+}
+
+/// Properties of `production.print-sheet` and `export_print_sheet`.
+fn print_schema() -> serde_json::Value {
+    use serde_json::json;
+    json!({
+        "mats": {"type": "object", "properties": mats_schema()},
+        "bleed": {"type": "boolean"},
+        "bleed_mm": {"type": "number"},
+    })
 }
 
 /// Dedicated MCP tools for engine commands: (tool, command, description). Arguments are the
@@ -1231,6 +1381,91 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "document.new-from-template",
         "Replace the document with a project template (ids from templates_list). Args: template, params? {preset?, width_mm?, height_mm?, fold? (vertical, horizontal), hole_mm?}.",
     ),
+    (
+        "shapes_slice",
+        "shapes.slice",
+        "Slice two overlapping closed shapes into every piece (a-b, b-a, a∩b; each region its own shape). Args: a, b.",
+    ),
+    (
+        "shapes_weld",
+        "shapes.weld",
+        "Weld shapes into one outline for good. Args: ids.",
+    ),
+    (
+        "shapes_attach",
+        "shapes.attach",
+        "Attach shapes: they keep their arrangement on one mat and cut together. Args: ids.",
+    ),
+    (
+        "shapes_detach",
+        "shapes.detach",
+        "Detach the Attach groups the shapes are in. Args: ids.",
+    ),
+    (
+        "shapes_flatten",
+        "shapes.flatten",
+        "Flatten shapes into one Print Then Cut image cut along their outline. Args: ids.",
+    ),
+    (
+        "shapes_unflatten",
+        "shapes.unflatten",
+        "Split a flattened image or sticker back into its shapes. Args: id.",
+    ),
+    (
+        "shape_contour",
+        "shape.contour",
+        "Hide or show contours (subpath indices) of a shape; hidden ones stay in the path but are not cut or exported. Args: id, contours, hidden.",
+    ),
+    (
+        "shapes_combine",
+        "shapes.combine",
+        "Non-destructive Combine (unite, subtract, intersect, exclude), undone with shapes_uncombine. Args: ids, operation.",
+    ),
+    (
+        "shapes_uncombine",
+        "shapes.uncombine",
+        "Restore a Combine's members where the combined shape is now. Args: id.",
+    ),
+    (
+        "shape_set_combine",
+        "shape.set-combine",
+        "Change a Combine's operation. Args: id, operation.",
+    ),
+    (
+        "shapes_create_sticker",
+        "shapes.create-sticker",
+        "Flatten shapes and add a welded offset border, cut as kiss-cut (default) or die-cut. Args: ids, border_mm? (default 3), cut?.",
+    ),
+    (
+        "shapes_set_production",
+        "shapes.set-production",
+        "Set operation, line/fill colour, material or send tool assignment of shapes; clear resets fields. Args: ids, operation?, line_color?, fill_color?, material?, send?, clear?.",
+    ),
+    (
+        "shapes_move_to_mat",
+        "shapes.move-to-mat",
+        "Put pieces on a given mat index (null: automatic). Args: ids, mat.",
+    ),
+    (
+        "production_machines",
+        "production.machines",
+        "List machine profiles: mats, roll limits, Print Then Cut limits.",
+    ),
+    (
+        "production_mats",
+        "production.mats",
+        "Lay pieces onto mats by material/colour/operation: copies, spacing, nesting with rotation steps, mirror per mat, mat-free.",
+    ),
+    (
+        "production_job",
+        "production.job",
+        "Build the cut job for the machine: per-mat ops with tool holders, passes, cut order, overcut, test cut, weeding, origin, feed.",
+    ),
+    (
+        "production_print_sheet",
+        "production.print-sheet",
+        "Print Then Cut sheets: registration marks, artwork and bleed per print mat (export_print_sheet writes PDF/PNG).",
+    ),
 ];
 
 fn mcp_tools() -> Vec<serde_json::Value> {
@@ -1351,6 +1586,26 @@ fn mcp_tools() -> Vec<serde_json::Value> {
             "export_image",
             "Render the current document to PNG or JPEG (by the path's extension) at dpi pixels per inch (default 300; 600, 1200 or custom up to 4800).",
             json!({"path": path, "dpi": number}),
+            json!(["path"]),
+        ),
+        (
+            "export_print_sheet",
+            "Write the Print Then Cut sheets (registration marks, artwork, bleed) as a PDF (all pages) or PNGs (one per sheet, -NN suffix when several). Print at 100%. Other args are production_print_sheet's options.",
+            {
+                let mut props = print_schema();
+                if let Some(map) = props.as_object_mut() {
+                    map.insert("path".to_string(), path.clone());
+                    map.insert(
+                        "format".to_string(),
+                        json!({"type": "string", "enum": ["pdf", "png"]}),
+                    );
+                    map.insert(
+                        "dpi".to_string(),
+                        json!({"type": "number", "minimum": 50, "maximum": 1200}),
+                    );
+                }
+                props
+            },
             json!(["path"]),
         ),
         (

@@ -267,7 +267,7 @@ pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
             continue;
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let polylines = geom::path_to_polylines(&shape.path, geom::DEFAULT_FLATTEN_STEPS);
+            let polylines = geom::path_to_polylines(&shape.cut_path(), geom::DEFAULT_FLATTEN_STEPS);
             paths.extend(machine::paths_from_polylines(&polylines));
         }
     }

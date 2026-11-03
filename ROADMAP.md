@@ -103,6 +103,20 @@ Completed items should be marked here only when behavior is usable end-to-end.
   guides, grid and snap settings, local library and recovery helpers, and project
   templates. They are available through engine commands and MCP; desktop integration
   remains incomplete. Raster images and canvas metadata share the document round trip.
+- 2026-11-03 — Production groundwork: shape operation and contour metadata, reversible
+  combine/attach workflows, mat layout, and print-sheet planning are available through
+  engine commands and MCP. Hardware cutting and complete UI wiring remain open.
+- 2026-11-02 — New Document dialog (M1.3): File › New… (Ctrl/Cmd+N), New from Template…
+  (Ctrl/Cmd+Shift+N) and app start without a file open an Illustrator-style dialog: tabs
+  (Recent, Cut Mats, Vinyl, Paper & Card, Print & Cut, Laser) over a grid of preset cards
+  with code-drawn thumbnails, and a Preset Details column (name, width, height, units,
+  orientation, cutting mat, machine, kerf) with Create/Close. Create runs `document.new` and
+  `kerf.set`; recent sizes persist in settings. Built from craft-ui's dialog, tokens and
+  controls (`apps/stencilcraft/src/new_doc.rs`, 8 tests). Presets set board, mat and kerf
+  only; starter geometry (card fold score, tag hole) is still missing (docs/gaps.md 27).
+- 2026-11-02 — canvas restyled after the reference app's dark look (dark stays the default
+  for new installs): charcoal craft `pro` dark chrome, mid-grey pasteboard, light-grey
+  rounded mat with a rim and up arrow indicating its feed edge, white page with a thin blue border (`docs/ui-design.md`). Appearance estimated, not measured.
 
 - 2026-11-02 — Silhouette Studio documents: the new `crates/studio` reads outlines and page
   size from `.studio` (v2) and `.studio3` (v3) files. Everything it knows was learned only

@@ -93,7 +93,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
                 let _ = writeln!(svg, "    <g class=\"group\" data-group=\"{id}\">");
                 open.push(*id);
             }
-            let d = path_to_svg_d(&shape.path)?;
+            let d = path_to_svg_d(&shape.cut_path())?;
             let _ = writeln!(
                 svg,
                 "    <path class=\"{}\" d=\"{}\"/>",
@@ -252,7 +252,7 @@ pub fn export_tile_preview(
                 continue;
             }
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                let d = path_to_svg_d(&shape.path)?;
+                let d = path_to_svg_d(&shape.cut_path())?;
                 let _ = writeln!(
                     svg,
                     "      <path class=\"{}\" d=\"{}\"/>",

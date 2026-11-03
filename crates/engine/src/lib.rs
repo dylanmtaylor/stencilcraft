@@ -11,7 +11,9 @@
 pub mod document;
 pub mod generate;
 mod path_edit;
+mod production;
 pub mod text;
+pub use production::{ProductionCommand, ProductionEffect, ProductionField, StickerCut};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -448,6 +450,10 @@ pub enum Command {
     /// Untagged, so they keep the same `{"command", "params"}` shape as the rest.
     #[serde(untagged)]
     Document(document::DocumentCommand),
+    /// Cut-production commands and queries (`production.rs`, `docs/mcp.md` › Production); they
+    /// use the same `command`/`params` envelope.
+    #[serde(untagged)]
+    Production(ProductionCommand),
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
@@ -570,6 +576,8 @@ pub enum Effect {
         families: Vec<text::FontFamily>,
     },
     Document(document::DocumentEffect),
+    /// A production query's result: machines, mat layout, cut job or print sheets.
+    Production(ProductionEffect),
 }
 
 /// Undo/redo snapshots StencilCraft's production document; VectorCraft still owns the reusable
@@ -704,6 +712,7 @@ impl Engine {
             | Command::SelectInverse { .. } => return self.query(&command),
             Command::TextFonts { .. } => return text::run(self, command),
             Command::Document(command) => return document::run(self, command),
+            Command::Production(ref c) if c.is_query() => return production::query(&self.doc, c),
             _ => {}
         }
         if let Some(id) = edit_targets(&command)
@@ -747,6 +756,7 @@ impl Engine {
                 | Command::TextToOutlines { .. }
                 | Command::TextUngroup { .. }
                 | Command::TextMonogram(_)
+                | Command::Production(_)
         );
         let before = self.capture_history_entry(false, false);
         let document_before = self.session.active().map(|state| Arc::clone(&state.doc));
@@ -915,6 +925,7 @@ impl Engine {
                 self.redo();
                 Ok(Effect::HistoryChanged)
             }
+            Command::Production(c) => production::execute(&mut self.doc, c),
             Command::ShapeRemove { id } => self.remove_shapes(&[id], "shape.remove"),
             Command::ShapesRemove { ids } => self.remove_shapes(&ids, "shapes.remove"),
             Command::ShapesDuplicate { ids } => self.duplicate_shapes(&ids),
@@ -2491,6 +2502,9 @@ impl Engine {
                 .or_else(|| existing_shape_id.and_then(|id| old_shapes.get(&id)));
             let flags = source_shape.map_or((false, false), |shape| (shape.hidden, shape.locked));
             let tool = source_shape.and_then(|shape| shape.tool.clone());
+            let production = source_shape
+                .map(|shape| shape.production.clone())
+                .unwrap_or_default();
             let style = source_style
                 .or_else(|| {
                     existing_shape_id.and_then(|id| old_shapes.get(&id).map(|shape| shape.style))
@@ -2529,6 +2543,7 @@ impl Engine {
                     hidden: flags.0,
                     locked: flags.1,
                     tool,
+                    production,
                     id: shape_id,
                     path: snap_mm_path(&transform_path(
                         &path,
@@ -2712,6 +2727,7 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesReleaseCompound { ids }
         | Command::ShapesSetHidden { ids, .. }
         | Command::TextToOutlines { ids } => ids.clone(),
+        Command::Production(c) => c.targets(),
         _ => Vec::new(),
     }
 }

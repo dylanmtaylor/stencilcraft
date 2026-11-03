@@ -323,6 +323,7 @@ fn join_document(doc: &mut Document, tolerance: f64) {
                     locked: false,
                     tool: None,
                     text: None,
+                    production: Default::default(),
                 });
                 next_id = next_id.saturating_add(1);
             }

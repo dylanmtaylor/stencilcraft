@@ -21,6 +21,7 @@ stencilcraft-pdf = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-studio = { workspace = true }
 stencilcraft-tiling = { workspace = true }
+stencilcraft-layout = { workspace = true }
 
 [dev-dependencies]
 image = { workspace = true }

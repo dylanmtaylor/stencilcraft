@@ -35,8 +35,8 @@ Send and Close Tab. Saving to the vendor library and cloud is replaced by local 
 
 | Item | Shortcut | Source | Status | Implementation |
 | --- | --- | --- | --- | --- |
-| New | Ctrl+N | SS | have | `document.new` |
-| New from Template… (board presets, mats) | Ctrl+Shift+N | SS (New Project Wizard) | missing | *proposed `document.new-from-template`* |
+| New… (New Document dialog) | Ctrl+N | SS, AI | have | app dialog → `document.new` + `kerf.set` |
+| New from Template… (board presets, mats) | Ctrl+Shift+N | SS (New Project Wizard) | partial (opens New Document on its first template tab; no starter geometry) | app dialog → `document.new` + `kerf.set` |
 | Open… | Ctrl+O | SS | have | app: `stencilcraft-doc` read |
 | Open Recent › | — | SS | have | app (persisted Recent list) |
 | Open Recovered… | — | SS | missing | app: autosave store (new) |

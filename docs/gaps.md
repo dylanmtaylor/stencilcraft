@@ -213,9 +213,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 48. **Monogram and text conveniences**: engine/MCP provide a monogram command, ungroup
     to lines or letters, and curved text by diameter. Desktop builders and editing controls
     are not yet wired.
-49. **Silhouette colours and live text**: the `.studio` reader drops line/fill colours
-    (layout known, see `formats/silhouette-studio.md` › Colours), groups and live-text
-    parameters. Colours should map to layers the way Send by Line Color groups them.
+49. **Silhouette fills, groups and live text**: the `.studio` reader maps line colours to
+    layers but drops fill colours, groups and live-text parameters (text comes in as
+    outlines); no writer.
 50. **Control channel while the window gets no frames**: with the screen locked or the
     window hidden, control requests (including `app.screenshot`) wait forever because
     they are drained once per frame. They should time out with an error (VectorCraft

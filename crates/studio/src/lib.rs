@@ -108,7 +108,7 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
     let root = block(body, MAGIC_LEN).ok_or_else(|| bad("root record is truncated"))?;
 
     let mut doc = Document {
-        layers: vec![Layer::new("cut", CutStyle::Cut)],
+        layers: Vec::new(),
         ..Document::default()
     };
     match page_size(body, &root) {
@@ -124,6 +124,8 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
     let to_doc = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, doc.board.height_mm]);
     let mut points_total = 0usize;
     let mut cursor = root.start;
+    // An object's style record comes before its outline: search from the last outline.
+    let mut style_from = root.start;
     while let Some((at, path)) = find_path(body, cursor, root.end) {
         cursor = path.end;
         if doc.shape_count() >= MAX_SHAPES {
@@ -147,8 +149,13 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
             ));
             continue;
         }
-        doc.push_shape(0, bez, CutStyle::Cut)
+        let layer = layer_for(&mut doc, line_color_before(body, style_from, at));
+        style_from = path.end;
+        doc.push_shape(layer, bez, CutStyle::Cut)
             .map_err(|e| bad(&e.to_string()))?;
+    }
+    if doc.layers.is_empty() {
+        doc.layers.push(Layer::new("cut", CutStyle::Cut));
     }
 
     doc.validate().map_err(|e| bad(&e.to_string()))?;
@@ -357,6 +364,57 @@ fn to_bez(path: &PathRecord) -> BezPath {
         }
     }
     bez
+}
+
+/// One cut layer per line colour, like Silhouette's Send by Line Color; shapes whose
+/// style was not found go on a plain `cut` layer.
+fn layer_for(doc: &mut Document, color: Option<[u8; 3]>) -> usize {
+    let (name, color) = match color {
+        Some([r, g, b]) => {
+            let hex = format!("#{r:02x}{g:02x}{b:02x}");
+            (format!("Line {hex}"), Some(hex))
+        }
+        None => ("cut".to_string(), None),
+    };
+    if let Some(i) = doc.layers.iter().position(|l| l.name == name) {
+        return i;
+    }
+    let mut layer = Layer::new(name, CutStyle::Cut);
+    layer.color = color;
+    doc.layers.push(layer);
+    doc.layers.len() - 1
+}
+
+/// The line colour of the last object style in `from..to`. A style holds a cut-action
+/// record (`01 L`, then a name string starting "cut": "cut", "cutunion", …); 25 bytes
+/// before it sit a flag byte `01` and the line colour as four f32 in B, G, R, A order.
+fn line_color_before(d: &[u8], from: usize, to: usize) -> Option<[u8; 3]> {
+    let window = d.get(from..to)?;
+    let mut found = None;
+    let mut offset = 0;
+    while let Some(rel) = window.get(offset..)?.windows(3).position(|w| w == b"cut") {
+        let name = from + offset + rel;
+        offset += rel + 1;
+        let Some(record) = name.checked_sub(9) else {
+            continue;
+        };
+        let name_len = u32_at(d, name - 4).and_then(|n| usize::try_from(n).ok());
+        let plausible = d.get(record) == Some(&1)
+            && name_len.is_some_and(|n| (3..=32).contains(&n))
+            && record >= from + 25
+            && d.get(record - 25) == Some(&1);
+        if !plausible {
+            continue;
+        }
+        let channel = |i: usize| {
+            let v = f32_at(d, record - 24 + 4 * i)?;
+            (v.is_finite() && (0.0..=1.0).contains(&v)).then(|| (v * 255.0).round() as u8)
+        };
+        if let (Some(b), Some(g), Some(r)) = (channel(0), channel(1), channel(2)) {
+            found = Some([r, g, b]);
+        }
+    }
+    found
 }
 
 /// Page width and height (mm): the root's second record, 0x29 bytes into its payload.

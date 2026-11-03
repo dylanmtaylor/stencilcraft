@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Silhouette Studio colours: line colours (stored as B, G, R, A floats) put
+  each imported shape on a `Line #rrggbb` cut layer, as Send by Line Color groups them.
+  Measured: the default blue and the #b87c1b sample come back as their own layers.
 - 2026-11-03 — Silhouette Studio documents: the reader now reads each object's
   page-coordinate outline, which brings in open paths (lines), compound paths and text
   (as glyph outlines), and rotated and grouped objects at their on-page positions. This

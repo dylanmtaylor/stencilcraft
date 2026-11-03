@@ -173,8 +173,12 @@ Diff of `rect-1in-at-1-1` against `rect-1in-line-b87c1b-fill-54a923` (tag **C2**
   `@fill:23A954`. These keys are what Send › "Cut by Line/Fill Color" rows refer to. (C2)
 - This BGR order matches the app's own Select by Color labels, which print B, G, R.
 
-The reader does not import colours yet. Mapping them to StencilCraft layers (one layer per
-line colour, like Send by Line Color) is the planned next step.
+The reader puts each shape on a cut layer per line colour (named `Line #rrggbb`, with the
+layer colour set), the way Send › Cut by Line Color groups lines. It finds an object's
+colour from the last cut-action record (name starting `cut`: `cut`, `cutunion`) between
+the previous outline and this one, with a `01` flag byte 25 bytes before it. A shape whose
+style is not found goes on a plain `cut` layer. Fill colour is not imported: StencilCraft
+shapes have no fill.
 
 - Rectangle nodes run (x0,y0) → (x0,y1) → (x1,y1) → (x1,y0). There is no repeated closing
   node. (R)
@@ -226,7 +230,8 @@ with no table) is also accepted.
 
 ## What the reader imports
 
-- Every page-coordinate outline record as one shape on a `cut` layer: one subpath per
+- Every page-coordinate outline record as one shape, on one layer per line colour (see
+  Colours): one subpath per
   contour, open contours left open, closed ones closed. Matching needs every length and
   count to agree, so stray bytes are not read as shapes (no false match in any sample).
   It is then flipped into StencilCraft's y-up document space: `y_doc = page_height - y_file`.
@@ -237,7 +242,7 @@ with no table) is also accepted.
 ## Unknowns
 
 - The 3 trailing bytes of drawing-frame nodes (not needed by the reader).
-- How the colour floats are tied to an object when several objects share a file (one sample has one object).
+- A sample with several objects in different colours, to confirm the style-to-outline order beyond the one-object and same-colour samples.
 - Group membership and nesting, layers, live-text parameters beyond font, size and characters.
 - v3 embeds precomputed cut data ("Include Cut Data", on by default). Which section holds it
   is not yet identified; section 4's bounding box may be part of it.

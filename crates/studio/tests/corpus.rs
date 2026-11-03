@@ -127,6 +127,44 @@ fn open_paths_stay_open_and_compound_contours_stay_one_shape() {
     assert_eq!(closes(1), 2, "both contours of the compound path close");
 }
 
+/// An object style as Silhouette writes it: flag, line colour as B, G, R, A, 8 bytes,
+/// then the cut-action record (`01 L`, name "cut").
+fn style(rgb: [u8; 3]) -> Vec<u8> {
+    let mut out = vec![1];
+    for c in [rgb[2], rgb[1], rgb[0], 255] {
+        out.extend_from_slice(&(f32::from(c) / 255.0).to_le_bytes());
+    }
+    out.extend_from_slice(&[0; 8]);
+    let mut action = 3u32.to_le_bytes().to_vec();
+    action.extend_from_slice(b"cut");
+    out.extend(block(&action));
+    out
+}
+
+#[test]
+fn line_colours_become_one_layer_each() {
+    let ochre = [0xb8, 0x7c, 0x1b];
+    let blue = [0, 0, 0xff];
+    let mut records = Vec::new();
+    for rgb in [ochre, blue, ochre] {
+        let mut object = style(rgb);
+        object.extend(path_record(&[(true, RECT)]));
+        records.push(object);
+    }
+    let doc = import(&v2_records((304.8, 304.8), &records), "t")
+        .unwrap()
+        .doc;
+    let layers: Vec<_> = doc
+        .layers
+        .iter()
+        .map(|l| (l.color.clone().unwrap_or_default(), l.shapes.len()))
+        .collect();
+    assert_eq!(
+        layers,
+        [("#b87c1b".to_string(), 2), ("#0000ff".to_string(), 1)]
+    );
+}
+
 #[test]
 fn empty_document_imports_with_no_shapes() {
     let got = import(&v2((304.8, 304.8), &[]), "t").unwrap();
@@ -326,6 +364,15 @@ fn real_samples_decode_when_present() {
                 "{name}"
             );
             assert_eq!(got.doc.shape_count(), shapes, "{name}");
+            if let Some(hex) = stem.strip_prefix("rect-1in-line-").and_then(|s| s.get(..6)) {
+                let colours: Vec<_> = got
+                    .doc
+                    .layers
+                    .iter()
+                    .filter_map(|l| l.color.clone())
+                    .collect();
+                assert_eq!(colours, [format!("#{hex}")], "{name}");
+            }
             let (Some([x, y, w, h]), Some(r)) = (bounds, got.doc.layers[0].bounds()) else {
                 continue;
             };

@@ -12,8 +12,11 @@ fn main() -> Result<(), String> {
                     got.doc.board.height_mm,
                     got.doc.shape_count()
                 );
-                for (_, s) in got.doc.shapes() {
-                    println!("  {:?}", s.path);
+                for layer in &got.doc.layers {
+                    println!("  layer {:?} ({} shapes)", layer.name, layer.shapes.len());
+                    for s in &layer.shapes {
+                        println!("    {:?}", s.path);
+                    }
                 }
                 for w in got.warnings {
                     println!("  warning: {w}");

@@ -693,92 +693,19 @@ pub fn edit_subpaths_to_bezpath(subpaths: &[craft_draw::ui::pen::EditSubpath]) -
     out
 }
 
-/// Apply a [`craft_draw::ui::pen::PathEdit`] gesture to a subpath slice.
+/// Apply a [`craft_draw::ui::pen::PathEdit`] gesture to a subpath slice, by craft-draw's own
+/// edit rules; an edit naming a knot that does not exist leaves the subpaths unchanged.
 pub fn apply_path_edit(
     base: &[craft_draw::ui::pen::EditSubpath],
     edit: &craft_draw::ui::pen::PathEdit,
 ) -> Vec<craft_draw::ui::pen::EditSubpath> {
-    use craft_draw::ui::pen::{HandleSide, Knot, PathEdit};
-    use kurbo::ParamCurve as _;
-    let mut subpaths = base.to_vec();
-    match edit {
-        PathEdit::MoveAnchors { anchors, by, .. } => {
-            for &r in anchors {
-                if let Some(k) = subpaths
-                    .get_mut(r.subpath)
-                    .and_then(|s| s.knots.get_mut(r.knot))
-                {
-                    k.anchor += *by;
-                    k.in_ctrl += *by;
-                    k.out_ctrl += *by;
-                }
-            }
-        }
-        &PathEdit::MoveHandle {
-            knot,
-            side,
-            to,
-            alone,
-            ..
-        } => {
-            if let Some(k) = subpaths
-                .get_mut(knot.subpath)
-                .and_then(|s| s.knots.get_mut(knot.knot))
-            {
-                match side {
-                    HandleSide::In => k.in_ctrl = to,
-                    HandleSide::Out => k.out_ctrl = to,
-                }
-                if alone {
-                    k.smooth = false;
-                } else if k.smooth {
-                    let v = to - k.anchor;
-                    let len = v.hypot();
-                    if len > 1e-9 {
-                        let other = match side {
-                            HandleSide::In => &mut k.out_ctrl,
-                            HandleSide::Out => &mut k.in_ctrl,
-                        };
-                        let other_len = (*other - k.anchor).hypot();
-                        *other = k.anchor - v * (other_len / len);
-                    }
-                }
-            }
-        }
-        &PathEdit::BendSegment { segment, t, by, .. } => {
-            if let Some(sub) = subpaths.get_mut(segment.subpath)
-                && let Some((a, b)) = sub.segment_ends(segment.knot)
-                && let Some(c) = sub.segment(segment.knot)
-            {
-                if sub.is_straight(segment.knot) {
-                    sub.knots[a].out_ctrl = c.eval(1.0 / 3.0);
-                    sub.knots[b].in_ctrl = c.eval(2.0 / 3.0);
-                    sub.knots[a].smooth = false;
-                    sub.knots[b].smooth = false;
-                }
-                let u = 1.0 - t;
-                let w1 = 3.0 * u * u * t;
-                let w2 = 3.0 * u * t * t;
-                let denom = w1 * w1 + w2 * w2;
-                if denom > 1e-9 {
-                    sub.knots[a].out_ctrl += by * (w1 / denom);
-                    sub.knots[b].in_ctrl += by * (w2 / denom);
-                }
-            }
-        }
-        &PathEdit::Convert { knot, out, .. } => {
-            if let Some(k) = subpaths
-                .get_mut(knot.subpath)
-                .and_then(|s| s.knots.get_mut(knot.knot))
-            {
-                *k = match out {
-                    Some(out) => Knot::smooth(k.anchor, out),
-                    None => Knot::corner(k.anchor),
-                };
-            }
-        }
-    }
-    subpaths
+    let mut path = craft_draw::ui::pen::EditPath {
+        key: edit.path(),
+        subpaths: base.to_vec(),
+        color: None,
+    };
+    edit.apply(&mut path);
+    path.subpaths
 }
 
 /// Split segment `seg` at parameter `t` (`0.0..=1.0`) by inserting a smooth cubic knot.

@@ -40,6 +40,7 @@ stencilcraft-tiling = { path = "crates/tiling" }
 stencilcraft-svg = { path = "crates/svg" }
 stencilcraft-dxf = { path = "crates/dxf" }
 stencilcraft-gcode = { path = "crates/gcode" }
+stencilcraft-generate = { path = "crates/generate" }
 stencilcraft-engine = { path = "crates/engine" }
 stencilcraft-machine = { path = "crates/machine" }
 stencilcraft-mcp = { path = "crates/mcp" }

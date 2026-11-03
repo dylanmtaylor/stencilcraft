@@ -1,0 +1,20 @@
+[package]
+name = "stencilcraft-generate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pure-geometry generators and effects: parametric shapes, hatch and stipple fills, rhinestones, pop-up struts, puzzles, weeding, warps, perforation"
+
+[dependencies]
+kurbo = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+vectorcraft-geom = { workspace = true }
+vectorcraft-pathops = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json = { workspace = true }

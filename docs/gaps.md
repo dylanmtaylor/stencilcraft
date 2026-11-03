@@ -2,6 +2,10 @@
 
 Every known shortfall, ranked; the standing work list. Pick the first item you can finish.
 
+Items 16 onward come from the reference-app inventory in
+[`reference-apps.md`](reference-apps.md). It holds the feature-by-feature detail and the
+clean-room posture for studying Silhouette Studio and Cricut Design Space.
+
 1. **SVG import**: common shapes (`path`, basic shapes), groups, standard affine
    transforms, inherited presentation/inline display and production styles, physical
    units/viewBox/`preserveAspectRatio`, local `<use>` of supported shapes/groups, and
@@ -46,7 +50,7 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
    alignment/distribution and edit-journal undo/redo; StencilCraft retains its millimetre
    document and metadata snapshots. The model still has no explicit persistent selection,
    and undo snapshots clone whole documents rather than sharing structure.
-7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Full node-level editing via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
+7. **UI**: craft-suite integration complete with CSD `TitleBar` (window frame and embedded icon), `MenuBar` (File, Edit, Object, View, Window, Help), contextual `OptionsBar`, and vertical `ToolRail` with flyouts. Node editing (move points, convert smooth/corner) via `BezierOverlay`, interactive path drawing via `PenDraft`, live drag-to-create shape primitives, millimetre `Rulers` with draggable zero-origin reset, and dockable `Layers & Objects` and inspector panels using `craft-ui` components.
 8. **Agent surface**: the CLI offers MCP stdio tools and legacy JSON-lines control, including
    serde-tagged engine commands; the CLI session stays headless. The desktop `--control`
    socket queues each request onto the UI thread and runs it against the engine behind the
@@ -68,3 +72,43 @@ Every known shortfall, ranked; the standing work list. Pick the first item you c
     - Right dock: `Properties` and `Layers` tabs share a dock group; VectorCraft also has an icon strip and Libraries tab.
     - Canvas navigation uses the shared bottom status bar; VectorCraft also shows render and fps stats.
     - Remaining differences include tool rail grouping and flyout markers, and the production controls in StencilCraft's top toolbar.
+16. **User offset**: kerf offsetting exists, but there is no command that adds an
+    outward/inward offset as a new shape. Also missing: round corners (kerf only mitres)
+    and the option to weld the offset outlines into one.
+17. **Groups, stacking and layer control**: no group/ungroup, no reordering
+    (forward/back), no locking of objects or layers, no rename, no moving objects
+    between layers. Attach (keep positions on the mat) and Contour (turn off single
+    sub-paths) build on these.
+18. **Snapping and guides**: there is a grid display but no snapping to the grid,
+    objects or guides. Also missing: guides and a measure tool. Units are mm only, with
+    no inch display.
+19. **Text**: the Text tool places built-in single-line bitmap lettering only. Missing:
+    user/system fonts (through `CRAFT_FONTS_DIR`, never bundled), size and spacing
+    controls, text that can be edited after placing, text on a path or arc, and a
+    glyphs panel.
+20. **Replicate and nesting**: only duplicate in place exists. Missing: copies in a
+    direction, row/column and radial arrays, mirrored copies, fill page and automatic
+    nesting.
+21. **Cut job settings**: missing test cut, overcut, cut order/path sorting, custom saved
+    materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
+    Also missing: weed lines and borders, and more operation types (pen, score,
+    perforate).
+22. **Machine connection**: the only transport is serial/CDC, and only from the CLI.
+    Missing: USB bulk (`nusb`), Bluetooth, device discovery, live status, load/unload,
+    pause and cancel, a Make-screen mat preview, multi-cutter output and batch jobs.
+    Driving Cricut machines is out of scope (no public specification).
+23. **Path editing tools**: missing freehand and smoothed freehand, arc, knife, eraser,
+    break/join/close path, release compound path, simplify, flip/mirror buttons, a
+    clipboard, and warp.
+24. **Trace**: threshold silhouette only. Missing: image filters, outer-edge-only trace,
+    trace & detach, background removal, a live preview of the trace area, and
+    multi-colour trace to layers.
+25. **Print & Cut, beyond item 3**: missing printing from the app, mark size and position
+    options, bleed, fill colour/gradient for printed artwork, Flatten, print size checks
+    and calibration. Scan-to-cut is low priority.
+26. **Formats**: missing DXF import (see item 5), PDF import, PDF/PNG/JPG export and
+    placed raster images for printing. Proprietary `.studio`/`.studio3` and AI/CDR
+    formats are out of scope.
+27. **Documents and preferences**: one board per document, with no pages or tabs. No
+    default machine/material preferences, no UI language choice and no local design
+    library beyond Recent. The browser/mobile client is item 9.

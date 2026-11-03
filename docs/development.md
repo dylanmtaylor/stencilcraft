@@ -83,3 +83,12 @@ go into a separately maintained craft-fonts repository read through an optional
 `CRAFT_FONTS_DIR` build input. Build, test and runtime must all work with that variable
 unset. For now the UI renders no user text via shaped fonts beyond the toolkit's own
 interface font.
+
+### Flatpak USB access
+
+Both Flatpak manifests and the fallback bundle builder grant `--device=usb` for
+the desktop's raw USB cutter transport. This requires a Flatpak version supporting
+that permission; older versions may ignore it. Host device permissions still apply.
+Rebuild and reinstall the package, then restart the app to apply manifest changes
+to an existing installation. This does not itself enable USB support in CLI builds.
+See [Flatpak sandbox permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).

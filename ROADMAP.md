@@ -99,6 +99,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: grant raw USB access in both Flatpak manifests and the
+  fallback bundle builder so packaged desktop builds can reach cutters. Host
+  device permissions and hardware validation remain necessary.
+
 - 2026-11-03 — Shape drawing now paints a live outline while dragging stars,
   polygons, ellipses and rectangles, using the same command as the final shape.
 

@@ -72,6 +72,7 @@ else
     --socket=fallback-x11 \
     --share=ipc \
     --device=dri \
+    --device=usb \
     --filesystem=xdg-documents \
     --filesystem=xdg-pictures
 

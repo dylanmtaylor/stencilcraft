@@ -13,13 +13,14 @@ use craft_draw::ui::pen::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
-use craft_theme::ControlSize;
+use craft_theme::{ControlSize, TypeRole};
 use craft_ui::canvas::{Readout, RulerNames, RulerUnits, Rulers};
-use craft_ui::composites::PanelFooter;
+use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
-    Button, ButtonVariant, Checkbox, IconButton, Kbd, NumberField, Select, Slider, SliderScale,
+    Button, ButtonVariant, Checkbox, IconButton, NumberField, Select, Slider, SliderScale,
     TextField, ToggleButton,
 };
+use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
 use craft_ui::docking::{
     Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
 };
@@ -28,8 +29,12 @@ use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
 use craft_ui::list::{ListRow, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::menu::{MenuBar, MenuEntry, MenuItem};
-use craft_ui::patterns::{LastUsed, OptionsBar, Panel, RailTool, StatusBar, ToolRail, ToolSlot};
+use craft_ui::menu::{MenuBar, MenuEntry, MenuItem, PressMenu};
+use craft_ui::patterns::{
+    AlignAction, AlignBar, Inspector, InspectorHeader, LastUsed, OptionsBar, Panel, RailTool,
+    StatusBar, ToolRail, ToolSlot,
+};
+use craft_ui::primitives::{Content, Divider, Text};
 use craft_ui::title_bar::{Frame, LeadingEnd, Title, TitleBar};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
@@ -39,6 +44,9 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
 /// connection (the same session core the CLI's `mcp` mode uses).
 mod control;
+
+/// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
+mod menus;
 
 /// The same bounded PNG/JPEG silhouette tracer used by the CLI.
 #[path = "../../stencilcraft-cli/src/trace.rs"]
@@ -245,8 +253,22 @@ pub enum TopMenuAction {
     Pathfinder(BooleanOperation),
     Align(Alignment),
     Distribute(DistributionAxis),
-    RotateCw15,
-    RotateCcw15,
+    /// Rotate the selection by whole degrees (positive is clockwise on screen).
+    RotateBy(i16),
+    CenterToPage,
+    SetStyle(CutStyle),
+    PlaceText,
+    SelectInverse,
+    SelectSameStyle,
+    SelectSameLayer,
+    ShowDesign,
+    ShowSend,
+    ShowPanel(WorkspacePanel),
+    DirectSelectTool,
+    DryRun,
+    Quit,
+    /// A planned item with no command yet; its menu row is disabled.
+    NotYet,
     FitView,
     CenterView,
     ActualSize,
@@ -581,7 +603,6 @@ pub struct StencilApp {
     pub speed_before: Option<f64>,
     pub zoom_before: Option<f64>,
     pub text_before: Option<String>,
-    pub inspector_before: [Option<String>; 4],
     pub status: String,
     pub open_path: Option<String>,
     pub send_mode: bool,
@@ -594,11 +615,10 @@ pub struct StencilApp {
     pub selected_shape: Option<u64>,
     pub selected_shapes: Vec<u64>,
     pub selected_layer: Option<usize>,
-    pub inspector_shape: Option<u64>,
-    pub inspector_bounds: Option<[f64; 4]>,
-    pub inspector_values: [String; 4],
-    pub inspector_editing: bool,
     pub text_dialog: bool,
+    /// File › Quit was chosen; the next frame closes the window.
+    pub quit_requested: bool,
+    pub text_dialog_state: DialogState<String>,
     pub text_value: String,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
@@ -627,6 +647,8 @@ pub struct StencilApp {
     pub control_port: Option<u16>,
     /// Queued control requests, handled on the UI thread against `engine`.
     pub control_jobs: Option<control::Jobs>,
+    /// The design-system theme resolved for `theme`, rebuilt when the user switches mode.
+    pub installed_theme: Option<(stencilcraft_ui_egui::ColorTheme, craft_ui::theme::Base)>,
 }
 
 #[derive(Clone, Debug)]
@@ -725,7 +747,6 @@ impl StencilApp {
             speed_before: None,
             zoom_before: None,
             text_before: None,
-            inspector_before: std::array::from_fn(|_| None),
             status,
             open_path: open_path.clone(),
             send_mode: false,
@@ -737,11 +758,9 @@ impl StencilApp {
             selected_shape: None,
             selected_shapes: Vec::new(),
             selected_layer: Some(0),
-            inspector_shape: None,
-            inspector_bounds: None,
-            inspector_values: std::array::from_fn(|_| String::new()),
-            inspector_editing: false,
             text_dialog: false,
+            quit_requested: false,
+            text_dialog_state: DialogState::new(),
             text_value: String::new(),
             canvas_drag_shape: None,
             canvas_selection_start: None,
@@ -767,13 +786,14 @@ impl StencilApp {
             settings_store: None,
             control_port: None,
             control_jobs: None,
+            installed_theme: None,
         }
     }
 
     /// Run queued `--control` requests against the document on screen. The socket
     /// hands work to the UI thread, so an agent edits what the user sees (and the
     /// user can undo it) instead of a private copy of the file.
-    fn drain_control_requests(&mut self) {
+    fn drain_control_requests(&mut self, ctx: &egui::Context) {
         let Some(jobs) = self.control_jobs.as_ref() else {
             return;
         };
@@ -782,6 +802,17 @@ impl StencilApp {
             pending.push(job);
         }
         for job in pending {
+            if let Some(path) = screenshot_request(&job.line) {
+                request_screenshot(ctx, path, job);
+                continue;
+            }
+            if let Some((id, ids)) = select_request(&job.line) {
+                // Selection is view state, not a document command: the window owns it.
+                self.set_selection(ids);
+                let reply = serde_json::json!({"id": id, "ok": true, "result": {"selected": self.selected_shapes}});
+                let _ = job.reply.send(reply.to_string());
+                continue;
+            }
             // The session owns the engine while it handles one request, then hands
             // it back: the document, undo history and counters all survive.
             let engine = std::mem::take(&mut self.engine);
@@ -797,6 +828,17 @@ impl StencilApp {
             self.engine = session.into_engine();
             self.retain_valid_selection();
             self.kerf_preview_cache = None;
+            if let Some((method, path)) = document_path_request(&job.line, &reply) {
+                // An agent opened or saved the visible document: the title, recent files and
+                // framing follow it as they do for File › Open and Save.
+                if method == "doc.open" {
+                    self.set_selection([]);
+                    self.view_initialized = false;
+                    self.last_board = None;
+                }
+                self.open_path = Some(path.clone());
+                self.record_recent_file(path);
+            }
             let _ = job.reply.send(reply);
         }
     }
@@ -1007,7 +1049,15 @@ impl StencilApp {
         if self.send_mode || ctx.egui_wants_keyboard_input() {
             return;
         }
-        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+        // Shifted shortcuts first: `consume_key` matches Cmd+A while Shift is also held.
+        let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::A)) {
+            self.handle_menu_action(TopMenuAction::Deselect);
+        } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::W)) {
+            self.handle_menu_action(TopMenuAction::Pathfinder(BooleanOperation::Union));
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::L)) {
+            self.handle_menu_action(TopMenuAction::ShowSend);
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
             self.select_all_shapes();
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F))
             || ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Num0))
@@ -1026,16 +1076,14 @@ impl StencilApp {
                 || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
         }) {
             self.delete_selection();
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
-            let _ = self.engine.undo();
-            self.retain_valid_selection();
         } else if ctx.input_mut(|input| {
-            input.consume_key(
-                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                egui::Key::Z,
-            ) || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+            input.consume_key(cmd_shift, egui::Key::Z)
+                || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
         }) {
             let _ = self.engine.redo();
+            self.retain_valid_selection();
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
+            let _ = self.engine.undo();
             self.retain_valid_selection();
         } else if ctx.input_mut(|input| {
             input.consume_key(
@@ -1185,30 +1233,31 @@ impl StencilApp {
         if !self.text_dialog {
             return;
         }
-        let mut open = self.text_dialog;
-        let mut add_text = false;
-        let mut cancel = false;
-        egui::Window::new("Place text as cut outlines")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .show(parent.ctx(), |ui| {
-                ui.label("Places simple single-line engraved lettering (up to 80 characters).");
-                let edit = TextField::new("place-text", "Text to place", &self.text_value)
-                    .char_limit(80)
-                    .show(ui);
-                apply_edit(&mut self.text_value, &mut self.text_before, edit.event);
-                ui.horizontal(|ui| {
-                    if ui.add(Button::new("Cancel")).clicked() {
-                        cancel = true;
-                    }
-                    if ui.add(Button::new("Add text")).clicked() {
-                        add_text = true;
-                    }
-                });
-            });
-        self.text_dialog = open && !add_text && !cancel;
-        if add_text {
+        let mut before = self.text_before.take();
+        let shown = Dialog::new("place-text-dialog", "Place text as cut outlines")
+            .footer(Footer::standard().ok("Add text").cancel("Cancel"))
+            .show(
+                parent.ctx(),
+                &mut self.text_dialog_state,
+                &mut self.text_value,
+                |ui, text| {
+                    ui.add(
+                        Text::new(
+                            "Places simple single-line engraved lettering (up to 80 characters).",
+                        )
+                        .content(Content::Muted),
+                    );
+                    let edit = TextField::new("place-text", "Text to place", text.as_str())
+                        .char_limit(80)
+                        .show(ui);
+                    apply_edit(text, &mut before, edit.event);
+                },
+            );
+        self.text_before = before;
+        if shown.closed {
+            self.text_dialog = false;
+        }
+        if shown.outcome == Some(Outcome::Ok) {
             self.add_text();
         }
     }
@@ -1294,317 +1343,7 @@ impl StencilApp {
     }
 
     fn build_menu_bar(&self) -> Vec<MenuItem<TopMenuAction>> {
-        let mut menus = Vec::new();
-
-        // 1. File
-        let mut file_items = vec![
-            MenuItem::new("New", TopMenuAction::NewDoc)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::N,
-                )))
-                .into(),
-            MenuItem::new("Open…", TopMenuAction::OpenDoc)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::O,
-                )))
-                .into(),
-        ];
-        let mut recent_sub = Vec::new();
-        if self.recent_files.is_empty() {
-            recent_sub.push(MenuEntry::Item(
-                MenuItem::new("No Recent Documents", TopMenuAction::NewDoc).enabled(false),
-            ));
-        } else {
-            for (i, path) in self.recent_files.iter().enumerate() {
-                let name = std::path::Path::new(path)
-                    .file_name()
-                    .and_then(std::ffi::OsStr::to_str)
-                    .unwrap_or(path);
-                recent_sub.push(MenuItem::new(name, TopMenuAction::OpenRecent(i)).into());
-            }
-        }
-        file_items.push(MenuItem::submenu("Open Recent", recent_sub).into());
-        file_items.push(MenuEntry::Separator);
-        file_items.push(
-            MenuItem::new("Save", TopMenuAction::SaveDoc)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::S,
-                )))
-                .into(),
-        );
-        file_items.push(
-            MenuItem::new("Save As…", TopMenuAction::SaveAsDoc)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                    egui::Key::S,
-                )))
-                .into(),
-        );
-        file_items.push(MenuEntry::Separator);
-        file_items.push(MenuItem::new("Import SVG…", TopMenuAction::ImportSvg).into());
-        file_items
-            .push(MenuItem::new("Import Image Silhouette…", TopMenuAction::ImportImage).into());
-        file_items.push(MenuEntry::Separator);
-        file_items.push(MenuItem::new("Export SVG…", TopMenuAction::ExportSvg).into());
-        file_items.push(
-            MenuItem::new("Export Print & Cut SVG…", TopMenuAction::ExportPrintCutSvg).into(),
-        );
-        file_items.push(MenuItem::new("Export DXF (R14 ASCII)…", TopMenuAction::ExportDxf).into());
-        file_items.push(MenuItem::new("Export G-code (Grbl)…", TopMenuAction::ExportGcode).into());
-        file_items
-            .push(MenuItem::new("Export Tiled SVG Sheets…", TopMenuAction::ExportTiledSvg).into());
-        menus.push(MenuItem::submenu("File", file_items));
-
-        // 2. Edit
-        let edit_items = vec![
-            MenuItem::new("Undo", TopMenuAction::Undo)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Z,
-                )))
-                .enabled(self.engine.can_undo())
-                .into(),
-            MenuItem::new("Redo", TopMenuAction::Redo)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                    egui::Key::Z,
-                )))
-                .enabled(self.engine.can_redo())
-                .into(),
-            MenuEntry::Separator,
-            MenuItem::new("Duplicate Selected", TopMenuAction::Duplicate)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::D,
-                )))
-                .enabled(!self.selected_shapes.is_empty())
-                .into(),
-            MenuItem::new("Delete", TopMenuAction::Delete)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::NONE,
-                    egui::Key::Backspace,
-                )))
-                .enabled(!self.selected_shapes.is_empty())
-                .into(),
-            MenuEntry::Separator,
-            MenuItem::new("Select All", TopMenuAction::SelectAll)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::A,
-                )))
-                .into(),
-            MenuItem::new("Deselect", TopMenuAction::Deselect)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::NONE,
-                    egui::Key::Escape,
-                )))
-                .enabled(!self.selected_shapes.is_empty())
-                .into(),
-        ];
-        menus.push(MenuItem::submenu("Edit", edit_items));
-
-        // 3. Object
-        let has_mult = self.selected_shapes.len() >= 2;
-        let object_items = vec![
-            MenuItem::submenu(
-                "Pathfinder",
-                vec![
-                    MenuItem::new("Unite", TopMenuAction::Pathfinder(BooleanOperation::Union))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new(
-                        "Minus Front",
-                        TopMenuAction::Pathfinder(BooleanOperation::Difference),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new(
-                        "Intersect",
-                        TopMenuAction::Pathfinder(BooleanOperation::Intersect),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new("Exclude", TopMenuAction::Pathfinder(BooleanOperation::Xor))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new(
-                        "Divide",
-                        TopMenuAction::Pathfinder(BooleanOperation::Divide),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new("Trim", TopMenuAction::Pathfinder(BooleanOperation::Trim))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new("Merge", TopMenuAction::Pathfinder(BooleanOperation::Merge))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new("Crop", TopMenuAction::Pathfinder(BooleanOperation::Crop))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new(
-                        "Outline",
-                        TopMenuAction::Pathfinder(BooleanOperation::Outline),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new(
-                        "Minus Back",
-                        TopMenuAction::Pathfinder(BooleanOperation::MinusBack),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                ],
-            )
-            .into(),
-            MenuItem::submenu(
-                "Align",
-                vec![
-                    MenuItem::new("Left", TopMenuAction::Align(Alignment::Left))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new(
-                        "Horizontal Center",
-                        TopMenuAction::Align(Alignment::HorizontalCenter),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new("Right", TopMenuAction::Align(Alignment::Right))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new("Top", TopMenuAction::Align(Alignment::Top))
-                        .enabled(has_mult)
-                        .into(),
-                    MenuItem::new(
-                        "Vertical Center",
-                        TopMenuAction::Align(Alignment::VerticalCenter),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new("Bottom", TopMenuAction::Align(Alignment::Bottom))
-                        .enabled(has_mult)
-                        .into(),
-                ],
-            )
-            .into(),
-            MenuItem::submenu(
-                "Distribute",
-                vec![
-                    MenuItem::new(
-                        "Horizontal",
-                        TopMenuAction::Distribute(DistributionAxis::Horizontal),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                    MenuItem::new(
-                        "Vertical",
-                        TopMenuAction::Distribute(DistributionAxis::Vertical),
-                    )
-                    .enabled(has_mult)
-                    .into(),
-                ],
-            )
-            .into(),
-            MenuEntry::Separator,
-            MenuItem::new("Rotate +15°", TopMenuAction::RotateCw15)
-                .enabled(!self.selected_shapes.is_empty())
-                .into(),
-            MenuItem::new("Rotate −15°", TopMenuAction::RotateCcw15)
-                .enabled(!self.selected_shapes.is_empty())
-                .into(),
-        ];
-        menus.push(MenuItem::submenu("Object", object_items));
-
-        // 4. View
-        let view_items = vec![
-            MenuItem::new("Fit to Sheet", TopMenuAction::FitView)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::NONE,
-                    egui::Key::F,
-                )))
-                .into(),
-            MenuItem::new("Center Sheet", TopMenuAction::CenterView)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::NONE,
-                    egui::Key::C,
-                )))
-                .into(),
-            MenuItem::new("Actual Size (100%)", TopMenuAction::ActualSize)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Num1,
-                )))
-                .into(),
-            MenuItem::new("Zoom In", TopMenuAction::ZoomIn)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Plus,
-                )))
-                .into(),
-            MenuItem::new("Zoom Out", TopMenuAction::ZoomOut)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Minus,
-                )))
-                .into(),
-            MenuEntry::Separator,
-            MenuItem::new("Rulers", TopMenuAction::ToggleRulers)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
-                    egui::Key::R,
-                )))
-                .check(self.prefs.show_rulers)
-                .into(),
-            MenuItem::new("Grid", TopMenuAction::ToggleGrid)
-                .shortcut(Kbd::new(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::COMMAND,
-                    egui::Key::Quote,
-                )))
-                .check(self.prefs.show_grid)
-                .into(),
-            MenuItem::new(
-                "Preview Kerf Compensation",
-                TopMenuAction::ToggleKerfPreview,
-            )
-            .check(self.kerf_preview)
-            .into(),
-            MenuItem::new("Print & Cut Marks", TopMenuAction::TogglePrintCutMarks)
-                .check(self.prefs.print_cut_marks)
-                .into(),
-        ];
-        menus.push(MenuItem::submenu("View", view_items));
-
-        // 5. Window
-        let window_items = vec![
-            MenuItem::new("Reset Panels to Default", TopMenuAction::ResetWorkspace).into(),
-            MenuEntry::Separator,
-            MenuItem::new(
-                "Dark Theme",
-                TopMenuAction::SetTheme(stencilcraft_ui_egui::ColorTheme::Dark),
-            )
-            .radio(self.theme == stencilcraft_ui_egui::ColorTheme::Dark)
-            .into(),
-            MenuItem::new(
-                "Light Theme",
-                TopMenuAction::SetTheme(stencilcraft_ui_egui::ColorTheme::Light),
-            )
-            .radio(self.theme == stencilcraft_ui_egui::ColorTheme::Light)
-            .into(),
-        ];
-        menus.push(MenuItem::submenu("Window", window_items));
-
-        // 6. Help
-        let help_items = vec![
-            MenuItem::new("Documentation", TopMenuAction::HelpManual).into(),
-            MenuItem::new("Keyboard Shortcuts", TopMenuAction::HelpCheatsheet).into(),
-            MenuItem::new("About StencilCraft", TopMenuAction::HelpAbout).into(),
-        ];
-        menus.push(MenuItem::submenu("Help", help_items));
-
-        menus
+        menus::build(self)
     }
 
     pub fn handle_menu_action(&mut self, action: TopMenuAction) {
@@ -1822,7 +1561,8 @@ impl StencilApp {
                     axis,
                 });
             }
-            TopMenuAction::RotateCw15 => {
+            TopMenuAction::RotateBy(degrees) => {
+                let degrees = f64::from(degrees);
                 if self.selected_shapes.len() > 1 {
                     self.run_command(Command::ShapesTransform {
                         ids: self.selected_shapes.clone(),
@@ -1830,26 +1570,94 @@ impl StencilApp {
                         dy_mm: 0.0,
                         scale_x: 1.0,
                         scale_y: 1.0,
-                        degrees: 15.0,
+                        degrees,
                     });
                 } else if let Some(id) = self.selected_shape {
-                    self.run_command(Command::ShapeRotate { id, degrees: 15.0 });
+                    self.run_command(Command::ShapeRotate { id, degrees });
                 }
             }
-            TopMenuAction::RotateCcw15 => {
-                if self.selected_shapes.len() > 1 {
-                    self.run_command(Command::ShapesTransform {
+            TopMenuAction::CenterToPage => {
+                for alignment in [Alignment::HorizontalCenter, Alignment::VerticalCenter] {
+                    self.run_command(Command::ShapesAlign {
                         ids: self.selected_shapes.clone(),
-                        dx_mm: 0.0,
-                        dy_mm: 0.0,
-                        scale_x: 1.0,
-                        scale_y: 1.0,
-                        degrees: -15.0,
+                        alignment,
+                        to_board: true,
                     });
-                } else if let Some(id) = self.selected_shape {
-                    self.run_command(Command::ShapeRotate { id, degrees: -15.0 });
                 }
             }
+            TopMenuAction::SetStyle(style) => self.run_command(Command::ShapesSetStyle {
+                ids: self.selected_shapes.clone(),
+                style,
+            }),
+            TopMenuAction::PlaceText => {
+                self.active_tool = ActiveTool::Text;
+                self.text_dialog = true;
+            }
+            TopMenuAction::SelectInverse => {
+                let inverse: Vec<u64> = self
+                    .engine
+                    .doc
+                    .shapes()
+                    .map(|(_, shape)| shape.id)
+                    .filter(|id| !self.selected_shapes.contains(id))
+                    .collect();
+                self.set_selection(inverse);
+            }
+            TopMenuAction::SelectSameStyle => {
+                let styles: Vec<CutStyle> = self
+                    .selected_shapes
+                    .iter()
+                    .filter_map(|id| self.engine.doc.get_shape(*id).map(|s| s.style))
+                    .collect();
+                let same: Vec<u64> = self
+                    .engine
+                    .doc
+                    .shapes()
+                    .filter(|(_, shape)| styles.contains(&shape.style))
+                    .map(|(_, shape)| shape.id)
+                    .collect();
+                self.set_selection(same);
+            }
+            TopMenuAction::SelectSameLayer => {
+                let same: Vec<u64> = self
+                    .engine
+                    .doc
+                    .layers
+                    .iter()
+                    .filter(|layer| {
+                        layer
+                            .shapes
+                            .iter()
+                            .any(|shape| self.selected_shapes.contains(&shape.id))
+                    })
+                    .flat_map(|layer| layer.shapes.iter().map(|shape| shape.id))
+                    .collect();
+                self.set_selection(same);
+            }
+            TopMenuAction::ShowDesign => self.send_mode = false,
+            TopMenuAction::ShowSend => self.send_mode = true,
+            TopMenuAction::ShowPanel(panel) => {
+                let action = if self.workspace.contains(&panel) {
+                    craft_ui::docking::Action::Activate { panel }
+                } else {
+                    craft_ui::docking::Action::Open {
+                        panel,
+                        anchor: None,
+                    }
+                };
+                if let Err(error) = self.workspace.apply(action) {
+                    self.status = format!("could not show panel: {error}");
+                }
+            }
+            TopMenuAction::DirectSelectTool => self.active_tool = ActiveTool::DirectSelect,
+            TopMenuAction::DryRun => {
+                self.send_mode = true;
+                self.send.summary = Some(self.encode_send_summary());
+            }
+            TopMenuAction::Quit => {
+                self.quit_requested = true;
+            }
+            TopMenuAction::NotYet => self.status = menus::NOT_YET.to_lowercase(),
             TopMenuAction::FitView => self.pending_view_command = Some(CanvasViewCommand::Fit),
             TopMenuAction::CenterView => {
                 self.pending_view_command = Some(CanvasViewCommand::Center)
@@ -1936,32 +1744,45 @@ impl StencilApp {
                             LeadingEnd::from_ui(ui)
                         },
                         |ui, _| {
+                            // The trailing slot lays out right to left: the switcher comes first
+                            // so it sits at the window edge, then Redo before Undo.
                             ui.horizontal(|ui| {
-                                egui::ComboBox::from_id_salt("workspace-switcher")
-                                    .selected_text("Essentials")
-                                    .width(88.0)
-                                    .show_ui(ui, |ui| {
-                                        if ui.selectable_label(true, "Essentials").clicked() {
-                                            reset_workspace_clicked = true;
-                                        }
-                                        if ui.selectable_label(false, "Reset Workspace").clicked() {
-                                            reset_workspace_clicked = true;
-                                        }
-                                    });
-                                ui.separator();
-                                if ui
-                                    .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
-                                    .clicked()
+                                let workspaces = [
+                                    MenuEntry::from(
+                                        MenuItem::new("Essentials", WorkspaceChoice::Essentials)
+                                            .radio(true),
+                                    ),
+                                    MenuEntry::Separator,
+                                    MenuItem::new("Reset Essentials", WorkspaceChoice::Reset)
+                                        .into(),
+                                ];
+                                let button = ui.add(
+                                    Button::new("Essentials")
+                                        .trailing_icon(Icon::ChevronDown)
+                                        .variant(ButtonVariant::Ghost)
+                                        .size(ControlSize::Sm),
+                                );
+                                if PressMenu::new(&workspaces)
+                                    .show(ui, &button)
+                                    .chosen
+                                    .is_some()
                                 {
-                                    undo_clicked = true;
+                                    reset_workspace_clicked = true;
                                 }
+                                Divider::vertical().show(ui);
                                 if ui
                                     .add(IconButton::new(Icon::Redo, "Redo").enabled(can_redo))
                                     .clicked()
                                 {
                                     redo_clicked = true;
                                 }
-                                ui.separator();
+                                if ui
+                                    .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
+                                    .clicked()
+                                {
+                                    undo_clicked = true;
+                                }
+                                Divider::vertical().show(ui);
                                 if ui
                                     .add(IconButton::new(theme_icon, "Switch Theme"))
                                     .clicked()
@@ -2034,10 +1855,10 @@ impl StencilApp {
                     });
                     bar.body(|ui| {
                         if count == 0 {
-                            ui.label("No selection");
-                            ui.separator();
+                            ui.add(Text::new("No selection"));
+                            Divider::vertical().show(ui);
                             let mut kerf_val = kerf_val_init;
-                            ui.label("Kerf:");
+                            ui.add(Text::new("Kerf:"));
                             let edit =
                                 NumberField::new("opt-kerf", "Kerf", kerf_val, &locale_numbers)
                                     .range(0.0..=2.0)
@@ -2054,14 +1875,14 @@ impl StencilApp {
                         } else if count == 1
                             && let Some(id) = selected_shape_id
                         {
-                            ui.label(format!("Shape #{id}"));
+                            ui.add(Text::new(format!("Shape #{id}")));
                             if let Some(bounds) = shape_bounds {
-                                ui.separator();
-                                ui.label(format!("W: {:.2} mm", bounds.width()));
-                                ui.label(format!("H: {:.2} mm", bounds.height()));
+                                Divider::vertical().show(ui);
+                                ui.add(Text::new(format!("W: {:.2} mm", bounds.width())));
+                                ui.add(Text::new(format!("H: {:.2} mm", bounds.height())));
                             }
                         } else {
-                            ui.label(format!("{count} shapes selected"));
+                            ui.add(Text::new(format!("{count} shapes selected")));
                             if ui.add(Button::new("Unite").size(ControlSize::Sm)).clicked() {
                                 do_unite = true;
                             }
@@ -2084,8 +1905,8 @@ impl StencilApp {
                                 .icon(Icon::Grid)
                                 .size(ControlSize::Sm),
                         );
-                        ui.separator();
-                        ui.label(format!("{object_count} objects"));
+                        Divider::vertical().show(ui);
+                        ui.add(Text::new(format!("{object_count} objects")));
                         let (mode_label, variant) = if send_mode {
                             ("← Design", ButtonVariant::Secondary)
                         } else {
@@ -2116,43 +1937,68 @@ impl StencilApp {
         }
     }
 
-    pub fn workflow_bar(&mut self, parent: &mut egui::Ui) {
-        egui::Panel::top("workflow").show(parent, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading(if self.send_mode { "Make" } else { "Design" });
-                ui.separator();
-                ui.label(format!("{} objects", self.engine.doc.shape_count()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let (label, destination) = if self.send_mode {
-                        ("← Design", false)
-                    } else {
-                        ("Make →", true)
-                    };
-                    if ui.add(Button::new(label)).clicked() {
-                        self.send_mode = destination;
-                    }
-                    ui.selectable_value(&mut self.send_mode, false, "Canvas");
-                });
-            });
-        });
-    }
-
     pub fn tools_panel(&mut self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(8.0);
-            ui.small("TOOLS");
-            ui.separator();
-            if ui.add(Button::new("Deselect")).clicked() {
-                self.set_selection([]);
-            }
-            if !self.selected_shapes.is_empty()
-                && ui.add(Button::new("Duplicate selected")).clicked()
-            {
-                self.duplicate_selection();
-            }
-            ui.selectable_value(&mut self.canvas_lasso_mode, false, "▱ Box select");
-            ui.selectable_value(&mut self.canvas_lasso_mode, true, "⌁ Lasso select");
-            if ui.add(Button::new("＋ Rectangle")).clicked() {
+        let has_selection = !self.selected_shapes.is_empty();
+        let mut lasso = self.canvas_lasso_mode;
+        let mut clicked = None;
+        let _ = Panel::new("stencilcraft-tools-panel").show(ui, |ui| {
+            let _ = SectionHeader::new("tools-select", "Select")
+                .collapsible(false)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let _ = ui.add(
+                            ToggleButton::new("Lasso select", &mut lasso)
+                                .icon(Icon::Lasso)
+                                .size(ControlSize::Sm),
+                        );
+                        for (label, icon, enabled, tool) in [
+                            (
+                                "Deselect",
+                                Icon::Close,
+                                has_selection,
+                                ToolsAction::Deselect,
+                            ),
+                            (
+                                "Duplicate",
+                                Icon::Copy,
+                                has_selection,
+                                ToolsAction::Duplicate,
+                            ),
+                            ("Delete", Icon::Trash, has_selection, ToolsAction::Delete),
+                        ] {
+                            let button = Button::new(label)
+                                .icon(icon)
+                                .enabled(enabled)
+                                .size(ControlSize::Sm);
+                            if ui.add(button).clicked() {
+                                clicked = Some(tool);
+                            }
+                        }
+                    });
+                });
+            let _ = SectionHeader::new("tools-add", "Add")
+                .collapsible(false)
+                .show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (label, icon, tool) in [
+                            ("Rectangle", Icon::Rectangle, ToolsAction::Rectangle),
+                            ("Image", Icon::Image, ToolsAction::Image),
+                            ("Text", Icon::Text, ToolsAction::Text),
+                        ] {
+                            let button = Button::new(label).icon(icon).size(ControlSize::Sm);
+                            if ui.add(button).clicked() {
+                                clicked = Some(tool);
+                            }
+                        }
+                    });
+                });
+        });
+        self.canvas_lasso_mode = lasso;
+        match clicked {
+            Some(ToolsAction::Deselect) => self.set_selection([]),
+            Some(ToolsAction::Duplicate) => self.duplicate_selection(),
+            Some(ToolsAction::Delete) => self.delete_selection(),
+            Some(ToolsAction::Rectangle) => {
                 self.run_command(Command::ShapeAddRect {
                     x: 20.0,
                     y: 20.0,
@@ -2161,29 +2007,17 @@ impl StencilApp {
                 });
                 self.select_latest_shape();
             }
-            if ui.add(Button::new("▧ Image")).clicked()
-                && let Some(path) = rfd::FileDialog::new()
+            Some(ToolsAction::Image) => {
+                if let Some(path) = rfd::FileDialog::new()
                     .add_filter("PNG or JPEG", &["png", "jpg", "jpeg"])
                     .pick_file()
-            {
-                self.import_image(path);
+                {
+                    self.import_image(path);
+                }
             }
-            if ui.add(Button::new("T Text")).clicked() {
-                self.text_dialog = true;
-            }
-            if ui.add(Button::new("⊖ Delete")).clicked() {
-                self.delete_selection();
-            }
-            ui.separator();
-            if ui.add(Button::new("↶")).clicked() {
-                let _ = self.engine.undo();
-                self.retain_valid_selection();
-            }
-            if ui.add(Button::new("↷")).clicked() {
-                let _ = self.engine.redo();
-                self.retain_valid_selection();
-            }
-        });
+            Some(ToolsAction::Text) => self.text_dialog = true,
+            None => {}
+        }
     }
 
     pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
@@ -2259,166 +2093,272 @@ impl StencilApp {
     }
 
     pub fn inspector_panel(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if self.send_mode {
-                ui.heading("Make");
-                ui.small("Review your material and machine settings before cutting.");
-                ui.separator();
-                self.send_tab(ui);
-                if ui.add(Button::new("← Back to canvas")).clicked() {
-                    self.send_mode = false;
-                }
-            } else {
-                self.inspector(ui);
+        let (header, target) = if self.send_mode {
+            (
+                InspectorHeader::new(Icon::Scissors, "Make").kind("Dry run"),
+                0,
+            )
+        } else {
+            match self.selected_shapes.as_slice() {
+                [] => (InspectorHeader::title_only("Document"), 1),
+                [id] => (
+                    InspectorHeader::new(Icon::Spline, format!("Shape #{id}")).kind("Path"),
+                    2 + *id,
+                ),
+                ids => (
+                    InspectorHeader::title_only(format!("{} objects", ids.len())),
+                    1,
+                ),
             }
-        });
+        };
+        Inspector::new("stencilcraft-inspector")
+            .target(target)
+            .header(header)
+            .show(ui, |ui| {
+                if self.send_mode {
+                    ui.add(
+                        Text::new("Review your material and machine settings before cutting.")
+                            .role(TypeRole::Caption)
+                            .content(Content::Muted),
+                    );
+                    self.send_tab(ui);
+                    if ui.add(Button::new("← Back to canvas")).clicked() {
+                        self.send_mode = false;
+                    }
+                } else {
+                    self.inspector(ui);
+                }
+            });
     }
 
     pub fn inspector(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Design");
-        ui.small("Layers & objects");
-        ui.add_space(8.0);
-
-        ui.label("Cutting mat");
-        let mut mat_select = Select::new("design-mat", "Cutting mat", &mut self.mat);
-        for (mat, label) in MAT_CHOICES {
-            mat_select = mat_select.option(*mat, *label);
-        }
-        let _ = mat_select.show(ui);
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.heading("Layers");
-            if ui.small_button("+").clicked() {
-                self.run_command(Command::LayerAdd {
-                    name: format!("Layer {}", self.engine.doc.layers.len() + 1),
-                    kind: stencilcraft_doc::CutStyle::Cut,
-                });
-            }
+        PropertyGroup::new("design-mat-group").show(ui, |ui| {
+            PropertyRow::word("Cutting mat").show(ui, |ui, _| {
+                let mut mat_select = Select::new("design-mat", "Cutting mat", &mut self.mat);
+                for (mat, label) in MAT_CHOICES {
+                    mat_select = mat_select.option(*mat, *label);
+                }
+                mat_select.show(ui)
+            });
         });
-        let visibility_changes: Vec<(usize, bool)> = self
+
+        if let Some(id) = (self.selected_shapes.len() == 1)
+            .then_some(self.selected_shape)
+            .flatten()
+        {
+            if let Some(bounds) = self
+                .engine
+                .doc
+                .get_shape(id)
+                .and_then(stencilcraft_doc::Shape::bounds)
+            {
+                let mut values = [bounds.x0, bounds.y0, bounds.width(), bounds.height()];
+                let mut committed = false;
+                let mut action = None;
+                let numbers = self.locale_numbers.clone();
+                let _ = SectionHeader::new("inspector-transform", "Transform").show(ui, |ui| {
+                    PropertyGroup::new(("transform", id)).show(ui, |ui| {
+                        for (a, b) in [(0, 1), (2, 3)] {
+                            let names = ["X", "Y", "W", "H"];
+                            let shown = values;
+                            let field = |ui: &mut egui::Ui, index: usize| {
+                                let min = if index < 2 { -10_000.0 } else { 0.01 };
+                                NumberField::new(
+                                    ("bound", id, index),
+                                    names[index],
+                                    shown[index],
+                                    &numbers,
+                                )
+                                .range(min..=10_000.0)
+                                .decimals(0..=2)
+                                .unit(Unit::new("{n} mm"))
+                                .show(ui)
+                            };
+                            let (first, second) = PropertyRow::pair(
+                                PropertyLabel::glyph(names[a]),
+                                PropertyLabel::glyph(names[b]),
+                            )
+                            .show(ui, |ui, _| field(ui, a), |ui, _| field(ui, b))
+                            .inner;
+                            for (index, event) in [(a, first.event), (b, second.event)] {
+                                if let Some(
+                                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+                                ) = event
+                                {
+                                    values[index] = value;
+                                    committed = true;
+                                }
+                            }
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        for (label, op) in [
+                            ("−15°", ShapeAction::Rotate(-15.0)),
+                            ("+15°", ShapeAction::Rotate(15.0)),
+                            ("−10%", ShapeAction::Scale(0.9)),
+                            ("+10%", ShapeAction::Scale(1.1)),
+                        ] {
+                            if ui.add(Button::new(label).size(ControlSize::Sm)).clicked() {
+                                action = Some(op);
+                            }
+                        }
+                    });
+                    ui.add(
+                        Text::new("Drag an object on the mat to reposition it.")
+                            .role(TypeRole::Caption)
+                            .content(Content::Muted),
+                    );
+                });
+                if committed {
+                    let [x, y, width, height] = values;
+                    self.run_command(Command::ShapeSetBounds {
+                        id,
+                        x,
+                        y,
+                        width,
+                        height,
+                    });
+                }
+                match action {
+                    Some(ShapeAction::Rotate(degrees)) => {
+                        self.run_command(Command::ShapeRotate { id, degrees });
+                    }
+                    Some(ShapeAction::Scale(s)) => {
+                        self.run_command(Command::ShapeScale {
+                            id,
+                            scale_x: s,
+                            scale_y: s,
+                        });
+                    }
+                    None => {}
+                }
+            } else if self.engine.doc.get_shape(id).is_none() {
+                self.set_selection([]);
+            }
+        }
+
+        let mut add_layer = false;
+        let mut visibility_changes: Vec<(usize, bool)> = Vec::new();
+        let layers: Vec<(String, bool)> = self
             .engine
             .doc
             .layers
             .iter()
-            .enumerate()
-            .filter_map(|(i, layer)| {
-                let mut visible = layer.visible;
-                let response = Checkbox::bool(
+            .map(|layer| {
+                (
                     format!("{}  ·  {}", layer.name, layer.shapes.len()),
-                    &mut visible,
+                    layer.visible,
                 )
-                .id_salt(("layer-visibility", i))
-                .show(ui);
-                response.response.changed().then_some((i, visible))
             })
             .collect();
-        for (i, visible) in visibility_changes {
-            if let Some(layer) = self.engine.doc.layers.get_mut(i) {
-                layer.visible = visible;
-            }
+        let _ = SectionHeader::new("inspector-layers", "Layers")
+            .controls(|ui| {
+                add_layer = ui.add(IconButton::new(Icon::Plus, "Add Layer")).clicked();
+            })
+            .show(ui, |ui| {
+                for (i, (label, visible)) in layers.into_iter().enumerate() {
+                    let mut visible_now = visible;
+                    let response = Checkbox::bool(label, &mut visible_now)
+                        .id_salt(("layer-visibility", i))
+                        .show(ui);
+                    if response.response.changed() {
+                        visibility_changes.push((i, visible_now));
+                    }
+                }
+            });
+        if add_layer {
+            self.run_command(Command::LayerAdd {
+                name: format!("Layer {}", self.engine.doc.layers.len() + 1),
+                kind: stencilcraft_doc::CutStyle::Cut,
+            });
+        }
+        // Visibility is document state: it goes through the engine so it undoes.
+        for (index, visible) in visibility_changes {
+            self.run_command(Command::LayerSetVisible { index, visible });
         }
 
-        ui.separator();
-        ui.heading("Objects");
         let shape_rows: Vec<(u64, String)> = self
             .engine
             .doc
             .shapes()
-            .map(|(_, shape)| {
-                (
-                    shape.id,
-                    format!("Shape  #{} · {:?}", shape.id, shape.style),
-                )
-            })
+            .map(|(_, shape)| (shape.id, format!("Shape #{} · {:?}", shape.id, shape.style)))
             .collect();
-        for (id, label) in shape_rows {
-            if ui
-                .selectable_label(self.selected_shapes.contains(&id), label)
-                .clicked()
-            {
-                let additive = ui.input(|input| input.modifiers.shift);
-                if additive {
-                    let mut ids = self.selected_shapes.clone();
-                    if let Some(index) = ids.iter().position(|selected| *selected == id) {
-                        ids.remove(index);
-                    } else {
-                        ids.push(id);
-                    }
-                    self.set_selection(ids);
-                } else {
-                    self.set_selection([id]);
+        let mut clicked_shape = None;
+        let _ = SectionHeader::new("inspector-objects", "Objects").show(ui, |ui| {
+            for (id, label) in shape_rows {
+                let row = ListRow::new(id, &label)
+                    .icon(Icon::Spline)
+                    .selected(self.selected_shapes.contains(&id))
+                    .show(ui);
+                if row.response.clicked() {
+                    clicked_shape = Some(id);
                 }
+            }
+        });
+        if let Some(id) = clicked_shape {
+            let additive = ui.input(|input| input.modifiers.shift);
+            if additive {
+                let mut ids = self.selected_shapes.clone();
+                if let Some(index) = ids.iter().position(|selected| *selected == id) {
+                    ids.remove(index);
+                } else {
+                    ids.push(id);
+                }
+                self.set_selection(ids);
+            } else {
+                self.set_selection([id]);
             }
         }
 
         if self.selected_shapes.len() >= 2 {
-            ui.separator();
-            ui.heading(format!("{} selected", self.selected_shapes.len()));
-            ui.horizontal_wrapped(|ui| {
-                if ui.add(Button::new("Unite")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Union);
-                }
-                if ui.add(Button::new("Minus front")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Difference);
-                }
-                if ui.add(Button::new("Intersect")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Intersect);
-                }
-                if ui.add(Button::new("Exclude")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Xor);
-                }
-                if ui.add(Button::new("Divide")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Divide);
-                }
-                if ui.add(Button::new("Trim")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Trim);
-                }
-                if ui.add(Button::new("Merge")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Merge);
-                }
-                if ui.add(Button::new("Crop")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Crop);
-                }
-                if ui.add(Button::new("Outline")).clicked() {
-                    self.run_pathfinder(BooleanOperation::Outline);
-                }
-                if ui.add(Button::new("Minus back")).clicked() {
-                    self.run_pathfinder(BooleanOperation::MinusBack);
-                }
-            });
-            ui.label("Align to selection");
-            ui.horizontal_wrapped(|ui| {
-                for (label, alignment) in [
-                    ("Left", Alignment::Left),
-                    ("H center", Alignment::HorizontalCenter),
-                    ("Right", Alignment::Right),
-                    ("Top", Alignment::Top),
-                    ("V center", Alignment::VerticalCenter),
-                    ("Bottom", Alignment::Bottom),
-                ] {
-                    if ui.add(Button::new(label)).clicked() {
-                        self.run_command(Command::ShapesAlign {
-                            ids: self.selected_shapes.clone(),
-                            alignment,
-                            to_board: false,
-                        });
+            let mut operation = None;
+            let _ = SectionHeader::new("inspector-pathfinder", "Pathfinder").show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for (label, op) in [
+                        ("Unite", BooleanOperation::Union),
+                        ("Minus Front", BooleanOperation::Difference),
+                        ("Intersect", BooleanOperation::Intersect),
+                        ("Exclude", BooleanOperation::Xor),
+                        ("Divide", BooleanOperation::Divide),
+                        ("Trim", BooleanOperation::Trim),
+                        ("Merge", BooleanOperation::Merge),
+                        ("Crop", BooleanOperation::Crop),
+                        ("Outline", BooleanOperation::Outline),
+                        ("Minus Back", BooleanOperation::MinusBack),
+                    ] {
+                        if ui.add(Button::new(label).size(ControlSize::Sm)).clicked() {
+                            operation = Some(op);
+                        }
                     }
-                }
+                });
             });
+            if let Some(op) = operation {
+                self.run_pathfinder(op);
+            }
+            let mut picked = None;
+            let _ = SectionHeader::new("inspector-align", "Align").show(ui, |ui| {
+                picked = AlignBar::new("inspector-align-bar")
+                    .enabled(|action| align_command(action).is_some())
+                    .show(ui)
+                    .picked;
+            });
+            match picked.and_then(align_command) {
+                Some(AlignCommand::Align(alignment)) => {
+                    self.run_command(Command::ShapesAlign {
+                        ids: self.selected_shapes.clone(),
+                        alignment,
+                        to_board: false,
+                    });
+                }
+                Some(AlignCommand::Distribute(axis)) => {
+                    self.run_command(Command::ShapesDistribute {
+                        ids: self.selected_shapes.clone(),
+                        axis,
+                    });
+                }
+                None => {}
+            }
             ui.horizontal(|ui| {
-                if ui.add(Button::new("Distribute ↔")).clicked() {
-                    self.run_command(Command::ShapesDistribute {
-                        ids: self.selected_shapes.clone(),
-                        axis: DistributionAxis::Horizontal,
-                    });
-                }
-                if ui.add(Button::new("Distribute ↕")).clicked() {
-                    self.run_command(Command::ShapesDistribute {
-                        ids: self.selected_shapes.clone(),
-                        axis: DistributionAxis::Vertical,
-                    });
-                }
                 if ui.add(Button::new("−15°")).clicked() {
                     self.run_command(Command::ShapesTransform {
                         ids: self.selected_shapes.clone(),
@@ -2442,14 +2382,22 @@ impl StencilApp {
             });
         }
 
-        ui.separator();
-        ui.heading("Cut settings");
         let kerf_width = self.kerf_draft.unwrap_or(self.engine.doc.kerf.width_mm);
-        ui.label(format!("Kerf  {:.3} mm", kerf_width));
-        match Slider::new("kerf", "Kerf", kerf_width, 0.0..=1.0)
-            .show(ui)
-            .event
-        {
+        let mut kerf_event = None;
+        let mut kerf_preview = self.kerf_preview;
+        let _ = SectionHeader::new("inspector-cut", "Cut settings").show(ui, |ui| {
+            ui.add(
+                Text::new(format!("Kerf  {kerf_width:.3} mm"))
+                    .role(TypeRole::Label)
+                    .content(Content::Muted),
+            );
+            kerf_event = Slider::new("kerf", "Kerf", kerf_width, 0.0..=1.0)
+                .show(ui)
+                .event;
+            let _ = Checkbox::bool("Preview kerf compensation", &mut kerf_preview).show(ui);
+        });
+        self.kerf_preview = kerf_preview;
+        match kerf_event {
             Some(EditEvent::Begin { .. }) => self.kerf_draft = Some(kerf_width),
             Some(EditEvent::Update { value, .. }) => self.kerf_draft = Some(value),
             Some(EditEvent::Commit { value, changed, .. }) => {
@@ -2464,136 +2412,16 @@ impl StencilApp {
             Some(EditEvent::Cancel { .. }) => self.kerf_draft = None,
             _ => {}
         }
-        let _ = Checkbox::bool("Preview kerf compensation", &mut self.kerf_preview).show(ui);
-
-        if let Some(id) = (self.selected_shapes.len() == 1)
-            .then_some(self.selected_shape)
-            .flatten()
-        {
-            if self.engine.doc.get_shape(id).is_some() {
-                ui.separator();
-                ui.heading(format!("Object #{id}"));
-                let bounds = self
-                    .engine
-                    .doc
-                    .get_shape(id)
-                    .and_then(stencilcraft_doc::Shape::bounds);
-                let bound_values =
-                    bounds.map(|bounds| [bounds.x0, bounds.y0, bounds.width(), bounds.height()]);
-                if self.inspector_shape != Some(id)
-                    || (self.inspector_bounds != bound_values && !self.inspector_editing)
-                {
-                    self.inspector_shape = Some(id);
-                    self.inspector_before = std::array::from_fn(|_| None);
-                    self.inspector_bounds = bound_values;
-                    if let Some(values) = bound_values {
-                        self.inspector_values = values.map(|value| format!("{value:.2}"));
-                    }
-                }
-                ui.label("Position and size (mm)");
-                let mut submitted = false;
-                let mut editing = false;
-                egui::Grid::new(("shape-bounds", id))
-                    .num_columns(4)
-                    .show(ui, |ui| {
-                        for (label_a, index_a, label_b, index_b) in
-                            [("X", 0, "Y", 1), ("W", 2, "H", 3)]
-                        {
-                            for (label, index) in [(label_a, index_a), (label_b, index_b)] {
-                                ui.label(label);
-                                let edit = ui
-                                    .scope(|ui| {
-                                        ui.set_max_width(62.0);
-                                        TextField::new(
-                                            ("bound", id, index),
-                                            label,
-                                            &self.inspector_values[index],
-                                        )
-                                        .show(ui)
-                                    })
-                                    .inner;
-                                editing |= edit.response.has_focus();
-                                submitted |= edit.submitted;
-                                apply_edit(
-                                    &mut self.inspector_values[index],
-                                    &mut self.inspector_before[index],
-                                    edit.event,
-                                );
-                            }
-                            ui.end_row();
-                        }
-                    });
-                self.inspector_editing = editing;
-                submitted |= ui.add(Button::new("Apply")).clicked();
-                let valid_bounds = self
-                    .inspector_values
-                    .iter()
-                    .map(|value| value.trim().parse::<f64>())
-                    .collect::<Result<Vec<_>, _>>();
-                if submitted {
-                    match valid_bounds {
-                        Ok(values) if values.len() == 4 => {
-                            self.run_command(Command::ShapeSetBounds {
-                                id,
-                                x: values[0],
-                                y: values[1],
-                                width: values[2],
-                                height: values[3],
-                            });
-                            if let Some(bounds) = self
-                                .engine
-                                .doc
-                                .get_shape(id)
-                                .and_then(stencilcraft_doc::Shape::bounds)
-                            {
-                                let values =
-                                    [bounds.x0, bounds.y0, bounds.width(), bounds.height()];
-                                self.inspector_values = values.map(|value| format!("{value:.2}"));
-                                self.inspector_bounds = Some(values);
-                            }
-                        }
-                        _ => self.status = "enter valid X, Y, width, and height in mm".to_string(),
-                    }
-                }
-                ui.horizontal(|ui| {
-                    if ui.add(Button::new("−15°")).clicked() {
-                        self.run_command(Command::ShapeRotate { id, degrees: -15.0 });
-                    }
-                    if ui.add(Button::new("+15°")).clicked() {
-                        self.run_command(Command::ShapeRotate { id, degrees: 15.0 });
-                    }
-                });
-                ui.horizontal(|ui| {
-                    if ui.add(Button::new("−10%")).clicked() {
-                        self.run_command(Command::ShapeScale {
-                            id,
-                            scale_x: 0.9,
-                            scale_y: 0.9,
-                        });
-                    }
-                    if ui.add(Button::new("+10%")).clicked() {
-                        self.run_command(Command::ShapeScale {
-                            id,
-                            scale_x: 1.1,
-                            scale_y: 1.1,
-                        });
-                    }
-                });
-                ui.small("Drag an object on the mat to reposition it.");
-            } else {
-                self.set_selection([]);
-            }
-        }
     }
 
     pub fn send_tab(&mut self, ui: &mut egui::Ui) {
-        ui.label("Model");
+        ui.add(Text::new("Model"));
         let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
         for (model, label) in MODEL_CHOICES {
             model_select = model_select.option(*model, *label);
         }
         let _ = model_select.show(ui);
-        ui.label("Material");
+        ui.add(Text::new("Material"));
         let mut media_select = Select::new("send-material", "Material", &mut self.send.media_index);
         for (i, _) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {
             media_select = media_select.option(i, media_label(i));
@@ -2605,7 +2433,10 @@ impl StencilApp {
             self.send.speed_override = media.speed.unwrap_or(5);
         }
         ui.add_space(4.0);
-        ui.label(format!("Pressure  {}", self.send.pressure_override));
+        ui.add(Text::new(format!(
+            "Pressure  {}",
+            self.send.pressure_override
+        )));
         let mut pressure = f64::from(self.send.pressure_override);
         let edit = Slider::new("send-pressure", "Pressure", pressure, 1.0..=33.0)
             .step(1.0)
@@ -2613,7 +2444,7 @@ impl StencilApp {
         if apply_edit(&mut pressure, &mut self.pressure_before, edit.event) {
             self.send.pressure_override = pressure as u8;
         }
-        ui.label(format!("Speed  {}", self.send.speed_override));
+        ui.add(Text::new(format!("Speed  {}", self.send.speed_override)));
         let mut speed = f64::from(self.send.speed_override);
         let edit = Slider::new("send-speed", "Speed", speed, 1.0..=30.0)
             .step(1.0)
@@ -2622,20 +2453,24 @@ impl StencilApp {
             self.send.speed_override = speed as u8;
         }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
-        ui.separator();
+        Divider::horizontal().show(ui);
         if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
         }
         if let Some(summary) = &self.send.summary {
-            ui.separator();
+            Divider::horizontal().show(ui);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for line in summary {
-                    ui.monospace(line);
+                    ui.add(Text::new(line).role(TypeRole::Mono));
                 }
             });
         }
         ui.add_space(6.0);
-        ui.small("Real sends: stencilcraft-cli cut --in FILE --device PATH");
+        ui.add(
+            Text::new("Real sends: stencilcraft-cli cut --in FILE --device PATH")
+                .role(TypeRole::Caption)
+                .content(Content::Muted),
+        );
     }
 
     /// Encode the visible flattened design through the machine crate and
@@ -3204,7 +3039,7 @@ impl StencilApp {
                                 self.pending_zoom =
                                     Some((zoom_value as f32 / 100.0).clamp(0.05, 400.0));
                             }
-                            ui.label(format!("{zoom_value:.0}%"));
+                            ui.add(Text::new(format!("{zoom_value:.0}%")));
                             if ui.add(IconButton::new(Icon::Plus, "Zoom in")).clicked() {
                                 self.pending_zoom = Some((self.view.zoom * 1.2).clamp(0.05, 400.0));
                             }
@@ -3213,7 +3048,7 @@ impl StencilApp {
                         StatusBar::message(ui, &status_msg, false);
                     });
                     bar.trailing(|ui| {
-                        ui.label(format!("Tool: {}", self.active_tool.label()))
+                        ui.add(Text::new(format!("Tool: {}", self.active_tool.label())))
                             .on_hover_text("Space+drag or middle-drag to pan · wheel to zoom");
                     });
                 });
@@ -3238,19 +3073,160 @@ pub fn apply_canvas_view_command(
     }
 }
 
+/// A button of the Tools panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolsAction {
+    Deselect,
+    Duplicate,
+    Delete,
+    Rectangle,
+    Image,
+    Text,
+}
+
+/// A row of the title bar's workspace switcher.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceChoice {
+    Essentials,
+    Reset,
+}
+
+/// A quick transform button in the inspector's Transform section.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ShapeAction {
+    Rotate(f64),
+    Scale(f64),
+}
+
+/// The engine command an [`AlignBar`] pick runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AlignCommand {
+    Align(Alignment),
+    Distribute(DistributionAxis),
+}
+
+/// The engine command behind `action`; `None` for the edge-distribute variants the engine does not
+/// have (the bar shows them disabled).
+fn align_command(action: AlignAction) -> Option<AlignCommand> {
+    Some(match action {
+        AlignAction::AlignLeftEdges => AlignCommand::Align(Alignment::Left),
+        AlignAction::AlignHorizontalCenters => AlignCommand::Align(Alignment::HorizontalCenter),
+        AlignAction::AlignRightEdges => AlignCommand::Align(Alignment::Right),
+        AlignAction::AlignTopEdges => AlignCommand::Align(Alignment::Top),
+        AlignAction::AlignVerticalCenters => AlignCommand::Align(Alignment::VerticalCenter),
+        AlignAction::AlignBottomEdges => AlignCommand::Align(Alignment::Bottom),
+        AlignAction::DistributeHorizontally => {
+            AlignCommand::Distribute(DistributionAxis::Horizontal)
+        }
+        AlignAction::DistributeVertically => AlignCommand::Distribute(DistributionAxis::Vertical),
+        _ => return None,
+    })
+}
+
+/// The output path of an `app.screenshot` control request (`{"method":"app.screenshot",
+/// "params":{"path":…}}`), the one control method the window answers itself: the MCP session
+/// is headless and has no frame to capture.
+fn screenshot_request(line: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("method")?.as_str()? != "app.screenshot" {
+        return None;
+    }
+    Some(value.get("params")?.get("path")?.as_str()?.to_string())
+}
+
+/// The method and path of a `doc.open` or `doc.save` request (legacy envelope or the MCP
+/// `doc_open`/`doc_save` tools) that `reply` answered successfully.
+fn document_path_request(line: &str, reply: &str) -> Option<(&'static str, String)> {
+    let request: serde_json::Value = serde_json::from_str(line).ok()?;
+    let reply: serde_json::Value = serde_json::from_str(reply).ok()?;
+    let (method, params) = match request.get("method")?.as_str()? {
+        "doc.open" => ("doc.open", request.get("params")?),
+        "doc.save" => ("doc.save", request.get("params")?),
+        "tools/call" => {
+            let params = request.get("params")?;
+            let method = match params.get("name")?.as_str()? {
+                "doc_open" => "doc.open",
+                "doc_save" => "doc.save",
+                _ => return None,
+            };
+            (method, params.get("arguments")?)
+        }
+        _ => return None,
+    };
+    let failed = reply.get("ok") == Some(&serde_json::Value::Bool(false))
+        || reply.get("error").is_some()
+        || reply.pointer("/result/isError") == Some(&serde_json::Value::Bool(true));
+    if failed {
+        return None;
+    }
+    Some((method, params.get("path")?.as_str()?.to_string()))
+}
+
+/// The request id and shape ids of an `app.select` control request
+/// (`{"method":"app.select","params":{"ids":[1,2]}}`); at most 10 000 ids are read.
+fn select_request(line: &str) -> Option<(serde_json::Value, Vec<u64>)> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    if value.get("method")?.as_str()? != "app.select" {
+        return None;
+    }
+    let ids = value
+        .get("params")?
+        .get("ids")?
+        .as_array()?
+        .iter()
+        .take(10_000)
+        .filter_map(serde_json::Value::as_u64)
+        .collect();
+    Some((value.get("id").cloned().unwrap_or_default(), ids))
+}
+
+/// Capture the next painted frame to a PNG at `path`, then answer `job`.
+fn request_screenshot(ctx: &egui::Context, path: String, job: control::Job) {
+    let id = serde_json::from_str::<serde_json::Value>(&job.line)
+        .ok()
+        .and_then(|v| v.get("id").cloned())
+        .unwrap_or(serde_json::Value::Null);
+    let callback = egui::ScreenshotCallback::new(move |image| {
+        let [w, h] = image.size;
+        let bytes: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+        let saved = u32::try_from(w)
+            .ok()
+            .zip(u32::try_from(h).ok())
+            .and_then(|(w, h)| image::RgbaImage::from_raw(w, h, bytes))
+            .ok_or_else(|| "screenshot: malformed image".to_string())
+            .and_then(|img| {
+                img.save(&path)
+                    .map_err(|e| format!("screenshot: {path}: {e}"))
+            });
+        let reply = match saved {
+            Ok(()) => {
+                serde_json::json!({"id": id, "ok": true, "result": {"path": path, "size": [w, h]}})
+            }
+            Err(e) => serde_json::json!({"id": id, "ok": false, "error": e}),
+        };
+        let _ = job.reply.send(reply.to_string());
+    });
+    ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(callback));
+    ctx.request_repaint();
+}
+
 impl eframe::App for StencilApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "recent_files", &self.recent_files);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        craft_ui::theme::install(ui.ctx(), &craft_ui::theme::Base::suite_default());
-        self.drain_control_requests();
-        ui.ctx().set_theme(match self.theme {
-            stencilcraft_ui_egui::ColorTheme::Dark => egui::ThemePreference::Dark,
-            stencilcraft_ui_egui::ColorTheme::Light => egui::ThemePreference::Light,
-        });
+        if self.installed_theme.as_ref().map(|(t, _)| *t) != Some(self.theme) {
+            self.installed_theme = Some((self.theme, stencilcraft_ui_egui::theme_base(self.theme)));
+        }
+        if let Some((_, base)) = &self.installed_theme {
+            craft_ui::theme::install(ui.ctx(), base);
+        }
+        self.drain_control_requests(ui.ctx());
         self.handle_keyboard_shortcuts(ui.ctx());
+        if std::mem::take(&mut self.quit_requested) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
 
         self.top_panel(ui);
         self.options_bar(ui);
@@ -3306,6 +3282,52 @@ impl eframe::App for StencilApp {
 mod tests {
     use super::*;
     use craft_ui::docking::{Action, Placement};
+
+    #[test]
+    fn window_control_methods_parse_and_ignore_everything_else() {
+        assert_eq!(
+            screenshot_request(
+                r#"{"id":1,"method":"app.screenshot","params":{"path":"/tmp/a.png"}}"#
+            ),
+            Some("/tmp/a.png".to_string())
+        );
+        assert_eq!(
+            screenshot_request(r#"{"id":1,"method":"doc.summary"}"#),
+            None
+        );
+        assert_eq!(screenshot_request("not json"), None);
+        let (id, ids) =
+            select_request(r#"{"id":7,"method":"app.select","params":{"ids":[1,"x",3]}}"#).unwrap();
+        assert_eq!((id, ids), (serde_json::json!(7), vec![1, 3]));
+        assert_eq!(
+            select_request(r#"{"method":"app.select","params":{}}"#),
+            None
+        );
+        let open = r#"{"id":1,"method":"doc.open","params":{"path":"a.stencilcraft"}}"#;
+        assert_eq!(
+            document_path_request(open, r#"{"id":1,"ok":true,"result":{}}"#),
+            Some(("doc.open", "a.stencilcraft".to_string()))
+        );
+        assert_eq!(
+            document_path_request(open, r#"{"id":1,"ok":false,"error":"x"}"#),
+            None
+        );
+        let tool = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"doc_save","arguments":{"path":"b.stencilcraft"}}}"#;
+        assert_eq!(
+            document_path_request(
+                tool,
+                r#"{"jsonrpc":"2.0","id":2,"result":{"isError":false}}"#
+            ),
+            Some(("doc.save", "b.stencilcraft".to_string()))
+        );
+        assert_eq!(
+            document_path_request(
+                tool,
+                r#"{"jsonrpc":"2.0","id":2,"result":{"isError":true}}"#
+            ),
+            None
+        );
+    }
 
     #[test]
     fn workspace_dock_identity_is_stable_across_frames() {
@@ -3390,6 +3412,41 @@ mod tests {
             app.engine.doc.get_shape(1).unwrap().bounds(),
             app.engine.doc.get_shape(2).unwrap().bounds()
         );
+    }
+
+    #[test]
+    fn shifted_shortcuts_are_not_taken_by_their_unshifted_twins() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 3.0,
+            y: 4.0,
+            width: 12.0,
+            height: 8.0,
+        });
+        assert!(app.engine.undo());
+        let mut press = |key, modifiers| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+            );
+            output.textures_delta.clear();
+        };
+        let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        press(egui::Key::Z, cmd_shift);
+        press(egui::Key::A, egui::Modifiers::COMMAND);
+        press(egui::Key::A, cmd_shift);
+        assert_eq!(app.engine.doc.shape_count(), 1, "Cmd+Shift+Z redoes");
+        assert!(app.selected_shapes.is_empty(), "Cmd+Shift+A deselects");
     }
 
     #[test]
@@ -3680,10 +3737,26 @@ mod tests {
 
     fn node_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
         let tree = output.platform_output.accesskit_update.as_ref().unwrap();
+        // A control named by a visible word label (`PropertyRow::word`) has no label of its own:
+        // it is `labelled_by` the label's node.
+        let named = |node: &egui::accesskit::Node| {
+            node.label() == Some(label) || node.value() == Some(label)
+        };
+        let label_ids: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter(|(_, node)| named(node))
+            .map(|(id, _)| *id)
+            .collect();
         let node = tree
             .nodes
             .iter()
             .find(|(_, node)| node.label() == Some(label))
+            .or_else(|| {
+                tree.nodes
+                    .iter()
+                    .find(|(_, node)| node.labelled_by().iter().any(|id| label_ids.contains(id)))
+            })
             .unwrap_or_else(|| panic!("missing node {label}"));
         let bounds = node.1.bounds().unwrap();
         egui::pos2(
@@ -4550,7 +4623,7 @@ mod tests {
             let node = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("＋ Rectangle"))
+                .find(|(_, node)| node.label() == Some("Rectangle"))
                 .unwrap();
             assert_eq!(node.1.role(), egui::accesskit::Role::Button);
             let bounds = node.1.bounds().unwrap();
@@ -4571,7 +4644,7 @@ mod tests {
             let node = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Duplicate selected"))
+                .find(|(_, node)| node.label() == Some("Duplicate"))
                 .unwrap();
             assert_eq!(node.1.role(), egui::accesskit::Role::Button);
             let bounds = node.1.bounds().unwrap();

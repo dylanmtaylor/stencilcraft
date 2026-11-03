@@ -137,6 +137,16 @@ pub struct Shape {
     pub id: u64,
     pub path: BezPath,
     pub style: CutStyle,
+    /// Hidden shapes are not drawn, selected or exported.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
+    /// Locked shapes cannot be selected or edited until unlocked.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Shape {
@@ -268,7 +278,13 @@ impl Document {
             .next_shape_id
             .checked_add(1)
             .ok_or_else(|| DocError::Model("shape ids exhausted".to_string()))?;
-        let shape = Shape { id, path, style };
+        let shape = Shape {
+            id,
+            path,
+            style,
+            hidden: false,
+            locked: false,
+        };
         layer.shapes.push(shape.clone());
         Ok(shape)
     }
@@ -466,6 +482,17 @@ mod tests {
         let doc = sample();
         let json = doc.save_json().unwrap();
         let back = Document::load_json(&json).unwrap();
+        assert_eq!(doc, back);
+    }
+
+    #[test]
+    fn flags_round_trip_and_default_off() {
+        let mut doc = sample();
+        let plain = doc.save_json().unwrap();
+        assert!(!plain.contains("hidden") && !plain.contains("locked"));
+        doc.layers[0].shapes[0].hidden = true;
+        doc.layers[0].shapes[0].locked = true;
+        let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
         assert_eq!(doc, back);
     }
 

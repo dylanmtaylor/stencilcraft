@@ -13,6 +13,48 @@ pub enum ColorTheme {
     Light,
 }
 
+/// StencilCraft's suite theme: VectorCraft's Modern slate greys with the coral accent, as a
+/// `craft-design-theme` file the design system resolves like any built-in.
+const THEME_JSON: &[u8] = include_bytes!("stencilcraft-theme.json");
+
+/// The design-system theme base StencilCraft installs each frame (`craft_ui::theme::install`),
+/// in `theme`'s mode at the Compact size. Falls back to the suite default if the bundled theme
+/// file ever fails to parse.
+pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
+    use craft_theme::{
+        AppDefaults, ModeChoice, Size, SuiteChoice, SystemAppearance, ThemeId, ThemePair,
+    };
+    let own = craft_theme::format::parse(THEME_JSON)
+        .ok()
+        .map(|file| file.theme);
+    let id = own
+        .as_ref()
+        .map_or_else(ThemeId::suite_default, |t| t.id.clone());
+    let defaults = AppDefaults {
+        theme: ThemePair::same(id),
+        mode: match theme {
+            ColorTheme::Dark => ModeChoice::Dark,
+            ColorTheme::Light => ModeChoice::Light,
+        },
+        size: Size::Compact,
+        sizes: Default::default(),
+    };
+    craft_ui::theme::Base::resolve(
+        &SuiteChoice::default().with_defaults(&defaults),
+        SystemAppearance::default(),
+        &defaults,
+        None,
+        &mut |wanted| {
+            own.clone().filter(|t| t.id == *wanted).or_else(|| {
+                craft_theme::builtins()
+                    .iter()
+                    .find(|t| t.id == *wanted)
+                    .cloned()
+            })
+        },
+    )
+}
+
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
@@ -693,92 +735,19 @@ pub fn edit_subpaths_to_bezpath(subpaths: &[craft_draw::ui::pen::EditSubpath]) -
     out
 }
 
-/// Apply a [`craft_draw::ui::pen::PathEdit`] gesture to a subpath slice.
+/// Apply a [`craft_draw::ui::pen::PathEdit`] gesture to a subpath slice, by craft-draw's own
+/// edit rules; an edit naming a knot that does not exist leaves the subpaths unchanged.
 pub fn apply_path_edit(
     base: &[craft_draw::ui::pen::EditSubpath],
     edit: &craft_draw::ui::pen::PathEdit,
 ) -> Vec<craft_draw::ui::pen::EditSubpath> {
-    use craft_draw::ui::pen::{HandleSide, Knot, PathEdit};
-    use kurbo::ParamCurve as _;
-    let mut subpaths = base.to_vec();
-    match edit {
-        PathEdit::MoveAnchors { anchors, by, .. } => {
-            for &r in anchors {
-                if let Some(k) = subpaths
-                    .get_mut(r.subpath)
-                    .and_then(|s| s.knots.get_mut(r.knot))
-                {
-                    k.anchor += *by;
-                    k.in_ctrl += *by;
-                    k.out_ctrl += *by;
-                }
-            }
-        }
-        &PathEdit::MoveHandle {
-            knot,
-            side,
-            to,
-            alone,
-            ..
-        } => {
-            if let Some(k) = subpaths
-                .get_mut(knot.subpath)
-                .and_then(|s| s.knots.get_mut(knot.knot))
-            {
-                match side {
-                    HandleSide::In => k.in_ctrl = to,
-                    HandleSide::Out => k.out_ctrl = to,
-                }
-                if alone {
-                    k.smooth = false;
-                } else if k.smooth {
-                    let v = to - k.anchor;
-                    let len = v.hypot();
-                    if len > 1e-9 {
-                        let other = match side {
-                            HandleSide::In => &mut k.out_ctrl,
-                            HandleSide::Out => &mut k.in_ctrl,
-                        };
-                        let other_len = (*other - k.anchor).hypot();
-                        *other = k.anchor - v * (other_len / len);
-                    }
-                }
-            }
-        }
-        &PathEdit::BendSegment { segment, t, by, .. } => {
-            if let Some(sub) = subpaths.get_mut(segment.subpath)
-                && let Some((a, b)) = sub.segment_ends(segment.knot)
-                && let Some(c) = sub.segment(segment.knot)
-            {
-                if sub.is_straight(segment.knot) {
-                    sub.knots[a].out_ctrl = c.eval(1.0 / 3.0);
-                    sub.knots[b].in_ctrl = c.eval(2.0 / 3.0);
-                    sub.knots[a].smooth = false;
-                    sub.knots[b].smooth = false;
-                }
-                let u = 1.0 - t;
-                let w1 = 3.0 * u * u * t;
-                let w2 = 3.0 * u * t * t;
-                let denom = w1 * w1 + w2 * w2;
-                if denom > 1e-9 {
-                    sub.knots[a].out_ctrl += by * (w1 / denom);
-                    sub.knots[b].in_ctrl += by * (w2 / denom);
-                }
-            }
-        }
-        &PathEdit::Convert { knot, out, .. } => {
-            if let Some(k) = subpaths
-                .get_mut(knot.subpath)
-                .and_then(|s| s.knots.get_mut(knot.knot))
-            {
-                *k = match out {
-                    Some(out) => Knot::smooth(k.anchor, out),
-                    None => Knot::corner(k.anchor),
-                };
-            }
-        }
-    }
-    subpaths
+    let mut path = craft_draw::ui::pen::EditPath {
+        key: edit.path(),
+        subpaths: base.to_vec(),
+        color: None,
+    };
+    edit.apply(&mut path);
+    path.subpaths
 }
 
 /// Split segment `seg` at parameter `t` (`0.0..=1.0`) by inserting a smooth cubic knot.
@@ -1067,6 +1036,16 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
 mod tests {
     use super::*;
     use stencilcraft_testkit::simple_square;
+
+    #[test]
+    fn bundled_theme_parses_and_resolves_in_both_modes() {
+        assert!(craft_theme::format::parse(THEME_JSON).is_ok());
+        for theme in [ColorTheme::Dark, ColorTheme::Light] {
+            let base = theme_base(theme);
+            assert_eq!(base.inputs.dark.id.as_str(), "stencilcraft.modern");
+            assert_eq!(base.inputs.light.id.as_str(), "stencilcraft.modern");
+        }
+    }
 
     #[test]
     fn palettes_keep_the_design_legible_in_both_themes() {

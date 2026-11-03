@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-raster = { workspace = true }
+stencilcraft-kerf = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }

@@ -16,7 +16,13 @@ fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> Layer {
 }
 
 fn shape(id: u64, path: BezPath, style: CutStyle) -> Shape {
-    Shape { id, path, style }
+    Shape {
+        id,
+        path,
+        style,
+        hidden: false,
+        locked: false,
+    }
 }
 
 pub fn rect_path(x: f64, y: f64, w: f64, h: f64) -> BezPath {

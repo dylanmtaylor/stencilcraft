@@ -24,13 +24,13 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
-# Shared UI components and docking, pinned to the design-system branch.
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
-craft-theme = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["serde"] }
-craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
-craft-draw = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b", features = ["ui"] }
-craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
-craft-window = { git = "https://github.com/storytold/craft-libs", rev = "053c0043dc1c05e96118f94e429f363b0fd7362b" }
+# Shared UI components and docking, pinned to aiongg/craft-libs design-system.
+craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
+craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }

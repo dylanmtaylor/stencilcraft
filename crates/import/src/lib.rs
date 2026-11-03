@@ -319,6 +319,8 @@ fn join_document(doc: &mut Document, tolerance: f64) {
                     id: next_id,
                     path,
                     style,
+                    hidden: false,
+                    locked: false,
                 });
                 next_id = next_id.saturating_add(1);
             }

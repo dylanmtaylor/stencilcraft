@@ -5,11 +5,14 @@
 //!
 //! Robustness limits (see `docs/gaps.md` 2): offsetting works on simple (non-self-
 //! intersecting) contours and is exact for convex ones; a join that would need a
-//! miter longer than the limit is bevelled instead of spiked. Counters are
+//! miter longer than the limit is bevelled instead of spiked. Corners can also be
+//! joined round or bevelled ([`JoinStyle`]), and [`offset_path`] takes a signed
+//! distance, so a negative one is an internal offset. Counters are
 //! detected by point containment against the shape's other contours, not full
 //! winding algebra yet.
 
 use kurbo::Point;
+use serde::{Deserialize, Serialize};
 use stencilcraft_doc::{CutStyle, Document};
 use stencilcraft_geom::{Polyline, signed_area};
 
@@ -21,16 +24,98 @@ pub enum KerfError {
     Model(String),
 }
 
+/// How the offset outline turns a corner that opens a gap (a convex corner when
+/// growing, a reflex one when shrinking). Corners that close up always meet at the
+/// intersection of the two offset edges, whatever the style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum JoinStyle {
+    /// Extend both edges until they meet, clamped by the miter (corner) limit.
+    #[default]
+    Miter,
+    /// Sweep an arc of radius `|delta|` around the original corner.
+    Round,
+    /// Cut the corner straight across between the two offset edges.
+    Bevel,
+}
+
+impl JoinStyle {
+    /// Parses `miter`, `round` or `bevel`.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim() {
+            "miter" => Some(Self::Miter),
+            "round" => Some(Self::Round),
+            "bevel" => Some(Self::Bevel),
+            _ => None,
+        }
+    }
+}
+
+/// The miter limit every caller used before it became a parameter.
+pub const DEFAULT_MITER_LIMIT: f64 = 4.0;
+
+/// Corner handling for an offset.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OffsetOptions {
+    pub join: JoinStyle,
+    /// Longest miter allowed, as a multiple of the offset distance (the "corner
+    /// limit"); a sharper corner is bevelled. Must be finite and at least 1.
+    pub miter_limit: f64,
+}
+
+impl Default for OffsetOptions {
+    fn default() -> Self {
+        Self {
+            join: JoinStyle::Miter,
+            miter_limit: DEFAULT_MITER_LIMIT,
+        }
+    }
+}
+
+impl OffsetOptions {
+    fn validate(&self) -> Result<(), KerfError> {
+        if !(self.miter_limit.is_finite() && self.miter_limit >= 1.0) {
+            return Err(KerfError::Invalid(format!(
+                "corner limit {} is not a finite number of at least 1",
+                self.miter_limit
+            )));
+        }
+        Ok(())
+    }
+}
+
 /// Offset one closed polygon by `delta` (positive = outward, no matter how the
 /// contour is wound). Returns the offset polygon with one vertex per input vertex.
 /// Corners are miter-joined, clamped to `miter_limit` × `|delta|` and bevelled
 /// beyond that. Degenerate edges (zero length) use either neighbour's normal.
 pub fn offset_closed_polygon(points: &[Point], delta: f64, miter_limit: f64) -> Vec<Point> {
+    offset_closed_polygon_with(
+        points,
+        delta,
+        &OffsetOptions {
+            join: JoinStyle::Miter,
+            miter_limit,
+        },
+    )
+}
+
+/// Largest angle one arc step of a round join may sweep (chord error under 0.5% of
+/// `|delta|`), and the most steps one corner may take.
+const ROUND_STEP: f64 = std::f64::consts::PI / 16.0;
+const ROUND_MAX_STEPS: usize = 32;
+
+/// [`offset_closed_polygon`] with a choice of join. Miter keeps one vertex per input
+/// vertex; round and bevel joins add vertices at the corners that open a gap.
+pub fn offset_closed_polygon_with(
+    points: &[Point],
+    delta: f64,
+    options: &OffsetOptions,
+) -> Vec<Point> {
     let n = points.len();
     if n < 3 || delta.abs() < 1e-12 {
         return points.to_vec();
     }
-    let limit = miter_limit.abs().max(1.0) * delta.abs();
+    let limit = options.miter_limit.abs().max(1.0) * delta.abs();
 
     // Outward unit normal per edge. For CCW winding (positive signed area, y up)
     // the outward normal of edge e is (e.y, −e.x); CW winding flips it.
@@ -54,44 +139,63 @@ pub fn offset_closed_polygon(points: &[Point], delta: f64, miter_limit: f64) -> 
     for i in 0..n {
         // The join of edges (i−1 → i) and (i → i+1) sits at vertex i; offset along
         // the miter direction between the two adjacent edge normals.
+        let p = points[i];
         let n_prev = normals[(i + n - 1) % n];
         let n_cur = normals[i];
         if n_cur.0 == 0.0 && n_cur.1 == 0.0 {
-            out.push(points[i]);
+            out.push(p);
             continue;
         }
-        let sum = (n_prev.0 + n_cur.0, n_prev.1 + n_cur.1);
-        let sum_len2 = sum.0 * sum.0 + sum.1 * sum.1;
-        if sum_len2 < 1e-18 {
-            // The adjacent normals cancel: no clean miter exists, so push straight
-            // out along the current edge's normal.
-            out.push(Point::new(
-                points[i].x + delta * n_cur.0,
-                points[i].y + delta * n_cur.1,
-            ));
+        // The normals turn with the edges; a turn of the same sign as face × delta
+        // pulls the two offset edges apart and leaves a gap to fill.
+        let turn = n_prev.0 * n_cur.1 - n_prev.1 * n_cur.0;
+        let opens_gap = (n_prev.0 != 0.0 || n_prev.1 != 0.0) && turn * face * delta > 1e-12;
+        if opens_gap && options.join != JoinStyle::Miter {
+            let (vx, vy) = (delta * n_prev.0, delta * n_prev.1);
+            out.push(Point::new(p.x + vx, p.y + vy));
+            if options.join == JoinStyle::Round {
+                let dot = n_prev.0 * n_cur.0 + n_prev.1 * n_cur.1;
+                let sweep = turn.atan2(dot);
+                let steps = ((sweep.abs() / ROUND_STEP).ceil() as usize).clamp(1, ROUND_MAX_STEPS);
+                for k in 1..steps {
+                    let (sin, cos) = (sweep * k as f64 / steps as f64).sin_cos();
+                    out.push(Point::new(
+                        p.x + vx * cos - vy * sin,
+                        p.y + vx * sin + vy * cos,
+                    ));
+                }
+            }
+            out.push(Point::new(p.x + delta * n_cur.0, p.y + delta * n_cur.1));
             continue;
         }
-        // cos(θ/2) of the corner: the dot of the miter direction with either normal.
-        let sum_len = sum_len2.sqrt();
-        let cos_half = (sum.0 * n_cur.0 + sum.1 * n_cur.1) / sum_len;
-        let miter_dir = (
-            (sum.0 / sum_len) * delta / cos_half.max(1e-9),
-            (sum.1 / sum_len) * delta / cos_half.max(1e-9),
-        );
-        if delta.abs() / cos_half.max(1e-9) > limit {
-            // Beyond the miter limit: bevel, pushing halfway between the two
-            // adjacent edge offsets.
-            let dx = (n_prev.0 + n_cur.0) * 0.5 * delta;
-            let dy = (n_prev.1 + n_cur.1) * 0.5 * delta;
-            out.push(Point::new(points[i].x + dx, points[i].y + dy));
-        } else {
-            out.push(Point::new(
-                points[i].x + miter_dir.0,
-                points[i].y + miter_dir.1,
-            ));
-        }
+        out.push(miter_point(p, n_prev, n_cur, delta, limit));
     }
     out
+}
+
+/// The mitered offset of corner `p`, bevelled to a single point past `limit`.
+fn miter_point(p: Point, n_prev: (f64, f64), n_cur: (f64, f64), delta: f64, limit: f64) -> Point {
+    let sum = (n_prev.0 + n_cur.0, n_prev.1 + n_cur.1);
+    let sum_len2 = sum.0 * sum.0 + sum.1 * sum.1;
+    if sum_len2 < 1e-18 {
+        // The adjacent normals cancel: no clean miter exists, so push straight
+        // out along the current edge's normal.
+        return Point::new(p.x + delta * n_cur.0, p.y + delta * n_cur.1);
+    }
+    // cos(θ/2) of the corner: the dot of the miter direction with either normal.
+    let sum_len = sum_len2.sqrt();
+    let cos_half = (sum.0 * n_cur.0 + sum.1 * n_cur.1) / sum_len;
+    if delta.abs() / cos_half.max(1e-9) > limit {
+        // Beyond the miter limit: bevel, pushing halfway between the two
+        // adjacent edge offsets.
+        let dx = (n_prev.0 + n_cur.0) * 0.5 * delta;
+        let dy = (n_prev.1 + n_cur.1) * 0.5 * delta;
+        return Point::new(p.x + dx, p.y + dy);
+    }
+    Point::new(
+        p.x + (sum.0 / sum_len) * delta / cos_half.max(1e-9),
+        p.y + (sum.1 / sum_len) * delta / cos_half.max(1e-9),
+    )
 }
 
 /// Apply kerf compensation to a document: every closed cut contour moves by
@@ -101,6 +205,18 @@ pub fn offset_closed_polygon(points: &[Point], delta: f64, miter_limit: f64) -> 
 /// compensation for them is a machine-side setting. Returns a new document; the
 /// input document is never mutated.
 pub fn apply(doc: &Document, miter_limit: f64) -> Result<Document, KerfError> {
+    apply_with(
+        doc,
+        &OffsetOptions {
+            join: JoinStyle::Miter,
+            miter_limit: miter_limit.abs().max(1.0),
+        },
+    )
+}
+
+/// [`apply`] with a choice of corner join and corner limit.
+pub fn apply_with(doc: &Document, options: &OffsetOptions) -> Result<Document, KerfError> {
+    options.validate()?;
     if !doc.kerf.width_mm.is_finite() || doc.kerf.width_mm < 0.0 {
         return Err(KerfError::Invalid(format!(
             "kerf width {} mm is not a valid non-negative width",
@@ -114,10 +230,28 @@ pub fn apply(doc: &Document, miter_limit: f64) -> Result<Document, KerfError> {
             if shape.style != CutStyle::Cut {
                 continue;
             }
-            shape.path = offset_shape_path(&shape.path, delta, miter_limit)?;
+            shape.path = offset_shape_path(&shape.path, delta, options)?;
         }
     }
     Ok(out)
+}
+
+/// Offset one shape's outline by `distance` mm: positive grows the solid (outer
+/// contours move out, holes shrink), negative is an internal offset (outer contours
+/// move in, holes grow). Open subpaths pass through unchanged; the result is a
+/// flattened polyline path.
+pub fn offset_path(
+    path: &kurbo::BezPath,
+    distance: f64,
+    options: &OffsetOptions,
+) -> Result<kurbo::BezPath, KerfError> {
+    options.validate()?;
+    if !distance.is_finite() {
+        return Err(KerfError::Invalid(format!(
+            "offset distance {distance} mm is not finite"
+        )));
+    }
+    offset_shape_path(path, distance, options)
 }
 
 /// Offsets every closed subpath of one path by `delta`, deciding the side via
@@ -125,7 +259,7 @@ pub fn apply(doc: &Document, miter_limit: f64) -> Result<Document, KerfError> {
 fn offset_shape_path(
     path: &kurbo::BezPath,
     delta: f64,
-    miter_limit: f64,
+    options: &OffsetOptions,
 ) -> Result<kurbo::BezPath, KerfError> {
     let lines = Polyline::from_path(path);
     let mut moved: Vec<Polyline> = Vec::with_capacity(lines.len());
@@ -147,7 +281,7 @@ fn offset_shape_path(
             .count();
         let signed = if depth % 2 == 1 { -delta } else { delta };
         moved.push(Polyline {
-            points: offset_closed_polygon(&pl.points, signed, miter_limit),
+            points: offset_closed_polygon_with(&pl.points, signed, options),
             closed: true,
         });
     }
@@ -531,5 +665,189 @@ mod tests {
         let mut doc = Document::default();
         doc.kerf.width_mm = -1.0;
         assert!(matches!(apply(&doc, 4.0), Err(KerfError::Invalid(_))));
+    }
+
+    fn with(join: JoinStyle) -> OffsetOptions {
+        OffsetOptions {
+            join,
+            ..OffsetOptions::default()
+        }
+    }
+
+    /// Deterministic convex polygons: regular n-gons plus irregular ones made by
+    /// sorting pseudo-random angles on an ellipse.
+    fn convex_polygons() -> Vec<Vec<Point>> {
+        let mut out: Vec<Vec<Point>> = [3usize, 4, 5, 8, 16, 64]
+            .iter()
+            .map(|&sides| {
+                Polyline::from_path(&regular_polygon(sides, 20.0))[0]
+                    .points
+                    .clone()
+            })
+            .collect();
+        let mut seed: u64 = 0x5eed;
+        for _ in 0..40 {
+            let mut angles: Vec<f64> = (0..3 + (seed % 9) as usize)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (seed >> 11) as f64 / (1u64 << 53) as f64 * std::f64::consts::TAU
+                })
+                .collect();
+            angles.sort_by(f64::total_cmp);
+            angles.dedup_by(|a, b| (*a - *b).abs() < 1e-3);
+            if angles.len() < 3 {
+                continue;
+            }
+            let (rx, ry) = (5.0 + (seed % 40) as f64, 3.0 + (seed % 17) as f64);
+            out.push(
+                angles
+                    .iter()
+                    .map(|a| Point::new(rx * a.cos(), ry * a.sin()))
+                    .collect(),
+            );
+        }
+        out
+    }
+
+    #[test]
+    fn miter_stays_the_default_and_matches_the_old_entry_point() {
+        assert_eq!(OffsetOptions::default().join, JoinStyle::Miter);
+        assert_eq!(OffsetOptions::default().miter_limit, 4.0);
+        for polygon in convex_polygons() {
+            assert_eq!(
+                offset_closed_polygon_with(&polygon, 0.7, &OffsetOptions::default()),
+                offset_closed_polygon(&polygon, 0.7, 4.0)
+            );
+        }
+    }
+
+    #[test]
+    fn round_join_area_is_monotonic_in_distance() {
+        for polygon in convex_polygons() {
+            let mut previous = signed_area(&polygon).abs();
+            for distance in [0.05, 0.2, 0.6, 1.0, 2.5, 6.0] {
+                let out = offset_closed_polygon_with(&polygon, distance, &with(JoinStyle::Round));
+                let area = signed_area(&out).abs();
+                assert!(area > previous, "d={distance}: {area} <= {previous}");
+                previous = area;
+            }
+        }
+    }
+
+    #[test]
+    fn round_join_area_never_exceeds_miter_and_bevel_never_exceeds_round() {
+        for polygon in convex_polygons() {
+            for distance in [0.1, 1.0, 4.0] {
+                // An unclipped miter: past the corner limit a miter collapses to a
+                // point inside the round arc, so the bound only holds without one.
+                let area = |join| {
+                    let options = OffsetOptions {
+                        join,
+                        miter_limit: 1e6,
+                    };
+                    signed_area(&offset_closed_polygon_with(&polygon, distance, &options)).abs()
+                };
+                let (miter, round, bevel) = (
+                    area(JoinStyle::Miter),
+                    area(JoinStyle::Round),
+                    area(JoinStyle::Bevel),
+                );
+                assert!(round <= miter + 1e-9, "round {round} > miter {miter}");
+                assert!(bevel <= round + 1e-9, "bevel {bevel} > round {round}");
+            }
+        }
+    }
+
+    #[test]
+    fn round_join_square_matches_the_rounded_rectangle() {
+        let (size, d) = (10.0, 2.0);
+        let out = offset_closed_polygon_with(&square(size), d, &with(JoinStyle::Round));
+        let b = bounds_of_points(&out).unwrap();
+        assert!((b.width() - (size + 2.0 * d)).abs() < 1e-9, "{b:?}");
+        // Every arc vertex sits exactly d from its corner.
+        let expected = size * size + 4.0 * size * d + std::f64::consts::PI * d * d;
+        let area = signed_area(&out).abs();
+        assert!(
+            (area - expected).abs() / expected < 0.005,
+            "{area} vs {expected}"
+        );
+        let bevel = offset_closed_polygon_with(&square(size), d, &with(JoinStyle::Bevel));
+        assert_eq!(bevel.len(), 8, "two vertices per bevelled corner");
+        let bevel_area = size * size + 4.0 * size * d + 2.0 * d * d;
+        assert!((signed_area(&bevel).abs() - bevel_area).abs() < 1e-9);
+    }
+
+    #[test]
+    fn corner_limit_controls_when_a_miter_is_clipped() {
+        // A 90° corner needs a miter of √2 × d: a limit of 1.2 clips it, 1.5 keeps it.
+        let clipped = offset_closed_polygon(&square(10.0), 1.0, 1.2);
+        let kept = offset_closed_polygon(&square(10.0), 1.0, 1.5);
+        assert!(bounds_of_points(&clipped).unwrap().width() < 12.0 - 1e-6);
+        assert!((bounds_of_points(&kept).unwrap().width() - 12.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn internal_offset_shrinks_outlines_grows_holes_and_rounds_reflex_corners() {
+        let mut compound = ccw_path(100.0);
+        let mut hole = kurbo::BezPath::new();
+        hole.move_to(Point::new(30.0, 30.0));
+        hole.line_to(Point::new(70.0, 30.0));
+        hole.line_to(Point::new(70.0, 70.0));
+        hole.line_to(Point::new(30.0, 70.0));
+        hole.close_path();
+        compound.extend(hole.elements().iter().copied());
+        let out = offset_path(&compound, -2.0, &with(JoinStyle::Round)).unwrap();
+        let lines = Polyline::from_path(&out);
+        let outer = bounds_of_points(&lines[0].points).unwrap();
+        let inner = bounds_of_points(&lines[1].points).unwrap();
+        assert!((outer.width() - 96.0).abs() < 1e-9, "{outer:?}");
+        assert!((inner.width() - 44.0).abs() < 1e-9, "{inner:?}");
+        // Shrinking: the outline's convex corners close up (4 vertices), the hole's
+        // corners open and get arcs.
+        assert_eq!(lines[0].points.len(), 4);
+        assert!(lines[1].points.len() > 4);
+
+        // An L shape's one reflex corner opens when shrinking: round adds an arc there.
+        let l_shape = vec![
+            Point::new(0.0, 0.0),
+            Point::new(20.0, 0.0),
+            Point::new(20.0, 10.0),
+            Point::new(10.0, 10.0),
+            Point::new(10.0, 20.0),
+            Point::new(0.0, 20.0),
+        ];
+        let miter = offset_closed_polygon_with(&l_shape, -1.0, &with(JoinStyle::Miter));
+        let round = offset_closed_polygon_with(&l_shape, -1.0, &with(JoinStyle::Round));
+        assert_eq!(miter.len(), 6);
+        assert!(round.len() > 6);
+        // The miter point overshoots into the material; the arc keeps exactly 1 mm
+        // from the corner, so the round result is the larger (exact) shrink.
+        assert!(signed_area(&round).abs() > signed_area(&miter).abs());
+        for point in &round[3..round.len() - 2] {
+            let to_corner = (*point - Point::new(10.0, 10.0)).hypot();
+            assert!((to_corner - 1.0).abs() < 1e-9, "{point:?}");
+        }
+    }
+
+    #[test]
+    fn bad_offset_options_are_errors() {
+        let path = ccw_path(10.0);
+        for limit in [f64::NAN, f64::INFINITY, 0.5, -3.0] {
+            let options = OffsetOptions {
+                join: JoinStyle::Miter,
+                miter_limit: limit,
+            };
+            assert!(offset_path(&path, 1.0, &options).is_err(), "limit {limit}");
+            assert!(apply_with(&Document::default(), &options).is_err());
+        }
+        for distance in [f64::NAN, f64::INFINITY] {
+            assert!(offset_path(&path, distance, &OffsetOptions::default()).is_err());
+        }
+        assert_eq!(JoinStyle::parse("round"), Some(JoinStyle::Round));
+        assert_eq!(JoinStyle::parse("bevel"), Some(JoinStyle::Bevel));
+        assert_eq!(JoinStyle::parse("miter"), Some(JoinStyle::Miter));
+        assert_eq!(JoinStyle::parse("spiky"), None);
     }
 }

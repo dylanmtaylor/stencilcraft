@@ -106,6 +106,54 @@ fn run_kerf_example_reports_applied_kerf() {
 }
 
 #[test]
+fn run_commands_replicate_before_a_round_join_kerf() {
+    let dir = fresh_out_dir();
+    let plain = dir.join("plain.svg");
+    let target = dir.join("replicated.svg");
+    let run = |out: &PathBuf, extra: &[&str]| {
+        let mut cmd = bin();
+        cmd.args(["run", "--in", &example("starter.stencilcraft")]);
+        cmd.args(extra);
+        cmd.args(["--export", &out.to_string_lossy()]);
+        let out = cmd.output().ok().expect("child spawns");
+        expect_exit0(&out, &String::from_utf8_lossy(&out.stdout));
+    };
+    run(&plain, &[]);
+    run(
+        &target,
+        &[
+            "--command",
+            r#"{"command":"shapes.rotate-copies","params":{"ids":[1],"count":3}}"#,
+            "--apply-kerf",
+            "0.4",
+            "--kerf-join",
+            "round",
+            "--kerf-limit",
+            "2",
+        ],
+    );
+    let paths = |p: &PathBuf| {
+        std::fs::read_to_string(p)
+            .expect("svg written")
+            .matches("<path")
+            .count()
+    };
+    assert_eq!(paths(&target), paths(&plain) + 2, "two rotated copies");
+
+    let mut bad = bin();
+    bad.args([
+        "run",
+        "--in",
+        &example("starter.stencilcraft"),
+        "--command",
+        r#"{"command":"shapes.rotate-copies","params":{"ids":[1],"count":0}}"#,
+        "--export",
+        &dir.join("never.svg").to_string_lossy(),
+    ]);
+    expect_exit1(&bad.output().ok().expect("child spawns"), "count 0");
+}
+
+#[test]
 fn run_tiles_the_poster_into_sheets() {
     let dir = fresh_out_dir();
     let base = dir.join("poster-tile");

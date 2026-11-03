@@ -61,9 +61,13 @@ Every image below is rendered by StencilCraft's own SVG exporter from the
 
 ## Why StencilCraft
 
-- **Familiar.** Laser/vinyl workflow conventions from public user documentation only,
-  clean-room: never reading or copying another cutting-prep program's code or assets.
-  Graphtec protocol facts come from community-reverse-engineered GPL drivers as
+- **Familiar.** Laser/vinyl workflow conventions learned clean-room. We drive the
+  reference apps (Silhouette Studio, Cricut Design Space) through their normal UI on
+  licensed installs and read their public documentation. We then write our own
+  implementation. We never use their source code, never disassemble or decompile their
+  binaries, never copy their assets, UI text or branding, and never bypass their
+  licensing or sign-in. The observations and the feature inventory are in
+  [`docs/reference-apps.md`](docs/reference-apps.md). Graphtec protocol facts come from community-reverse-engineered GPL drivers as
   *specifications only* ([inkscape-silhouette](https://github.com/fablabnbg/inkscape-silhouette),
   [inkscape-cutcutgo](https://github.com/virtualabs/inkscape-cutcutgo),
   [pklaus/Silhouette-Cutting-Plotters](https://github.com/pklaus/Silhouette-Cutting-Plotters)) —
@@ -125,7 +129,8 @@ printf '%s\n' '{"id":1,"method":"doc.summary","params":{}}' | nc 127.0.0.1 7979
 `stencil-frame.stencilcraft` (a true counter for kerf) and `poster.stencilcraft`
 (an oversized board for tiling). Protocol and design notes live in [`docs/`](docs):
 `machine.md` (the Graphtec command stream), `ui-design.md` (Silhouette/Cricut structure
-on our skin), `architecture.md`, `mcp.md`, `gaps.md`, `development.md`.
+on our skin), `reference-apps.md` (the reference-app feature inventory and the clean-room
+posture), `menu-map.md` (the Silhouette-familiar menu bar), `architecture.md`, `mcp.md`, `gaps.md`, `development.md`.
 
 ## Use it from Claude Code and other agents
 
@@ -145,7 +150,8 @@ The full method list and the equivalent MCP tools are in [`docs/mcp.md`](docs/mc
 
 StencilCraft is under active development. [**ROADMAP.md**](ROADMAP.md) has the stage,
 the numbers by dimension and what's next; [`docs/gaps.md`](docs/gaps.md) the ranked
-list of what's missing.
+list of what's missing; [`docs/reference-apps.md`](docs/reference-apps.md) the
+feature-by-feature comparison with Silhouette Studio and Cricut Design Space.
 
 **Where we are (2026-10-29): scaffold+.** The document model and `.stencilcraft` round
 trip, kerf compensation, sheet tiling, and SVG/DXF/G-code exports work and are tested;
@@ -178,7 +184,8 @@ There are no packaged releases yet — StencilCraft builds from source with
 release packaging is on the roadmap (M5).
 
 Agent and contributor rules (clean-room, the asset policy, no panics in shipped code,
-quality gates) are in [`AGENTS.md`](AGENTS.md). Every bundled asset is listed with its
+quality gates) are in [`AGENTS.md`](AGENTS.md). What we may and may not do with the
+reference apps is in [`docs/reference-apps.md`](docs/reference-apps.md#clean-room-posture). Every bundled asset is listed with its
 author, source and licence in [`ASSETS.md`](ASSETS.md).
 
 ## License and credits

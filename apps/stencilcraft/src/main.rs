@@ -4295,6 +4295,56 @@ mod tests {
     }
 
     #[test]
+    fn wheel_zoom_keeps_the_point_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let pointer = egui::pos2(300.0, 250.0);
+        let mut frame = |app: &mut StencilApp, events: Vec<egui::Event>, t: f64| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(t),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.canvas_body(ui),
+            );
+            output.textures_delta.clear();
+        };
+        for i in 0..3 {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(pointer)],
+                f64::from(i) * 0.016,
+            );
+        }
+        let before = app.view.screen_to_world(pointer.to_vec2());
+        let zoom_before = app.view.zoom;
+        let wheel = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, 120.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+        };
+        frame(&mut app, vec![wheel], 0.064);
+        for i in 0..40 {
+            frame(&mut app, vec![], 0.08 + f64::from(i) * 0.016);
+        }
+        let after = app.view.screen_to_world(pointer.to_vec2());
+        assert!(
+            app.view.zoom > zoom_before * 1.05,
+            "zoomed in: {zoom_before} -> {}",
+            app.view.zoom
+        );
+        assert!(
+            (after.x - before.x).abs() < 0.05 && (after.y - before.y).abs() < 0.05,
+            "point under the pointer moved: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
     fn canvas_view_shortcuts_are_ignored_while_text_input_is_wanted() {
         let ctx = egui::Context::default();
         let mut app = StencilApp::new(None);

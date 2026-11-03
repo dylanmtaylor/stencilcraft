@@ -99,6 +99,12 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: Make displays the detected USB cutter model without a
+  conflicting model selector; offline preparation retains manual selection.
+
+- 2026-11-03 — M3: Make describes validation and USB submission separately,
+  and no longer directs desktop users to the CLI for real sends.
+
 - 2026-11-03 — M3: Make limits mat choices to the selected cutter catalog and
   clears an incompatible mat when the cutter changes.
 

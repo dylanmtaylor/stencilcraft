@@ -3053,10 +3053,21 @@ impl StencilApp {
                             summary.extend(unsupported);
                         }
                     } else {
-                        self.send.summary = Some(vec![
-                            value.to_string(),
-                            "Submission is not confirmation that cutting has finished.".into(),
-                        ]);
+                        let bytes = value["bytes"].as_u64().unwrap_or_default();
+                        self.send.summary = Some(if value["sent"].as_bool() == Some(true) {
+                            vec![
+                                format!("Sent {bytes} bytes to the cutter."),
+                                "Sending finished; physical cutting may still be in progress."
+                                    .into(),
+                            ]
+                        } else {
+                            vec![
+                                format!(
+                                    "Validation passed: {bytes} bytes prepared. Nothing has been sent."
+                                ),
+                                "When ready, select Send cut to selected USB cutter.".into(),
+                            ]
+                        });
                     }
                 }
                 Err(error) => self.send.summary = Some(vec![error]),
@@ -3088,11 +3099,15 @@ impl StencilApp {
         }
 
         ui.add(Text::new("Model"));
-        let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
-        for (model, label) in MODEL_CHOICES {
-            model_select = model_select.option(*model, *label);
+        if self.send.device.is_empty() {
+            let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
+            for (model, label) in MODEL_CHOICES {
+                model_select = model_select.option(*model, *label);
+            }
+            let _ = model_select.show(ui);
+        } else {
+            ui.add(Text::new(model_label(self.send.model)));
         }
-        let _ = model_select.show(ui);
         let caps = stencilcraft_machine::DeviceRegistry::builtin().by_id(self.send.model.id());
         if !mat_supported(caps, self.mat) {
             self.mat = stencilcraft_machine::Mat::None;
@@ -3173,12 +3188,6 @@ impl StencilApp {
                 }
             });
         }
-        ui.add_space(6.0);
-        ui.add(
-            Text::new("Real sends: stencilcraft-cli cut --in FILE --device PATH")
-                .role(TypeRole::Caption)
-                .content(Content::Muted),
-        );
     }
 
     /// Encode the visible flattened design through the machine crate and

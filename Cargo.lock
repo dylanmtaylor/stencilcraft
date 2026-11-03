@@ -4291,6 +4291,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "stencilcraft-studio"
+version = "0.1.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "stencilcraft-doc",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "stencilcraft-svg"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,15 @@
+[package]
+name = "stencilcraft-studio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded, fail-closed reader for Silhouette Studio .studio (v2) and .studio3 (v3) documents"
+
+[dependencies]
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+stencilcraft-doc = { workspace = true }
+
+[lints]
+workspace = true

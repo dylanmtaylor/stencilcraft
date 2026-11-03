@@ -8,6 +8,7 @@ description = "Kerf compensation: contour offsetting for StencilCraft documents"
 
 [dependencies]
 kurbo = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }

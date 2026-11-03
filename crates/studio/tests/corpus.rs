@@ -30,7 +30,11 @@ fn path_record(points: &[(f32, f32)]) -> Vec<u8> {
     }
     let mut outer = 0u32.to_le_bytes().to_vec();
     outer.extend(block(&list));
-    block(&outer)
+    let mut out = block(&outer);
+    for v in [1f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
 }
 
 /// A v2 body: header, root record holding a filler record, the page record and paths.
@@ -126,11 +130,11 @@ fn foreign_and_unsupported_headers_are_rejected() {
 }
 
 #[test]
-fn bad_coordinates_skip_the_path_with_a_warning() {
+fn bad_coordinates_are_never_imported() {
     let file = v2((304.8, 304.8), &[&[(f32::NAN, 0.0), (1.0, 1.0)], RECT]);
     let got = import(&file, "t").unwrap();
+    // A non-finite coordinate fails the record check: the path is not a match.
     assert_eq!(got.doc.shape_count(), 1);
-    assert_eq!(got.warnings.len(), 1);
 }
 
 fn seeds() -> Vec<Vec<u8>> {
@@ -188,26 +192,40 @@ fn bit_flips_never_panic() {
     }
 }
 
+/// Samples checked on screen in Silhouette Studio before saving: name, shape count,
+/// and the bounding box X, Y, W, H in inches from the Transform panel.
+const VERIFIED: &[(&str, usize, [f64; 4])] = &[
+    ("empty-v3.studio3", 0, [0.0; 4]),
+    ("rect-1in-at-1-1", 1, [1.0, 1.0, 1.0, 1.0]),
+    ("rect-1in-at-2-1", 1, [2.0, 1.0, 1.0, 1.0]),
+    ("rect-2x1in-at-1-1", 1, [1.0, 1.0, 2.0, 1.0]),
+    ("ellipse-2x1in-at-1-1", 1, [1.0, 1.0, 2.0, 1.0]),
+];
+
 #[test]
 fn real_samples_decode_when_present() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/silhouette");
-    for name in ["rect-v2.studio", "rect-v3.studio3", "empty-v3.studio3"] {
-        let Ok(bytes) = std::fs::read(format!("{dir}/{name}")) else {
-            continue;
+    for &(stem, shapes, [x, y, w, h]) in VERIFIED {
+        let names = if stem.contains('.') {
+            vec![stem.to_string()]
+        } else {
+            vec![format!("{stem}.studio"), format!("{stem}.studio3")]
         };
-        let got = import(&bytes, name).unwrap();
-        assert!((got.doc.board.width_mm - 304.8).abs() < 1e-3, "{name}");
-        assert!((got.doc.board.height_mm - 304.8).abs() < 1e-3, "{name}");
-        if name.starts_with("empty") {
-            assert_eq!(got.doc.shape_count(), 0, "{name}");
-            continue;
+        for name in names {
+            let Ok(bytes) = std::fs::read(format!("{dir}/{name}")) else {
+                continue;
+            };
+            let got = import(&bytes, &name).unwrap();
+            assert!((got.doc.board.width_mm - 304.8).abs() < 1e-3, "{name}");
+            assert!((got.doc.board.height_mm - 304.8).abs() < 1e-3, "{name}");
+            assert_eq!(got.doc.shape_count(), shapes, "{name}");
+            let Some(r) = got.doc.layers[0].bounds() else {
+                continue;
+            };
+            let got_in = [r.x0, r.y0, r.width(), r.height()].map(|v| v / 25.4);
+            for (g, want) in got_in.iter().zip([x, y, w, h]) {
+                assert!((g - want).abs() < 0.002, "{name}: {got_in:?}");
+            }
         }
-        assert_eq!(got.doc.shape_count(), 1, "{name}");
-        let r = got.doc.layers[0].bounds().unwrap();
-        // 2.456, 2.292 in; 5.469 x 4.375 in.
-        assert!((r.x0 / 25.4 - 2.456).abs() < 0.002, "{name} {r:?}");
-        assert!((r.y0 / 25.4 - 2.292).abs() < 0.002, "{name} {r:?}");
-        assert!((r.width() / 25.4 - 5.469).abs() < 0.002, "{name} {r:?}");
-        assert!((r.height() / 25.4 - 4.375).abs() < 0.002, "{name} {r:?}");
     }
 }

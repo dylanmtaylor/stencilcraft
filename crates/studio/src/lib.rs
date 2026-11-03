@@ -10,7 +10,7 @@
 //! body that is not in the plain layout we know (for example a protected store
 //! design) is rejected instead of guessed at. Records we do not understand are skipped.
 
-use kurbo::{BezPath, Point};
+use kurbo::{Affine, BezPath, Point, Vec2};
 use stencilcraft_doc::format::{Capabilities, Converted, Fidelity, FormatHandler};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 
@@ -118,17 +118,23 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
         if doc.shape_count() >= MAX_SHAPES {
             return Err(bad("more than 100,000 shapes"));
         }
-        let points = path_points(body, &path);
-        points_total = points_total.saturating_add(points.len());
+        points_total = points_total.saturating_add(path.nodes.len());
         if points_total > MAX_POINTS {
             return Err(bad("more than 2,000,000 points"));
         }
-        let Some(bez) = to_bez(&points) else {
+        let bez = to_bez(&path);
+        let limit = f64::from(MAX_COORD_MM);
+        let wild = |p: Point| !p.is_finite() || p.x.abs() > limit || p.y.abs() > limit;
+        if bez
+            .elements()
+            .iter()
+            .any(|el| el.end_point().is_some_and(wild))
+        {
             warnings.push(format!(
                 "skipped a path at byte {at}: coordinates out of range"
             ));
             continue;
-        };
+        }
         doc.push_shape(0, bez, CutStyle::Cut)
             .map_err(|e| bad(&e.to_string()))?;
     }
@@ -211,17 +217,25 @@ fn block(d: &[u8], at: usize) -> Option<Block> {
 /// A path record, as seen around every shape in our samples:
 ///
 /// ```text
-/// 01 L1  u32(?)  01 L2  01 u32(n-1?)  n × [01 11000000 f32 x  f32 y  5 bytes]
+/// 01 L1  u32(?)  01 L2  01 u32(?)  n × node      L1 == L2 + 9
+/// node:  01 len  f32 x  f32 y  in-handle  out-handle  3 bytes(?)
+/// handle: 00 (none) | 01 f32 dx f32 dy (relative to the node)
 /// ```
-/// with `L1 == L2 + 9` and `L2 == 9 + 18 n`. All of that must hold before we
-/// accept it, which makes a false match on unrelated bytes vanishingly unlikely.
+/// followed by the object's 3 × 3 transform (f32, row-major). Every length must
+/// agree before we accept it, so a false match on unrelated bytes is vanishingly
+/// unlikely.
 struct PathRecord {
-    first_point: usize,
-    count: usize,
+    nodes: Vec<Node>,
+    transform: Affine,
     end: usize,
 }
 
-const POINT_RECORD: usize = 18;
+#[derive(Debug, Clone, Copy)]
+struct Node {
+    at: Point,
+    handle_in: Option<Vec2>,
+    handle_out: Option<Vec2>,
+}
 
 fn find_path(d: &[u8], from: usize, to: usize) -> Option<(usize, PathRecord)> {
     let window = d.get(from..to)?;
@@ -245,53 +259,99 @@ fn path_at(d: &[u8], at: usize, limit: usize) -> Option<PathRecord> {
     if inner.end != outer.end || *d.get(inner.start)? != 1 {
         return None;
     }
-    let points_bytes = inner.end.checked_sub(inner.start + 5)?;
-    if points_bytes == 0 || points_bytes % POINT_RECORD != 0 {
-        return None;
-    }
-    let count = points_bytes / POINT_RECORD;
-    let first_point = inner.start + 5;
-    for k in 0..count {
-        let p = first_point + k * POINT_RECORD;
-        if *d.get(p)? != 1 || u32_at(d, p + 1)? != (POINT_RECORD - 1) as u32 {
+    let mut nodes = Vec::new();
+    let mut p = inner.start + 5;
+    while p < inner.end {
+        let node = block(d, p)?;
+        if node.end > inner.end {
             return None;
         }
+        nodes.push(parse_node(d, node)?);
+        p = node.end;
+    }
+    if nodes.is_empty() {
+        return None;
     }
     Some(PathRecord {
-        first_point,
-        count,
+        nodes,
+        transform: transform_at(d, outer.end)?,
         end: outer.end,
     })
 }
 
-fn path_points(d: &[u8], path: &PathRecord) -> Vec<(f32, f32)> {
-    (0..path.count)
-        .filter_map(|k| {
-            let p = path.first_point + k * POINT_RECORD;
-            Some((f32_at(d, p + 5)?, f32_at(d, p + 9)?))
-        })
-        .collect()
+fn parse_node(d: &[u8], b: Block) -> Option<Node> {
+    let at = point_at(d, b.start)?;
+    let mut o = b.start + 8;
+    let mut handle = || -> Option<Option<Vec2>> {
+        let flag = *d.get(o)?;
+        o += 1;
+        match flag {
+            0 => Some(None),
+            1 => {
+                let v = point_at(d, o)?.to_vec2();
+                o += 8;
+                Some(Some(v))
+            }
+            _ => None,
+        }
+    };
+    let handle_in = handle()?;
+    let handle_out = handle()?;
+    // Three trailing bytes of unknown meaning close every node record.
+    (o + 3 == b.end).then_some(Node {
+        at,
+        handle_in,
+        handle_out,
+    })
 }
 
-/// shortcut: every path is closed and straight-sided, as in all samples so far
-/// (rectangles); upgrade once line/curve samples show the open flag and node types.
-fn to_bez(points: &[(f32, f32)]) -> Option<BezPath> {
-    let mut bez = BezPath::new();
-    for (i, &(x, y)) in points.iter().enumerate() {
-        if !x.is_finite() || !y.is_finite() || x.abs() > MAX_COORD_MM || y.abs() > MAX_COORD_MM {
+/// The 3 × 3 row-major matrix after a path; only affine ones (last row 0 0 1) pass.
+fn transform_at(d: &[u8], at: usize) -> Option<Affine> {
+    let mut m = [0f64; 9];
+    for (i, v) in m.iter_mut().enumerate() {
+        let f = f32_at(d, at + 4 * i)?;
+        if !f.is_finite() || f.abs() > MAX_COORD_MM {
             return None;
         }
-        let p = Point::new(f64::from(x), f64::from(y));
-        if i == 0 {
-            bez.move_to(p);
+        *v = f64::from(f);
+    }
+    let [a, b, c, dd, e, f, g, h, i] = m;
+    (g == 0.0 && h == 0.0 && i == 1.0).then_some(Affine::new([a, dd, b, e, c, f]))
+}
+
+fn point_at(d: &[u8], at: usize) -> Option<Point> {
+    let (x, y) = (f32_at(d, at)?, f32_at(d, at + 4)?);
+    let ok = |v: f32| v.is_finite() && v.abs() <= MAX_COORD_MM;
+    (ok(x) && ok(y)).then(|| Point::new(f64::from(x), f64::from(y)))
+}
+
+/// Segments are cubic where either end has a handle, straight otherwise.
+/// shortcut: every path is closed, as in all samples so far (rectangle, ellipse);
+/// upgrade once the line/open-polyline samples show the open flag.
+fn to_bez(path: &PathRecord) -> BezPath {
+    let mut bez = BezPath::new();
+    let Some(first) = path.nodes.first() else {
+        return bez;
+    };
+    bez.move_to(first.at);
+    let next = path.nodes.iter().skip(1).chain(std::iter::once(first));
+    let last = path.nodes.len() - 1;
+    for (i, (from, to)) in path.nodes.iter().zip(next).enumerate() {
+        if from.handle_out.is_none() && to.handle_in.is_none() {
+            // The closing straight edge is the close itself.
+            if i != last {
+                bez.line_to(to.at);
+            }
         } else {
-            bez.line_to(p);
+            bez.curve_to(
+                from.at + from.handle_out.unwrap_or_default(),
+                to.at + to.handle_in.unwrap_or_default(),
+                to.at,
+            );
         }
     }
-    if points.len() > 1 {
-        bez.close_path();
-    }
-    Some(bez)
+    bez.close_path();
+    path.transform * bez
 }
 
 /// Page width and height (mm): the root's second record, 0x29 bytes into its payload.
@@ -344,8 +404,8 @@ impl FormatHandler for StudioHandler {
             read: Fidelity::Lossy,
             write: Fidelity::None,
             notes: &[
-                "Reads straight-sided outlines (as closed paths) and the page size.",
-                "Curves, open paths, text, colours, layers and cut settings are not read yet.",
+                "Reads outlines (lines and Bézier curves, as closed paths) with each object's transform, and the page size.",
+                "Open paths, text, colours, layers and cut settings are not read yet.",
                 "Protected or encrypted store designs are rejected, never decrypted.",
             ],
         }

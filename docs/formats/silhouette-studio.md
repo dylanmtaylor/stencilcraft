@@ -7,8 +7,8 @@ in one thing, then compare the bytes. We did not disassemble, decompile or debug
 We did not read any other project's code for these formats. Posture:
 [`docs/reference-apps.md`](../reference-apps.md) (branch `docs/reference-apps`).
 
-Reader: [`crates/studio`](../../crates/studio/src/lib.rs). Status: **read, lossy** (straight-sided
-outlines and page size). Writing is not done yet (see [Writing](#writing)).
+Reader: [`crates/studio`](../../crates/studio/src/lib.rs). Status: **read, lossy** (outlines,
+both straight and Bézier, with each object's transform applied, plus page size). Writing is not done yet (see [Writing](#writing)).
 
 ## Protected designs
 
@@ -29,16 +29,26 @@ thumbnail. Keep them locally under `corpora/silhouette/`, where the corpus tests
 | `rect-v2.studio` | `7304b266…0210f7` | one rectangle 5.469 × 4.375 in at X 2.456, Y 2.292 in; 12 × 12 in CAMEO 5 page; saved as v2 |
 | `rect-v3.studio3` | `8d74c1aa…daacbd` | the same document saved as v3 |
 | `empty-v3.studio3` | `51b60e87…41f70` | empty 12 × 12 in page, same app session, v3 |
+| `rect-1in-at-1-1.studio` / `.studio3` | `bebfc1b0…4e0739` / `ff4315a1…c24291` | rectangle W 1 H 1 at X 1 Y 1 in, checked on screen |
+| `rect-1in-at-2-1.studio` / `.studio3` | `1188097c…05f2e1` / `dcf11d30…dcda3f` | the same rectangle at X 2 (only X differs) |
+| `rect-2x1in-at-1-1.studio` / `.studio3` | `77ebadc4…203c3e` / `3f0c9b51…19e416` | W 2 H 1 at X 1 Y 1 (only W differs) |
+| `ellipse-2x1in-at-1-1.studio` / `.studio3` | `aa73e855…d6be6a` / `70abbfb1…277b4b` | ellipse W 2 H 1 at X 1 Y 1 |
 
 Pair tags used below: **R2/R3** = rect-v2 vs rect-v3; **E3/R3** = empty-v3 vs rect-v3;
-**R** = seen in both rect files, with values checked against the known geometry.
+**R** = seen in both rect files, with values checked against the known geometry;
+**X** = rect-1in-at-1-1 vs rect-1in-at-2-1 (only X); **W** = rect-1in-at-1-1 vs
+rect-2x1in-at-1-1 (only W); **C** = ellipse vs rect-2x1in-at-1-1 (same box, curve versus
+corner nodes).
 
 ## Conventions
 
 - Little-endian everywhere. (R)
 - Geometry is **millimetres** stored as **f32**, origin at the **page's top-left corner**, y
-  pointing **down**. Rectangle X 2.456 in is stored as 62.380, Y 2.292 in as 58.213. The page
-  is stored as 304.8 × 304.8. (R)
+  pointing **down**. The page is stored as 304.8 × 304.8. A shape's nodes are kept in the
+  frame where the shape was first drawn. A per-object 3 × 3 matrix maps them onto the page,
+  and moving or resizing changes only the matrix, never the nodes. In X and W the node
+  coordinates stay the same and the matrix changes. Applying the matrix gives exactly the
+  on-screen X/Y/W/H. (X, W, C)
 - Strings are a u32 byte count followed by bytes without a terminator, for example
   `06 00 00 00 "square"` and `0a 00 00 00 "Untitled-1"`. (R)
 - **Records.** Most structure is nested records: marker byte `0x01`, a u32 length that
@@ -75,41 +85,45 @@ The root's children, in order (only the first two are relied on):
 
 ### Shape (path) record
 
-The rectangle is stored as:
-
 ```text
-01 L1                      path record, L1 = 90
-   u32 0                   unknown (path or contour kind?)
-   01 L2                   point list, L2 = L1 - 9 = 81
-      01 u32 3             unknown: 3 for 4 points (n-1? closed flag + count?)
-      n × point:           each 18 bytes
-         01 11 00 00 00    a record of length 17
-         f32 x, f32 y      page millimetres
-         5 bytes           first point 00 00 01 00 00, others all zero (node flags?)
+01 L1                      path record
+   u32 0                   unknown (contour kind?)
+   01 L2                   node list, L2 = L1 - 9
+      01 u32 3             unknown: 3 for both 4-node shapes (n-1? closed flag + count?)
+      n × node:
+         01 len            len 17 (no handles) or 33 (two handles)          (R, C)
+         f32 x, f32 y      node, in the drawing frame (mm)
+         in handle         00 = none | 01 f32 dx f32 dy, relative to the node (C)
+         out handle        same encoding
+         3 bytes           rect 00 00 00 (rect-v2 first node 01 00 00), ellipse 00 01 00: unknown
+f32 × 9                    object matrix, row-major: x' = a x + b y + c, y' = d x + e y + f;
+                           last row 0 0 1                                   (X, W)
+f32 × 6                    cx cy a b c d: the on-page frame. Centre plus the half-size axes:
+                           rect-1in-at-1-1 gives 38.1 38.1 12.7 0 0 12.7    (X, W)
+01|02 u32 0                unknown (01 in .studio, 02 in .studio3)
+01 L3 u32 0 u32 L4 01 u32 3  second node list: n × {f32 x, f32 y, in handle, out handle}
+                           (10 bytes for corners, 26 for curves) = the nodes after the matrix
+"Rectangle"/"Ellipse", 32-hex id, "create_rectangle" (the tool used), …
 ```
 
-The reader accepts a path only when all of this holds: `L1 = L2 + 9`, `L2 = 9 + 18n`, every
-point record has length 17, and every coordinate is finite and within ±1 km. It finds paths
-by scanning the root record for this exact nested pattern. (R)
+- Rectangle nodes run (x0,y0) → (x0,y1) → (x1,y1) → (x1,y0). There is no repeated closing
+  node. (R)
+- Ellipse: 4 nodes (right, bottom, left, top), each with both handles. The handle length is
+  0.5523 × the radius, the usual cubic circle constant: 12.265 = 22.2 × 0.5523. The in handle
+  points back along the incoming segment, the out handle forward. (C)
+- Segment i → i+1 is a cubic with control points `node_i + out_i` and `node_{i+1} + in_{i+1}`.
+  With no handles at either end it is a straight line. (C)
+- Moving by 1 in (X) changes only matrix `c` (and the frame centre). Doubling the width (W)
+  changes matrix `a` and `c`. The nodes are byte-identical in X and W, but in rect-1in-at-1-1
+  they differ from the other two (that rectangle was drawn separately). (X, W)
+- The reader accepts a path only when every length agrees (`L1 = L2 + 9`, node lengths match
+  their handle flags), every coordinate is finite and within ±1 km, and the matrix is affine.
+  It finds paths by scanning the root record for this nested pattern and applies the matrix.
 
-The points run (x0,y0) → (x0,y1) → (x1,y1) → (x1,y0), counter-clockwise on screen. There is
-no repeated closing point. (R)
-
-Right after the point list come:
-
-- a 3 × 3 f32 matrix `[1 0 -207.27; 0 1 -204.49; 0 0 1]`;
-- six f32 `-75.43 -90.71 69.46 0 0 55.57`, which are the rectangle's centre in the shifted
-  frame and its half-width and half-height;
-- a second copy of the points (`00000000`, a u32 length **without** a `01` marker, `01 u32 3`,
-  then 4 × {f32 x, f32 y, u16 0}). These points equal the first list moved by the matrix:
-  62.38 − 207.27 = −144.89. (R)
-
-The record then carries the name `"Rectangle"`, a 32-hex id and `"create_rectangle"`
-(the tool that made it). (R)
-
-**Which list is authoritative?** The first list matches the document geometry exactly in
-page coordinates, so the reader imports it. What the matrix means (the inverse of an object
-transform? a pivot frame?) is unknown until the rotated-rectangle sample arrives.
+**rect-v2/rect-v3 puzzle.** Applying their matrix puts the rectangle at about (−144.9, −146.3)
+mm, which is off the page. Their raw nodes, by contrast, match the X 2.456, Y 2.292 in we were
+told. The later on-screen-verified samples follow the matrix rule exactly, so the reader
+follows it. The first pair needs re-checking in the VM (it was not verified on screen).
 
 ## .studio3 (v3) layout
 
@@ -140,18 +154,20 @@ with no table) is also accepted.
 
 ## What the reader imports
 
-- Every path record, as a closed polyline on one `cut` layer. This is a **shortcut**: open
-  paths and curves are not yet distinguished (see below).
+- Every path record as a closed path (lines and cubics) on one `cut` layer, after its object
+  matrix is applied. This is a **shortcut**: open paths are not yet told apart (see below).
 - Page width and height, rounded to 1 µm. If they are missing or not plausible, the
   default sheet is used and a warning is returned.
 - Caps: 64 MiB input, 100,000 shapes, 2,000,000 points.
 
 ## Unknowns
 
-- Curves (Bézier nodes): what the 5 trailing point bytes and the `01 u32 3` prefix mean.
-  Needs the ellipse sample.
+- The 3 trailing node bytes, and the `01 u32 3` list prefix.
 - Open versus closed paths: needs the line and open-polyline samples.
-- Object transforms and rotation: what the 3 × 3 matrix means.
+- Rotation: which matrix entries a rotation changes (needs the rotated-rectangle sample).
+- Where rect-v2/rect-v3 really sat on the page (see the puzzle above).
+- v3 embeds precomputed cut data ("Include Cut Data", on by default). Which section holds it
+  is not yet identified; section 4's bounding box may be part of it.
 - Line and fill colour, layer membership, multiple layers, groups, compound paths, text.
 - Page width versus height order (only a square page so far). Letter-page sample needed.
 - Sections 1, 3, 5, 6, 7, 8 of v3.

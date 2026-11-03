@@ -298,7 +298,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Load/unload media, pause, cancel | both | Machine controls during a job | missing | replicate | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Multi-cutter support | SS (Business) | Send jobs to several machines at once | missing | replicate later | 2026-11-02, SS 5.0.539: not present in Basic |
 | Batch / queued jobs | SS (Business) | Queue several designs or repeats as one job | missing | replicate | 2026-11-02, SS 5.0.539: not present in Basic |
-| Cricut machine protocol | DS | Driving Cricut machines | out of scope | won't do: no public specification; would need protocol work we don't do | blocked: sign-in required (2026-11-02, DS 9.83.76) |
+| Cricut machine protocol | DS | Driving Cricut machines | missing | replicate once protocol facts can be learned clean-room (public docs, or observing what a normal job sends); none yet | blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | Firmware updates | both | Update the machine firmware from the app | out of scope | won't do: vendor firmware | SS: pending. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 
 ## Library and store
@@ -319,10 +319,10 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Open Recovered (autosave recovery) | SS | Reopen work saved automatically before a crash | missing: no autosave | replicate | 2026-11-02, SS 5.0.539: File › Open Recovered… |
 | DXF import | both | Open CAD outlines | missing (DXF export only) | replicate | 2026-11-02, SS 5.0.539: DXF is in Basic's Open types; import options: fit to page, convert white lines to black, join lines into polylines. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
 | PDF import | SS (Designer+) | Open vector PDFs | missing | replicate | 2026-11-02, SS 5.0.539: Basic's Open dialog has no PDF |
-| AI/EPS/CDR import | SS (Business) | Open Illustrator/CorelDRAW files | missing | won't do directly: proprietary formats; users export SVG/PDF | 2026-11-02, SS 5.0.539: not present in Basic |
+| AI/EPS/CDR import | SS (Business) | Open Illustrator/CorelDRAW files | missing | replicate AI (its PDF-compatible content) and EPS (a PostScript subset); CDR only if its structure can be learned clean-room | 2026-11-02, SS 5.0.539: not present in Basic |
 | Raster import (PNG/JPEG/BMP/GIF/TIFF) | both | Place a photo or clip art to trace or print | partial: PNG/JPEG for tracing only; no placed raster for printing | replicate | 2026-11-02, SS 5.0.539: PNG, JPEG, BMP, GIF and TIFF in Basic's Open types; PNG autotrace on import is on by default. DS: blocked: sign-in required (2026-11-02, DS 9.83.76) |
-| Embroidery formats (PES, DST, …) | SS (Designer Plus) | Import embroidery outlines | out of scope | won't do: not a cutting-prep need | 2026-11-02, SS 5.0.539: not present in Basic |
-| Native `.studio`/`.studio3` | SS | The vendor's own formats: Basic saves `.studio3`, `.studio` and GSP and opens those plus GSD | out of scope | won't do: proprietary format with no public specification; we do not reverse-engineer it | 2026-11-02, SS 5.0.539: Basic's save types: Studio V3 (.studio3), V2 (.studio), GSP; GSD open options: as-is, convert white lines to black, join lines into polylines |
+| Embroidery formats (PES, DST, …) | SS (Designer Plus) | Import embroidery outlines | missing | replicate (outline only) | 2026-11-02, SS 5.0.539: not present in Basic |
+| Native `.studio`/`.studio3` | SS | The vendor's own formats: Basic saves `.studio3`, `.studio` and GSP and opens those plus GSD | missing | reimagine: import needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF | 2026-11-02, SS 5.0.539: Basic's save types: Studio V3 (.studio3), V2 (.studio), GSP; GSD open options: as-is, convert white lines to black, join lines into polylines |
 | SVG export | SS (Business) | Save as SVG | have | replicate | 2026-11-02, SS 5.0.539: Basic has no SVG export (and no DXF, PDF or PNG) |
 | PDF/PNG/JPG export | SS (Business) | Save as PDF or image | missing | replicate (PDF first) | 2026-11-02, SS 5.0.539: not present in Basic |
 | DXF export | — | StencilCraft's own | have (R14, flattened) | — | — |

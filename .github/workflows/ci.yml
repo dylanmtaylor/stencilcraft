@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
 
+# A newer push to a PR branch cancels its older run; every push to main runs to the end.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -20,5 +21,7 @@ jobs:
     # Tracks @main so suite-wide CI fixes reach every app without a PR in each repository.
     uses: storytold/craft-common-actions/.github/workflows/gate.yml@main
     with:
+      # Same craft-fonts commit as release.yml.
+      craft-fonts-ref: bfcbf714e45a3ea8e98f88ab2b7971372a576414
       packages: >-
         libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev

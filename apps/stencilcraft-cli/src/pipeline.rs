@@ -54,6 +54,7 @@ pub enum PipelineError {
 pub fn run_pipeline(
     doc: &Document,
     kerf_mm: Option<f64>,
+    kerf_options: &stencilcraft_kerf::OffsetOptions,
     tiling: Option<&Tiling>,
     export_base: &str,
     gcode: &GcodeSettings,
@@ -63,7 +64,7 @@ pub fn run_pipeline(
             let mut with_setting = doc.clone();
             with_setting.kerf.width_mm = k;
             Some(
-                stencilcraft_kerf::apply(&with_setting, 4.0)
+                stencilcraft_kerf::apply_with(&with_setting, kerf_options)
                     .map_err(|e| PipelineError::User(e.to_string()))?,
             )
         }
@@ -181,6 +182,7 @@ mod tests {
         let report = run_pipeline(
             &tk::simple_square(),
             None,
+            &Default::default(),
             None,
             &out,
             &GcodeSettings::default(),
@@ -208,6 +210,7 @@ mod tests {
         let reports = run_pipeline(
             &tk::big_diagonal(),
             Some(0.2),
+            &Default::default(),
             Some(&tiling),
             "ignored",
             &GcodeSettings::default(),
@@ -229,6 +232,7 @@ mod tests {
         let r = run_pipeline(
             &tk::simple_square(),
             Some(-1.0),
+            &Default::default(),
             None,
             "/tmp/never",
             &GcodeSettings::default(),

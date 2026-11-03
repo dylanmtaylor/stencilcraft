@@ -22,7 +22,10 @@ to the process. The control socket listens on `127.0.0.1` only, but it has no au
 on a trusted machine and review what connected clients do.
 
 The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `export_svg`,
-`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, and `command_execute`. Their
+`export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `command_execute`, and the
+replicate/offset tools `shapes_replicate_side`, `shapes_replicate_array`,
+`shapes_replicate_fill`, `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset`
+(see [Replicate and offset](#replicate-and-offset)). Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -74,6 +77,41 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `tile.run` | `{path, sheet_w, sheet_h, overlap, marks?}` | `{tiles: n}` |
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `command.execute` | `{command: <command name>, params: <command parameters>}` | engine result |
+| `shapes.replicate-side` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.replicate-array` | `{ids, axis, count, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.replicate-fill` | `{ids, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.mirror-copy` | `{ids, side, gap_mm}` | `{ShapesAdded: {ids}}` |
+| `shapes.rotate-copies` | `{ids, count}` | `{ShapesAdded: {ids}}` |
+| `shapes.offset` | `{ids, distance_mm, join?, miter_limit?}` | `{ShapesAdded: {ids}}` |
+
+## Replicate and offset
+
+These are engine commands (`crates/engine/src/lib.rs`), so each is one undoable edit
+(`edit.undo` removes every copy it added). Each has a dedicated MCP tool whose arguments
+are the command's params, and can also be sent through `command_execute` or as a legacy
+method of the same name. Copies keep each shape's cut/engrave style. Documents are y-up,
+so `above` means larger y.
+
+| Command | Behaviour |
+| --- | --- |
+| `shapes.replicate-side` | One copy of the selection on `side` (`left`, `right`, `above`, `below`): its bounds touch the selection's bounds, `gap_mm` apart. |
+| `shapes.replicate-array` | A row (`axis: horizontal`, growing right) or column (`vertical`, growing up) of `count` items; the selection is the first, so `count - 1` copies are added. |
+| `shapes.replicate-fill` | Every cell of the selection's grid (pitch = selection size + `gap_mm`) that lies wholly on the board gets a copy; the selection keeps its own cell. |
+| `shapes.mirror-copy` | A mirrored copy on `side`: `left`/`right` copies flip horizontally, `above`/`below` vertically, then sit edge to edge `gap_mm` away. |
+| `shapes.rotate-copies` | A radial array of `count` items (the selection included) rotated in steps of 360°/`count` about the selection's bounds centre. |
+| `shapes.offset` | Adds an offset outline of each shape, keeping the original. Positive `distance_mm` grows the solid; negative is an internal offset (outlines shrink, holes grow). `join` is `miter` (default), `round` or `bevel`; `miter_limit` (default 4, at least 1) is the corner limit as a multiple of the distance. The outline is flattened to line segments. |
+
+Limits: `gap_mm` must be finite and non-negative; `count` is 2–1000; one command adds at
+most 10,000 shapes (a fill that would need more is refused — raise the gap); ids must be
+unique and exist; copies must stay within finite coordinates. A refused command changes
+nothing and adds no history.
+
+The CLI reaches the same commands with `stencilcraft-cli run --command JSON` (repeatable,
+run in order on the loaded document before kerf and export), for example
+`--command '{"command":"shapes.replicate-fill","params":{"ids":[1],"gap_mm":2}}'`. CLI
+kerf compensation takes `--kerf-join miter|round|bevel` and `--kerf-limit N` beside
+`--apply-kerf MM`; miter with limit 4 stays the default. The MCP `kerf_apply` tool only
+records the kerf width on the document; offsetting with a chosen join is `shapes_offset`.
 
 The desktop app's `--control` socket also answers two window methods the headless session
 cannot (legacy envelope only):

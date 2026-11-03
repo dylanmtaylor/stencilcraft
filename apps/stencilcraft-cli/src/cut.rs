@@ -11,8 +11,8 @@ use stencilcraft_doc::Document;
 use stencilcraft_geom as geom;
 use stencilcraft_machine as machine;
 use stencilcraft_machine::{
-    Capabilities, CutJob, CutProgram, CutSettings, DeviceRegistry, MachineDriver, Mat, Media,
-    PlotOptions, Registration, ToolKind, TransportSpec,
+    Capabilities, CutJob, CutOrder, CutProgram, CutSettings, DeviceRegistry, MachineDriver, Mat,
+    Media, PlotOptions, Registration, ToolKind, TransportSpec,
 };
 
 /// Errors from the cut subcommand; printed to stderr as the process message.
@@ -66,6 +66,14 @@ pub struct CutRequest {
     pub overcut_mm: Option<f64>,
     pub media_size: Option<(f64, f64)>,
     pub registration: Option<Registration>,
+    /// Cut order (default: minimize roller movement).
+    pub order: Option<CutOrder>,
+    /// Cut paths in order regardless of nesting (default: interior first).
+    pub no_interior_first: bool,
+    /// Closed-contour overcut past the start, mm.
+    pub closed_overcut_mm: Option<f64>,
+    /// Mirror on the mat (heat-transfer vinyl).
+    pub mirror: bool,
 }
 
 impl CutRequest {
@@ -90,6 +98,16 @@ impl CutRequest {
                 "--holder" => req.holder = Some(num(arg, take()?)?),
                 "--passes" => req.passes = Some(num(arg, take()?)?),
                 "--overcut" => req.overcut_mm = Some(num(arg, take()?)?),
+                "--closed-overcut" => req.closed_overcut_mm = Some(num(arg, take()?)?),
+                "--order" => {
+                    let v = take()?;
+                    req.order =
+                        Some(CutOrder::parse(v).ok_or_else(|| {
+                            user(format!("--order {v}: use none, speed or roller"))
+                        })?);
+                }
+                "--no-interior-first" => req.no_interior_first = true,
+                "--mirror" => req.mirror = true,
                 "--mat" => {
                     let v = take()?;
                     req.mat = Some(Mat::parse(v).ok_or_else(|| {
@@ -245,6 +263,10 @@ pub fn build_job(
     s.media_size_mm = req.media_size;
     s.registration = req.registration;
     let mut job = s.to_job(paths, &PlotOptions::default(), req.bbox_only);
+    job.order = req.order.unwrap_or_default();
+    job.interior_first = !req.no_interior_first;
+    job.closed_overcut_mm = req.closed_overcut_mm.unwrap_or(0.0);
+    job.mirror = req.mirror;
     // Force/speed go straight into the job: their units are machine-specific
     // and may exceed the Silhouette step range (laser power 0-1000, mm/min).
     for op in &mut job.operations {
@@ -344,6 +366,13 @@ fn header(program: &CutProgram, media: &Media, caps: &Capabilities, job: &CutJob
             op.settings.passes
         ));
     }
+    out.push(format!(
+        "order: {}, interior first: {}, closed overcut: {} mm, mirror: {}",
+        job.order.id(),
+        if job.interior_first { "on" } else { "off" },
+        job.closed_overcut_mm,
+        if job.mirror { "on" } else { "off" }
+    ));
     if let Some(bb) = program.bbox_mm {
         out.push(format!(
             "cut area: {:.1} x {:.1} mm — use --bbox for a preview rectangle",
@@ -367,6 +396,12 @@ fn print_cut_help() {
     println!("  --depth N         AutoBlade depth 0..10 (holder 1)");
     println!("  --passes N        cut each path N times (1..10)");
     println!("  --overcut MM      line-segment overcut at sharp corners (0..2 mm)");
+    println!("  --closed-overcut MM  cut each closed contour past its start (0..5 mm)");
+    println!(
+        "  --order ORDER     none, speed (nearest-neighbour) or roller (default: feed one way)"
+    );
+    println!("  --no-interior-first  don't cut inner contours before their outline");
+    println!("  --mirror          flip about the media centre (heat-transfer vinyl)");
     println!("  --mat MAT         none, 12x12, 12x24, 8x12, 15x15, 24x24, 8.5x12");
     println!("  --media-size WxL  loaded media in mm (required where the cut width is unknown)");
     println!("  --regmarks W,L,X,Y  print & cut: mark spacing and first-mark position, mm");
@@ -642,6 +677,46 @@ mod tests {
         assert!(lines[0].starts_with("dry run: encoded"));
         assert!(lines.iter().any(|l| l == "J1"));
         assert!(lines.iter().any(|l| l.starts_with("FX")));
+    }
+
+    #[test]
+    fn job_settings_reach_the_transcript() {
+        let req = CutRequest::parse(&args(&[
+            "--in",
+            "a",
+            "--order",
+            "speed",
+            "--no-interior-first",
+            "--closed-overcut",
+            "1.5",
+            "--mirror",
+        ]))
+        .expect("parses");
+        let lines = run(&req, &starter()).expect("dry runs");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l
+                    == "order: speed, interior first: off, closed overcut: 1.5 mm, mirror: on"),
+            "{lines:?}"
+        );
+        // Mirroring changes the cut coordinates, never the document.
+        let plain = run(&CutRequest::default(), &starter()).expect("dry runs");
+        let mirrored = run(
+            &CutRequest {
+                mirror: true,
+                ..CutRequest::default()
+            },
+            &starter(),
+        )
+        .expect("dry runs");
+        assert_ne!(plain, mirrored);
+        assert!(CutRequest::parse(&args(&["--in", "a", "--order", "zigzag"])).is_err());
+        let too_far = CutRequest {
+            closed_overcut_mm: Some(9.0),
+            ..CutRequest::default()
+        };
+        assert!(run(&too_far, &starter()).is_err());
     }
 
     #[test]

@@ -150,10 +150,17 @@ pub fn trace(pixels: &RgbaImage, options: &TraceOptions) -> Result<TraceOutput, 
     let contours = follow_boundaries(&mask, w, h)?
         .into_iter()
         .filter_map(|points| {
-            let points = simplify(points, options.smoothing);
-            (points.len() >= 3).then(|| Contour {
-                hole: stencilcraft_geom::signed_area(&points) < 0.0,
-                points,
+            let area = stencilcraft_geom::signed_area(&points);
+            let mut simplified = simplify(points.clone(), options.smoothing);
+            // A contour only a few pixels across can collapse under the tolerance;
+            // keep its exact pixel outline rather than lose or flip it.
+            let kept = stencilcraft_geom::signed_area(&simplified);
+            if kept * area <= 0.0 || kept.abs() < area.abs() * 0.5 {
+                simplified = simplify(points, 0.0);
+            }
+            (simplified.len() >= 3).then_some(Contour {
+                hole: area < 0.0,
+                points: simplified,
             })
         })
         .collect();

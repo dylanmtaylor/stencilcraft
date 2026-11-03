@@ -16,6 +16,7 @@ stencilcraft-dxf = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
+stencilcraft-layout = { workspace = true }
 
 [dev-dependencies]
 stencilcraft-testkit = { workspace = true }

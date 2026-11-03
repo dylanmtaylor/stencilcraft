@@ -25,7 +25,8 @@ The MCP tool names are `doc_open`, `doc_save`, `doc_summary`, `kerf_apply`, `exp
 `export_dxf`, `export_gcode`, `tile_run`, `tile_preview`, `command_execute`, and the
 replicate/offset tools `shapes_replicate_side`, `shapes_replicate_array`,
 `shapes_replicate_fill`, `shapes_mirror_copy`, `shapes_rotate_copies` and `shapes_offset`
-(see [Replicate and offset](#replicate-and-offset)). Their
+(see [Replicate and offset](#replicate-and-offset)), and the cut-production tools (see
+[Production](#production)). Their
 arguments correspond to the legacy method parameters below. `tile_run` takes an optional
 `marks: true` to stamp corner registration brackets and edge overlap guides on each sheet;
 `tile_preview` writes the whole tiling to one labelled SVG page (`columns`, `scale`,
@@ -153,6 +154,64 @@ run in order on the loaded document before kerf and export), for example
 kerf compensation takes `--kerf-join miter|round|bevel` and `--kerf-limit N` beside
 `--apply-kerf MM`; miter with limit 4 stays the default. The MCP `kerf_apply` tool only
 records the kerf width on the document; offsetting with a chosen join is `shapes_offset`.
+
+## Production
+
+Cut-production commands (`crates/engine/src/production.rs`, algorithms in `crates/layout`)
+cover Cricut Design Space's layer actions and Make screen and Silhouette Studio's Send
+settings, from our own design. Each is an engine command (one undo step) with a dedicated MCP
+tool (the name with `.`/`-` turned into `_`); the `production.*` queries change nothing. Shape
+production data (operation, colours, material, attach group, manual mat, hidden contours,
+Combine/Flatten members, send-preview tool) is saved in the `.stencilcraft` file under each
+shape's `production` key and follows moves, rotations and scaling.
+
+| Command / tool | Params | Effect |
+| --- | --- | --- |
+| `shapes.slice` | `{a, b}` | Two overlapping closed shapes become every piece (a − b, b − a, a ∩ b; each separate region its own shape). The overlap takes the top shape's settings. `ShapesAdded`. |
+| `shapes.weld` | `{ids}` (≥ 2) | One outline for good; the first shape in document order keeps its id. |
+| `shapes.attach` / `shapes.detach` | `{ids}` | Attached shapes stay in their arrangement on one mat and cut together (draw/score layers ride with their cut layer). Detach releases the whole group. |
+| `shapes.flatten` / `shapes.unflatten` | `{ids}` / `{id}` | Flatten: one Print Then Cut image (members kept as artwork) cut along the members' outline. Unflatten restores them where the image is now. |
+| `shape.contour` | `{id, contours, hidden}` | Hide or show contours (subpath indices). Hidden contours stay in the path but every export (SVG, DXF, G-code, tiling, cut, cut jobs) leaves them out. |
+| `shapes.combine` | `{ids, operation}` | Non-destructive `unite`, `subtract` (back-most minus the rest), `intersect`, `exclude`; the result keeps its members. `ShapeAdded`. |
+| `shape.set-combine` / `shapes.uncombine` | `{id, operation}` / `{id}` | Change the operation; or restore the members (they follow any move of the group). |
+| `shapes.create-sticker` | `{ids, border_mm?, cut?}` | Flatten plus a welded offset border (0.5–50 mm, default 3; holes filled), cut `kiss-cut` (default, backing intact) or `die-cut`. |
+| `shapes.set-production` | `{ids, operation?, line_color?, fill_color?, material?, send?, clear?}` | `operation`: `cut`, `kiss-cut`, `die-cut`, `draw`, `score`, `engrave`, `perforate`, `print-then-cut`, `guide` (never sent). Colours take CSS forms and are stored as `#rrggbb`. `send`: `tool1`, `tool1-outline`, `tool2`, `tool2-outline`, `ignore`. `clear` lists fields to reset. |
+| `shapes.move-to-mat` | `{ids, mat}` | Put pieces on mat `mat` (an existing mat is re-laid with them; a higher number makes a new mat); `null` is automatic. |
+| `production.machines` | `{}` | Machine profiles: mat cut areas, roll width/length limits and roller margins, Print Then Cut maximum, mark style. |
+| `production.mats` | mat options | `{"Production": {"Mats": …}}`: the mat layout. |
+| `production.job` | job options | `{"Production": {"Job": …}}`: per-mat cut operations for the machine layer. |
+| `production.print-sheet` | print options | `{"Production": {"PrintSheets": […]}}`: one page per Print Then Cut mat. |
+
+**Mat options** (all optional): `machine` (`cricut-maker` default, `cricut-explore`,
+`cricut-joy`, `cricut-joy-xtra`, `cricut-venture`, `silhouette-cameo`,
+`silhouette-cameo-plus`, `silhouette-cameo-pro`, `silhouette-portrait`), `mat` (size name;
+default the smallest that fits the largest piece), `mat_free` (roll feed: length reported
+with roller margins and the minimum length), `copies` (1–100), `spacing_mm` (0–100, default
+3), `nest` (skyline packing, big pieces first; off is Cricut's down-the-mat columns),
+`rotation_step_deg` (0 or 1–180, default 90; at most 36 angles), `mirror_on` / `mirror_off`
+(mat indices; iron-on, HTV and Infusible Ink materials mirror automatically), `page`
+(`width_mm`, `height_mm` default US Letter; `marks` `silhouette`/`cricut`/`four-corner`;
+`mark_length_mm` 20, `mark_thickness_mm` 0.5, `mark_inset_mm` 15.9). Pieces are grouped onto
+mats by print-then-cut / material / colour. A piece too big for the mat (or for the machine's
+Print Then Cut maximum) is an error naming the shape and the limit. Mat coordinates are mm
+from the top-left of the cut area, y down the mat; each placement carries its
+document → mat `transform`.
+
+**Job options**: `mats` (above), `cut_by` (`operation`, `line-color`, `fill-color`, `layer`),
+`groups` (`[{key, tool 1|2, enabled, passes?, overcut_mm?}]` per group key), `order`
+(`minimize-roller` default, `document`, `by-color`, `by-layer`, `shortest-travel`),
+`inside_first` (default true: counters before outlines), `overcut_mm` (0–5),
+`passes` (1–10), `test_cut` (`{mat, x_mm, y_mm, size_mm}`; must be on the mat and clear of
+pieces), `weed` (`{margin_mm, lines}`: a box and lines through the gaps), `origin`
+(`top-left` …), `feed` (`length` or `width`), `after` (`return-to-origin` or `feed`),
+`stipple_order` (`default`, `edge-to-center`, `center-to-edge` for dots under 0.5 mm).
+Each op has `shape_id`, `copy`, `contour`, `group`, `operation`, `tool`, `passes`, `closed`
+and `path`; Print Then Cut mats also carry their `registration` marks.
+
+**Print options**: `mats`, `bleed` (default on), `bleed_mm` (0–10, default 1.27). The
+`export_print_sheet` tool (legacy `export.print-sheet`) writes them: `{path, format: pdf|png,
+dpi?}` plus the print options; PDF is one page per sheet at actual size; PNG is one file per
+sheet (`-NN` suffix when there are several, 50–1200 dpi).
 
 The desktop app's `--control` socket also answers two window methods the headless session
 cannot (legacy envelope only):

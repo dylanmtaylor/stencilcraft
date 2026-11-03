@@ -4182,9 +4182,12 @@ dependencies = [
  "stencilcraft-engine",
  "stencilcraft-gcode",
  "stencilcraft-geom",
+ "stencilcraft-import",
  "stencilcraft-kerf",
  "stencilcraft-machine",
  "stencilcraft-mcp",
+ "stencilcraft-pdf",
+ "stencilcraft-raster",
  "stencilcraft-svg",
  "stencilcraft-testkit",
  "stencilcraft-tiling",
@@ -4226,11 +4229,13 @@ dependencies = [
 name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
+ "image",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-geom",
+ "stencilcraft-raster",
  "thiserror 2.0.21",
  "vectorcraft-engine",
  "vectorcraft-geom",
@@ -4256,6 +4261,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "stencilcraft-import"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "kurbo 0.13.1",
+ "stencilcraft-doc",
+ "stencilcraft-dxf",
+ "stencilcraft-geom",
+ "stencilcraft-pdf",
+ "stencilcraft-raster",
+ "stencilcraft-svg",
+ "thiserror 2.0.21",
+ "tiny-skia",
+ "vectorcraft-cad",
+ "vectorcraft-doc",
+ "vectorcraft-eps",
+ "vectorcraft-pdf",
+]
+
+[[package]]
 name = "stencilcraft-kerf"
 version = "0.1.0"
 dependencies = [
@@ -4278,15 +4303,41 @@ dependencies = [
 name = "stencilcraft-mcp"
 version = "0.1.0"
 dependencies = [
+ "image",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
  "stencilcraft-engine",
  "stencilcraft-gcode",
+ "stencilcraft-import",
  "stencilcraft-kerf",
+ "stencilcraft-pdf",
  "stencilcraft-svg",
  "stencilcraft-testkit",
  "stencilcraft-tiling",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "stencilcraft-pdf"
+version = "0.1.0"
+dependencies = [
+ "kurbo 0.13.1",
+ "stencilcraft-doc",
+ "thiserror 2.0.21",
+ "vectorcraft-pdf",
+]
+
+[[package]]
+name = "stencilcraft-raster"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "image",
+ "kurbo 0.13.1",
+ "serde",
+ "stencilcraft-doc",
+ "stencilcraft-geom",
  "thiserror 2.0.21",
 ]
 

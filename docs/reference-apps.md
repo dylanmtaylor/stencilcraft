@@ -172,10 +172,10 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 
 | Feature | App | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
-| Outward/inward offset of a shape | both | Make a new outline a set distance outside or inside the shape | partial: the `kerf` crate offsets contours for kerf compensation, but there is no user offset command that adds a new shape | replicate as an engine command on top of `kerf` | 2026-11-02, SS 5.0.539: Offset panel shows a live preview on the selection before Apply; the dimension callouts update to the offset size; Cancel discards it. DS: docs only (sign-in required) |
-| Corner style (round/sharp) | both | Choose rounded or sharp corners, with a limit on how far sharp corners reach | partial: kerf uses a miter join only | replicate | 2026-11-02, SS 5.0.539: sharp or round corners plus a corner limit value (1.0 default); the live test defaulted to round at 0.125 in, the panel showed 0.079 in. DS: docs only (sign-in required) |
+| Outward/inward offset of a shape | both | Make a new outline a set distance outside or inside the shape | partial: desktop Offset panel previews and applies `shapes.offset`; welding results is not exposed | replicate as an engine command on top of `kerf` | 2026-11-02, SS 5.0.539: Offset panel shows a live preview on the selection before Apply; the dimension callouts update to the offset size; Cancel discards it. DS: docs only (sign-in required) |
+| Corner style (round/sharp) | both | Choose rounded or sharp corners, with a limit on how far sharp corners reach | partial: desktop Offset panel and engine support miter, round and bevel joins and miter limit | replicate | 2026-11-02, SS 5.0.539: sharp or round corners plus a corner limit value (1.0 default); the live test defaulted to round at 0.125 in, the panel showed 0.079 in. DS: docs only (sign-in required) |
 | Weld offsets / per-letter offsets | DS | Merge the offset outlines into one, or keep one per piece | missing | replicate | docs only (sign-in required) |
-| Internal offset | SS | Offset inward, used for frames and borders | partial (kerf counters) | replicate | 2026-11-02, SS 5.0.539: Internal Offset is a mode beside Offset in the same panel |
+| Internal offset | SS | Offset inward, used for frames and borders | partial: desktop Offset panel applies inward offsets; large offsets can invert thin features | replicate | 2026-11-02, SS 5.0.539: Internal Offset is a mode beside Offset in the same panel |
 
 Sources: [Cricut, *How to use the Offset feature*](https://help.cricut.com/hc/en-us/articles/360061650414-How-to-use-the-Offset-feature-in-Design-Space).
 
@@ -183,11 +183,11 @@ Sources: [Cricut, *How to use the Offset feature*](https://help.cricut.com/hc/en
 
 | Feature | App | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
-| Threshold trace of a raster image | both | Choose an area or the whole image; turn dark pixels into cut outlines | have: `trace-image` CLI and the Trace Image tool; PNG/JPEG; adjustable threshold | replicate | 2026-11-02, SS 5.0.539: Trace panel: select the trace area, then threshold % and despeckle threshold %; PNG files are auto-traced on import by default (a preference). DS: docs only (sign-in required) |
-| High/low-pass filter, scale and colour-range trace | SS | Image filters and colour selection that guide the trace | missing | replicate | 2026-11-02, SS 5.0.539: an Advanced section in the Trace panel holds the filters (not expanded yet) |
+| Threshold trace of a raster image | both | Choose an area or the whole image; turn dark pixels into cut outlines | partial: CLI/engine trace PNG, JPEG and other raster formats; the desktop uses its older threshold workflow without area preview | replicate | 2026-11-02, SS 5.0.539: Trace panel: select the trace area, then threshold % and despeckle threshold %; PNG files are auto-traced on import by default (a preference). DS: docs only (sign-in required) |
+| High/low-pass filter, scale and colour-range trace | SS | Image filters and colour selection that guide the trace | partial: engine/MCP support low/high-pass and colour-range options; desktop controls and scale parity remain open | replicate | 2026-11-02, SS 5.0.539: an Advanced section in the Trace panel holds the filters (not expanded yet) |
 | Image effects | SS | Brightness, colour and other adjustments on placed images | missing | reimagine later, low priority | 2026-11-02, SS 5.0.539: the panel needs GPU support and showed only an unsupported-graphics notice in the VM |
-| Trace outer edge only / trace & detach | SS | Keep only the outline, or split the image along the trace | missing | replicate | 2026-11-02, SS 5.0.539: Trace Outer Edge and Trace and Detach are actions next to Trace |
-| Background remover / "complexity" upload flow | DS | A guided upload that removes the background, then cleans up with erase tools | missing | reimagine (local, deterministic; no cloud ML) | docs only (sign-in required) |
+| Trace outer edge only / trace & detach | SS | Keep only the outline, or split the image along the trace | partial: engine/MCP support outer-edge and detach modes; desktop controls remain open | replicate | 2026-11-02, SS 5.0.539: Trace Outer Edge and Trace and Detach are actions next to Trace |
+| Background remover / "complexity" upload flow | DS | A guided upload that removes the background, then cleans up with erase tools | partial: engine/MCP have deterministic background removal; guided upload and erase tools remain open | reimagine (local, deterministic; no cloud ML) | docs only (sign-in required) |
 | Live preview of the trace on screen | both | Highlights the area that will be traced | missing | replicate | SS: pending. DS: docs only (sign-in required) |
 | Full-colour/multi-layer trace | both | Trace each colour into its own layer | missing | replicate | SS: pending. DS: docs only (sign-in required) |
 
@@ -203,20 +203,20 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Exclude / XOR | both | Keep everything except the overlap | have: `xor` | replicate | 2026-11-02, SS 5.0.539: no exclude/XOR action in Basic's Modify panel. DS: docs only (sign-in required) |
 | Divide / Slice | both | Split overlapping shapes into separate pieces | have: `divide`, `trim`, `crop`, `outline` | replicate | 2026-11-02, SS 5.0.539: Divide and Crop in the Modify panel. DS: docs only (sign-in required) |
 | Detach Lines | SS | Separate a shape's lines from it | missing | replicate once its behaviour is confirmed | 2026-11-02, SS 5.0.539: a Modify panel action; its behaviour not tested yet |
-| Attach | DS | Keep pieces in their relative positions on the mat without merging them | missing | reimagine (groups that keep positions when sent to the mat) | docs only (sign-in required) |
-| Flatten (print layers into one printable image) | DS | Merge layers into one Print Then Cut image | missing | reimagine as part of Print & Cut | docs only (sign-in required) |
-| Contour (hide parts of a shape) | DS | Hide individual sub-paths so they are not cut | missing | replicate (per-subpath enable) | docs only (sign-in required) |
+| Attach | DS | Keep pieces in their relative positions on the mat without merging them | partial: production engine/MCP support attach/detach; desktop mat workflow is not wired | reimagine (groups that keep positions when sent to the mat) | docs only (sign-in required) |
+| Flatten (print layers into one printable image) | DS | Merge layers into one Print Then Cut image | partial: production engine/MCP support flatten/unflatten metadata; end-to-end printed artwork and desktop workflow remain open | reimagine as part of Print & Cut | docs only (sign-in required) |
+| Contour (hide parts of a shape) | DS | Hide individual sub-paths so they are not cut | partial: engine/MCP hide individual contours; desktop controls remain open | replicate (per-subpath enable) | docs only (sign-in required) |
 
 ## Replicate and array
 
 | Feature | App | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
-| Duplicate in a direction (left/right/above/below) | SS | One-click copies next to the original | missing (only duplicate in place, `shapes.duplicate`) | replicate | 2026-11-02, SS 5.0.539: Replicate panel: duplicate left, right, above, below |
-| Row/column/grid array | SS | Preset rows or columns of copies | missing | replicate | 2026-11-02, SS 5.0.539: presets only: row of 3, row of 4, column of 3, column of 4; no free count seen |
-| Rotated copies (radial array) | SS | N copies rotated around a centre | missing | replicate | 2026-11-02, SS 5.0.539: Rotate Copies presets (a small set of radial counts) on a Radial tab |
-| Fill page | SS | Repeat a shape until the media is full | missing | replicate (pairs with nesting) | 2026-11-02, SS 5.0.539: Fill Page in the Replicate panel |
-| Mirror copy | SS | A mirrored duplicate | missing | replicate | 2026-11-02, SS 5.0.539: mirrored copy below, above, left or right |
-| Nesting (auto pack shapes to save material) | SS (Business) | Pack shapes tightly onto the media | missing | replicate | 2026-11-02, SS 5.0.539: the Replicate panel may have a Nesting tab; not confirmed usable in Basic |
+| Duplicate in a direction (left/right/above/below) | SS | One-click copies next to the original | have: desktop Replicate panel and engine commands | replicate | 2026-11-02, SS 5.0.539: Replicate panel: duplicate left, right, above, below |
+| Row/column/grid array | SS | Preset rows or columns of copies | partial: desktop Replicate panel and engine commands support arrays; preset details need comparison | replicate | 2026-11-02, SS 5.0.539: presets only: row of 3, row of 4, column of 3, column of 4; no free count seen |
+| Rotated copies (radial array) | SS | N copies rotated around a centre | partial: desktop Replicate panel and engine commands support rotated copies | replicate | 2026-11-02, SS 5.0.539: Rotate Copies presets (a small set of radial counts) on a Radial tab |
+| Fill page | SS | Repeat a shape until the media is full | have: desktop Replicate panel and `shapes.replicate-fill` | replicate (pairs with nesting) | 2026-11-02, SS 5.0.539: Fill Page in the Replicate panel |
+| Mirror copy | SS | A mirrored duplicate | have: desktop Replicate panel and `shapes.mirror-copy` | replicate | 2026-11-02, SS 5.0.539: mirrored copy below, above, left or right |
+| Nesting (auto pack shapes to save material) | SS (Business) | Pack shapes tightly onto the media | partial: production mat planner supports nesting; desktop workflow and hardware validation remain open | replicate | 2026-11-02, SS 5.0.539: the Replicate panel may have a Nesting tab; not confirmed usable in Basic |
 
 ## Alignment
 
@@ -322,15 +322,15 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | --- | --- | --- | --- | --- | --- |
 | SVG import | SS (Designer+), DS | Open vector artwork | have: a working subset (see [`gaps.md`](gaps.md) 1) | replicate | 2026-11-02, SS 5.0.539: Basic's Open dialog has no SVG. DS: docs only (sign-in required) |
 | Merge (import into current document) | SS | Open a file's contents into the document already open | have: Import SVG/Image add to the open document | replicate | 2026-11-02, SS 5.0.539: File › Merge (Ctrl+Shift+O) |
-| Open Recovered (autosave recovery) | SS | Reopen work saved automatically before a crash | missing: no autosave | replicate | 2026-11-02, SS 5.0.539: File › Open Recovered… |
-| DXF import | both | Open CAD outlines | missing (DXF export only) | replicate | 2026-11-02, SS 5.0.539: DXF is in Basic's Open types; import options: fit to page, convert white lines to black, join lines into polylines. DS: docs only (sign-in required) |
-| PDF import | SS (Designer+) | Open vector PDFs | missing | replicate | 2026-11-02, SS 5.0.539: Basic's Open dialog has no PDF |
-| AI/EPS/CDR import | SS (Business) | Open Illustrator/CorelDRAW files | missing | replicate AI (its PDF-compatible content) and EPS (a PostScript subset); CDR only if its structure can be learned clean-room | 2026-11-02, SS 5.0.539: not present in Basic |
-| Raster import (PNG/JPEG/BMP/GIF/TIFF) | both | Place a photo or clip art to trace or print | partial: PNG/JPEG for tracing only; no placed raster for printing | replicate | 2026-11-02, SS 5.0.539: PNG, JPEG, BMP, GIF and TIFF in Basic's Open types; PNG autotrace on import is on by default. DS: docs only (sign-in required) |
+| Open Recovered (autosave recovery) | SS | Reopen work saved automatically before a crash | partial: bounded recovery snapshot helpers exist; desktop autosave and recovery UI are not wired | replicate | 2026-11-02, SS 5.0.539: File › Open Recovered… |
+| DXF import | both | Open CAD outlines | partial: CLI/MCP import supported entities; complete fidelity and desktop workflow remain open | replicate | 2026-11-02, SS 5.0.539: DXF is in Basic's Open types; import options: fit to page, convert white lines to black, join lines into polylines. DS: docs only (sign-in required) |
+| PDF import | SS (Designer+) | Open vector PDFs | partial: CLI/MCP import vector paths; images, text and fills are not preserved | replicate | 2026-11-02, SS 5.0.539: Basic's Open dialog has no PDF |
+| AI/EPS/CDR import | SS (Business) | Open Illustrator/CorelDRAW files | partial: AI/EPS vector paths supported by import; CDR unsupported | replicate AI (its PDF-compatible content) and EPS (a PostScript subset); CDR only if its structure can be learned clean-room | 2026-11-02, SS 5.0.539: not present in Basic |
+| Raster import (PNG/JPEG/BMP/GIF/TIFF) | both | Place a photo or clip art to trace or print | partial: engine places bounded raster images; desktop display/printing workflow remains incomplete | replicate | 2026-11-02, SS 5.0.539: PNG, JPEG, BMP, GIF and TIFF in Basic's Open types; PNG autotrace on import is on by default. DS: docs only (sign-in required) |
 | Embroidery formats (PES, DST, …) | SS (Designer Plus) | Import embroidery outlines | missing | replicate (outline only) | 2026-11-02, SS 5.0.539: not present in Basic |
-| Native `.studio`/`.studio3` | SS | The vendor's own formats: Basic saves `.studio3`, `.studio` and GSP and opens those plus GSD | missing | reimagine: import needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF | 2026-11-02, SS 5.0.539: Basic's save types: Studio V3 (.studio3), V2 (.studio), GSP; GSD open options: as-is, convert white lines to black, join lines into polylines |
+| Native `.studio`/`.studio3` | SS | The vendor's own formats: Basic saves `.studio3`, `.studio` and GSP and opens those plus GSD | partial: lossy reader imports supported outlines and page size; no writer, GSD or GSP | reimagine: import needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF | 2026-11-02, SS 5.0.539: Basic's save types: Studio V3 (.studio3), V2 (.studio), GSP; GSD open options: as-is, convert white lines to black, join lines into polylines |
 | SVG export | SS (Business) | Save as SVG | have | replicate | 2026-11-02, SS 5.0.539: Basic has no SVG export (and no DXF, PDF or PNG) |
-| PDF/PNG/JPG export | SS (Business) | Save as PDF or image | missing | replicate (PDF first) | 2026-11-02, SS 5.0.539: not present in Basic |
+| PDF/PNG/JPG export | SS (Business) | Save as PDF or image | partial: CLI/MCP export vector PDF and rendered PNG/JPEG; desktop workflow and PDF artwork fidelity remain incomplete | replicate (PDF first) | 2026-11-02, SS 5.0.539: not present in Basic |
 | DXF export | — | StencilCraft's own | have (R14, flattened) | — | — |
 | G-code export | — | StencilCraft's own | have | — | — |
 | Plugins for external design tools | SS (Silhouette Connect) | Send straight from Illustrator/CorelDRAW to the cutter | missing | reimagine: CLI/MCP and SVG/PDF interchange; never tie the core to proprietary software | pending |
@@ -373,39 +373,38 @@ Owner goal: support every format the source apps support.
 | Format | App / edition | Direction | StencilCraft status | Posture |
 | --- | --- | --- | --- | --- |
 | `.stencilcraft` (JSON) | StencilCraft | open, save | have | ours |
-| `.studio3` (Studio V3) | SS Basic+ | open, save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
-| `.studio` (Studio V2) | SS Basic+ | open, save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
+| `.studio3` (Studio V3) | SS Basic+ | open, save (observed 5.0.539) | partial: lossy outline/page reader; no writer | reimagine: bounded import of unprotected documents; writing remains open |
+| `.studio` (Studio V2) | SS Basic+ | open, save (observed 5.0.539) | partial: lossy outline/page reader; no writer | reimagine: bounded import of unprotected documents; writing remains open |
 | GSP | SS Basic+ | save (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
 | GSD (older Graphtec Studio) | SS Basic+ | open (observed 5.0.539) | missing | reimagine: needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF/SVG |
-| DXF | SS Basic+ | open (observed 5.0.539) | import missing; export have (R14, flattened) | replicate |
-| DXF | DS desktop | upload (not on iOS/Android) | import missing | replicate |
+| DXF | SS Basic+ | open (observed 5.0.539) | partial: import supported entities; R14 flattened export | replicate |
+| DXF | DS desktop | upload (not on iOS/Android) | partial: import supported entities; R14 flattened export | replicate |
 | SVG | SS Designer+ | open | import partial (subset) | replicate |
 | SVG | SS Business | export | have | replicate |
 | SVG | DS | upload | import partial (subset) | replicate |
-| PDF | SS Designer+ | open | missing | replicate |
-| PDF | SS Business | export | missing | replicate |
-| PDF | DS | not accepted for upload (help centre) | missing | replicate (for SS parity) |
-| AI (Illustrator) | SS Business | open | missing | replicate via its PDF-compatible content |
-| EPS | SS Business | open | missing | replicate (PostScript subset) |
+| PDF | SS Designer+ | open | partial: vector-path import and stroke export; artwork fidelity incomplete | replicate |
+| PDF | SS Business | export | partial: vector-path import and stroke export; artwork fidelity incomplete | replicate |
+| PDF | DS | not accepted for upload (help centre) | partial: vector-path import and stroke export; artwork fidelity incomplete | replicate (for SS parity) |
+| AI (Illustrator) | SS Business | open | partial: vector paths only | replicate via its PDF-compatible content |
+| EPS | SS Business | open | partial: vector paths only | replicate (PostScript subset) |
 | CDR (CorelDRAW) | SS Business | open | missing | replicate only if its structure can be learned clean-room |
-| PNG | SS Basic+ | open (observed 5.0.539; autotrace on import) | import partial (trace only) | replicate (also placed raster for printing) |
-| PNG | SS Business | export | missing | replicate |
-| PNG | DS | upload | import partial (trace only) | replicate |
-| JPEG | SS Basic+ | open (observed 5.0.539) | import partial (trace only) | replicate |
-| JPEG | SS Business | export | missing | replicate |
-| JPEG | DS | upload | import partial (trace only) | replicate |
-| BMP | SS Basic+, DS | open / upload | missing | replicate |
-| GIF | SS Basic+, DS | open / upload | missing | replicate |
-| TIFF | SS Basic+ | open (observed 5.0.539) | missing | replicate |
-| TIFF | DS | not accepted for upload (help centre) | missing | replicate (for SS parity) |
+| PNG | SS Basic+ | open (observed 5.0.539; autotrace on import) | partial: placed raster import; desktop display/print incomplete | replicate (also placed raster for printing) |
+| PNG | SS Business | export | have: CLI/MCP rendered image export | replicate |
+| PNG | DS | upload | partial: placed raster import; desktop display/print incomplete | replicate |
+| JPEG | SS Basic+ | open (observed 5.0.539) | partial: placed raster import; desktop display/print incomplete | replicate |
+| JPEG | SS Business | export | have: CLI/MCP rendered image export | replicate |
+| JPEG | DS | upload | partial: placed raster import; desktop display/print incomplete | replicate |
+| BMP | SS Basic+, DS | open / upload | partial: placed raster import; desktop display/print incomplete | replicate |
+| GIF | SS Basic+, DS | open / upload | partial: placed raster import; desktop display/print incomplete | replicate |
+| TIFF | SS Basic+ | open (observed 5.0.539) | partial: placed raster import; desktop display/print incomplete | replicate |
+| TIFF | DS | not accepted for upload (help centre) | partial: placed raster import; desktop display/print incomplete | replicate (for SS parity) |
 | HEIC | DS | upload (listed in one help article) | missing | replicate |
-| WebP | DS | not documented in the help articles we found | missing | verify, then replicate if supported |
+| WebP | DS | not documented in the help articles we found | partial: placed raster import; desktop display/print incomplete | verify, then replicate if supported |
 | Embroidery: PES, DST, EXP, JEF, XXX | SS Designer Plus | open | missing | replicate (outline only) |
 | Fonts: TTF/OTF (system fonts) | SS, DS | used for text | partial: installed families and built-in single-line font in the desktop text dialog; file picker missing | replicate through system/user fonts; none bundled |
 | Pattern images (JPG/PNG) | SS Designer+, DS | imported as fill patterns | missing | replicate |
 | Design Space projects | DS | cloud-only; no local project file | n/a (we save `.stencilcraft` locally) | won't do: account system |
 | G-code (Grbl) | StencilCraft | export | have | ours |
-
 ## Cutters
 
 Every machine either app drives. Silhouette USB IDs and widths come from the device table of
@@ -459,7 +458,7 @@ repeat a row in the area tables above, so this table can be read on its own.
 | Feature | Edition | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
 | SVG import | Designer | Open SVG files | partial: a tested subset (see `gaps.md` 1) | replicate | not present in Basic; from vendor docs (not observed) |
-| PDF import | Designer | Open the vector content of PDF files | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| PDF import | Designer | Open the vector content of PDF files | partial: CLI/MCP import vector paths; images, text and fills are not preserved | replicate | not present in Basic; from vendor docs (not observed) |
 | Layers panel | Designer | Create, rename, reorder, hide and lock layers; move objects between layers | partial: `layer.add/remove/set-visible` only | replicate | not present in Basic; from vendor docs (not observed) |
 | Cut by layer | Designer (to confirm) | Send settings and cut order chosen per layer | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | Rhinestone tool | Designer | Place stones along a line, around an outline or as a fill; stone size, spacing and shape | have (engine/MCP, no UI yet): `generate.rhinestone` | replicate (stone templates are just circles we generate) | not present in Basic; from vendor docs (not observed) |
@@ -484,7 +483,7 @@ repeat a row in the area tables above, so this table can be read on its own.
 | PNG/JPG export | Business | Save as an image | missing | replicate | not present in Basic; from vendor docs (not observed) |
 | AI, EPS and CDR import | Business | Open Illustrator, EPS and CorelDRAW files | missing | replicate AI (its PDF-compatible content) and EPS (a PostScript subset); CDR only if its structure can be learned clean-room | not present in Basic; from vendor docs (not observed) |
 | Multi-cutter support | Business | Drive several machines from one app, each with its own job | missing | replicate | not present in Basic; from vendor docs (not observed) |
-| Nesting | Business | Pack shapes tightly onto the media to save material | missing | replicate | not present in Basic; from vendor docs (not observed) |
+| Nesting | Business | Pack shapes tightly onto the media to save material | partial: production mat planner supports nesting; desktop and hardware workflow remain open | replicate | not present in Basic; from vendor docs (not observed) |
 | Tiling | Business | Split a design larger than the media into tiles | have: `tiling` crate | replicate | not present in Basic; from vendor docs (not observed) |
 | Weed lines and borders | Business | Add cut lines around and between shapes so waste lifts in pieces | have (engine/MCP, no UI yet): `generate.weed` | replicate | not present in Basic; from vendor docs (not observed) |
 | Job queue / batch | Business (to confirm) | Queue several designs or copies as one production run | missing | replicate | not present in Basic; from vendor docs (not observed) |
@@ -558,26 +557,26 @@ against the engine command set on main (2026-11-02).
 | Select all / deselect | Edit bar | Select everything or nothing ([library](cricut-design-space/edit-bar.md#select-all--deselect)) | have | replicate | docs only (sign-in required) |
 | Cut, copy, paste | Edit bar | Clipboard ([library](cricut-design-space/edit-bar.md#edit-menu-cut-copy-paste)) | partial: duplicate only | replicate | docs only (sign-in required) |
 | Align and distribute | Edit bar | Align 2+ objects; distribute evenly ([library](cricut-design-space/edit-bar.md#align)) | have: `shapes.align`, `shapes.distribute` | replicate | docs only (sign-in required) |
-| Arrange | Edit bar | To back, backward, forward, to front ([library](cricut-design-space/edit-bar.md#arrange)) | missing | replicate | docs only (sign-in required) |
+| Arrange | Edit bar | To back, backward, forward, to front ([library](cricut-design-space/edit-bar.md#arrange)) | partial: engine/MCP `shapes.arrange`; complete desktop controls remain open | replicate | docs only (sign-in required) |
 | Flip | Edit bar | Flip horizontal/vertical ([library](cricut-design-space/edit-bar.md#flip--mirror)) | partial: `shapes.transform` negative scale; `shapes.mirror-copy` makes a copy | replicate | docs only (sign-in required) |
 | Size | Edit bar | Exact W/H, 0.1 steps, proportion lock ([library](cricut-design-space/edit-bar.md#size)) | have: size fields with aspect link | replicate | docs only (sign-in required) |
 | Rotate | Edit bar | Exact angle, 1° steps ([library](cricut-design-space/edit-bar.md#rotate)) | have: `shape.rotate`, `shapes.transform` | replicate | docs only (sign-in required) |
 | Position | Edit bar | Exact X/Y ([library](cricut-design-space/edit-bar.md#position)) | have: `shape.set-bounds` | replicate | docs only (sign-in required) |
-| Offset | Edit bar | Outline at a distance; round/sharp corners; weld offsets ([library](cricut-design-space/edit-bar.md#offset)) | partial: engine `shapes.offset` (join style, miter limit); no UI; no weld-offsets option | replicate | docs only (sign-in required) |
+| Offset | Edit bar | Outline at a distance; round/sharp corners; weld offsets ([library](cricut-design-space/edit-bar.md#offset)) | partial: desktop Offset panel previews and applies offsets; no weld-offsets option | replicate | docs only (sign-in required) |
 | Warp (30 styles) | Edit bar | Preset warps with a strength slider (Access) ([library](cricut-design-space/edit-bar.md#warp)) | partial (engine/MCP): `generate.warp`, 15 styles with bend and distortion | replicate | docs only (sign-in required) |
-| Create Sticker (die/kiss cut, border) | Edit bar | One-step sticker: flatten, border, die or kiss cut (Access) ([library](cricut-design-space/edit-bar.md#create-sticker)) | missing | replicate (offset + flatten + cut depth) | docs only (sign-in required) |
-| Group / ungroup | Layers panel | Move and size together ([library](cricut-design-space/layers-panel.md#group--ungroup)) | missing | replicate | docs only (sign-in required) |
+| Create Sticker (die/kiss cut, border) | Edit bar | One-step sticker: flatten, border, die or kiss cut (Access) ([library](cricut-design-space/edit-bar.md#create-sticker)) | partial: engine/MCP `shapes.create-sticker`; desktop and hardware depth validation remain open | replicate (offset + flatten + cut depth) | docs only (sign-in required) |
+| Group / ungroup | Layers panel | Move and size together ([library](cricut-design-space/layers-panel.md#group--ungroup)) | partial: engine/MCP `group.create` and `group.ungroup`; desktop workflow remains open | replicate | docs only (sign-in required) |
 | Duplicate | Layers panel | Copy the selection ([library](cricut-design-space/layers-panel.md#duplicate)) | have: `shapes.duplicate` | replicate | docs only (sign-in required) |
 | Delete | Layers panel | Remove the selection ([library](cricut-design-space/layers-panel.md#delete)) | have: `shapes.remove` | replicate | docs only (sign-in required) |
 | Hide layer / object | Layers panel | Hidden items are not cut or printed ([library](cricut-design-space/layers-panel.md#hide--show-layer)) | have: `layer.set-visible`, `shapes.set-hidden` | replicate | docs only (sign-in required) |
-| Rename and reorder layers | Layers panel | Rename; drag to reorder ([library](cricut-design-space/layers-panel.md#rename-and-reorder-layers)) | missing | replicate | docs only (sign-in required) |
+| Rename and reorder layers | Layers panel | Rename; drag to reorder ([library](cricut-design-space/layers-panel.md#rename-and-reorder-layers)) | partial: engine/MCP layer rename and move commands; desktop drag reordering remains open | replicate | docs only (sign-in required) |
 | Slice | Layers panel | Split two overlapping layers ([library](cricut-design-space/layers-panel.md#slice)) | have: Pathfinder `divide` | replicate | docs only (sign-in required) |
 | Weld | Layers panel | Merge permanently into one outline ([library](cricut-design-space/layers-panel.md#weld)) | have: Pathfinder `union` | replicate | docs only (sign-in required) |
-| Combine (non-destructive Unite/Subtract/Intersect/Exclude) | Layers panel | Shape operations that stay editable ([library](cricut-design-space/layers-panel.md#combine-unite-subtract-intersect-exclude)) | partial: same operations exist but are destructive (undo only) | replicate (live boolean groups) | docs only (sign-in required) |
-| Attach / detach | Layers panel | Keep positions on the mat; fasten draw/score to cut ([library](cricut-design-space/layers-panel.md#attach--detach)) | missing | replicate | docs only (sign-in required) |
-| Flatten / unflatten | Layers panel | Merge into one printable layer ([library](cricut-design-space/layers-panel.md#flatten--unflatten)) | missing | replicate | docs only (sign-in required) |
-| Contour | Layers panel | Hide individual cut lines ([library](cricut-design-space/layers-panel.md#contour)) | missing | replicate | docs only (sign-in required) |
-| Color Sync | Layers panel | Merge colours to use fewer mats ([library](cricut-design-space/layers-panel.md#color-sync-panel)) | missing | replicate | docs only (sign-in required) |
+| Combine (non-destructive Unite/Subtract/Intersect/Exclude) | Layers panel | Shape operations that stay editable ([library](cricut-design-space/layers-panel.md#combine-unite-subtract-intersect-exclude)) | partial: engine/MCP preserve source members and support uncombine; desktop workflow remains open | replicate (live boolean groups) | docs only (sign-in required) |
+| Attach / detach | Layers panel | Keep positions on the mat; fasten draw/score to cut ([library](cricut-design-space/layers-panel.md#attach--detach)) | partial: engine/MCP support attach/detach; desktop workflow remains open | replicate | docs only (sign-in required) |
+| Flatten / unflatten | Layers panel | Merge into one printable layer ([library](cricut-design-space/layers-panel.md#flatten--unflatten)) | partial: engine/MCP commands exist; complete print rendering and desktop workflow remain open | replicate | docs only (sign-in required) |
+| Contour | Layers panel | Hide individual cut lines ([library](cricut-design-space/layers-panel.md#contour)) | partial: engine/MCP `shape.contour`; desktop controls remain open | replicate | docs only (sign-in required) |
+| Color Sync | Layers panel | Merge colours to use fewer mats ([library](cricut-design-space/layers-panel.md#color-sync-panel)) | partial: engine/MCP `layer.color-sync`; desktop workflow remains open | replicate | docs only (sign-in required) |
 | Basic Cut | Operations | Cut the outline ([library](cricut-design-space/operations-and-linetypes.md)) | have: `cut` style | replicate | docs only (sign-in required) |
 | Pen / Draw | Operations | Draw with a pen ([library](cricut-design-space/operations-and-linetypes.md)) | partial: `engrave` style | replicate | docs only (sign-in required) |
 | Score | Operations | Fold line with stylus or wheel ([library](cricut-design-space/operations-and-linetypes.md)) | partial: `engrave` style | replicate | docs only (sign-in required) |
@@ -627,51 +626,12 @@ against the engine command set on main (2026-11-02).
 | Desktop platforms | Account | Windows and Mac only ([library](cricut-design-space/settings-and-account.md#desktop-platforms)) | have: also Linux | replicate and extend | docs only (sign-in required) |
 | Clear application cache | Account | Troubleshooting step ([library](cricut-design-space/settings-and-account.md#clear-application-cache-desktop)) | n/a | n/a | docs only (sign-in required) |
 
-## Missing items, by area
+## Remaining work, by area
 
-These are the rows marked **missing** above. Rows marked partial are not listed. The ranked order is in [`gaps.md`](gaps.md).
-
-- **Canvas**: Home screen, Starter mode, document tabs, auto mat layout, snap to grid,
-  smart snapping, live dimension callouts, measure.
-- **Drawing**: freehand, arc, knife, eraser, parametric shapes, rhinestone/cross-stitch/puzzle.
-- **Text**: typography controls, text on path / curve text, glyphs panel, spelling check.
-- **Editing**: group/ungroup, break/join/close path, simplify, warp, lock, rotation knob,
-  Paste in Front, Select by Color, action-after-tool-use preference, node count readout.
-- **Offset**: weld offsets / per-letter offsets.
-- **Trace**: image filters, outer-edge-only trace and trace & detach, background removal,
-  live preview, multi-colour trace, image effects.
-- **Pathfinder**: Attach, Flatten, Contour, Detach Lines.
-- **Replicate**: directional duplicate, row/column presets, radial copies, fill page,
-  mirror copy, nesting.
-- **Alignment**: spacing by a set value.
-- **Layers**: reorder and arrange shortcuts, lock, move between layers, Colour Sync.
-- **Styles**: dashed lines and joins/caps, fill/gradient/pattern, print cut lines,
-  sketch and stipple fills, specialty (emboss/deboss/foil) tools, pop-up card generator.
-- **Print & Cut**: mark options, show print border, printing from the app, bleed, sensor
-  registration, calibration, print size limits, scan-to-cut.
-- **Cut settings**: custom materials, per-layer settings, advanced material settings,
-  test cut, overcut, cut order, mat-free strategy, weed lines.
-- **Machine**: Send sub-modes by colour, tool-holder line assignment, mat preview,
-  Bluetooth transport, load/unload/pause/cancel controls, packet size, multi-cutter, batch
-  jobs.
-- **Formats**: DXF import, PDF import, PDF/PNG/JPG export, external design-tool plugins,
-  autosave recovery.
-- **Preferences**: language, print resolution and preview.
-- **Platforms**: browser/mobile client.
-- **SS paid editions**: PDF import/export, PNG/JPG export, layers panel, cut by layer,
-  rhinestone, sketch effect, custom gradient/pattern fills, eraser/knife options,
-  eyedropper, measure, shear/distort, lattice, font creator, glyphs, weld on cut, roll
-  feed/mat-free, cross-stitch, embroidery import, advanced warp, Flexishapes, puzzle
-  generator, AI/EPS/CDR import, multi-cutter, nesting, weed lines, job queue.
-- **DS full inventory**: Home, templates, Smart Guides, history panel, deboss/wave/
-  perforate/foil operations, arrange, font picker, size, letter/line space, alignment,
-  curve, ungroup to letters, print fill, patterns, warp, group, attach, flatten, contour,
-  Colour Sync, layer reorder, mat preview and arrangement, mirror per mat, project copies,
-  tool prompts, go/pause/unload, Print Then Cut size limit and flow, calibration, remove
-  background, erase/restore cleanup, uploaded-images library, project collections.
-- **Formats**: `.studio3`/`.studio`/GSP/GSD (owner decision), DXF, PDF, AI, EPS, CDR, BMP,
-  GIF, TIFF, HEIC and WebP import, PDF/PNG/JPEG export, embroidery import, system fonts,
-  pattern images.
-- **Cutters**: Silhouette SD, CAMEO 1/2, CAMEO 5 Alpha, Portrait 1/2, Curio 1/2, Craft
-  ROBO CC200/CC300, Graphtec CE/CB; USB-bulk and Bluetooth transports for every model.
-  All Cricut machines are missing and pending the owner's decision.
+The tables above distinguish usable workflows from engine-only and incomplete features.
+The ranked, implementation-level list is in [`gaps.md`](gaps.md). The most significant
+remaining work includes desktop integration of live text, placed images, production and
+multi-page controls; print and cutter hardware validation; full native-format fidelity;
+and broader import/export fidelity. Cloud services, vendor assets and protected designs
+remain outside the project’s implementation scope. Entries based solely on vendor
+materials are not treated as observed behaviour.

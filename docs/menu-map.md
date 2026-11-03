@@ -160,7 +160,8 @@ brings them together as Illustrator does.
 | Ungroup to Letters / Lines | — | DS | missing | *proposed `text.split`* |
 | Find Font… | — | AI | missing | app |
 | Spelling… | F7 | SS | missing | app |
-| Place lettering (built-in single-line) | T (tool) | ours | have | `shape.add-path` |
+| Place lettering | T (tool) | ours | have: editable text with installed-family and size picker | `text.add` |
+| Edit Selected Text… | — | ours | have: text, family and size | `text.edit` |
 
 ## Select
 

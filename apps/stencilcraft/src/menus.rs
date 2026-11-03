@@ -396,6 +396,7 @@ fn type_menu() -> Vec<MenuEntry<A>> {
         item("Place Lettering…", A::PlaceText)
             .shortcut(kbd(NONE, Key::T))
             .into(),
+        item("Edit Selected Text…", A::EditText).into(),
         todo("Type on a Path"),
         todo("Curve Text…"),
         todo("Create Outlines"),

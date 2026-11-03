@@ -108,10 +108,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     and snap settings, snapping queries and measurements. Desktop gesture integration,
     smart guides and live width/height callouts remain incomplete; display-unit support
     also needs integration in the desktop UI.
-19. **Text**: the desktop Text tool places bitmap-derived outlines. Engine and MCP
-    provide editable text with user/system fonts, single-line lettering, size and spacing,
-    text on a path or arc, and conversion to outlines. The desktop does not yet expose
-    those live-text controls or a glyphs panel.
+19. **Text**: the desktop Text dialog creates editable text using the built-in single-line
+    font or an installed font family, with a point-size control; Type › Edit Selected
+    Text updates it. Missing: font file and style selection, direct canvas insertion,
+    spacing and alignment controls, text on a path or arc, and a glyphs panel.
 20. **Replicate and nesting**: engine commands and desktop panels cover directional,
     mirrored, array, radial and fill-page copies. Production mat planning has nesting;
     an integrated desktop mat preview and hardware validation remain open.

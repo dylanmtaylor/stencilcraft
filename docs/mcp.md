@@ -216,9 +216,12 @@ means the smaller y.
 | `guide.move` / `guide.remove` | `{index, position_mm}` / `{index}` | Refused for a locked guide. |
 | `guide.set-locked` | `{index, locked}` | |
 | `guide.clear` | `{}` | Removes unlocked guides; answers `{GuidesCleared: {removed}}`. |
+| `guide.lock-all` | `{locked}` | Locks or unlocks every guide (View › Guides › Lock Guides). |
+| `guide.make` | `{ids}` | Make Guides: replaces the shapes with guides along each one's bounds (two vertical, two horizontal; positions already guided are not doubled). Answers `ShapesRemoved`. |
+| `guide.release` | `{}` | Release Guides: every unlocked guide becomes an open line shape across the main board on layer 0. Answers `ShapesAdded`. |
 | `grid.set` | `{spacing_mm, subdivisions, visible?}` | Spacing 0.01-10000 mm, subdivisions 1-100; snapping uses spacing / subdivisions. |
-| `snap.set` | `{grid?, guides?, objects?, spacing?, tolerance_mm?}` | Defaults: grid off, the rest on, 2 mm. |
-| `snap.point` (Q) | `{x, y, width?, height?, exclude?, tolerance_mm?}` | A point, or a moving box whose left/centre/right and top/centre/bottom snap. Answers `{Snap: {x, y, dx, dy, snapped_x, snapped_y, lines}}`; each axis snaps to its nearest target (`guide`, `edge`, `center`, `page`, `spacing`, `grid`) within tolerance, and `lines` are the alignment or equal-spacing markers to draw. Also callable as the pure function `stencilcraft_engine::document::snap`. |
+| `snap.set` | `{grid?, guides?, objects?, spacing?, points?, tolerance_mm?}` | Defaults: grid and points off, the rest on, 2 mm. `points` is Snap to Point (other shapes' anchor points). |
+| `snap.point` (Q) | `{x, y, width?, height?, exclude?, tolerance_mm?}` | A point, or a moving box whose left/centre/right and top/centre/bottom snap. Answers `{Snap: {x, y, dx, dy, snapped_x, snapped_y, lines}}`; each axis snaps to its nearest target (`guide`, `edge`, `center`, `page`, `spacing`, `grid`) within tolerance (with `points` on, an anchor point within tolerance on both axes wins first and moves both axes; its kind is `point` and its line is zero-length at the point), and `lines` are the alignment or equal-spacing markers to draw. Also callable as the pure function `stencilcraft_engine::document::snap`. |
 | `measure.distance` (Q) | `{from: [x, y], to: [x, y]}` | `{Measure: {distance_mm, dx_mm, dy_mm, angle_degrees}}`, angle from +x towards +y. |
 | `query.dimensions` (Q) | `{ids}` | `{Dimensions: {x, y, width, height}}` of the combined bounds. |
 | `select.all` / `select.none` (Q) | `{}` | Selectable shapes outside template layers / nothing. |

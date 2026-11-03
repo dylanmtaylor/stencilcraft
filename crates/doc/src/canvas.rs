@@ -199,6 +199,9 @@ pub struct SnapSettings {
     /// Smart guides: equal spacing between neighbours.
     #[serde(default = "crate::yes")]
     pub spacing: bool,
+    /// Snap to point: shapes' anchor points (Illustrator's View › Snap to Point).
+    #[serde(default)]
+    pub points: bool,
     #[serde(default = "default_tolerance")]
     pub tolerance_mm: f64,
 }
@@ -214,6 +217,7 @@ impl Default for SnapSettings {
             guides: true,
             objects: true,
             spacing: true,
+            points: false,
             tolerance_mm: default_tolerance(),
         }
     }

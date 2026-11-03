@@ -120,6 +120,18 @@ pub enum DocumentCommand {
     /// Remove every unlocked guide.
     #[serde(rename = "guide.clear")]
     GuideClear {},
+    /// Lock or unlock every guide (Illustrator's View › Guides › Lock Guides).
+    #[serde(rename = "guide.lock-all")]
+    GuideLockAll { locked: bool },
+    /// Make Guides: replace shapes `ids` with guides along their bounds' edges (a vertical
+    /// guide at each side, a horizontal one at the top and bottom). Guides already at a
+    /// position are not doubled.
+    #[serde(rename = "guide.make")]
+    GuideMake { ids: Vec<u64> },
+    /// Release Guides: turn every unlocked guide into an open line shape across the main
+    /// board on layer 0, and remove those guides.
+    #[serde(rename = "guide.release")]
+    GuideRelease {},
     #[serde(rename = "grid.set")]
     GridSet {
         spacing_mm: f64,
@@ -138,6 +150,9 @@ pub enum DocumentCommand {
         objects: Option<bool>,
         #[serde(default)]
         spacing: Option<bool>,
+        /// Snap to shapes' anchor points.
+        #[serde(default)]
+        points: Option<bool>,
         #[serde(default)]
         tolerance_mm: Option<f64>,
     },
@@ -360,6 +375,8 @@ pub enum SnapKind {
     Center,
     Page,
     Spacing,
+    /// A shape's anchor point (snap to point); its line is zero-length, at the point.
+    Point,
 }
 
 /// What one axis snapped to: `value_mm` is the coordinate matched.
@@ -849,6 +866,14 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
                 removed: before - engine.doc.guides.len(),
             }))
         }
+        DocumentCommand::GuideLockAll { locked } => {
+            for guide in &mut engine.doc.guides {
+                guide.locked = locked;
+            }
+            changed
+        }
+        DocumentCommand::GuideMake { ids } => guide_make(engine, &ids),
+        DocumentCommand::GuideRelease {} => guide_release(engine),
         DocumentCommand::GridSet {
             spacing_mm,
             subdivisions,
@@ -868,6 +893,7 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             guides,
             objects,
             spacing,
+            points,
             tolerance_mm,
         } => {
             let snap = &mut engine.doc.snap;
@@ -876,6 +902,7 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
                 (&mut snap.guides, guides),
                 (&mut snap.objects, objects),
                 (&mut snap.spacing, spacing),
+                (&mut snap.points, points),
             ] {
                 if let Some(v) = value {
                     *field = v;
@@ -1162,6 +1189,80 @@ fn apply_labels(
         };
     }
     Ok(())
+}
+
+fn guide_make(engine: &mut Engine, ids: &[u64]) -> Result<Effect, EngineError> {
+    let ids = editable_ids(engine, ids, "guide.make")?;
+    if ids.is_empty() {
+        return Err(invalid("guide.make: no shapes given".to_string()));
+    }
+    for id in &ids {
+        let bounds = engine
+            .doc
+            .get_shape(*id)
+            .and_then(stencilcraft_doc::Shape::bounds)
+            .ok_or_else(|| invalid(format!("guide.make: shape {id} has no bounds")))?;
+        for (axis, position_mm) in [
+            (GuideAxis::Vertical, bounds.x0),
+            (GuideAxis::Vertical, bounds.x1),
+            (GuideAxis::Horizontal, bounds.y0),
+            (GuideAxis::Horizontal, bounds.y1),
+        ] {
+            let exists = engine
+                .doc
+                .guides
+                .iter()
+                .any(|g| g.axis == axis && (g.position_mm - position_mm).abs() < 1e-9);
+            if exists {
+                continue;
+            }
+            if engine.doc.guides.len() >= canvas::MAX_GUIDES {
+                return Err(invalid(format!(
+                    "guide.make: a document holds at most {} guides",
+                    canvas::MAX_GUIDES
+                )));
+            }
+            engine.doc.guides.push(Guide {
+                axis,
+                position_mm,
+                locked: false,
+            });
+        }
+    }
+    let selected: BTreeSet<u64> = ids.iter().copied().collect();
+    for layer in &mut engine.doc.layers {
+        layer.shapes.retain(|s| !selected.contains(&s.id));
+    }
+    Ok(Effect::ShapesRemoved { ids })
+}
+
+fn guide_release(engine: &mut Engine) -> Result<Effect, EngineError> {
+    let (w, h) = (engine.doc.board.width_mm, engine.doc.board.height_mm);
+    let released: Vec<Guide> = engine
+        .doc
+        .guides
+        .iter()
+        .filter(|g| !g.locked)
+        .cloned()
+        .collect();
+    let mut ids = Vec::with_capacity(released.len());
+    for guide in &released {
+        let p = guide.position_mm;
+        let (a, b) = match guide.axis {
+            GuideAxis::Vertical => ((p, 0.0), (p, h)),
+            GuideAxis::Horizontal => ((0.0, p), (w, p)),
+        };
+        let mut path = kurbo::BezPath::new();
+        path.move_to(a);
+        path.line_to(b);
+        let shape = engine
+            .doc
+            .push_shape(0, path, CutStyle::Cut)
+            .map_err(|e| invalid(format!("guide.release: {e}")))?;
+        ids.push(shape.id);
+    }
+    engine.doc.guides.retain(|g| g.locked);
+    Ok(Effect::ShapesAdded { ids })
 }
 
 fn guide_mut<'a>(
@@ -1580,14 +1681,19 @@ pub fn snap(
         query.y + query.height,
     );
     let exclude: BTreeSet<u64> = query.exclude.iter().copied().collect();
-    let others: Vec<Rect> = doc
+    let other_shapes: Vec<&stencilcraft_doc::Shape> = doc
         .layers
         .iter()
         .filter(|l| l.visible)
         .flat_map(|l| &l.shapes)
         .filter(|s| !s.hidden && !exclude.contains(&s.id))
-        .filter_map(stencilcraft_doc::Shape::bounds)
         .collect();
+    let others: Vec<Rect> = other_shapes.iter().filter_map(|s| s.bounds()).collect();
+    if settings.points
+        && let Some(result) = snap_to_point(query, moving, &other_shapes, tolerance)
+    {
+        return Ok(result);
+    }
     let pages: Vec<Rect> = doc.all_pages().iter().map(Page::rect).collect();
     let extent = pages
         .iter()
@@ -1614,6 +1720,68 @@ pub fn snap(
         snapped_x,
         snapped_y,
         lines,
+    })
+}
+
+/// Snap to point: the nearest anchor point of another shape to the moving point (or to a
+/// corner or the centre of the moving box), when it lies within `tolerance` in both axes.
+/// A point match moves both axes at once, so it wins over the per-axis targets.
+fn snap_to_point(
+    query: &SnapQuery,
+    moving: Rect,
+    others: &[&stencilcraft_doc::Shape],
+    tolerance: f64,
+) -> Option<SnapResult> {
+    let refs = if moving.width() > 0.0 || moving.height() > 0.0 {
+        vec![
+            kurbo::Point::new(moving.x0, moving.y0),
+            kurbo::Point::new(moving.x1, moving.y0),
+            kurbo::Point::new(moving.x1, moving.y1),
+            kurbo::Point::new(moving.x0, moving.y1),
+            moving.center(),
+        ]
+    } else {
+        vec![kurbo::Point::new(moving.x0, moving.y0)]
+    };
+    let mut best: Option<(f64, kurbo::Point, kurbo::Point)> = None;
+    for shape in others {
+        for el in shape.path.elements() {
+            let node = match *el {
+                kurbo::PathEl::MoveTo(p)
+                | kurbo::PathEl::LineTo(p)
+                | kurbo::PathEl::QuadTo(_, p)
+                | kurbo::PathEl::CurveTo(_, _, p) => p,
+                kurbo::PathEl::ClosePath => continue,
+            };
+            for r in &refs {
+                let d = node - *r;
+                if d.x.abs() <= tolerance
+                    && d.y.abs() <= tolerance
+                    && best.is_none_or(|(b, ..)| d.hypot() < b)
+                {
+                    best = Some((d.hypot(), node, *r));
+                }
+            }
+        }
+    }
+    let (_, node, r) = best?;
+    let (dx, dy) = (node.x - r.x, node.y - r.y);
+    let target = |value_mm| SnapTarget {
+        kind: SnapKind::Point,
+        value_mm,
+    };
+    Some(SnapResult {
+        x: query.x + dx,
+        y: query.y + dy,
+        dx,
+        dy,
+        snapped_x: Some(target(node.x)),
+        snapped_y: Some(target(node.y)),
+        lines: vec![SnapLine {
+            kind: SnapKind::Point,
+            from: [node.x, node.y],
+            to: [node.x, node.y],
+        }],
     })
 }
 
@@ -1800,6 +1968,9 @@ mod tests {
                 name: "g".to_string(),
             },
             DocumentCommand::GuideClear {},
+            DocumentCommand::GuideLockAll { locked: true },
+            DocumentCommand::GuideMake { ids: vec![1] },
+            DocumentCommand::GuideRelease {},
             DocumentCommand::PageAdd(PageRequest {
                 preset: Some(PagePreset::A4),
                 ..PageRequest::default()
@@ -2285,6 +2456,7 @@ mod tests {
                 guides: None,
                 objects: None,
                 spacing: None,
+                points: None,
                 tolerance_mm: Some(-1.0),
             },
         ] {
@@ -2296,6 +2468,95 @@ mod tests {
             (back.guides, back.grid),
             (e.doc.guides.clone(), e.doc.grid.clone())
         );
+    }
+
+    #[test]
+    fn guides_make_release_and_lock_all() {
+        let mut e = three();
+        // Square 2 spans x 20..30, y 0..10: four guides, the square goes away.
+        assert_eq!(
+            run(&mut e, DocumentCommand::GuideMake { ids: vec![2] }),
+            Effect::ShapesRemoved { ids: vec![2] }
+        );
+        assert!(e.doc.get_shape(2).is_none());
+        let at = |e: &Engine| {
+            e.doc
+                .guides
+                .iter()
+                .map(|g| (g.axis, g.position_mm))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            at(&e),
+            vec![
+                (GuideAxis::Vertical, 20.0),
+                (GuideAxis::Vertical, 30.0),
+                (GuideAxis::Horizontal, 0.0),
+                (GuideAxis::Horizontal, 10.0),
+            ]
+        );
+        // Square 1 shares the top and bottom: only its sides are new.
+        run(&mut e, DocumentCommand::GuideMake { ids: vec![1] });
+        assert_eq!(e.doc.guides.len(), 6);
+        assert!(
+            e.run(Command::Document(DocumentCommand::GuideMake {
+                ids: vec![]
+            }))
+            .is_err()
+        );
+        assert!(
+            e.run(Command::Document(DocumentCommand::GuideMake {
+                ids: vec![99]
+            }))
+            .is_err()
+        );
+
+        run(&mut e, DocumentCommand::GuideLockAll { locked: true });
+        assert!(e.doc.guides.iter().all(|g| g.locked));
+        // Locked guides stay put on release.
+        assert_eq!(
+            run(&mut e, DocumentCommand::GuideRelease {}),
+            Effect::ShapesAdded { ids: vec![] }
+        );
+        run(&mut e, DocumentCommand::GuideLockAll { locked: false });
+        let Effect::ShapesAdded { ids } = run(&mut e, DocumentCommand::GuideRelease {}) else {
+            panic!("release adds shapes");
+        };
+        assert_eq!(ids.len(), 6);
+        assert!(e.doc.guides.is_empty());
+        let first = e.doc.get_shape(ids[0]).unwrap().bounds().unwrap();
+        assert_eq!(
+            (first.x0, first.x1, first.y0, first.y1),
+            (20.0, 20.0, 0.0, e.doc.board.height_mm)
+        );
+        // One undo step brings the guides back.
+        e.run(Command::Undo).unwrap();
+        assert_eq!(e.doc.guides.len(), 6);
+    }
+
+    #[test]
+    fn snap_to_point_moves_both_axes_onto_an_anchor() {
+        let mut doc = three().doc;
+        doc.snap.objects = false;
+        doc.snap.spacing = false;
+        doc.snap.guides = false;
+        // Off: nothing snaps.
+        assert_eq!(snap_at(&doc, 19.2, 0.7, 0.0, 0.0, vec![]).dx, 0.0);
+        doc.snap.points = true;
+        let r = snap_at(&doc, 19.2, 0.7, 0.0, 0.0, vec![]);
+        assert!((r.x - 20.0).abs() < 1e-12 && r.y.abs() < 1e-12, "{r:?}");
+        assert_eq!(r.snapped_x.unwrap().kind, SnapKind::Point);
+        assert_eq!(r.lines[0].from, [20.0, 0.0]);
+        // A moving box snaps its nearest corner; excluded shapes are not targets.
+        let r = snap_at(&doc, 31.0, 11.0, 5.0, 5.0, vec![]);
+        assert!(
+            (r.x - 30.0).abs() < 1e-12 && (r.y - 10.0).abs() < 1e-12,
+            "{r:?}"
+        );
+        let r = snap_at(&doc, 31.0, 11.0, 5.0, 5.0, vec![2]);
+        assert_eq!((r.dx, r.dy), (0.0, 0.0));
+        // Only within the tolerance on both axes.
+        assert_eq!(snap_at(&doc, 23.0, 0.5, 0.0, 0.0, vec![]).dx, 0.0);
     }
 
     fn snap_at(doc: &Document, x: f64, y: f64, w: f64, h: f64, exclude: Vec<u64>) -> SnapResult {

@@ -5181,9 +5181,13 @@ version = "0.1.0"
 dependencies = [
  "kurbo 0.13.1",
  "roxmltree 0.21.2",
+ "stencilcraft-color",
  "stencilcraft-doc",
+ "stencilcraft-generate",
  "stencilcraft-geom",
  "thiserror 2.0.21",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
 ]
 
 [[package]]

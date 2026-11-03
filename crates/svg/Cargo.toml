@@ -12,6 +12,10 @@ roxmltree = "0.21.2"
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
+stencilcraft-color = { workspace = true }
+stencilcraft-generate = { workspace = true }
+vectorcraft-geom = { workspace = true }
+vectorcraft-pathops = { workspace = true }
 
 [lints]
 workspace = true

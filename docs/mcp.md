@@ -446,7 +446,9 @@ GIF first frame, TIFF, WebP) are placed as an image object sized at `dpi` (defau
 trace; HEIC/HEIF is refused with a message. Files over 64 MiB, images over 10,000 px a
 side or 16 million pixels, and more than 200,000 paths are errors, never crashes. Only
 path geometry is read from vector files: fills, text, embedded images and symbol
-instances are dropped.
+instances are dropped. An SVG with text, a mask, a filter or CSS the importer ignores
+imports without those parts; what was skipped is printed to the server's stderr (the CLI
+`import-svg` prints the same warnings). Convert text to paths first to keep it.
 
 `image_trace` turns a placed image into closed paths. `options` (all optional):
 

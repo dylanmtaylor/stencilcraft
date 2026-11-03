@@ -8,6 +8,9 @@ use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};
 
+mod production;
+pub use production::{CombineOp, GroupKind, Operation, SendAssign, ShapeProduction, SourceGroup};
+
 /// Native format name, written into every saved file and checked on load.
 pub const FORMAT_NAME: &str = "stencilcraft";
 /// Current format version; loaders accept exactly what they can read and say so
@@ -143,6 +146,9 @@ pub struct Shape {
     /// Locked shapes cannot be selected or edited until unlocked.
     #[serde(default, skip_serializing_if = "is_false")]
     pub locked: bool,
+    /// Production metadata (operation, colours, attach, contours, combine sources).
+    #[serde(default, skip_serializing_if = "ShapeProduction::is_default")]
+    pub production: ShapeProduction,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -229,6 +235,7 @@ impl Document {
             style,
             hidden: false,
             locked: false,
+            production: ShapeProduction::default(),
         };
         layer.shapes.push(shape.clone());
         Ok(shape)

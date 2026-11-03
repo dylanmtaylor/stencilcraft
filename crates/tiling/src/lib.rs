@@ -215,7 +215,8 @@ pub fn tile_document_with(
             }
             let mut piece_layer = stencilcraft_doc::Layer::new(layer.name.clone(), layer.kind);
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                let Some(b) = bounds_of_shape(&shape.path) else {
+                let cut = shape.cut_path();
+                let Some(b) = bounds_of_shape(&cut) else {
                     continue;
                 };
                 if !rects_touch(b, tile.rect) {
@@ -229,15 +230,16 @@ pub fn tile_document_with(
                     && b.y1 <= tile.rect.y1 + 1e-9;
                 let clipped;
                 let source = if on_sheet {
-                    &shape.path
+                    &*cut
                 } else {
-                    clipped = clip::clip_path_to_rect(&shape.path, tile.rect);
+                    clipped = clip::clip_path_to_rect(&cut, tile.rect);
                     &clipped
                 };
                 if source.elements().is_empty() {
                     continue;
                 }
                 let mut translated = shape.clone();
+                translated.production.hidden_contours.clear();
                 translated.path = transform_path(
                     source,
                     kurbo::Affine::translate((-tile.rect.x0, -tile.rect.y0)),

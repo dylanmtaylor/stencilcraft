@@ -213,7 +213,7 @@ pub fn flatten_document(doc: &Document) -> Vec<Vec<(f64, f64)>> {
             continue;
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            for pl in geom::path_to_polylines(&shape.path, geom::DEFAULT_FLATTEN_STEPS) {
+            for pl in geom::path_to_polylines(&shape.cut_path(), geom::DEFAULT_FLATTEN_STEPS) {
                 if pl.points.len() < 2 {
                     continue;
                 }

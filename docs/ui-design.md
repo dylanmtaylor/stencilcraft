@@ -2,8 +2,11 @@
 
 StencilCraft uses a dark canvas, restrained two-accent palette, and hairline
 production strokes, while adopting the
-*structure* that made the commercial cutter apps usable. Structure is
-copied; skin is ours. Everything colours-wise comes from
+*structure* that made the commercial cutter apps usable. We learn that structure
+by driving the apps through their normal UI and from their public documentation.
+We then build it from our own design. Their icons, artwork, UI text and branding are
+never copied (see [`reference-apps.md`](reference-apps.md#clean-room-posture) for the
+clean-room posture and the full feature inventory). The structure is borrowed; the skin is ours. Everything colours-wise comes from
 `stencilcraft_ui_egui::Tokens`; nothing hard-codes hex inline.
 
 ## What these apps get right (and we adopt)

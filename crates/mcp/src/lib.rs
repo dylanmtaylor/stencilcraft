@@ -693,7 +693,12 @@ mod tests {
         assert_eq!(counted["result"]["isError"], false);
         let text = counted["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("\"nodes\":4"), "{text}");
-        let bad = call(&mut session, 4, "path_break", r#"{"id":1,"contour":9,"node":0}"#);
+        let bad = call(
+            &mut session,
+            4,
+            "path_break",
+            r#"{"id":1,"contour":9,"node":0}"#,
+        );
         assert_eq!(bad["result"]["isError"], true);
     }
 

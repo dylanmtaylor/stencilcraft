@@ -107,7 +107,10 @@ fn break_closed_opens_and_open_splits() {
     assert_eq!((c.contours, c.nodes), (1, 5));
     assert_eq!(closes(&path_of(&e, square)), 0);
 
-    let line = add(&mut e, polyline(&[(0.0, 20.0), (5.0, 20.0), (10.0, 20.0)], false));
+    let line = add(
+        &mut e,
+        polyline(&[(0.0, 20.0), (5.0, 20.0), (10.0, 20.0)], false),
+    );
     e.run(Command::PathBreak {
         id: line,
         contour: 0,
@@ -203,7 +206,10 @@ fn join_nearest_and_specified_ends() {
 #[test]
 fn close_adds_segment_or_merges_ends() {
     let mut e = Engine::default();
-    let u = add(&mut e, polyline(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], false));
+    let u = add(
+        &mut e,
+        polyline(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)], false),
+    );
     run_undoable(&mut e, Command::PathClose { id: u, contour: 0 });
     assert_eq!(closes(&path_of(&e, u)), 1);
     assert_eq!(count(&mut e, &[u]).nodes, 3);
@@ -393,7 +399,10 @@ fn simplify_reduces_nodes_within_tolerance() {
     assert!(after * 5 < before, "{before} -> {after} nodes");
     let simplified = path_of(&e, id);
     let d = deviation(&simplified, &original).max(deviation(&original, &simplified));
-    assert!(d <= tolerance * 1.5, "deviation {d} over tolerance {tolerance}");
+    assert!(
+        d <= tolerance * 1.5,
+        "deviation {d} over tolerance {tolerance}"
+    );
     for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(
             e.run(Command::PathSimplify {
@@ -636,10 +645,7 @@ fn node_count_reports_linear_and_bezier_nodes() {
     assert_eq!(c.linear, 0);
     assert_eq!(c.bezier, c.nodes);
     assert_eq!(all.linear, 4);
-    assert!(
-        e.run(Command::QueryNodeCount { ids: vec![12345] })
-            .is_err()
-    );
+    assert!(e.run(Command::QueryNodeCount { ids: vec![12345] }).is_err());
 }
 
 #[test]

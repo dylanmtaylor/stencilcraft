@@ -56,9 +56,10 @@ impl RunRequest {
                 "--in" => req.input = Some(value()?.to_string()),
                 "--command" => {
                     let v = value()?;
-                    req.commands.push(serde_json::from_str(v).map_err(|e| {
-                        PipelineError::User(format!("--command {v}: {e}"))
-                    })?);
+                    req.commands.push(
+                        serde_json::from_str(v)
+                            .map_err(|e| PipelineError::User(format!("--command {v}: {e}")))?,
+                    );
                 }
                 "--apply-kerf" => {
                     let v = value()?;

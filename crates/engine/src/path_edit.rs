@@ -244,7 +244,11 @@ pub(crate) fn join(
     Ok(a)
 }
 
-pub(crate) fn average(path: &mut PathData, nodes: &[NodeRef], axis: NodeAxis) -> Result<(), String> {
+pub(crate) fn average(
+    path: &mut PathData,
+    nodes: &[NodeRef],
+    axis: NodeAxis,
+) -> Result<(), String> {
     let selected = check_nodes(path, nodes)?;
     let selection: Vec<(usize, usize)> = selected.iter().map(|r| (r.contour, r.node)).collect();
     let axis = match axis {
@@ -318,7 +322,11 @@ pub(crate) fn delete_nodes(path: &mut PathData, nodes: &[NodeRef]) -> Result<(),
     finish(path)
 }
 
-pub(crate) fn set_node_type(path: &mut PathData, nodes: &[NodeRef], kind: NodeType) -> Result<(), String> {
+pub(crate) fn set_node_type(
+    path: &mut PathData,
+    nodes: &[NodeRef],
+    kind: NodeType,
+) -> Result<(), String> {
     let selected = check_nodes(path, nodes)?;
     for at in selected {
         let sp = contour_mut(path, at.contour)?;
@@ -341,7 +349,12 @@ pub(crate) fn set_node_type(path: &mut PathData, nodes: &[NodeRef], kind: NodeTy
     Ok(())
 }
 
-pub(crate) fn set_segment(path: &mut PathData, contour: usize, segment: usize, kind: SegmentType) -> Result<(), String> {
+pub(crate) fn set_segment(
+    path: &mut PathData,
+    contour: usize,
+    segment: usize,
+    kind: SegmentType,
+) -> Result<(), String> {
     let sp = contour_mut(path, contour)?;
     let n = sp.anchors.len();
     if segment >= sp.segment_count() {
@@ -351,7 +364,10 @@ pub(crate) fn set_segment(path: &mut PathData, contour: usize, segment: usize, k
         ));
     }
     let (i0, i1) = (segment, (segment + 1) % n);
-    let (Some(a), Some(b)) = (sp.anchors.get(i0).map(|a| a.p), sp.anchors.get(i1).map(|a| a.p)) else {
+    let (Some(a), Some(b)) = (
+        sp.anchors.get(i0).map(|a| a.p),
+        sp.anchors.get(i1).map(|a| a.p),
+    ) else {
         return Err(format!("contour {contour} has no segment {segment}"));
     };
     let (out, inn) = match kind {

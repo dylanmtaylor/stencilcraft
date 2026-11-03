@@ -196,7 +196,11 @@ pub enum Command {
     /// Break a shape's path at one node: a closed contour opens there, an open one splits in
     /// two (both pieces stay in the shape; `shapes.release-compound` separates them).
     #[serde(rename = "path.break")]
-    PathBreak { id: u64, contour: usize, node: usize },
+    PathBreak {
+        id: u64,
+        contour: usize,
+        node: usize,
+    },
     /// Join two open contours end to end. `b` may be another shape (it is consumed) or another
     /// contour of `a`. Ends default to the nearest pair; coincident ends merge into one node,
     /// otherwise a straight segment joins them.
@@ -340,23 +344,49 @@ pub enum DistributionAxis {
 /// The result of a command: what changed.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Effect {
-    ShapeAdded { id: u64 },
-    ShapesAdded { ids: Vec<u64> },
-    ShapeRemoved { id: u64 },
-    ShapesRemoved { ids: Vec<u64> },
-    ShapeTransformed { id: u64 },
-    ShapesStyled { ids: Vec<u64> },
+    ShapeAdded {
+        id: u64,
+    },
+    ShapesAdded {
+        ids: Vec<u64>,
+    },
+    ShapeRemoved {
+        id: u64,
+    },
+    ShapesRemoved {
+        ids: Vec<u64>,
+    },
+    ShapeTransformed {
+        id: u64,
+    },
+    ShapesStyled {
+        ids: Vec<u64>,
+    },
     HistoryChanged,
     LayerAdded,
-    LayerVisibilityChanged { index: usize, visible: bool },
-    LayerRemoved { index: usize },
-    KerfSet { width_mm: f64 },
-    BoardChanged { width_mm: f64, height_mm: f64 },
+    LayerVisibilityChanged {
+        index: usize,
+        visible: bool,
+    },
+    LayerRemoved {
+        index: usize,
+    },
+    KerfSet {
+        width_mm: f64,
+    },
+    BoardChanged {
+        width_mm: f64,
+        height_mm: f64,
+    },
     DocumentReset,
     /// Shapes whose paths or flags changed in place.
-    ShapesEdited { ids: Vec<u64> },
+    ShapesEdited {
+        ids: Vec<u64>,
+    },
     /// A query's matching shape ids, in document order.
-    Selection { ids: Vec<u64> },
+    Selection {
+        ids: Vec<u64>,
+    },
     NodeCount(NodeCount),
 }
 
@@ -1057,11 +1087,9 @@ impl Engine {
                 };
                 Ok(Effect::DocumentReset)
             }
-            Command::PathBreak { id, contour, node } => {
-                self.edit_anchors(id, "path.break", |p| {
-                    path_edit::break_at(p, NodeRef { contour, node })
-                })
-            }
+            Command::PathBreak { id, contour, node } => self.edit_anchors(id, "path.break", |p| {
+                path_edit::break_at(p, NodeRef { contour, node })
+            }),
             Command::PathJoin {
                 a,
                 a_contour,
@@ -1174,9 +1202,10 @@ impl Engine {
                 } else {
                     "select.same-stroke"
                 };
-                let reference = self.doc.get_shape(*id).ok_or_else(|| {
-                    EngineError::Invalid(format!("{name}: no shape has id {id}"))
-                })?;
+                let reference = self
+                    .doc
+                    .get_shape(*id)
+                    .ok_or_else(|| EngineError::Invalid(format!("{name}: no shape has id {id}")))?;
                 // Closed contours are filled regions; open paths only carry a stroke.
                 let filled = |path: &BezPath| {
                     path.elements()
@@ -1337,8 +1366,13 @@ impl Engine {
                 "{NAME}: select at least two shapes"
             )));
         }
-        if let Some(id) = requested.iter().find(|id| self.doc.get_shape(**id).is_none()) {
-            return Err(EngineError::Invalid(format!("{NAME}: no shape has id {id}")));
+        if let Some(id) = requested
+            .iter()
+            .find(|id| self.doc.get_shape(**id).is_none())
+        {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: no shape has id {id}"
+            )));
         }
         let ordered: Vec<(u64, BezPath)> = self
             .doc

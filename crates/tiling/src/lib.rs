@@ -214,7 +214,7 @@ pub fn tile_document_with(
                 continue;
             }
             let mut piece_layer = stencilcraft_doc::Layer::new(layer.name.clone(), layer.kind);
-            for shape in &layer.shapes {
+            for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
                 let Some(b) = bounds_of_shape(&shape.path) else {
                     continue;
                 };

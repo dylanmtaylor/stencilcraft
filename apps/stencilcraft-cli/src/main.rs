@@ -7,7 +7,8 @@
 //! - `mcp [--control PORT]` — MCP and legacy JSON-lines control on stdio (see docs/mcp.md);
 //!   with `--control`, requests are relayed to the running desktop app
 //! - `make-starter --out FILE` — write the canonical starter document
-//! - `cut --in FILE [--media …] [--bbox] [--device PATH]` — machine cut prep
+//! - `cut --in FILE [--model ID] [--media …] [--bbox] [--out FILE] [--device DEV]` — machine cut prep
+//! - `machines [--json]` — the cutter catalog; `devices [--status]` — USB cutters (feature `usb`)
 //! - `help`
 
 mod cut;
@@ -32,6 +33,8 @@ fn main() -> Result<(), String> {
         Some("trace-image") => trace_image_command(&args[1..]),
         Some("print-cut") => print_cut_command(&args[1..]),
         Some("mcp") => mcp_command(&args[1..]),
+        Some("machines") => cut::machines_command(&args[1..]),
+        Some("devices") => cut::devices_command(&args[1..]),
         Some("cut") => {
             cut::execute(&args[1..])?;
             Ok(())
@@ -260,9 +263,13 @@ fn print_help() {
     println!("  mcp [--control PORT]");
     println!("      MCP and legacy JSON-lines control on stdio (docs/mcp.md).");
     println!("      With --control, requests drive the document open in the desktop app.");
-    println!("  cut --in FILE [--media …] [--bbox] [--device PATH]");
-    println!("      Machine sensor registration and automatic alignment are not implemented.");
-    println!("      Encode + send to a cutting machine; dry-run transcript by default.");
+    println!("  cut --in FILE [--model ID] [--media …] [--bbox] [--out FILE] [--device DEV]");
+    println!("      Encode for a cutter (Silhouette/Graphtec GP-GL, HP-GL, DMPL); dry-run");
+    println!("      transcript by default, limits enforced per model. --device sends for real.");
+    println!("  machines [--json]");
+    println!("      List every catalogued cutter with its documented limits.");
+    println!("  devices [--status]");
+    println!("      Enumerate USB cutters (build with --features usb); --status queries them.");
     println!("  make-starter --out FILE");
     println!("  help");
 }

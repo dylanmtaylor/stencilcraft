@@ -338,6 +338,9 @@ impl Session {
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
                 Ok(serde_json::json!({ "path": path, "tiles": pieces.len() }))
             }
+            "machines.list" => Ok(machines_json()),
+            "machine.capabilities" => machine_capabilities(params),
+            "machine.dry_run" => machine_dry_run(&self.engine.doc, params),
             "command.execute" => {
                 let command: Command = serde_json::from_value(params.clone())
                     .map_err(|e| ProtocolError::Bad(format!("bad command parameters: {e}")))?;
@@ -367,6 +370,9 @@ fn tool_method(name: &str) -> Option<&'static str> {
         "tile_run" => Some("tile.run"),
         "tile_preview" => Some("tile.preview"),
         "command_execute" => Some("command.execute"),
+        "machines_list" => Some("machines.list"),
+        "machine_capabilities" => Some("machine.capabilities"),
+        "machine_dry_run" => Some("machine.dry_run"),
         _ => None,
     }
 }
@@ -437,6 +443,41 @@ fn mcp_tools() -> Vec<serde_json::Value> {
             "Write one SVG page showing every sheet of the tiling, each in a framed cell, so the whole job can be inspected before cutting.",
             json!({"path": path, "sheet_w": number, "sheet_h": number, "overlap": number, "columns": json!({"type": "integer"}), "scale": number, "marks": json!({"type": "boolean"})}),
             json!(["path", "sheet_w", "sheet_h"]),
+        ),
+        (
+            "machines_list",
+            "List every catalogued cutting machine with its dialect, USB id, cut area, mats, tool holders, tools, force/speed ranges and Bluetooth support. null means not publicly documented.",
+            json!({}),
+            json!([]),
+        ),
+        (
+            "machine_capabilities",
+            "Full capabilities of one machine: protocol, support level, USB id, cut area, mats, tool holders, tools, force/speed ranges with units, roll feed, registration marks, overcut, multi-pass, notes.",
+            json!({"model": json!({"type": "string"})}),
+            json!(["model"]),
+        ),
+        (
+            "machine_dry_run",
+            "Encode the current document for a cutter without touching hardware and return the command transcript. Settings outside the model's documented limits are rejected. model is a machines_list id; optional: media (preset name/id), force, speed, tool, holder, depth, passes, overcut (mm), mat, media_size [w, l] mm, pen, track_enhancing, bbox, regmarks {width, length, x, y, search, quad}, path (also write the byte stream there).",
+            json!({
+                "model": json!({"type": "string"}),
+                "media": json!({"type": ["string", "integer"]}),
+                "force": json!({"type": "integer"}),
+                "speed": json!({"type": "integer"}),
+                "tool": json!({"type": "string"}),
+                "holder": json!({"type": "integer"}),
+                "depth": json!({"type": "integer"}),
+                "passes": json!({"type": "integer"}),
+                "overcut": number,
+                "mat": json!({"type": "string"}),
+                "media_size": json!({"type": "array", "items": number}),
+                "pen": json!({"type": "boolean"}),
+                "track_enhancing": json!({"type": "boolean"}),
+                "bbox": json!({"type": "boolean"}),
+                "regmarks": json!({"type": "object"}),
+                "path": path,
+            }),
+            json!(["model"]),
         ),
         (
             "command_execute",
@@ -516,6 +557,167 @@ fn gcode_settings(
         })?;
     }
     Ok(settings)
+}
+
+/// The machine registry as JSON (`machines.list`): every `Capabilities` row
+/// from `machines.toml`; `null` = not publicly documented.
+pub fn machines_json() -> serde_json::Value {
+    serde_json::to_value(stencilcraft_machine::DeviceRegistry::builtin().machines())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// `machine.capabilities`: one machine's full capability row.
+fn machine_capabilities(params: &serde_json::Value) -> Result<serde_json::Value, ProtocolError> {
+    let id = str_param(params, "model")?;
+    let caps = stencilcraft_machine::DeviceRegistry::builtin()
+        .by_id(&id)
+        .ok_or_else(|| {
+            ProtocolError::Bad(format!(
+                "machine.capabilities: unknown model `{id}` (see machines_list)"
+            ))
+        })?;
+    serde_json::to_value(caps).map_err(|e| ProtocolError::Internal(e.to_string()))
+}
+
+/// Longest transcript a dry run returns inline.
+const DRY_RUN_LINES: usize = 5000;
+
+/// `machine.dry_run`: validate and encode the document for a model. Never
+/// sends: real sends are only `stencilcraft-cli cut --device`.
+fn machine_dry_run(
+    doc: &stencilcraft_doc::Document,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, ProtocolError> {
+    use stencilcraft_machine as m;
+    let bad = |e: String| ProtocolError::Bad(format!("machine.dry_run: {e}"));
+    let id = str_param(params, "model")?;
+    let caps = m::DeviceRegistry::builtin()
+        .by_id(&id)
+        .ok_or_else(|| bad(format!("unknown model `{id}` (see machines_list)")))?;
+    let media = match params.get("media") {
+        None | Some(serde_json::Value::Null) => m::Media::by_id(102),
+        Some(v) => match (v.as_u64(), v.as_str()) {
+            (Some(n), _) => u16::try_from(n).ok().and_then(m::Media::by_id),
+            (_, Some(name)) => {
+                let lower = name.to_ascii_lowercase();
+                m::MEDIA_PRESETS
+                    .iter()
+                    .copied()
+                    .find(|p| p.name.to_ascii_lowercase().starts_with(&lower))
+            }
+            _ => None,
+        },
+    }
+    .ok_or_else(|| bad("unknown media preset".to_string()))?;
+    let mut s = m::CutSettings::for_caps(caps, &media);
+    let small = |key: &str| -> Result<Option<u8>, ProtocolError> {
+        u32_param(params, key)?
+            .map(|n| u8::try_from(n).map_err(|_| bad(format!("`{key}` {n} is out of range"))))
+            .transpose()
+    };
+    let flag = |key: &str| {
+        params
+            .get(key)
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+    };
+    if let Some(v) = small("depth")? {
+        s.depth = Some(v);
+    }
+    if let Some(v) = small("holder")? {
+        s.toolholder = v;
+    }
+    if let Some(v) = small("passes")? {
+        s.passes = v;
+    }
+    if let Some(v) = params.get("overcut").and_then(serde_json::Value::as_f64) {
+        s.overcut_mm = v;
+    }
+    if let Some(t) = params.get("tool").and_then(serde_json::Value::as_str) {
+        s.tool = Some(m::ToolKind::parse(t).ok_or_else(|| bad(format!("unknown tool `{t}`")))?);
+    }
+    if let Some(v) = params.get("mat").and_then(serde_json::Value::as_str) {
+        s.mat = m::Mat::parse(v).ok_or_else(|| bad(format!("unknown mat `{v}`")))?;
+    }
+    if let Some(arr) = params
+        .get("media_size")
+        .and_then(serde_json::Value::as_array)
+    {
+        let (Some(w), Some(l)) = (
+            arr.first().and_then(serde_json::Value::as_f64),
+            arr.get(1).and_then(serde_json::Value::as_f64),
+        ) else {
+            return Err(bad("media_size must be [width, length] in mm".to_string()));
+        };
+        s.media_size_mm = Some((w, l));
+    }
+    s.pen = flag("pen");
+    s.track_enhancing = flag("track_enhancing");
+    if let Some(r) = params.get("regmarks").filter(|r| !r.is_null()) {
+        let f = |k: &str| {
+            r.get(k)
+                .and_then(serde_json::Value::as_f64)
+                .ok_or_else(|| bad(format!("regmarks.{k} must be a number")))
+        };
+        let b = |k: &str| {
+            r.get(k)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        };
+        s.registration = Some(m::Registration {
+            width_mm: f("width")?,
+            length_mm: f("length")?,
+            origin_right_mm: f("x")?,
+            origin_down_mm: f("y")?,
+            search: b("search") || b("quad"),
+            quad: b("quad"),
+        });
+    }
+    let mut paths = Vec::new();
+    for layer in doc.layers.iter().filter(|l| l.visible) {
+        for shape in &layer.shapes {
+            let pl = stencilcraft_geom::path_to_polylines(
+                &shape.path,
+                stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
+            );
+            paths.extend(m::paths_from_polylines(&pl));
+        }
+    }
+    if paths.is_empty() {
+        return Err(bad("document has no visible shapes to cut".to_string()));
+    }
+    let mut job = s.to_job(&paths, &m::PlotOptions::default(), flag("bbox"));
+    // Force/speed in the machine's own units (steps, laser power, mm/min).
+    let (force, speed) = (u32_param(params, "force")?, u32_param(params, "speed")?);
+    for op in &mut job.operations {
+        if force.is_some() {
+            op.settings.force = force;
+        }
+        if speed.is_some() {
+            op.settings.speed = speed;
+        }
+    }
+    let program = m::dry_run(caps, &job).map_err(|e| bad(e.to_string()))?;
+    let stream = program.to_stream();
+    let written = match params.get("path").and_then(serde_json::Value::as_str) {
+        Some(path) => {
+            std::fs::write(path, &stream).map_err(|e| bad(format!("{path}: {e}")))?;
+            Some(path.to_string())
+        }
+        None => None,
+    };
+    let transcript = program.transcript();
+    Ok(serde_json::json!({
+        "model": caps.id,
+        "protocol": caps.protocol.id(),
+        "commands": transcript.len(),
+        "bytes": stream.len(),
+        "bbox_mm": program.bbox_mm.map(|b| [b.1, b.0, b.3, b.2]),
+        "registration_wait": program.registration_wait,
+        "truncated": transcript.len() > DRY_RUN_LINES,
+        "transcript": transcript.iter().take(DRY_RUN_LINES).collect::<Vec<_>>(),
+        "path": written,
+    }))
 }
 
 fn ok_response(id: Option<serde_json::Value>, result: serde_json::Value) -> String {
@@ -650,6 +852,54 @@ mod tests {
         assert!(r.contains("\"ok\":true"), "{r}");
         let svg = std::fs::read_to_string(&out).unwrap();
         assert!(svg.contains("stencilcraft-cut"));
+    }
+
+    #[test]
+    fn machines_list_and_dry_run() {
+        let mut session = Session::default();
+        let r: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_line(r#"{"id":1,"method":"machines.list"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let list = r["result"].as_array().unwrap();
+        assert!(
+            list.iter()
+                .any(|m| m["id"] == "cameo-4-pro" && m["usb"] == "0b4d:1139")
+        );
+        assert!(
+            list.iter()
+                .any(|m| m["id"] == "curio" && m["usb"].is_null())
+        );
+
+        let src = write_tmp("dry.stencilcraft", &doc_json());
+        session
+            .handle_line(&format!(
+                r#"{{"id":2,"method":"doc.open","params":{{"path":"{src}"}}}}"#
+            ))
+            .unwrap();
+        let r = session
+            .handle_line(r#"{"id":3,"method":"machine.dry_run","params":{"model":"cameo-4","mat":"12x12","tool":"autoblade","depth":3}}"#)
+            .unwrap()
+            .unwrap();
+        let v: serde_json::Value = serde_json::from_str(&r).unwrap();
+        assert_eq!(v["ok"], true, "{r}");
+        let lines = v["result"]["transcript"].as_array().unwrap();
+        assert!(lines.iter().any(|l| l == "TF3,1"));
+        let r = session
+            .handle_line(
+                r#"{"id":4,"method":"machine.dry_run","params":{"model":"cameo-4","force":50}}"#,
+            )
+            .unwrap()
+            .unwrap();
+        assert!(r.contains("\"ok\":false") && r.contains("force 50"), "{r}");
+        let r = session
+            .handle_line(r#"{"id":5,"method":"machine.dry_run","params":{"model":"cricut-maker"}}"#)
+            .unwrap()
+            .unwrap();
+        assert!(r.contains("unknown model"), "{r}");
     }
 
     #[test]

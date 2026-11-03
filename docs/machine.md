@@ -145,6 +145,30 @@ CAMEO 3: the same mat block, then `J t`, `!s,t`, `FXp,t`, `FE`, `FF` pair,
 - **Line-segment overcut** (`--overcut MM`): at every corner sharper than 30° the
   blade runs MM past the corner and back (blade down); flattened curves are left
   alone. StencilCraft's own geometric rule, not a captured vendor stream.
+- **Cut order** (`--order none|speed|roller`, default `roller`; MCP `order`): the
+  reference's Send preference "Cut Order Sorting" (No Sort | Maximize Speed |
+  Minimize Roller Movement, default the last), observed in
+  [`observations/silhouette-studio.md`](observations/silhouette-studio.md). `roller`
+  sorts each operation's paths by their top (feed-axis) edge so the media moves one
+  way; `speed` is greedy nearest-neighbour from the head's last position. Above
+  5000 paths per operation both fall back to the plain feed-axis sort.
+- **Interior contours first** (on by default; `--no-interior-first`, MCP
+  `interior_first: false`): a path enclosed by a closed path (strict bbox
+  containment plus point-in-polygon) is cut before it, so holes are cut before the
+  part is freed. Combines with any order: a path becomes eligible once everything
+  inside it is cut.
+- **Closed-contour overcut** (`--closed-overcut MM`, 0–5 mm, default 0; MCP
+  `closed_overcut`): each closed contour continues MM past its start along its
+  first segments so the start/end join is cut through (the reference's "Software
+  Overcut" preference). Not applied to pen operations; works on every protocol.
+- **Mirror on mat** (`--mirror`, MCP `mirror`): flips the job horizontally about the
+  media centre for heat-transfer vinyl (cut face down). The width is the loaded
+  media size, else the mat, else the machine's cut width; with origin margins the
+  flip is `x' = W − 2·margin − x`. Applied when the job is built, after ordering and
+  overcut; the document is never touched. Refused with registration marks.
+- These job settings are applied by `apply_job_settings` in the job layer between
+  two `validate` passes (the second checks the mirrored design still fits), so every
+  protocol gets them; the desktop preview (`encode_cut`) applies them too.
 - **Track enhancing** (`--track-enhancing`): `FY0`; the device only acts at force ≥ 19.
 - **Print & cut** (`--regmarks W,L,X,Y [--regmark-search] [--regmark-quad]`): after
   setup, `TB50,0 TB99 TB52,2 TB51,400 TB53,10 TB55,1` then `TB123,h,w,top,left`
@@ -210,7 +234,8 @@ only; plotters get force/speed from the panel.
 
 - Bluetooth transport (see above); USB tested only against `MockTransport`.
 - Curio and Graphtec CE USB ids; Graphtec CE force/speed over GP-GL.
-- Mat-free cutting strategy (path sorting for knife pressure relief).
+- Mat-free cutting strategy (pressure relief beyond the cut-order sort).
+- Choosing the start point of closed contours (the speed order only reorders paths).
 - Binary-encoded relative draw (`BE`) that newer firmware accepts.
 
 ## Provenance & licensing

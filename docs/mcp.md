@@ -289,7 +289,7 @@ produces a response with `id: null`. No request may abort the session on a bad p
 | `tile.preview` | `{path, sheet_w, sheet_h, overlap, columns?, scale?, marks?}` | `{path, tiles: n}` |
 | `machines.list` | `{}` | array of machines: `{id, name, vendor, protocol, support, usb, firmware, cut_width_mm, cut_length_mm, media_width_mm, mats, tool_holders, tools, max_force_gf, force{min,max,unit}, speed{min,max,unit}, roll_feed, bluetooth, regmarks, quad_regmarks, overcut, multi_pass, notes}` (`null` = undocumented) |
 | `machine.capabilities` | `{model}` | that machine's full capabilities row |
-| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, truncated, transcript: [..], path}` |
+| `machine.dry_run` | `{model, media?, force?, speed?, tool?, holder?, depth?, passes?, overcut?, mat?, media_size?: [w, l], pen?, track_enhancing?, bbox?, regmarks?: {width, length, x, y, search?, quad?}, order?: "none"\|"speed"\|"roller", interior_first?, closed_overcut?, mirror?, path?}` | `{model, protocol, commands, bytes, bbox_mm, registration_wait, order, interior_first, closed_overcut_mm, mirror, truncated, transcript: [..], path}` |
 | `export.pdf` | `{path}` | `{path}` |
 | `export.image` | `{path, dpi?}` (`.png`, `.jpg`/`.jpeg`; dpi default 300, up to 4800) | `{path, dpi}` |
 | `import.file` | `{path, fit_to_page?, join?, join_tolerance?, dpi?}` | `{shapes: [id], images: [id]}` |
@@ -414,7 +414,12 @@ current document for one model and returns the transcript (first 5000 commands; 
 says if there were more); with `path` it also writes the exact byte stream (HP-GL/DMPL files
 for a spooler, for example). Every value is validated against the model: an out-of-range
 force, speed, depth, tool, holder, mat or a design outside the cut area is a normal tool error
-naming the knob and range — never clamped. There is deliberately **no** MCP method that sends
+naming the knob and range — never clamped. Job settings: `order` (`roller` default: sort
+by the feed-axis top edge; `speed`: nearest-neighbour; `none`: document order),
+`interior_first` (default true: inner contours before the closed path around them),
+`closed_overcut` (mm, 0–5, past the start of each closed contour) and `mirror` (flip about
+the media centre for heat-transfer vinyl; not with `regmarks`). See
+[`machine.md`](machine.md) › Job options. There is deliberately **no** MCP method that sends
 to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a person.
 
 ## Import and trace

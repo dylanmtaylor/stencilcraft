@@ -115,8 +115,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 20. **Replicate and nesting**: engine commands and desktop panels cover directional,
     mirrored, array, radial and fill-page copies. Production mat planning has nesting;
     an integrated desktop mat preview and hardware validation remain open.
-21. **Cut job settings**: missing test cut, overcut, cut order/path sorting, custom saved
-    materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
+21. **Cut job settings**: cut order (none/speed/roller), interior contours first,
+    closed-contour overcut and line-segment overcut exist as job settings (CLI `cut`, MCP
+    `machine.dry_run`); the desktop Send panel doesn't expose them yet, and the speed order
+    doesn't choose contour start points. Missing: test cut, custom saved materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
     Also missing: weed lines and borders, and more operation types (pen, score,
     perforate). Also missing: Send modes that set one row of settings per line or fill
     colour, assigning lines to tool holder 1 or 2 (or skipping them) on the cut preview,
@@ -159,8 +161,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     a stroked or open path into a closed cuttable outline. Missing: its menu/UI wiring and
     a general Expand. This is the usual way to make stencil lettering and line art
     cuttable.
-30. **Mirror on mat and load type**: no per-job mirror for heat-transfer vinyl, which is
-    cut face down. No choice between on-mat, without-mat (Smart Materials) and roll feed,
+30. **Mirror on mat and load type**: a per-job mirror (`cut --mirror`, MCP `mirror`)
+    flips about the media centre at job build time; the desktop Send panel doesn't offer it
+    yet and no material preset turns it on. No choice between on-mat, without-mat (Smart Materials) and roll feed,
     no project copies, and no arranging pieces on a mat preview.
 31. **Weld on cut and cut by layer**: overlapping shapes are cut twice unless welded by
     hand, and there is no per-layer cut order or per-layer settings at send time.

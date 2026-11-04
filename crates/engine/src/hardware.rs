@@ -20,9 +20,27 @@ pub enum HardwareCommand {
         /// Optional AutoBlade depth (0–10); omitted leaves blade adjustment to the user.
         #[serde(default)]
         depth: Option<u8>,
+        /// Tool installed in the selected holder; omitted uses the loaded tool.
+        #[serde(default)]
+        tool: Option<machine::ToolKind>,
+        /// Use a pen to draw rather than a blade to cut.
+        #[serde(default)]
+        draw: bool,
+        /// One-based holder number and number of passes.
+        #[serde(default = "one")]
+        holder: u8,
+        #[serde(default = "one")]
+        passes: u8,
+        /// Mirror about the material width.
+        #[serde(default)]
+        mirror: bool,
         #[serde(default)]
         send: bool,
     },
+}
+
+fn one() -> u8 {
+    1
 }
 
 pub fn run(
@@ -45,6 +63,11 @@ fn execute(
         force,
         speed,
         depth,
+        tool,
+        draw,
+        holder,
+        passes,
+        mirror,
         send,
     } = command
     else {
@@ -78,18 +101,41 @@ fn execute(
             "No visible paths to cut".into(),
         ));
     }
+    let tool = tool.or_else(|| depth.map(|_| machine::ToolKind::AutoBlade));
+    if *draw && tool.is_some_and(|t| t != machine::ToolKind::Pen) {
+        return Err(machine::MachineError::Config(
+            "Draw requires a pen or an unspecified tool".into(),
+        ));
+    }
+    if !*draw && tool == Some(machine::ToolKind::Pen) {
+        return Err(machine::MachineError::Config(
+            "Select Draw when using a pen".into(),
+        ));
+    }
+    if depth.is_some() && tool != Some(machine::ToolKind::AutoBlade) {
+        return Err(machine::MachineError::Config(
+            "Blade depth can only be set for AutoBlade".into(),
+        ));
+    }
     let job = machine::CutJob {
         mat: *mat,
+        mirror: *mirror,
         media_size_mm: (*mat == machine::Mat::None)
             .then_some((doc.board.width_mm, doc.board.height_mm)),
         operations: vec![machine::Operation {
-            holder: 1,
-            tool: depth.map(|_| machine::ToolKind::AutoBlade),
+            holder: *holder,
+            kind: if *draw {
+                machine::OpKind::Draw
+            } else {
+                machine::OpKind::Cut
+            },
+            tool,
             paths,
             settings: machine::OpSettings {
                 force: Some(*force),
                 speed: Some(*speed),
                 depth: *depth,
+                passes: *passes,
                 ..Default::default()
             },
             ..Default::default()
@@ -163,6 +209,11 @@ mod tests {
             force: 10,
             speed: 5,
             depth: None,
+            tool: None,
+            draw: false,
+            holder: 1,
+            passes: 1,
+            mirror: false,
             send: true,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
@@ -183,6 +234,11 @@ mod tests {
             force: 10,
             speed: 5,
             depth: None,
+            tool: None,
+            draw: false,
+            holder: 1,
+            passes: 1,
+            mirror: false,
             send: false,
         };
         assert!(run(&engine.doc, &command).is_ok());
@@ -212,6 +268,11 @@ mod tests {
             force: 10,
             speed: 5,
             depth: None,
+            tool: None,
+            draw: false,
+            holder: 1,
+            passes: 1,
+            mirror: false,
             send: false,
         };
         assert!(run(&engine.doc, &command).is_err());
@@ -227,6 +288,47 @@ mod tests {
             *depth = Some(1);
         }
         assert!(run(&engine.doc, &command).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn hardware_settings_validate_tool_and_passes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = crate::Engine::new(stencilcraft_doc::Document::default());
+        engine.run(crate::Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 10.0,
+            height: 10.0,
+        })?;
+        let mut command = HardwareCommand::Cut {
+            model: "cameo-4".into(),
+            location: "unused".into(),
+            mat: machine::Mat::Cameo12x12,
+            force: 10,
+            speed: 5,
+            depth: None,
+            tool: Some(machine::ToolKind::Pen),
+            draw: true,
+            holder: 1,
+            passes: 1,
+            mirror: false,
+            send: false,
+        };
+        let first = execute(&engine.doc, &command)?;
+        if let HardwareCommand::Cut { passes, .. } = &mut command {
+            *passes = 2;
+        }
+        let second = execute(&engine.doc, &command)?;
+        assert!(second["bytes"].as_u64() > first["bytes"].as_u64());
+        if let HardwareCommand::Cut { draw, .. } = &mut command {
+            *draw = false;
+        }
+        assert!(execute(&engine.doc, &command).is_err());
+        if let HardwareCommand::Cut { draw, passes, .. } = &mut command {
+            *draw = true;
+            *passes = 11;
+        }
+        assert!(execute(&engine.doc, &command).is_err());
         Ok(())
     }
 

@@ -134,7 +134,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 20. **Replicate and nesting**: engine commands and desktop panels cover directional,
     mirrored, array, radial and fill-page copies. Production mat planning has nesting;
     an integrated desktop mat preview and hardware validation remain open.
-21. **Cut job settings**: cut order (none/speed/roller), interior contours first,
+21. **Cut job settings**: Make offers job-wide cut/draw, tool, holder, passes, mirror, pressure, speed and AutoBlade depth; per-layer controls remain missing. cut order (none/speed/roller), interior contours first,
     closed-contour overcut and line-segment overcut exist as job settings (CLI `cut`, MCP
     `machine.dry_run`); the desktop Send panel doesn't expose them yet, and the speed order
     doesn't choose contour start points. Missing: test cut, custom saved materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.

@@ -289,7 +289,7 @@ move hardware. Selection uses catalog USB identifiers; submission checks the mod
 again before opening the transport. USB work runs outside the UI thread.
 
 Load material first. Optionally enable AutoBlade depth in Make; otherwise set blade depth on the machine. This initial workflow cuts
-visible, non-hidden paths with holder 1; it does not apply kerf compensation or
+visible, non-hidden paths using the selected action, tool, holder and passes; it does not apply kerf compensation or
 per-layer operations. Bounding-box preview disables real submission. Submission
 reports bytes, not physical completion. Use the machine controls to stop motion.
 On Linux the user must have permission to open the USB device; permission failures
@@ -328,3 +328,8 @@ the validated job must fit those dimensions. The page edge is shown on the canva
 but the reduced roller margins are not yet drawn or validated. Position and lock
 both rollers to grip the sheet. Pop-out cardstock remains unavailable. See
 [Silhouette material sizes](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000273294-installing-and-using-silhouette-studio).
+
+Make offers Cut and Draw actions, compatible known tools, holder, passes, mirror,
+force, speed, and optional AutoBlade depth. These settings apply to all visible
+paths in the job; per-layer settings and Pop-out Cut are not available in Make.
+The chosen tool is not auto-detected. Hardware behavior remains unverified.

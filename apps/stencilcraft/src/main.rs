@@ -681,6 +681,11 @@ pub struct SendTab {
     pub bbox_only: bool,
     pub set_blade_depth: bool,
     pub blade_depth: u8,
+    pub draw: bool,
+    pub tool: Option<stencilcraft_machine::ToolKind>,
+    pub holder: u8,
+    pub passes: u8,
+    pub mirror: bool,
     pub summary: Option<Vec<String>>,
     pub devices: Vec<(String, String, String)>,
     pub device: String,
@@ -698,6 +703,11 @@ impl Default for SendTab {
             bbox_only: false,
             set_blade_depth: false,
             blade_depth: 1,
+            draw: false,
+            tool: None,
+            holder: 1,
+            passes: 1,
+            mirror: false,
             summary: None,
             devices: Vec::new(),
             device: String::new(),
@@ -3217,7 +3227,85 @@ impl StencilApp {
         if apply_edit(&mut speed, &mut self.speed_before, edit.event) {
             self.send.speed_override = speed as u8;
         }
-        let _ = Checkbox::bool("Set AutoBlade depth", &mut self.send.set_blade_depth).show(ui);
+        ui.add(Text::new("Action"));
+        let _ = Select::new("send-action", "Action", &mut self.send.draw)
+            .option(false, "Cut")
+            .option(true, "Draw with pen")
+            .show(ui);
+        if self.send.draw
+            && self
+                .send
+                .tool
+                .is_some_and(|t| t != stencilcraft_machine::ToolKind::Pen)
+        {
+            self.send.tool = None;
+        }
+        if !self.send.draw && self.send.tool == Some(stencilcraft_machine::ToolKind::Pen) {
+            self.send.tool = None;
+        }
+        if self
+            .send
+            .tool
+            .is_some_and(|t| caps.is_none_or(|c| !c.tools.contains(&t)))
+        {
+            self.send.tool = None;
+        }
+        let mut tool_select = Select::new("send-tool", "Tool", &mut self.send.tool)
+            .option(None, "Loaded tool (unspecified)");
+        if let Some(caps) = caps {
+            for (tool, label) in [
+                (stencilcraft_machine::ToolKind::AutoBlade, "AutoBlade"),
+                (
+                    stencilcraft_machine::ToolKind::RatchetBlade,
+                    "Ratchet blade",
+                ),
+                (
+                    stencilcraft_machine::ToolKind::DeepCutBlade,
+                    "Deep-cut blade",
+                ),
+                (stencilcraft_machine::ToolKind::Pen, "Pen"),
+            ] {
+                if caps.tools.contains(&tool)
+                    && ((tool == stencilcraft_machine::ToolKind::Pen) == self.send.draw)
+                {
+                    tool_select = tool_select.option(Some(tool), label);
+                }
+            }
+        }
+        let _ = tool_select.show(ui);
+        ui.horizontal(|ui| {
+            ui.label("Tool holder");
+            let max = caps.and_then(|c| c.tool_holders).unwrap_or(1).max(1);
+            self.send.holder = self.send.holder.clamp(1, max);
+            ui.add(egui::DragValue::new(&mut self.send.holder).range(1..=max));
+            ui.label("Passes");
+            let max_passes = if caps.is_some_and(|c| c.multi_pass) {
+                10
+            } else {
+                1
+            };
+            self.send.passes = self.send.passes.clamp(1, max_passes);
+            ui.add(egui::DragValue::new(&mut self.send.passes).range(1..=max_passes));
+        });
+        let _ = Checkbox::bool("Mirror on material", &mut self.send.mirror).show(ui);
+        if self.send.draw
+            || self
+                .send
+                .tool
+                .is_some_and(|t| t != stencilcraft_machine::ToolKind::AutoBlade)
+            || self.send.holder != 1
+        {
+            self.send.set_blade_depth = false;
+        }
+        if !self.send.draw
+            && self.send.holder == 1
+            && self
+                .send
+                .tool
+                .is_none_or(|t| t == stencilcraft_machine::ToolKind::AutoBlade)
+        {
+            let _ = Checkbox::bool("Set AutoBlade depth", &mut self.send.set_blade_depth).show(ui);
+        }
         if self.send.set_blade_depth {
             ui.horizontal(|ui| {
                 ui.label("AutoBlade depth");
@@ -3227,7 +3315,9 @@ impl StencilApp {
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         Divider::horizontal().show(ui);
         if !self.send.device.is_empty() && !self.send.bbox_only {
-            ui.add(Text::new("Load the mat and set blade depth on the cutter. Send cuts all visible paths with holder 1."));
+            ui.add(Text::new(
+                "Load the material and selected tool. The action applies to all visible paths.",
+            ));
             for (label, send) in [
                 ("Validate USB cut", false),
                 ("Send cut to selected USB cutter", true),
@@ -3241,6 +3331,11 @@ impl StencilApp {
                             force: u32::from(self.send.pressure_override),
                             speed: u32::from(self.send.speed_override),
                             depth: self.send.set_blade_depth.then_some(self.send.blade_depth),
+                            tool: self.send.tool,
+                            draw: self.send.draw,
+                            holder: self.send.holder,
+                            passes: self.send.passes,
+                            mirror: self.send.mirror,
                             send,
                         },
                         ui.ctx().clone(),
@@ -3251,6 +3346,9 @@ impl StencilApp {
 
         if ui.add(Button::new("Encode dry run")).clicked() {
             self.send.summary = Some(self.encode_send_summary());
+            if let Some(summary) = &mut self.send.summary {
+                summary.push("Legacy preview: action, tool, holder, passes and mirror are not reflected. Use Validate USB cut for the selected settings.".into());
+            }
         }
     }
 

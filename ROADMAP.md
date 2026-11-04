@@ -99,6 +99,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — M3: Make exposes cut/draw, tool, holder, passes and mirror
+  through validated hardware jobs. Per-layer actions, tool detection and Pop-out
+  remain missing; new controls have not been hardware tested.
+
 - 2026-11-03 — M3: Make offers matless sheet dimensions and optional AutoBlade
   depth; matless jobs validate against sheet bounds. Exact roller margins and
   Pop-out cutting remain unimplemented and hardware verification remains pending.

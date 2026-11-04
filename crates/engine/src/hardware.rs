@@ -17,6 +17,9 @@ pub enum HardwareCommand {
         mat: machine::Mat,
         force: u32,
         speed: u32,
+        /// Optional AutoBlade depth (0–10); omitted leaves blade adjustment to the user.
+        #[serde(default)]
+        depth: Option<u8>,
         #[serde(default)]
         send: bool,
     },
@@ -41,6 +44,7 @@ fn execute(
         mat,
         force,
         speed,
+        depth,
         send,
     } = command
     else {
@@ -76,12 +80,16 @@ fn execute(
     }
     let job = machine::CutJob {
         mat: *mat,
+        media_size_mm: (*mat == machine::Mat::None)
+            .then_some((doc.board.width_mm, doc.board.height_mm)),
         operations: vec![machine::Operation {
             holder: 1,
+            tool: depth.map(|_| machine::ToolKind::AutoBlade),
             paths,
             settings: machine::OpSettings {
                 force: Some(*force),
                 speed: Some(*speed),
+                depth: *depth,
                 ..Default::default()
             },
             ..Default::default()
@@ -154,6 +162,7 @@ mod tests {
             mat: machine::Mat::None,
             force: 10,
             speed: 5,
+            depth: None,
             send: true,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
@@ -173,6 +182,7 @@ mod tests {
             mat: machine::Mat::Cameo12x12,
             force: 10,
             speed: 5,
+            depth: None,
             send: false,
         };
         assert!(run(&engine.doc, &command).is_ok());
@@ -182,6 +192,44 @@ mod tests {
         assert!(run(&engine.doc, &command).is_err());
         Ok(())
     }
+    #[test]
+    fn matless_media_and_autoblade_depth_are_validated() -> Result<(), Box<dyn std::error::Error>> {
+        let mut engine = crate::Engine::new(stencilcraft_doc::Document::default());
+        engine.run(crate::Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 20.0,
+            height: 20.0,
+        })?;
+        engine.run(crate::Command::DocumentSetBoard {
+            width_mm: 25.0,
+            height_mm: 50.0,
+        })?;
+        let mut command = HardwareCommand::Cut {
+            model: "cameo-4".into(),
+            location: "unused".into(),
+            mat: machine::Mat::None,
+            force: 10,
+            speed: 5,
+            depth: None,
+            send: false,
+        };
+        assert!(run(&engine.doc, &command).is_err());
+        engine.run(crate::Command::DocumentSetBoard {
+            width_mm: 50.0,
+            height_mm: 50.0,
+        })?;
+        if let HardwareCommand::Cut { depth, .. } = &mut command {
+            *depth = Some(11);
+        }
+        assert!(run(&engine.doc, &command).is_err());
+        if let HardwareCommand::Cut { depth, .. } = &mut command {
+            *depth = Some(1);
+        }
+        assert!(run(&engine.doc, &command).is_ok());
+        Ok(())
+    }
+
     #[test]
     fn send_defaults_to_false() -> Result<(), Box<dyn std::error::Error>> {
         let command: HardwareCommand = serde_json::from_str(

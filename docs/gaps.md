@@ -180,7 +180,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     a stroked or open path into a closed cuttable outline. Missing: its menu/UI wiring and
     a general Expand. This is the usual way to make stencil lettering and line art
     cuttable.
-30. **Mirror on mat and load type**: Pop-out Cut is not implemented; [research and protocol gaps](pop-out-cut.md) track the required work. a per-job mirror (`cut --mirror`, MCP `mirror`)
+30. **Mirror on mat and load type**: Make supports matless sheet size validation and optional AutoBlade depth; roller margins, cut-border preview and Pop-out cutting remain missing. Pop-out Cut is not implemented; [research and protocol gaps](pop-out-cut.md) track the required work. a per-job mirror (`cut --mirror`, MCP `mirror`)
     flips about the media centre at job build time; the desktop Send panel doesn't offer it
     yet and no material preset turns it on. No choice between on-mat, without-mat (Smart Materials) and roll feed,
     no project copies, and no arranging pieces on a mat preview.

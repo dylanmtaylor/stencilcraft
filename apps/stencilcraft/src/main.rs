@@ -679,6 +679,8 @@ pub struct SendTab {
     pub pressure_override: u8,
     pub speed_override: u8,
     pub bbox_only: bool,
+    pub set_blade_depth: bool,
+    pub blade_depth: u8,
     pub summary: Option<Vec<String>>,
     pub devices: Vec<(String, String, String)>,
     pub device: String,
@@ -694,6 +696,8 @@ impl Default for SendTab {
             pressure_override: 10,
             speed_override: 5,
             bbox_only: false,
+            set_blade_depth: false,
+            blade_depth: 1,
             summary: None,
             devices: Vec::new(),
             device: String::new(),
@@ -3147,6 +3151,41 @@ impl StencilApp {
             }
         }
         let _ = mat_select.show(ui);
+        if self.mat == stencilcraft_machine::Mat::None {
+            ui.add(Text::new(
+                "Matless: backed materials only. Pop-out cardstock is not supported yet.",
+            ));
+            ui.add(Text::new("Material size (mm)"));
+            let (mut width, mut height) = (
+                self.engine.doc.board.width_mm,
+                self.engine.doc.board.height_mm,
+            );
+            ui.horizontal(|ui| {
+                ui.label("Width");
+                let changed_w = ui
+                    .add(
+                        egui::DragValue::new(&mut width)
+                            .range(1.0..=100000.0)
+                            .speed(1.0),
+                    )
+                    .changed();
+                ui.label("Length");
+                let changed_h = ui
+                    .add(
+                        egui::DragValue::new(&mut height)
+                            .range(1.0..=100000.0)
+                            .speed(1.0),
+                    )
+                    .changed();
+                if changed_w || changed_h {
+                    self.run_command(Command::DocumentSetBoard {
+                        width_mm: width,
+                        height_mm: height,
+                    });
+                }
+            });
+            ui.add(Text::new("Align the sheet with the left guide, adjust and lock the right roller so both grip the material, then load it. The page edge is shown on the canvas; roller margins are not yet shown."));
+        }
         ui.add(Text::new("Material"));
         let mut media_select = Select::new("send-material", "Material", &mut self.send.media_index);
         for (i, _) in stencilcraft_machine::MEDIA_PRESETS.iter().enumerate() {
@@ -3178,6 +3217,13 @@ impl StencilApp {
         if apply_edit(&mut speed, &mut self.speed_before, edit.event) {
             self.send.speed_override = speed as u8;
         }
+        let _ = Checkbox::bool("Set AutoBlade depth", &mut self.send.set_blade_depth).show(ui);
+        if self.send.set_blade_depth {
+            ui.horizontal(|ui| {
+                ui.label("AutoBlade depth");
+                ui.add(egui::DragValue::new(&mut self.send.blade_depth).range(0..=10));
+            });
+        }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         Divider::horizontal().show(ui);
         if !self.send.device.is_empty() && !self.send.bbox_only {
@@ -3194,6 +3240,7 @@ impl StencilApp {
                             mat: self.mat,
                             force: u32::from(self.send.pressure_override),
                             speed: u32::from(self.send.speed_override),
+                            depth: self.send.set_blade_depth.then_some(self.send.blade_depth),
                             send,
                         },
                         ui.ctx().clone(),

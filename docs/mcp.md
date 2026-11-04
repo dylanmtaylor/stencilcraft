@@ -482,6 +482,6 @@ JPEG at `dpi` (render capped at 64 million pixels).
 
 `hardware.devices` enumerates connected cutter-vendor USB descriptors.
 `hardware.cut` takes `model` (catalog id), `location` (from discovery), `mat`,
-`force`, `speed`, and `send` (defaults false). False validates visible document
+`force`, `speed`, optional AutoBlade `depth` (0–10), and `send` (defaults false). Matless jobs are bounded by the document board size. False validates visible document
 paths; **true physically submits the cut**. These commands do not change document
 history. USB requires the engine `usb` feature (enabled by the desktop).

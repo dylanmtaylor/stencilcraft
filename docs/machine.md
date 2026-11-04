@@ -288,7 +288,7 @@ your connected cutter, choose its supported mat and material settings, and use
 move hardware. Selection uses catalog USB identifiers; submission checks the model
 again before opening the transport. USB work runs outside the UI thread.
 
-Load material first and set blade depth on the machine. This initial workflow cuts
+Load material first. Optionally enable AutoBlade depth in Make; otherwise set blade depth on the machine. This initial workflow cuts
 visible, non-hidden paths with holder 1; it does not apply kerf compensation or
 per-layer operations. Bounding-box preview disables real submission. Submission
 reports bytes, not physical completion. Use the machine controls to stop motion.
@@ -322,3 +322,9 @@ communication. A quick return without a success message does not confirm a cut.
 Pop-out cutting of cardstock without a mat is not implemented. The **no mat**
 setting alone does not enable it. See [Pop-out cutting research](pop-out-cut.md)
 for the documented behavior and remaining protocol and validation work.
+
+For matless backed material, Make edits the document width and length in mm;
+the validated job must fit those dimensions. The page edge is shown on the canvas,
+but the reduced roller margins are not yet drawn or validated. Position and lock
+both rollers to grip the sheet. Pop-out cardstock remains unavailable. See
+[Silhouette material sizes](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000273294-installing-and-using-silhouette-studio).

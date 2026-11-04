@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Flatpak manifests grant Bluetooth sockets, network access and
+  BlueZ access for future Bluetooth transport; actual Bluetooth sending remains open.
+
 - 2026-11-03 — M3: Make exposes cut/draw, tool, holder, passes and mirror
   through validated hardware jobs. Per-layer actions, tool detection and Pop-out
   remain missing; new controls have not been hardware tested.

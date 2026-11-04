@@ -71,6 +71,9 @@ else
     --socket=wayland \
     --socket=fallback-x11 \
     --share=ipc \
+    --share=network \
+    --allow=bluetooth \
+    --system-talk-name=org.bluez \
     --device=dri \
     --device=usb \
     --filesystem=xdg-documents \

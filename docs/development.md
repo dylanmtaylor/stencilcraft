@@ -94,3 +94,11 @@ to an existing installation. This does not itself enable USB support in CLI buil
 See [Flatpak sandbox permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
 
 For Linux host cutter permissions, see [Linux cutter permissions](machine.md#linux-cutter-permissions).
+
+### Flatpak Bluetooth access
+
+The Flatpak manifests grant Bluetooth sockets, the host network namespace and
+access to `org.bluez` on the system bus for planned Linux Bluetooth connections.
+This grants broader network access; it does not implement Bluetooth transport.
+Rebuild and reinstall the Flatpak to apply these permissions. See [Flatpak sandbox
+permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).

@@ -689,6 +689,9 @@ pub struct SendTab {
     pub summary: Option<Vec<String>>,
     pub devices: Vec<(String, String, String)>,
     pub device: String,
+    pub connection_mode: u8,
+    pub bluetooth_address: String,
+    pub bluetooth_channel: u8,
     pub hardware_result: HardwareResult,
     pub busy: bool,
 }
@@ -711,6 +714,9 @@ impl Default for SendTab {
             summary: None,
             devices: Vec::new(),
             device: String::new(),
+            connection_mode: 0,
+            bluetooth_address: String::new(),
+            bluetooth_channel: 1,
             hardware_result: Default::default(),
             busy: false,
         }
@@ -3053,7 +3059,10 @@ impl StencilApp {
             self.send.busy = false;
             match result {
                 Ok(stencilcraft_engine::Effect::Hardware(value)) => {
-                    if let Some(devices) = value.as_array() {
+                    if let Some(devices) = value
+                        .as_array()
+                        .or_else(|| value.get("bluetooth_devices").and_then(|d| d.as_array()))
+                    {
                         self.send.devices = devices
                             .iter()
                             .filter_map(|d| {
@@ -3067,7 +3076,7 @@ impl StencilApp {
                         self.send.device.clear();
                         let unsupported: Vec<_> = devices.iter().filter(|d| d["model"].is_null()).map(|d| format!("{}: direct cutting unsupported; export SVG for the manufacturer software.", d["product"].as_str().unwrap_or("Unknown USB cutter"))).collect();
                         self.send.summary = Some(vec![format!(
-                            "{} recognized USB cutters. Select your cutter below.",
+                            "{} recognized cutters. Select your cutter below.",
                             self.send.devices.len()
                         )]);
                         if let Some(summary) = &mut self.send.summary {
@@ -3086,7 +3095,7 @@ impl StencilApp {
                                 format!(
                                     "Validation passed: {bytes} bytes prepared. Nothing has been sent."
                                 ),
-                                "When ready, select Send cut to selected USB cutter.".into(),
+                                "When ready, use the Send cut button.".into(),
                             ]
                         });
                     }
@@ -3119,26 +3128,65 @@ impl StencilApp {
                 response.scroll_to_me(Some(egui::Align::TOP));
             }
         }
-        if ui.add(Button::new("Find USB cutters")).clicked() {
-            self.start_hardware(
-                stencilcraft_engine::HardwareCommand::Devices,
-                ui.ctx().clone(),
-            );
-        }
-        let mut device_select =
-            Select::new("usb-device", "Connected cutter", &mut self.send.device);
-        for (location, _, name) in &self.send.devices {
-            device_select = device_select.option(location.clone(), format!("{name} ({location})"));
-        }
-        let _ = device_select.show(ui);
-        if let Some((_, model, _)) = self.send.devices.iter().find(|d| d.0 == self.send.device)
-            && let Some(model) = stencilcraft_machine::Model::by_id(model)
+        #[cfg(all(feature = "bluetooth", target_os = "linux"))]
         {
-            self.send.model = model;
+            let previous = self.send.connection_mode;
+            let _ = Select::new(
+                "cutter-connection",
+                "Connection",
+                &mut self.send.connection_mode,
+            )
+            .option(0, "USB")
+            .option(1, "Bluetooth LE")
+            .option(2, "Bluetooth Classic")
+            .show(ui);
+            if previous != self.send.connection_mode {
+                self.send.device.clear();
+                self.send.devices.clear();
+                self.send.summary = None;
+            }
+        }
+        if self.send.connection_mode == 2 {
+            ui.label("Pair the Classic Bluetooth device in system settings; enter its Classic address and RFCOMM channel.");
+            ui.horizontal(|ui| {
+                ui.label("Bluetooth address");
+                ui.text_edit_singleline(&mut self.send.bluetooth_address);
+            });
+            ui.horizontal(|ui| {
+                ui.label("RFCOMM channel");
+                ui.add(egui::DragValue::new(&mut self.send.bluetooth_channel).range(1..=30));
+            });
+        } else {
+            let (label, command) = if self.send.connection_mode == 1 {
+                (
+                    "Find paired Bluetooth cutters",
+                    stencilcraft_engine::HardwareCommand::BluetoothDevices,
+                )
+            } else {
+                (
+                    "Find USB cutters",
+                    stencilcraft_engine::HardwareCommand::Devices,
+                )
+            };
+            if ui.add(Button::new(label)).clicked() {
+                self.start_hardware(command, ui.ctx().clone());
+            }
+            let mut device_select =
+                Select::new("cutter-device", "Connected cutter", &mut self.send.device);
+            for (location, _, name) in &self.send.devices {
+                device_select =
+                    device_select.option(location.clone(), format!("{name} ({location})"));
+            }
+            let _ = device_select.show(ui);
+            if let Some((_, model, _)) = self.send.devices.iter().find(|d| d.0 == self.send.device)
+                && let Some(model) = stencilcraft_machine::Model::by_id(model)
+            {
+                self.send.model = model;
+            }
         }
 
         ui.add(Text::new("Model"));
-        if self.send.device.is_empty() {
+        if self.send.connection_mode == 2 || self.send.device.is_empty() {
             let mut model_select = Select::new("send-model", "Model", &mut self.send.model);
             for (model, label) in MODEL_CHOICES {
                 model_select = model_select.option(*model, *label);
@@ -3314,14 +3362,21 @@ impl StencilApp {
         }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
         Divider::horizontal().show(ui);
-        if !self.send.device.is_empty() && !self.send.bbox_only {
+        let selected_connection = if self.send.connection_mode == 2 {
+            !self.send.bluetooth_address.trim().is_empty()
+        } else {
+            !self.send.device.is_empty()
+        };
+        if selected_connection && !self.send.bbox_only {
             ui.add(Text::new(
                 "Load the material and selected tool. The action applies to all visible paths.",
             ));
-            for (label, send) in [
-                ("Validate USB cut", false),
-                ("Send cut to selected USB cutter", true),
-            ] {
+            let (validate_label, send_label) = if self.send.connection_mode != 0 {
+                ("Validate Bluetooth cut", "Send cut via Bluetooth")
+            } else {
+                ("Validate USB cut", "Send cut to selected USB cutter")
+            };
+            for (label, send) in [(validate_label, false), (send_label, true)] {
                 if ui.add(Button::new(label)).clicked() {
                     self.start_hardware(
                         stencilcraft_engine::HardwareCommand::Cut {
@@ -3336,6 +3391,17 @@ impl StencilApp {
                             holder: self.send.holder,
                             passes: self.send.passes,
                             mirror: self.send.mirror,
+                            bluetooth: (self.send.connection_mode != 0).then(|| {
+                                stencilcraft_engine::hardware::BluetoothTarget {
+                                    address: if self.send.connection_mode == 1 {
+                                        self.send.device.clone()
+                                    } else {
+                                        self.send.bluetooth_address.trim().to_owned()
+                                    },
+                                    channel: self.send.bluetooth_channel,
+                                    ble: self.send.connection_mode == 1,
+                                }
+                            }),
                             send,
                         },
                         ui.ctx().clone(),

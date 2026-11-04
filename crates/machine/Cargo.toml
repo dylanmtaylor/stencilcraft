@@ -18,7 +18,13 @@ serialport = { version = "4", optional = true, default-features = false }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 nusb = { version = "0.2.7", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = { version = "0.17.4", optional = true, features = ["rfcomm", "bluetoothd"] }
+tokio = { version = "1", optional = true, features = ["rt", "net", "time", "io-util"] }
+futures-util = { version = "0.3", optional = true }
+
 [features]
+bluetooth = ["dep:bluer", "dep:tokio", "dep:futures-util"]
 default = []
 # Real serial transports (USB CDC/ACM devices that expose a tty, BLE-over-RFCOMM
 # via an OS-paired /dev/rfcomm*, etc.). Everything else in this crate is

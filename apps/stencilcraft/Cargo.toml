@@ -36,8 +36,9 @@ stencilcraft-ui-egui = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 
 [features]
-default = ["usb"]
+default = ["usb", "bluetooth"]
 usb = ["stencilcraft-engine/usb"]
+bluetooth = ["stencilcraft-engine/bluetooth"]
 
 [lints]
 workspace = true

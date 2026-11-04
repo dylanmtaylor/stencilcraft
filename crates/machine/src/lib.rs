@@ -44,6 +44,8 @@ pub use protocol::{
 pub use registry::{BUILTIN_MACHINES_TOML, DeviceRegistry, USB_VENDORS, UsbIds};
 #[cfg(feature = "serial")]
 pub use transport::SerialTransport;
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+pub use transport::{BleTransport, BluetoothTransport, list_ble_devices};
 pub use transport::{
     FileTransport, MockTransport, RecordingTransport, TcpTransport, Transport, TransportSpec,
 };

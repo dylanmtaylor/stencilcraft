@@ -4,7 +4,7 @@
 explicitly, sends them. It covers the Silhouette/Graphtec family that speaks the
 ASCII GP-GL dialect over USB (vendor `0b4d`, plus `3844` for the CAMEO 5 Alpha
 line), professional Graphtec CE cutters, and any HP-GL or DMPL sign cutter (Roland,
-USCutter, Vinyl Express, …), and Grbl G-code lasers/knife CNCs. Cricut machines
+USCutter, Vinyl Express, …), and Grbl G-code lasers/knife CNCs. Linux also supports Bluetooth LE and experimental Bluetooth Classic RFCOMM. Cricut machines
 have registry slots but are export-only — see [Cricut](#cricut). The driver
 architecture (CutJob, Capabilities, Protocol, Transport, DeviceRegistry) is in
 [`machine-architecture.md`](machine-architecture.md).
@@ -217,7 +217,7 @@ run `--bbox` first to see where the job lands.
 | `MockTransport` | — | scripted replies, for tests/simulation |
 | `SerialTransport` | `serial` | tty/COM devices, OS-paired Bluetooth rfcomm ports |
 | `UsbTransport` | `usb` | `nusb` 0.2 (MIT OR Apache-2.0, pure Rust): bulk OUT/IN on interface 0, kernel driver detached, 5 s timeouts. Implemented, not yet exercised on real hardware by us. |
-| Bluetooth RFCOMM/BLE | — | **remaining.** No permissive, cross-platform Rust crate makes RFCOMM straightforward; BLE GATT (`btleplug`, MIT/Apache) would also need the undocumented GATT service layout. Workaround: pair in the OS and use the resulting serial port with `--device /dev/rfcomm0`. |
+| Bluetooth | LE and Classic RFCOMM | Linux BLE paired-device discovery and firmware/status queries plus blade-up movement verified on Cameo 4; cutting and Classic remain unverified. |
 
 CLI:
 
@@ -333,3 +333,35 @@ Make offers Cut and Draw actions, compatible known tools, holder, passes, mirror
 force, speed, and optional AutoBlade depth. These settings apply to all visible
 paths in the job; per-layer settings and Pop-out Cut are not available in Make.
 The chosen tool is not auto-detected. Hardware behavior remains unverified.
+
+## Bluetooth Classic on Linux (experimental)
+
+Pair the cutter's **Classic** Bluetooth device in Linux settings first. In Make,
+select Bluetooth Classic, enter its Classic address and the RFCOMM channel from
+its service record, and select its model. Validate the job before sending. The
+transport checks the firmware against the selected model before sending cut data.
+The address and channel are not discovered automatically; an OS connection to the
+BLE endpoint does not establish a Classic RFCOMM connection. Bluetooth Classic
+requires a desktop build with the `bluetooth` feature (on by default on Linux).
+It has not been validated on hardware. Automatic pairing and active discovery remain unsupported; paired BLE discovery is supported. A Bluetooth failure can occur after partial delivery;
+inspect the cutter before retrying.
+
+The Flatpak requires Bluetooth socket, network namespace and BlueZ permissions;
+see [development](development.md#flatpak-bluetooth-access).
+
+## Bluetooth LE on Linux
+
+Pair the cutter using the system Bluetooth settings, then in Make select
+**Bluetooth LE**, choose **Find paired Bluetooth cutters**, and select it.
+Validation checks the job without connecting; Send opens the selected device,
+checks firmware and readiness, then transmits. The OS connection may be opened
+by StencilCraft if the paired device is not already connected. Bluetooth is
+provided in Linux desktop builds by default; the Flatpak must be rebuilt and
+reinstalled with its Bluetooth permissions.
+
+On one Cameo 4 (firmware V1.20), firmware and ready status replies and a 5 mm
+blade-up move were verified over BLE. A Bluetooth cut, Print & Cut registration,
+and other models have not been verified. A write failure may occur after partial
+delivery; check the cutter before retrying. Protocol characteristic roles are
+from the public [Bluetooth discussion](https://github.com/fablabnbg/inkscape-silhouette/issues/88),
+and were verified with the non-cutting firmware query on this user's cutter.

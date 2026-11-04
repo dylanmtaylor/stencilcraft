@@ -143,9 +143,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     colour, assigning lines to tool holder 1 or 2 (or skipping them) on the cut preview,
     and advanced material settings (acceleration, track enhancing, kraft-blade loop
     corners).
-22. **Machine connection**: CLI supports serial/CDC and feature-gated USB bulk, device
+22. **Machine connection**: Linux BLE finds paired cutters and has verified Cameo 4 firmware/status queries and blade-up movement; cutting and Classic RFCOMM remain unverified. CLI supports serial/CDC and feature-gated USB bulk, device
     discovery and status queries; USB and registration-mark sessions need real hardware
-    validation. Desktop discovery and explicit USB submission are available; live status, Bluetooth, interactive mat preview,
+    validation. Desktop USB and paired BLE discovery and submission are available; live status, active Bluetooth scanning, interactive mat preview,
     multi-cutter output and batch jobs remain open. Cricut hardware control is out of
     scope without a public protocol.
 23. **Path editing tools**: shape creation has a live drag outline matching the committed geometry. missing freehand and smoothed freehand, arc, knife, eraser,

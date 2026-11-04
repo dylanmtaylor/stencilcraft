@@ -16,7 +16,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
 | UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
 | Agent surface | working | CLI `run`/MCP tools and legacy JSON-lines control; desktop `--control` drives the visible document |
-| Machine control | preliminary | 32-model catalog (Silhouette/Graphtec, Graphtec CE, generic GP-GL/HP-GL/DMPL), limit-checked encoders, `nusb` USB transport behind `usb` (untested on hardware), no Bluetooth (docs/machine.md) |
+| Machine control | preliminary | 32-model catalog (Silhouette/Graphtec, Graphtec CE, generic GP-GL/HP-GL/DMPL), limit-checked encoders, `nusb` USB and Linux Bluetooth LE/Classic; Cameo 4 BLE firmware/status and blade-up movement verified, cutting unverified (docs/machine.md) |
 | Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
 
@@ -47,7 +47,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 4. Bridge generation prototype (M3 early): algorithm notes in `docs/bridges.md`.
 5. G-code profiles: material/machine presets, separate first/last pass, Z knife mode.
 6. Machine control (docs/machine.md): hardware validation of the USB transport and the
-   registration-mark session, Bluetooth RFCOMM/BLE, mat-free path sorting for
+   registration-mark session, Bluetooth cutting and Classic validation, mat-free path sorting for
    knife-pressure relief.
 
 ## Reference-app feature inventory
@@ -98,6 +98,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
   is not implemented.
 
 ## Progress log
+
+- 2026-11-03 — M3: Linux Bluetooth LE discovery and transport plus experimental
+  Bluetooth Classic. Measured on a Cameo 4: BLE firmware/status queries and a
+  5 mm blade-up move; a Bluetooth cut and Classic transport remain unverified.
 
 - 2026-11-03 — Flatpak manifests grant Bluetooth sockets, network access and
   BlueZ access for future Bluetooth transport; actual Bluetooth sending remains open.

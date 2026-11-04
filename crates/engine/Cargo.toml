@@ -26,6 +26,7 @@ vectorcraft-text = { workspace = true }
 
 [features]
 usb = ["stencilcraft-machine/usb"]
+bluetooth = ["stencilcraft-machine/bluetooth"]
 
 [dev-dependencies]
 image = { workspace = true }

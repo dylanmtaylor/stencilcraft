@@ -9,6 +9,9 @@ pub enum HardwareCommand {
     /// Enumerate USB descriptors without opening or moving a cutter.
     #[serde(rename = "hardware.devices")]
     Devices,
+    /// Discover paired Bluetooth LE cutters from the system Bluetooth service.
+    #[serde(rename = "hardware.bluetooth_devices")]
+    BluetoothDevices,
     /// Validate the current visible document; only send when `send` is true.
     #[serde(rename = "hardware.cut")]
     Cut {
@@ -34,9 +37,23 @@ pub enum HardwareCommand {
         /// Mirror about the material width.
         #[serde(default)]
         mirror: bool,
+        /// Optional Linux Bluetooth Classic RFCOMM endpoint, paired outside the app.
+        #[serde(default)]
+        bluetooth: Option<BluetoothTarget>,
         #[serde(default)]
         send: bool,
     },
+}
+
+/// A Bluetooth Classic endpoint. The RFCOMM channel comes from the device's service record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BluetoothTarget {
+    pub address: String,
+    #[serde(default = "one")]
+    pub channel: u8,
+    /// Use Bluetooth LE instead of Classic RFCOMM.
+    #[serde(default)]
+    pub ble: bool,
 }
 
 fn one() -> u8 {
@@ -56,6 +73,9 @@ fn execute(
     doc: &stencilcraft_doc::Document,
     command: &HardwareCommand,
 ) -> Result<serde_json::Value, machine::MachineError> {
+    if matches!(command, HardwareCommand::BluetoothDevices) {
+        return bluetooth_devices();
+    }
     let HardwareCommand::Cut {
         model,
         location,
@@ -68,6 +88,7 @@ fn execute(
         holder,
         passes,
         mirror,
+        bluetooth,
         send,
     } = command
     else {
@@ -148,7 +169,11 @@ fn execute(
             serde_json::json!({"model":model,"bytes":program.to_stream().len(),"sent":false}),
         );
     }
-    send_usb(caps, location, &job)
+    if let Some(target) = bluetooth {
+        send_bluetooth(caps, target, &job)
+    } else {
+        send_usb(caps, location, &job)
+    }
 }
 
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
@@ -197,6 +222,62 @@ fn send_usb(
     devices()
 }
 
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+fn bluetooth_devices() -> Result<serde_json::Value, machine::MachineError> {
+    let devices = machine::list_ble_devices()?;
+    Ok(
+        serde_json::json!({"bluetooth_devices": devices.into_iter().map(|(address, model, name)| serde_json::json!({"location":address,"model":model,"name":name})).collect::<Vec<_>>()}),
+    )
+}
+#[cfg(not(all(feature = "bluetooth", target_os = "linux")))]
+fn bluetooth_devices() -> Result<serde_json::Value, machine::MachineError> {
+    Err(machine::MachineError::Config(
+        "Bluetooth LE requires a Linux build with Bluetooth enabled".into(),
+    ))
+}
+
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+fn send_bluetooth(
+    caps: &machine::Capabilities,
+    target: &BluetoothTarget,
+    job: &machine::CutJob,
+) -> Result<serde_json::Value, machine::MachineError> {
+    if caps.bluetooth != Some(true) {
+        return Err(machine::MachineError::Config(
+            "Bluetooth support is not documented for this model".into(),
+        ));
+    }
+    let mut transport: Box<dyn machine::Transport> = if target.ble {
+        Box::new(machine::BleTransport::open(&target.address)?)
+    } else {
+        Box::new(machine::BluetoothTransport::open(
+            &target.address,
+            target.channel,
+        )?)
+    };
+    transport.write(machine::ESC_INIT.as_bytes())?;
+    let version = machine::query_version(transport.as_mut())?;
+    if machine::DeviceRegistry::builtin().by_firmware(&version) != Some(caps) {
+        return Err(machine::MachineError::Protocol(format!(
+            "Bluetooth firmware {version:?} does not identify the selected model {}",
+            caps.id
+        )));
+    }
+    let mut driver = machine::MachineDriver::new(caps.clone(), transport);
+    let report = driver.send(job, &mut machine::NoHooks)?;
+    Ok(serde_json::json!({"sent":true,"bytes":report.bytes,"firmware":report.version}))
+}
+#[cfg(not(all(feature = "bluetooth", target_os = "linux")))]
+fn send_bluetooth(
+    _: &machine::Capabilities,
+    _: &BluetoothTarget,
+    _: &machine::CutJob,
+) -> Result<serde_json::Value, machine::MachineError> {
+    Err(machine::MachineError::Config(
+        "Bluetooth requires a Linux build with Bluetooth enabled".into(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +295,7 @@ mod tests {
             holder: 1,
             passes: 1,
             mirror: false,
+            bluetooth: None,
             send: true,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
@@ -239,6 +321,7 @@ mod tests {
             holder: 1,
             passes: 1,
             mirror: false,
+            bluetooth: None,
             send: false,
         };
         assert!(run(&engine.doc, &command).is_ok());
@@ -273,6 +356,7 @@ mod tests {
             holder: 1,
             passes: 1,
             mirror: false,
+            bluetooth: None,
             send: false,
         };
         assert!(run(&engine.doc, &command).is_err());
@@ -312,6 +396,7 @@ mod tests {
             holder: 1,
             passes: 1,
             mirror: false,
+            bluetooth: None,
             send: false,
         };
         let first = execute(&engine.doc, &command)?;
@@ -329,6 +414,30 @@ mod tests {
             *passes = 11;
         }
         assert!(execute(&engine.doc, &command).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn bluetooth_command_is_serializable_without_sending() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let command: HardwareCommand = serde_json::from_str(
+            r#"{"command":"hardware.cut","params":{"model":"cameo-4","location":"","mat":"none","force":10,"speed":5,"bluetooth":{"address":"00:11:22:33:44:55","ble":true}}}"#,
+        )?;
+        assert!(matches!(
+            command,
+            HardwareCommand::Cut {
+                send: false,
+                bluetooth: Some(BluetoothTarget {
+                    channel: 1,
+                    ble: true,
+                    ..
+                }),
+                ..
+            }
+        ));
+        let discover: HardwareCommand =
+            serde_json::from_str(r#"{"command":"hardware.bluetooth_devices"}"#)?;
+        assert!(matches!(discover, HardwareCommand::BluetoothDevices));
         Ok(())
     }
 

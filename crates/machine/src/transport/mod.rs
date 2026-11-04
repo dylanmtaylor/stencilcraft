@@ -14,17 +14,35 @@ use std::time::Duration;
 
 use crate::MachineError;
 
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+mod ble;
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+mod bluetooth;
 mod net;
 #[cfg(feature = "serial")]
 mod serial;
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 mod usb;
 
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+pub use ble::{BleTransport, list_ble_devices};
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+pub use bluetooth::BluetoothTransport;
 pub use net::TcpTransport;
 #[cfg(feature = "serial")]
 pub use serial::SerialTransport;
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use usb::{UsbTransport, list_usb_devices};
+
+#[cfg(all(feature = "bluetooth", target_os = "linux"))]
+fn ensure_blocking_context() -> Result<(), crate::MachineError> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return Err(crate::MachineError::Transport(
+            "Bluetooth transport must run outside an async runtime".into(),
+        ));
+    }
+    Ok(())
+}
 
 /// Default read timeout for interactive transports.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);

@@ -71,7 +71,11 @@ recomputes and round-trips so a kerf build is always present in tests).
 
 ## Platforms
 
-- **macOS/Windows/Linux**: plain `cargo`, no system dependencies.
+- **macOS/Windows**: plain `cargo`, no system dependencies.
+- **Linux**: default desktop builds include Bluetooth and need `pkg-config` and
+  the D-Bus development headers (`libdbus-1-dev` on Debian/Ubuntu). To build the
+  desktop without Bluetooth, use `cargo build -p stencilcraft --no-default-features
+  --features usb`.
 - **wasm**: planned; until the wasm build exists, `cargo xtask ci` only checks that every
   dependency stays wasm-buildable on paper (no platform-conditional non-wasm deps added
   to crates the web app will share). Web shell lands in M5.

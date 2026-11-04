@@ -23,8 +23,23 @@ tests. Shipped code returns `Result`/`Option` — see AGENTS.md › "Never crash
 
 ## Toolchain
 
-Rust 1.95 or later (edition 2024). No nightly, no external tools: everything the CI
-checks is a plain `cargo` invocation that `xtask` orchestrates.
+Rust 1.95 or later (edition 2024), installed through rustup. On Ubuntu, the distro's
+`rustc`/`cargo` packages can be older than this minimum; make sure `~/.cargo/bin` is
+before `/usr/bin` in `PATH`, so `cargo` and `rustc` use rustup's selected toolchain.
+For example, install and select the current stable toolchain with `rustup toolchain
+install stable` and `rustup default stable`.
+
+Linux desktop builds need the system compiler, `pkg-config`, and D-Bus development
+headers. On Ubuntu, install them with:
+
+```sh
+sudo apt install build-essential pkg-config libdbus-1-dev
+```
+
+Then build from the repository root with `cargo build --release -p stencilcraft`.
+For a user Flatpak build and install, use `packaging/linux/install-flatpak.sh`.
+No `cargo install` step is used: `craft-ui` and the other craft-libs are fetched by
+Cargo from the revisions pinned in `Cargo.toml` and `Cargo.lock`.
 
 ## Documents
 

@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-03 — Ubuntu build guide now calls out the Rust 1.95 minimum, using rustup
+  ahead of older distro toolchains, and the D-Bus headers needed for the Bluetooth build.
+
 - 2026-11-03 — M3: Linux Bluetooth LE discovery and transport plus experimental
   Bluetooth Classic. Measured on a Cameo 4: BLE firmware/status queries and a
   5 mm blade-up move; a Bluetooth cut and Classic transport remain unverified.

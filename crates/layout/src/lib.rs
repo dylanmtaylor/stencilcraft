@@ -8,7 +8,7 @@
 //!   by colour, by layer, shortest travel), line-segment overcut, test cut, weed box and lines,
 //!   origin and feed direction. The machine layer turns these into device commands.
 //! - [`print_sheets`]: Print Then Cut pages with registration marks and bleed, exported with
-//!   [`sheets_to_pdf`] or [`sheet_to_png`].
+//!   [`sheet_to_png`] (or as PDF by `stencilcraft-pdf`).
 //!
 //! Everything here is a pure function of the document and its options; bad input is a
 //! [`LayoutError`], never a panic. Coordinates on a mat are millimetres with the origin at the
@@ -27,7 +27,6 @@ pub use machines::{MACHINES, MachineProfile, MarkStyle, MatSize, Roll, machine};
 pub use mats::{MatKey, MatLayout, MatOptions, MatPlan, PageOptions, Placement, layout_mats};
 pub use print::{
     PrintItem, PrintOptions, PrintSheet, art_area, print_sheets, registration_marks, sheet_to_png,
-    sheets_to_pdf,
 };
 
 use kurbo::{BezPath, PathEl, Point};

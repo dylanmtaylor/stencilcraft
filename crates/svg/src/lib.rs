@@ -5,8 +5,7 @@
 //! Import supports common SVG shapes, groups, transforms, production styles, and
 //! local `<use>` references; see `docs/gaps.md` for remaining gaps.
 
-use std::fmt::Write as _;
-
+use craft_svg_paths::write::{SvgWriter, num, path_data};
 use kurbo::BezPath;
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::{Polyline, path_to_polylines};
@@ -45,37 +44,62 @@ fn view_bounds(doc: &Document) -> kurbo::Rect {
 /// Serialise a document to SVG, millimetres as user units, one `<g>` per layer
 /// (hidden layers included but marked invisible).
 pub fn export(doc: &Document) -> Result<String, SvgError> {
+    let mut svg = SvgWriter::new();
+    write_artwork(&mut svg, doc);
+    svg.line(0);
+    Ok(svg.finish())
+}
+
+/// A length or coordinate in millimetres, three decimals.
+fn mm(value: f64) -> craft_svg_paths::write::Num {
+    num(value, 3)
+}
+
+/// `<path class="…" d="…"/>` for one shape.
+fn write_shape(svg: &mut SvgWriter, shape: &stencilcraft_doc::Shape) {
+    svg.tag("path")
+        .attr("class", class_for(shape.style))
+        .attr("d", path_data(&shape.cut_path()))
+        .empty();
+}
+
+/// The document's `<svg>` element, without the XML declaration.
+fn write_artwork(svg: &mut SvgWriter, doc: &Document) {
     let board = view_bounds(doc);
-    let mut svg = String::with_capacity(1024);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" ");
-    let _ = write!(
-        svg,
-        "width=\"{:.3}mm\" height=\"{:.3}mm\" viewBox=\"{:.3} {:.3} {:.3} {:.3}\"",
-        board.width(),
-        board.height(),
-        board.x0,
-        board.y0,
-        board.width(),
-        board.height()
-    );
-    svg.push_str(">\n");
-    let title = svg_title(doc);
-    svg.push_str(&title);
+    let (w, h) = (mm(board.width()), mm(board.height()));
+    svg.root()
+        .attr("version", "1.1")
+        .attr("width", format_args!("{w}mm"))
+        .attr("height", format_args!("{h}mm"))
+        .attr(
+            "viewBox",
+            format_args!("{} {} {w} {h}", mm(board.x0), mm(board.y0)),
+        )
+        .open();
+    svg.line(0);
+    svg.tag("title").text(&format!(
+        "stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm",
+        stencilcraft_doc::FORMAT_NAME,
+        doc.layers.len(),
+        doc.shape_count(),
+        doc.kerf.width_mm
+    ));
     let parents = doc.group_parent_map();
     // Template (guide) layers are canvas-only: never exported.
     for layer in doc.layers.iter().filter(|layer| !layer.template) {
         let vis = if layer.visible { "visible" } else { "hidden" };
-        let _ = writeln!(
-            svg,
-            "  <g class=\"{}\" data-kind=\"{}\" style=\"display:{}\">",
-            class_for(layer.kind),
-            match layer.kind {
-                CutStyle::Cut => "cut",
-                CutStyle::Engrave => "engrave",
-            },
-            vis
-        );
+        svg.line(1);
+        svg.tag("g")
+            .attr("class", class_for(layer.kind))
+            .attr(
+                "data-kind",
+                match layer.kind {
+                    CutStyle::Cut => "cut",
+                    CutStyle::Engrave => "engrave",
+                },
+            )
+            .attr("style", format_args!("display:{vis}"))
+            .open();
         // Groups nest inside the layer as `<g class="group" data-group="id">`; a group
         // whose shapes are not adjacent in stacking order appears more than once.
         let mut open: Vec<u64> = Vec::new();
@@ -86,28 +110,30 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
             );
             let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
             for _ in common..open.len() {
-                svg.push_str("    </g>\n");
+                svg.line(2);
+                svg.close();
             }
             open.truncate(common);
             for id in chain.iter().skip(common) {
-                let _ = writeln!(svg, "    <g class=\"group\" data-group=\"{id}\">");
+                svg.line(2);
+                svg.tag("g")
+                    .attr("class", "group")
+                    .attr("data-group", id)
+                    .open();
                 open.push(*id);
             }
-            let d = path_to_svg_d(&shape.cut_path())?;
-            let _ = writeln!(
-                svg,
-                "    <path class=\"{}\" d=\"{}\"/>",
-                class_for(shape.style),
-                d
-            );
+            svg.line(2);
+            write_shape(svg, shape);
         }
         for _ in &open {
-            svg.push_str("    </g>\n");
+            svg.line(2);
+            svg.close();
         }
-        svg.push_str("  </g>\n");
+        svg.line(1);
+        svg.close();
     }
-    svg.push_str("</svg>\n");
-    Ok(svg)
+    svg.line(0);
+    svg.close();
 }
 
 /// How to lay tiled sheets out on one preview page.
@@ -188,29 +214,30 @@ pub fn export_tile_preview(
         )));
     }
 
-    let mut svg = String::with_capacity(2048 + pieces.len() * 512);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let _ = writeln!(
-        svg,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_w:.3}mm\" height=\"{page_h:.3}mm\" viewBox=\"0 0 {page_w:.3} {page_h:.3}\">"
-    );
-    let _ = writeln!(
-        svg,
-        "  <title>StencilCraft tiling preview: {} sheets, {} × {} cells</title>",
+    let mut svg = SvgWriter::new();
+    let (w, h) = (mm(page_w), mm(page_h));
+    svg.root()
+        .attr("version", "1.1")
+        .attr("width", format_args!("{w}mm"))
+        .attr("height", format_args!("{h}mm"))
+        .attr("viewBox", format_args!("0 0 {w} {h}"))
+        .open();
+    svg.line(1);
+    svg.tag("title").text(&format!(
+        "StencilCraft tiling preview: {} sheets, {} × {} cells",
         pieces.len(),
         columns,
         rows
-    );
+    ));
     // A preview shows outlines, not filled artwork: fill would hide the very detail
     // the preview exists to show. Colours follow cutting-software convention.
-    svg.push_str("  <style>\n");
-    svg.push_str("    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n");
-    svg.push_str("    .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n");
-    svg.push_str("    .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n");
-    svg.push_str(
-        "    .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }\n",
+    svg.line(1);
+    svg.tag("style").text(
+        "\n    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n    \
+         .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n    \
+         .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n    \
+         .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }\n  ",
     );
-    svg.push_str("  </style>\n");
     for (index, piece) in pieces.iter().enumerate() {
         let col = index % columns;
         let row = index / columns;
@@ -219,52 +246,67 @@ pub fn export_tile_preview(
         // the bottom of the board, so it belongs at the bottom of the page.
         let y = gap + (rows - 1 - row) as f64 * (cell_h + gap);
         let cell_height = piece.board.height_mm * options.scale;
-        let _ = writeln!(
-            svg,
-            "  <g class=\"sheet\" data-sheet=\"{}\" data-size=\"{:.1}x{:.1}\">",
-            index, piece.board.width_mm, piece.board.height_mm
-        );
-        let _ = writeln!(
-            svg,
-            "    <text class=\"preview-label\" x=\"{x:.3}\" y=\"{:.3}\">sheet {} of {} · {:.0}×{:.0} mm</text>",
-            y - 1.6,
-            index + 1,
-            pieces.len(),
-            piece.board.width_mm,
-            piece.board.height_mm
-        );
-        let _ = writeln!(
-            svg,
-            "    <rect class=\"preview-frame\" x=\"{x:.3}\" y=\"{y:.3}\" width=\"{:.3}\" height=\"{cell_height:.3}\"/>",
-            piece.board.width_mm * options.scale
-        );
+        let (board_w, board_h) = (piece.board.width_mm, piece.board.height_mm);
+        svg.line(1);
+        svg.tag("g")
+            .attr("class", "sheet")
+            .attr("data-sheet", index)
+            .attr(
+                "data-size",
+                format_args!("{}x{}", num(board_w, 1), num(board_h, 1)),
+            )
+            .open();
+        svg.line(2);
+        svg.tag("text")
+            .attr("class", "preview-label")
+            .attr("x", mm(x))
+            .attr("y", mm(y - 1.6))
+            .text(&format!(
+                "sheet {} of {} · {board_w:.0}×{board_h:.0} mm",
+                index + 1,
+                pieces.len(),
+            ));
+        svg.line(2);
+        svg.tag("rect")
+            .attr("class", "preview-frame")
+            .attr("x", mm(x))
+            .attr("y", mm(y))
+            .attr("width", mm(board_w * options.scale))
+            .attr("height", mm(cell_height))
+            .empty();
         // Flip the sheet's y-up millimetres into the page's y-down space, so each cell
         // reads the same way the sheet does on the mat.
-        let _ = writeln!(
-            svg,
-            "    <g transform=\"translate({x:.3} {:.3}) scale({:.4} {:.4})\">",
-            y + cell_height,
-            options.scale,
-            -options.scale
-        );
+        svg.line(2);
+        svg.tag("g")
+            .attr(
+                "transform",
+                format_args!(
+                    "translate({} {}) scale({} {})",
+                    mm(x),
+                    mm(y + cell_height),
+                    num(options.scale, 4),
+                    num(-options.scale, 4)
+                ),
+            )
+            .open();
         for layer in &piece.layers {
             if !layer.is_output() {
                 continue;
             }
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                let d = path_to_svg_d(&shape.cut_path())?;
-                let _ = writeln!(
-                    svg,
-                    "      <path class=\"{}\" d=\"{}\"/>",
-                    class_for(shape.style),
-                    d
-                );
+                svg.line(3);
+                write_shape(&mut svg, shape);
             }
         }
-        svg.push_str("    </g>\n  </g>\n");
+        svg.line(2);
+        svg.close();
+        svg.line(1);
+        svg.close();
     }
-    svg.push_str("</svg>\n");
-    Ok(svg)
+    svg.line(0);
+    svg.close();
+    svg.line(0);
+    Ok(svg.finish())
 }
 
 /// Export a physical-size Print & Cut SVG sheet with three high-contrast
@@ -275,7 +317,6 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     const MARK_SIZE_MM: f64 = 6.0;
 
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
-    let artwork = export(doc)?;
     let page_width = doc.board.width_mm + 2.0 * PAGE_MARGIN_MM;
     let page_height = doc.board.height_mm + 2.0 * PAGE_MARGIN_MM;
     if !page_width.is_finite() || !page_height.is_finite() {
@@ -284,83 +325,86 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
         ));
     }
 
-    let mut svg = String::with_capacity(artwork.len() + 1024);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let _ = writeln!(
-        svg,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_width:.3}mm\" height=\"{page_height:.3}mm\" viewBox=\"0 0 {page_width:.3} {page_height:.3}\">"
-    );
-    svg.push_str("  <title>StencilCraft print-and-cut alignment sheet</title>\n");
-    let _ = writeln!(
-        svg,
-        "  <g id=\"registration-marks\" fill=\"#000000\" aria-label=\"Registration marks: top-left square, top-right and bottom-left corners\">"
-    );
-    let _ = writeln!(
-        svg,
-        "    <rect x=\"0\" y=\"0\" width=\"{MARK_SIZE_MM:.3}\" height=\"{MARK_SIZE_MM:.3}\"/>"
-    );
-    let _ = writeln!(
-        svg,
-        "    <path d=\"M {:.3} 0 H {:.3} V {:.3} H {:.3} V {:.3} H {:.3} Z\"/>",
-        page_width,
-        page_width - MARK_SIZE_MM,
-        MARK_SIZE_MM,
-        page_width - 1.5,
-        1.5,
-        page_width - MARK_SIZE_MM,
-    );
-    let _ = writeln!(
-        svg,
-        "    <path d=\"M 0 {:.3} H {:.3} V {:.3} H {:.3} V {:.3} H 0 Z\"/>",
-        page_height,
-        MARK_SIZE_MM,
-        page_height - MARK_SIZE_MM,
-        1.5,
-        page_height - 1.5,
-    );
-    svg.push_str("  </g>\n");
-    let _ = writeln!(
-        svg,
-        "  <svg x=\"{PAGE_MARGIN_MM:.3}\" y=\"{PAGE_MARGIN_MM:.3}\" width=\"{:.3}mm\" height=\"{:.3}mm\" viewBox=\"0 0 {:.3} {:.3}\" overflow=\"hidden\">",
-        doc.board.width_mm, doc.board.height_mm, doc.board.width_mm, doc.board.height_mm,
-    );
-    if let Some(root_start) = artwork.find('>')
-        && let Some(root_end) = artwork.rfind("</svg>")
-        && root_start < root_end
-    {
-        svg.push_str(&artwork[root_start + 1..root_end]);
-    } else {
-        return Err(SvgError::Write(
-            "print-cut: could not embed SVG artwork".to_string(),
-        ));
+    let mut svg = SvgWriter::new();
+    let (w, h) = (mm(page_width), mm(page_height));
+    svg.root()
+        .attr("version", "1.1")
+        .attr("width", format_args!("{w}mm"))
+        .attr("height", format_args!("{h}mm"))
+        .attr("viewBox", format_args!("0 0 {w} {h}"))
+        .open();
+    svg.line(1);
+    svg.tag("title")
+        .text("StencilCraft print-and-cut alignment sheet");
+    svg.line(1);
+    svg.tag("g")
+        .attr("id", "registration-marks")
+        .attr("fill", "#000000")
+        .attr(
+            "aria-label",
+            "Registration marks: top-left square, top-right and bottom-left corners",
+        )
+        .open();
+    // A square establishes the origin. Asymmetric corner marks preserve page
+    // orientation and provide two additional, widely spaced alignment points.
+    svg.line(2);
+    svg.tag("rect")
+        .attr("x", "0")
+        .attr("y", "0")
+        .attr("width", mm(MARK_SIZE_MM))
+        .attr("height", mm(MARK_SIZE_MM))
+        .empty();
+    let far = MARK_SIZE_MM;
+    for corner in [
+        [
+            (page_width, 0.0),
+            (page_width - far, 0.0),
+            (page_width - far, far),
+            (page_width - 1.5, far),
+            (page_width - 1.5, 1.5),
+            (page_width - far, 1.5),
+        ],
+        [
+            (0.0, page_height),
+            (far, page_height),
+            (far, page_height - far),
+            (1.5, page_height - far),
+            (1.5, page_height - 1.5),
+            (0.0, page_height - 1.5),
+        ],
+    ] {
+        let mut mark = BezPath::new();
+        for (i, point) in corner.into_iter().enumerate() {
+            if i == 0 {
+                mark.move_to(point);
+            } else {
+                mark.line_to(point);
+            }
+        }
+        mark.close_path();
+        svg.line(2);
+        svg.tag("path").attr("d", path_data(&mark)).empty();
     }
-    svg.push_str("  </svg>\n</svg>\n");
-    Ok(svg)
-}
-
-fn svg_title(doc: &Document) -> String {
-    let mut s = String::new();
-    let _ = writeln!(
-        s,
-        "<title>stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm</title>",
-        stencilcraft_doc::FORMAT_NAME,
-        doc.layers.len(),
-        doc.shape_count(),
-        doc.kerf.width_mm
-    );
-    s
-}
-
-/// kurbo's SVG grammar on a BezPath escapes attribute-quoting issues: no quotes
-/// appear in path data. Guarded anyway against a future kurbo grammar change.
-fn path_to_svg_d(path: &BezPath) -> Result<String, SvgError> {
-    let s = path.to_svg();
-    if s.contains('"') || s.contains('<') {
-        return Err(SvgError::Write(format!(
-            "path data has markup characters: {s}"
-        )));
-    }
-    Ok(s)
+    svg.line(1);
+    svg.close();
+    let (board_w, board_h) = (mm(doc.board.width_mm), mm(doc.board.height_mm));
+    svg.line(1);
+    svg.tag("svg")
+        .attr("x", mm(PAGE_MARGIN_MM))
+        .attr("y", mm(PAGE_MARGIN_MM))
+        .attr("width", format_args!("{board_w}mm"))
+        .attr("height", format_args!("{board_h}mm"))
+        .attr("viewBox", format_args!("0 0 {board_w} {board_h}"))
+        .attr("overflow", "hidden")
+        .open();
+    svg.line(0);
+    write_artwork(&mut svg, doc);
+    svg.line(1);
+    svg.close();
+    svg.line(0);
+    svg.close();
+    svg.line(0);
+    Ok(svg.finish())
 }
 
 /// The cut or engrave tag an SVG element carries, as `craft-svg-paths` follows it down the tree.
@@ -488,7 +532,7 @@ pub fn import_with_warnings(svg: &str, path_name: &str) -> Result<SvgImport, Svg
         }
         let kind = shape.kind.0;
         let color = shape.stroke.and_then(|paint| {
-            match stencilcraft_color::parse_color(&paint) {
+            match craft_svg_paths::color::parse_color(&paint) {
                 Ok(color) => Some(color.to_css()),
                 Err(_) => {
                     craft_svg_paths::push_warning(

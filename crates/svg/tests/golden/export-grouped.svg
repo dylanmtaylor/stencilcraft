@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="112.500mm" height="150.000mm" viewBox="-12.500 0.000 112.500 150.000">
+<title>stencilcraft stencilcraft: 4 layers, 8 shapes, kerf 0.000 mm</title>
+  <g class="stencilcraft-cut" data-kind="cut" style="display:visible">
+    <g class="group" data-group="1">
+    <path class="stencilcraft-cut" d="M10,10 L30,10 L30,30 L10,30 Z"/>
+    <g class="group" data-group="2">
+    <path class="stencilcraft-cut" d="M5,5 C10.5,0.125 20,0.3333333333333333 25,5 Q30,12 5,5 Z"/>
+    </g>
+    </g>
+    <path class="stencilcraft-cut" d="M40,40 L45,40 L45,45 L40,45 Z"/>
+    <g class="group" data-group="1">
+    <path class="stencilcraft-engrave" d="M-12.5,60 L-7.5,60 L-7.5,65 L-12.5,65 Z"/>
+    </g>
+  </g>
+  <g class="stencilcraft-engrave" data-kind="engrave" style="display:visible">
+    <path class="stencilcraft-engrave" d="M5,90 L95,90"/>
+  </g>
+  <g class="stencilcraft-cut" data-kind="cut" style="display:hidden">
+    <path class="stencilcraft-cut" d="M1,1 L3,1 L3,3 L1,3 Z"/>
+  </g>
+</svg>

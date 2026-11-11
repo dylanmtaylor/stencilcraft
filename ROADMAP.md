@@ -99,6 +99,13 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-11 — M3: no file format is written or parsed by this workspace's own code any more.
+  SVG export (document, tile preview, print-and-cut sheet, project thumbnails) goes through
+  `craft_svg_paths::write` and CSS colours through `craft_svg_paths::color`; `crates/color`
+  is gone, and the Print Then Cut PDF is written by `craft-pdf` (`stencilcraft_pdf::
+  export_print_sheets`, replacing a hand-written PDF in `crates/layout`). Document and
+  tile-preview SVG are byte-identical (new golden files, `crates/svg/tests/golden/`). Fixed:
+  the print-and-cut sheet was not well-formed XML (an `<svg>` element was never closed).
 - 2026-11-11 — M3: PDF export is written through craft-libs' shared PDF writer (`craft-pdf`,
   over Krilla) instead of a hand-written one, and Silhouette Studio files are parsed by
   craft-libs' `craft-silhouette-studio`; `crates/pdf` and `crates/studio` are now adapters.

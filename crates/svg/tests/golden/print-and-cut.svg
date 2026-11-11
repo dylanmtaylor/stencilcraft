@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="124.000mm" height="174.000mm" viewBox="0 0 124.000 174.000">
+  <title>StencilCraft print-and-cut alignment sheet</title>
+  <g id="registration-marks" fill="#000000" aria-label="Registration marks: top-left square, top-right and bottom-left corners">
+    <rect x="0" y="0" width="6.000" height="6.000"/>
+    <path d="M124,0 L118,0 L118,6 L122.5,6 L122.5,1.5 L118,1.5 Z"/>
+    <path d="M0,174 L6,174 L6,168 L1.5,168 L1.5,172.5 L0,172.5 Z"/>
+  </g>
+  <svg x="12.000" y="12.000" width="100.000mm" height="150.000mm" viewBox="0 0 100.000 150.000" overflow="hidden">
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="100.000mm" height="150.000mm" viewBox="0.000 0.000 100.000 150.000">
+<title>stencilcraft stencilcraft: 2 layers, 3 shapes, kerf 0.000 mm</title>
+  <g class="stencilcraft-cut" data-kind="cut" style="display:visible">
+    <path class="stencilcraft-cut" d="M10,10 L60,10 L60,60 L10,60 Z"/>
+    <path class="stencilcraft-cut" d="M70,20 L85,20 L85,60 L70,60 Z"/>
+  </g>
+  <g class="stencilcraft-engrave" data-kind="engrave" style="display:visible">
+    <path class="stencilcraft-engrave" d="M10,90 L90,90"/>
+  </g>
+</svg>
+  </svg>
+</svg>

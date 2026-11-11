@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="68.000mm" height="93.000mm" viewBox="0 0 68.000 93.000">
+  <title>StencilCraft tiling preview: 3 sheets, 2 × 2 cells</title>
+  <style>
+    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }
+    .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }
+    .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }
+    .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }
+  </style>
+  <g class="sheet" data-sheet="0" data-size="100.0x150.0">
+    <text class="preview-label" x="6.000" y="47.900">sheet 1 of 3 · 100×150 mm</text>
+    <rect class="preview-frame" x="6.000" y="49.500" width="25.000" height="37.500"/>
+    <g transform="translate(6.000 87.000) scale(0.2500 -0.2500)">
+      <path class="stencilcraft-cut" d="M10,10 L60,10 L60,60 L10,60 Z"/>
+      <path class="stencilcraft-cut" d="M70,20 L85,20 L85,60 L70,60 Z"/>
+      <path class="stencilcraft-engrave" d="M10,90 L90,90"/>
+    </g>
+  </g>
+  <g class="sheet" data-sheet="1" data-size="100.0x150.0">
+    <text class="preview-label" x="37.000" y="47.900">sheet 2 of 3 · 100×150 mm</text>
+    <rect class="preview-frame" x="37.000" y="49.500" width="25.000" height="37.500"/>
+    <g transform="translate(37.000 87.000) scale(0.2500 -0.2500)">
+      <path class="stencilcraft-cut" d="M10,10 L30,10 L30,30 L10,30 Z"/>
+      <path class="stencilcraft-cut" d="M5,5 C10.5,0.125 20,0.3333333333333333 25,5 Q30,12 5,5 Z"/>
+      <path class="stencilcraft-cut" d="M40,40 L45,40 L45,45 L40,45 Z"/>
+      <path class="stencilcraft-engrave" d="M-12.5,60 L-7.5,60 L-7.5,65 L-12.5,65 Z"/>
+      <path class="stencilcraft-engrave" d="M5,90 L95,90"/>
+    </g>
+  </g>
+  <g class="sheet" data-sheet="2" data-size="60.5x150.0">
+    <text class="preview-label" x="6.000" y="4.400">sheet 3 of 3 · 60×150 mm</text>
+    <rect class="preview-frame" x="6.000" y="6.000" width="15.125" height="37.500"/>
+    <g transform="translate(6.000 43.500) scale(0.2500 -0.2500)">
+      <path class="stencilcraft-cut" d="M10,10 L60,10 L60,60 L10,60 Z"/>
+      <path class="stencilcraft-cut" d="M70,20 L85,20 L85,60 L70,60 Z"/>
+      <path class="stencilcraft-engrave" d="M10,90 L90,90"/>
+    </g>
+  </g>
+</svg>

@@ -1064,6 +1064,24 @@ mod tests {
     fn thumbnail_respects_its_budget() {
         let doc = canvas_sample();
         let full = doc.render_thumbnail(64 * 1024);
+        // The exact bytes: thumbnails are stored in project files.
+        let mut curved = canvas_sample();
+        let mut path = kurbo::BezPath::new();
+        path.move_to((1.005, 2.0));
+        path.quad_to((3.0, 4.5), (5.25, 6.0));
+        path.curve_to((1.0, 1.0), (2.0, 2.0), (3.0, 1.0 / 3.0));
+        path.close_path();
+        curved.push_shape(0, path, CutStyle::Cut).unwrap();
+        assert_eq!(
+            curved.render_thumbnail(64 * 1024),
+            concat!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100.00 150.00">"##,
+                r##"<g transform="matrix(1 0 0 -1 0 150.00)" fill="none" stroke="#000" stroke-width="0.75">"##,
+                r##"<path d="M10.00 20.00L40.00 20.00L40.00 60.00L10.00 60.00Z"/>"##,
+                r##"<path d="M50.00 50.00L55.00 50.00L55.00 55.00L50.00 55.00Z"/>"##,
+                r##"<path d="M1.00 2.00Q3.00 4.50 5.25 6.00C1.00 1.00 2.00 2.00 3.00 0.33Z"/></g></svg>"##
+            )
+        );
         assert!(full.starts_with("<svg") && full.ends_with("</svg>"));
         assert_eq!(full.matches("<path").count(), 2);
         let small = doc.render_thumbnail(full.len() - 1);

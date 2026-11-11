@@ -259,23 +259,19 @@ pub struct Group {
     pub children: Vec<GroupChild>,
 }
 
-/// `#rrggbb` (or `#rgb`) to RGB; `None` for anything else.
+/// `#rrggbb` (or `#rgb`) to RGB; `None` for anything else. The document stores only
+/// these two of the CSS forms.
 pub fn parse_hex_color(text: &str) -> Option<[u8; 3]> {
-    let hex = text.strip_prefix('#')?;
-    let digit = |i: usize| u8::from_str_radix(hex.get(i..i + 1)?, 16).ok();
-    match hex.len() {
-        6 => {
-            let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
-            Some([byte(0)?, byte(2)?, byte(4)?])
-        }
-        3 => Some([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
-        _ => None,
+    if !text.starts_with('#') || !matches!(text.len(), 4 | 7) {
+        return None;
     }
+    let color = craft_svg_paths::color::parse_color(text).ok()?;
+    Some([color.r, color.g, color.b])
 }
 
 /// Canonical lowercase `#rrggbb`.
 pub fn format_hex_color([r, g, b]: [u8; 3]) -> String {
-    format!("#{r:02x}{g:02x}{b:02x}")
+    craft_svg_paths::color::Color::new(r, g, b).to_css()
 }
 
 /// Euclidean RGB distance (0 to about 441.7).
@@ -560,26 +556,40 @@ impl Document {
     /// A small standalone SVG preview of the board's output shapes, at most `max_bytes`
     /// long: shapes past the budget are left out. Coordinates keep two decimals.
     pub fn render_thumbnail(&self, max_bytes: usize) -> String {
-        let (w, h) = (self.board.width_mm, self.board.height_mm);
+        use craft_svg_paths::write::{SvgWriter, num, path_data_fixed};
+        let (w, h) = (num(self.board.width_mm, 2), num(self.board.height_mm, 2));
+        let mut svg = SvgWriter::fragment();
+        svg.root()
+            .attr("viewBox", format_args!("0 0 {w} {h}"))
+            .open();
         // Documents are y-up; flip into SVG's y-down space.
-        let mut svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w:.2} {h:.2}\">\
-             <g transform=\"matrix(1 0 0 -1 0 {h:.2})\" fill=\"none\" stroke=\"#000\" \
-             stroke-width=\"{:.2}\">",
-            (w.max(h) / 200.0).max(0.01)
-        );
-        let tail = "</g></svg>";
+        svg.tag("g")
+            .attr("transform", format_args!("matrix(1 0 0 -1 0 {h})"))
+            .attr("fill", "none")
+            .attr("stroke", "#000")
+            .attr(
+                "stroke-width",
+                num(
+                    (self.board.width_mm.max(self.board.height_mm) / 200.0).max(0.01),
+                    2,
+                ),
+            )
+            .open();
+        let tail = "</g></svg>".len();
         'layers: for layer in self.layers.iter().filter(|l| l.is_output()) {
             for shape in layer.shapes.iter().filter(|s| !s.hidden) {
-                let element = format!("<path d=\"{}\"/>", short_path_data(&shape.path));
-                if svg.len() + element.len() + tail.len() > max_bytes {
+                let mut element = SvgWriter::fragment();
+                element
+                    .tag("path")
+                    .attr("d", path_data_fixed(&shape.path, 2))
+                    .empty();
+                if svg.len() + element.len() + tail > max_bytes {
                     break 'layers;
                 }
-                svg.push_str(&element);
+                svg.raw(&element.finish());
             }
         }
-        svg.push_str(tail);
-        svg
+        svg.finish()
     }
 }
 
@@ -597,26 +607,6 @@ pub fn group_chain_in(parents: &BTreeMap<GroupChild, u64>, child: GroupChild) ->
     }
     chain.reverse();
     chain
-}
-
-fn short_path_data(path: &kurbo::BezPath) -> String {
-    use kurbo::PathEl;
-    use std::fmt::Write;
-    let mut d = String::new();
-    for el in path.elements() {
-        let _ = match el {
-            PathEl::MoveTo(p) => write!(d, "M{:.2} {:.2}", p.x, p.y),
-            PathEl::LineTo(p) => write!(d, "L{:.2} {:.2}", p.x, p.y),
-            PathEl::QuadTo(a, p) => write!(d, "Q{:.2} {:.2} {:.2} {:.2}", a.x, a.y, p.x, p.y),
-            PathEl::CurveTo(a, b, p) => write!(
-                d,
-                "C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
-                a.x, a.y, b.x, b.y, p.x, p.y
-            ),
-            PathEl::ClosePath => write!(d, "Z"),
-        };
-    }
-    d
 }
 
 #[cfg(test)]

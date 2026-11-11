@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "StencilCraft command model, undo/redo, and document editing"
 
 [dependencies]
+craft-svg-paths = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -18,7 +19,6 @@ stencilcraft-raster = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-generate = { workspace = true }
 stencilcraft-layout = { workspace = true }
-stencilcraft-color = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }

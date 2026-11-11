@@ -470,7 +470,9 @@ impl Session {
         let mut written = Vec::new();
         match format {
             "pdf" => {
-                std::fs::write(&path, stencilcraft_layout::sheets_to_pdf(&sheets))
+                let pdf = stencilcraft_pdf::export_print_sheets(&sheets)
+                    .map_err(|e| ProtocolError::Bad(e.to_string()))?;
+                std::fs::write(&path, pdf)
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
                 written.push(path.clone());
             }

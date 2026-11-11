@@ -8,6 +8,7 @@ description = "StencilCraft document model and the .stencilcraft JSON format"
 
 [dependencies]
 craft-atomic = { workspace = true }
+craft-svg-paths = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

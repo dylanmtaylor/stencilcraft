@@ -15,12 +15,16 @@
 //! undocumented; encoding never touches hardware; a real send is a separate,
 //! explicit [`MachineDriver::send`]. See `docs/machine-architecture.md`.
 //!
-//! Protocol facts come from public documentation and community specification
-//! (`inkscape-silhouette` GPL-2.0, read for facts only; Graphtec GP-GL list;
-//! Grbl wiki). No GPL code was ported. See `docs/machine.md`.
+//! The command languages themselves live in craft-libs: `craft-plotter`
+//! (GP-GL incl. the Silhouette dialect, HP-GL, DMPL: job to bytes, device
+//! queries, reply parsers) and `craft-gcode` (G-code lines, Grbl replies).
+//! This crate maps a `CutJob` and a machine's `Capabilities` onto them and
+//! runs the send sessions over a transport. Protocol provenance: the
+//! `craft-plotter` README and `docs/machine.md`.
 //!
-//! Layering: depends on `stencilcraft-geom` (points), `serde` + `toml` (the
-//! machine table), and optionally `serialport` / `nusb`.
+//! Layering: depends on `stencilcraft-geom` (points), `craft-plotter` and
+//! `craft-gcode` (protocols), `serde` + `toml` (the machine table), and
+//! optionally `serialport` / `nusb`.
 
 mod capabilities;
 mod driver;
@@ -52,28 +56,20 @@ pub use transport::{
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use transport::{UsbTransport, list_usb_devices};
 
+pub use craft_plotter::gpgl::ETX;
+#[cfg(test)]
+pub(crate) use craft_plotter::gpgl::silhouette::su;
+use craft_plotter::gpgl::silhouette::{self, Tool};
+/// Silhouette escapes and queries (`ESC EOT` init, `ESC ENQ` status, `ESC NAK`
+/// tool setup, `FG` firmware version), device units, mats and the status reply.
+pub use craft_plotter::gpgl::silhouette::{
+    INIT as ESC_INIT, Mat, STATUS_QUERY as ESC_STATUS, SU_PER_INCH, SU_PER_MM,
+    Status as DeviceStatus, TOOL_QUERY as ESC_TOOL_SETUP, VERSION_COMMAND as QUERY_VERSION,
+    parse_status,
+};
+/// An encoded program and its commands, framed for the wire.
+pub use craft_plotter::{Command, Framing, Program as CutProgram, delimit};
 use stencilcraft_geom::Point;
-
-/// Device units: the Silhouette native resolution is 0.05 mm, so all
-/// movements are sent as integer "Silhouette Units" (20 per mm, 508 per inch).
-pub const SU_PER_MM: f64 = 20.0;
-pub const SU_PER_INCH: f64 = 508.0;
-
-/// Command terminator: every GP-GL command is followed by ETX (0x03).
-pub const ETX: u8 = 0x03;
-/// Escape `\x1b\x04` (EOT): initializes the device.
-pub const ESC_INIT: &str = "\u{1b}\u{4}";
-/// Escape `\x1b\x05` (ENQ): device status query, replies one of `0`,`1`,`2`.
-pub const ESC_STATUS: &str = "\u{1b}\u{5}";
-/// Escape `\x1b\x15` (NAK): tool-setup query (Cameo 4 family).
-pub const ESC_TOOL_SETUP: &str = "\u{1b}\u{15}";
-/// Query `FG` — firmware version string, e.g. `CAMEO 4 PRO V1.02`.
-pub const QUERY_VERSION: &str = "FG";
-
-/// Convert millimetres to device units by rounding.
-pub(crate) fn su(mm: f64) -> i64 {
-    (mm * SU_PER_MM).round() as i64
-}
 
 /// A typed handle for the built-in machines, kept for the desktop app and
 /// older callers. New code addresses machines by registry id
@@ -241,99 +237,6 @@ impl Model {
         self.caps()
             .and_then(|c| c.speed.as_ref())
             .map_or(0, |r| u8::try_from(r.max).unwrap_or(u8::MAX))
-    }
-}
-
-/// A cutting-mat definition: device code plus usable extent in inches
-/// (the extents below come from the community mat tables; the Pro mat is
-/// 24 in × 24 in even though the tray takes 609.6 mm-wide material).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum Mat {
-    None,
-    Cameo12x12,
-    Cameo12x24,
-    Portrait8x12,
-    CameoPlus15x15,
-    CameoPro24x24,
-    Portrait8_5x12,
-}
-
-impl TryFrom<String> for Mat {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Mat::parse(&s).ok_or_else(|| format!("unknown mat `{s}`"))
-    }
-}
-
-impl From<Mat> for String {
-    fn from(m: Mat) -> String {
-        m.id().to_string()
-    }
-}
-
-impl Mat {
-    pub const ALL: &'static [Mat] = &[
-        Mat::None,
-        Mat::Cameo12x12,
-        Mat::Cameo12x24,
-        Mat::Portrait8x12,
-        Mat::CameoPlus15x15,
-        Mat::CameoPro24x24,
-        Mat::Portrait8_5x12,
-    ];
-
-    /// The device's `TG` mat code.
-    pub fn code(self) -> u8 {
-        match self {
-            Mat::None => 0,
-            Mat::Cameo12x12 => 1,
-            Mat::Cameo12x24 => 2,
-            Mat::Portrait8x12 => 3,
-            Mat::CameoPlus15x15 => 8,
-            Mat::CameoPro24x24 => 9,
-            Mat::Portrait8_5x12 => 11,
-        }
-    }
-
-    /// CLI/MCP id (`12x24`, `none`, …).
-    pub fn id(self) -> &'static str {
-        match self {
-            Mat::None => "none",
-            Mat::Cameo12x12 => "12x12",
-            Mat::Cameo12x24 => "12x24",
-            Mat::Portrait8x12 => "8x12",
-            Mat::CameoPlus15x15 => "15x15",
-            Mat::CameoPro24x24 => "24x24",
-            Mat::Portrait8_5x12 => "8.5x12",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Mat> {
-        let s = s.trim().to_ascii_lowercase();
-        if s == "portrait8x12" {
-            return Some(Mat::Portrait8x12);
-        }
-        Mat::ALL.iter().copied().find(|m| m.id() == s)
-    }
-
-    /// Usable mat extent (down, right) in inches.
-    pub fn extent_inch(self) -> (f64, f64) {
-        match self {
-            Mat::None => (0.0, 0.0),
-            Mat::Cameo12x12 => (12.0, 12.0),
-            Mat::Cameo12x24 => (24.0, 12.0),
-            Mat::Portrait8x12 => (12.0, 8.0),
-            Mat::CameoPlus15x15 => (15.0, 15.0),
-            Mat::CameoPro24x24 => (24.0, 24.0),
-            Mat::Portrait8_5x12 => (12.0, 8.5),
-        }
-    }
-
-    /// Usable mat extent (down, right) in mm.
-    pub fn extent_mm(self) -> (f64, f64) {
-        let (d, r) = self.extent_inch();
-        (d * 25.4, r * 25.4)
     }
 }
 
@@ -617,19 +520,24 @@ impl From<ToolKind> for String {
     }
 }
 
+impl From<Tool> for ToolKind {
+    fn from(t: Tool) -> ToolKind {
+        match t {
+            Tool::Empty => ToolKind::Empty,
+            Tool::RatchetBlade => ToolKind::RatchetBlade,
+            Tool::AutoBlade => ToolKind::AutoBlade,
+            Tool::DeepCutBlade => ToolKind::DeepCutBlade,
+            Tool::KraftBlade => ToolKind::KraftBlade,
+            Tool::RotaryBlade => ToolKind::RotaryBlade,
+            Tool::Pen => ToolKind::Pen,
+            Tool::Error => ToolKind::Error,
+        }
+    }
+}
+
 impl ToolKind {
     pub fn from_code(code: u8) -> Option<ToolKind> {
-        Some(match code {
-            0 => ToolKind::Empty,
-            1 => ToolKind::RatchetBlade,
-            2 => ToolKind::AutoBlade,
-            3 => ToolKind::DeepCutBlade,
-            4 => ToolKind::KraftBlade,
-            5 => ToolKind::RotaryBlade,
-            7 => ToolKind::Pen,
-            255 => ToolKind::Error,
-            _ => return None,
-        })
+        Tool::from_code(code).map(ToolKind::from)
     }
 
     /// CLI/MCP/registry id.
@@ -669,37 +577,10 @@ impl ToolKind {
 
 /// Parse a tool-setup reply (`"2,7\x03"`: holder 1, holder 2 codes).
 pub fn parse_tool_setup(response: &[u8]) -> Vec<Option<ToolKind>> {
-    String::from_utf8_lossy(response)
-        .trim_matches(|c: char| c == '\u{3}' || c.is_whitespace())
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().parse::<u8>().ok().and_then(ToolKind::from_code))
+    silhouette::parse_tool_setup(response)
+        .into_iter()
+        .map(|t| t.map(ToolKind::from))
         .collect()
-}
-
-/// Device status from the Silhouette status escape query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeviceStatus {
-    Ready,
-    Moving,
-    Unloaded,
-    Unknown(u8),
-}
-
-/// Parse a status query response (e.g. `b"    0\x03"` — an ASCII digit
-/// before the ETX terminator, possibly zero-padded).
-pub fn parse_status(response: &[u8]) -> DeviceStatus {
-    let code = response
-        .iter()
-        .find(|b| **b != b' ' && **b != 0x03)
-        .copied();
-    match code {
-        Some(b'0') => DeviceStatus::Ready,
-        Some(b'1') => DeviceStatus::Moving,
-        Some(b'2') => DeviceStatus::Unloaded,
-        Some(other) => DeviceStatus::Unknown(other),
-        None => DeviceStatus::Unknown(255),
-    }
 }
 
 /// Single-operation job settings, the shape the desktop app and the first
@@ -826,123 +707,6 @@ impl CutSettings {
     }
 }
 
-/// One device command. `to_ascii` produces the exact text (without the
-/// terminator the program's `Framing` adds).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    /// `J<toolholder>` — select the active tool holder.
-    SelectTool(u8),
-    /// `FX<p>,<toolholder>` — cutting force.
-    Pressure(u8, u8),
-    /// `!<speed>,<toolholder>` — cut speed.
-    Speed(u8, u8),
-    /// `TF<depth>,<toolholder>` — blade depth (AutoBlade).
-    Depth(u8, u8),
-    /// `FC<x>,<y>,<toolholder>` — blade swivel circle (in device units).
-    CutterOffset {
-        x_mm: f64,
-        y_mm: f64,
-        toolholder: u8,
-    },
-    /// `FE<n>,<toolholder>` — lift head between paths when `n == 1`.
-    Lift { lift: bool, toolholder: u8 },
-    /// `FF<start>,<end>,<toolholder>` — corner sharpening range, tenths of mm.
-    SharpenCorners {
-        start_tenths: i64,
-        end_tenths: i64,
-        toolholder: u8,
-    },
-    /// `TJ<acceleration>` — acceleration ramp.
-    Acceleration(i64),
-    /// `M<down>,<right>` — head-up move, mm coordinates.
-    Move { down_mm: f64, right_mm: f64 },
-    /// `D<down>,<right>` — head-down draw/cut to point, mm coordinates.
-    Draw { down_mm: f64, right_mm: f64 },
-    /// `\<down>,<right>` — cutting-region upper-left bound.
-    BoundaryTopLeft { down_mm: f64, right_mm: f64 },
-    /// `Z<down>,<right>` — cutting-region lower-right bound.
-    BoundaryBottomRight { down_mm: f64, right_mm: f64 },
-    /// `FY<0|1>` — roller track enhancing (`FY0` = on).
-    TrackEnhancing(bool),
-    /// `TG<code>` — select cutting mat.
-    SelectMat(Mat),
-    /// `FN0` — device soft reset.
-    Reset,
-    /// `TB50,0` / `TB50,1` — portrait/landscape feed direction.
-    PortraitMode(bool),
-    /// `L0` — pen-up marker between plot sections.
-    PenUp,
-    /// `SO0` — mark origin/service position.
-    Origin,
-    /// `H` — full home (Cameo 3 and newer).
-    Home,
-    /// `FW<id>` — media select (legacy dialect only).
-    MediaSelect(u16),
-    /// `FX<p>` — force without a holder (legacy dialect).
-    PressureLegacy(u8),
-    /// `!<s>` — speed without a holder (legacy dialect).
-    SpeedLegacy(u8),
-    /// `FC<d>` — blade offset without a holder (legacy dialect).
-    CutterOffsetLegacy(f64),
-    /// A command built by another protocol (HP-GL, DMPL, G-code, plain
-    /// GP-GL) or a fixed-text Silhouette command (`TB99`, …).
-    Raw(String),
-}
-
-impl Command {
-    pub fn to_ascii(&self) -> String {
-        match self {
-            Command::SelectTool(t) => format!("J{t}"),
-            Command::Pressure(p, t) => format!("FX{p},{t}"),
-            Command::Speed(s, t) => format!("!{s},{t}"),
-            Command::Depth(d, t) => format!("TF{d},{t}"),
-            Command::CutterOffset {
-                x_mm,
-                y_mm,
-                toolholder,
-            } => format!("FC{},{},{}", su(*x_mm), su(*y_mm), toolholder),
-            Command::Lift { lift, toolholder } => format!("FE{},{}", u8::from(*lift), toolholder),
-            Command::SharpenCorners {
-                start_tenths,
-                end_tenths,
-                toolholder,
-            } => format!("FF{start_tenths},{end_tenths},{toolholder}"),
-            Command::Acceleration(a) => format!("TJ{a}"),
-            Command::Move { down_mm, right_mm } => format!("M{},{}", su(*down_mm), su(*right_mm)),
-            Command::Draw { down_mm, right_mm } => format!("D{},{}", su(*down_mm), su(*right_mm)),
-            Command::BoundaryTopLeft { down_mm, right_mm } => {
-                format!("\\{},{}", su(*down_mm), su(*right_mm))
-            }
-            Command::BoundaryBottomRight { down_mm, right_mm } => {
-                format!("Z{},{}", su(*down_mm), su(*right_mm))
-            }
-            Command::TrackEnhancing(on) => format!("FY{}", if *on { 0 } else { 1 }),
-            Command::SelectMat(mat) => format!("TG{}", mat.code()),
-            Command::Reset => "FN0".to_string(),
-            Command::PortraitMode(landscape) => format!("TB50,{}", u8::from(*landscape)),
-            Command::PenUp => "L0".to_string(),
-            Command::Origin => "SO0".to_string(),
-            Command::Home => "H".to_string(),
-            Command::MediaSelect(id) => format!("FW{id}"),
-            Command::PressureLegacy(p) => format!("FX{p}"),
-            Command::SpeedLegacy(s) => format!("!{s}"),
-            Command::CutterOffsetLegacy(d) => format!("FC{}", su(*d)),
-            Command::Raw(s) => s.clone(),
-        }
-    }
-}
-
-/// Delimit commands into a GP-GL byte stream: each command's ASCII followed
-/// by an ETX byte.
-pub fn delimit(commands: &[Command]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(commands.len() * 8);
-    for cmd in commands {
-        out.extend_from_slice(cmd.to_ascii().as_bytes());
-        out.push(ETX);
-    }
-    out
-}
-
 /// Margins and end feed for the single-operation API.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlotOptions {
@@ -992,8 +756,8 @@ pub fn encode_plot(
     } else {
         paths.to_vec()
     };
-    let mut commands = protocol::gpgl_plot_body(&body, opts.margin_down_mm, opts.margin_right_mm);
-    commands.extend(protocol::gpgl_park(bb, opts.end_paper_offset_mm));
+    let mut commands = silhouette::plot_body(&body, opts.margin_down_mm, opts.margin_right_mm);
+    commands.extend(silhouette::park(bb, opts.end_paper_offset_mm));
     (commands, Some(bb))
 }
 
@@ -1038,55 +802,9 @@ pub fn encode_cut(
     s.passes = s.passes.clamp(1, MAX_PASSES);
     let job = s.to_job(paths, opts, bbox_only);
     let job = apply_job_settings(caps, &job).unwrap_or(job);
-    protocol_for(caps.protocol).encode(caps, &job)
-}
-
-/// How a program's commands are framed on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Framing {
-    /// GP-GL: each command followed by ETX.
-    #[default]
-    Etx,
-    /// HP-GL / DMPL / G-code: commands carry their own terminators; newline between.
-    Newline,
-}
-
-/// An encoded program: the commands, their framing, and where a session must
-/// pause for the registration-mark search.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct CutProgram {
-    pub commands: Vec<Command>,
-    pub bbox_mm: Option<BBoxMm>,
-    pub framing: Framing,
-    /// Registration: after this many commands the sender must wait for the
-    /// device to report the marks found before streaming the rest.
-    pub registration_wait: Option<usize>,
-}
-
-impl CutProgram {
-    /// The exact byte stream for a transport to write.
-    pub fn to_stream(&self) -> Vec<u8> {
-        stream_of(&self.commands, self.framing)
-    }
-
-    /// One command per line, for dry-run transcripts.
-    pub fn transcript(&self) -> Vec<String> {
-        self.commands.iter().map(Command::to_ascii).collect()
-    }
-}
-
-pub(crate) fn stream_of(commands: &[Command], framing: Framing) -> Vec<u8> {
-    match framing {
-        Framing::Etx => delimit(commands),
-        Framing::Newline => {
-            let mut out = Vec::new();
-            for c in commands {
-                out.extend_from_slice(c.to_ascii().as_bytes());
-                out.push(b'\n');
-            }
-            out
-        }
-    }
+    protocol_for(caps.protocol)
+        .encode(caps, &job)
+        .unwrap_or_default()
 }
 
 /// Errors surfaced by encoders, transports and sessions.
@@ -1159,11 +877,8 @@ pub fn query_status(transport: &mut dyn Transport) -> Result<DeviceStatus, Machi
 
 /// Ask for the firmware version string (`FG`), trimmed of ETX/padding.
 pub fn query_version(transport: &mut dyn Transport) -> Result<String, MachineError> {
-    transport.write(b"FG\x03")?;
-    let reply = read_reply(transport)?;
-    Ok(String::from_utf8_lossy(&reply)
-        .trim_matches(|c: char| c == '\u{3}' || c.is_whitespace())
-        .to_string())
+    transport.write(silhouette::VERSION_QUERY)?;
+    Ok(silhouette::parse_version(&read_reply(transport)?))
 }
 
 /// Ask a Cameo-4-family device which tools sit in its holders (`ESC NAK`).

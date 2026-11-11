@@ -7,6 +7,9 @@ license.workspace = true
 description = "Vendor-neutral cutting-machine drivers for StencilCraft: capabilities registry (machines.toml), protocols (GP-GL, HP-GL, DMPL, G-code), transports"
 
 [dependencies]
+# The command languages (GP-GL, HP-GL, DMPL) and G-code: encoding and reply parsing.
+craft-plotter = { workspace = true }
+craft-gcode = { workspace = true }
 stencilcraft-geom = { workspace = true }
 # Weld on cut: the same boolean engine as the Pathfinder/Weld commands.
 vectorcraft-geom = { workspace = true }

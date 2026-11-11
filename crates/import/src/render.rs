@@ -62,8 +62,10 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
         // tiny-skia wants premultiplied RGBA.
         for (dst, src) in source
             .data_mut()
-            .chunks_exact_mut(4)
-            .zip(pixels.as_raw().chunks_exact(4))
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(pixels.as_raw().as_chunks::<4>().0)
         {
             let a = u16::from(src[3]);
             for c in 0..3 {
@@ -109,7 +111,7 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
     }
 
     let mut out = RgbaImage::new(pixmap.width(), pixmap.height());
-    for (dst, src) in out.chunks_exact_mut(4).zip(pixmap.data().chunks_exact(4)) {
+    for (dst, src) in out.as_chunks_mut::<4>().0.iter_mut().zip(pixmap.data().as_chunks::<4>().0) {
         // The sheet is opaque white, so premultiplied equals straight colour.
         dst.copy_from_slice(src);
     }

@@ -260,6 +260,12 @@ only; plotters get force/speed from the panel.
 
 ## Provenance & licensing
 
+The protocol code itself (job to command bytes, device queries, reply parsers) lives in
+craft-libs: `craft-plotter` (Silhouette and plain GP-GL, HP-GL, DMPL) and `craft-gcode`
+(G-code lines, Grbl real-time commands and replies). `crates/machine` maps a `CutJob` and a
+machine's capabilities onto them, validates against `machines.toml`, and runs the send
+sessions over a transport. The `craft-plotter` README carries the same provenance record.
+
 Facts, not code, from:
 
 - `fablabnbg/inkscape-silhouette` — `silhouette/Graphtec.py` device table and

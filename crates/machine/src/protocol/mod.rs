@@ -2,9 +2,12 @@
 //! and, for interactive transports, run the send session: identify, wait for
 //! ready, stream, report status, and pause/cancel where the protocol has it.
 //!
-//! Implementations: Silhouette/Graphtec GP-GL (three generations) and plain
-//! GP-GL (`gpgl`), HP-GL/HP-GL/2 and DMPL (`plotter`), Grbl G-code (`gcode`),
-//! and `Unsupported` for driver slots that must not encode (Cricut, Curio).
+//! The languages themselves (commands, units, framing, reply formats) are in
+//! craft-libs (`craft-plotter`, `craft-gcode`). The implementations here map
+//! a job and a machine onto them and pump the session over a `Transport`:
+//! Silhouette GP-GL, three generations (`gpgl`), plain GP-GL, HP-GL and DMPL
+//! (`plotter`), Grbl G-code (`gcode`), and `Unsupported` for driver slots
+//! that must not encode (Cricut, Curio).
 
 use crate::{Capabilities, CutJob, CutProgram, MachineError, ProtocolId, Transport};
 
@@ -12,12 +15,19 @@ mod gcode;
 mod gpgl;
 mod plotter;
 
+pub use craft_plotter::dmpl::UNITS_PER_MM as DMPL_PER_MM;
+pub use craft_plotter::gpgl::UNITS_PER_MM as GPGL_PER_MM;
+pub use craft_plotter::gpgl::silhouette::registration as encode_registration;
+pub use craft_plotter::hpgl::UNITS_PER_MM as HPGL_PER_MM;
 pub use gcode::{GcodeProtocol, parse_grbl_status};
-pub use gpgl::{SilhouetteProtocol, encode_registration};
-pub(crate) use gpgl::{park as gpgl_park, plot_body as gpgl_plot_body, setup as gpgl_setup};
-pub use plotter::{
-    DMPL_PER_MM, DmplProtocol, GPGL_PER_MM, GpglProtocol, HPGL_PER_MM, HpglProtocol,
-};
+pub use gpgl::SilhouetteProtocol;
+pub(crate) use gpgl::setup as gpgl_setup;
+pub use plotter::{DmplProtocol, GpglProtocol, HpglProtocol};
+
+/// A job the encoder's own limits refuse (`validate` normally catches it first).
+fn refused(e: impl core::fmt::Display) -> MachineError {
+    MachineError::Limit(e.to_string())
+}
 
 /// Machine state as a protocol reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,11 +82,12 @@ pub struct SendReport {
     pub bytes: usize,
 }
 
-/// A wire protocol. `encode` assumes `job` already passed `validate(caps, job)`.
+/// A wire protocol. `encode` assumes `job` already passed `validate(caps, job)`;
+/// it still refuses a job past the encoder's own limits.
 pub trait Protocol {
     fn id(&self) -> ProtocolId;
 
-    fn encode(&self, caps: &Capabilities, job: &CutJob) -> CutProgram;
+    fn encode(&self, caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError>;
 
     /// Query status, where the protocol defines a query.
     fn status(&self, _t: &mut dyn Transport) -> Result<MachineStatus, MachineError> {
@@ -132,8 +143,8 @@ impl Protocol for UnsupportedProtocol {
         self.0
     }
 
-    fn encode(&self, _caps: &Capabilities, _job: &CutJob) -> CutProgram {
-        CutProgram::default()
+    fn encode(&self, _caps: &Capabilities, _job: &CutJob) -> Result<CutProgram, MachineError> {
+        Ok(CutProgram::default())
     }
 
     fn send(

@@ -295,6 +295,11 @@ Completed items should be marked here only when behavior is usable end-to-end.
   depth; `--tile-prefix` is honoured; the desktop `--control` socket now runs requests against
   the visible document.
 
+- 2026-11-11 — machine protocols moved to craft-libs: `crates/machine` encodes through
+  `craft-plotter` (Silhouette/plain GP-GL, HP-GL, DMPL, reply parsers) and `craft-gcode`
+  (bare G-code lines, Grbl replies); its own encoders are deleted. All 44 machine tests and the
+  per-model golden transcripts pass unchanged (measured).
+
 - 2026-11-02 — cutters: catalog of 32 machines (Portrait 1-4, CAMEO 1-5 incl. Plus/Pro/
   Alpha, Curio 1/2 export-only, Craft Robo, Graphtec CE6000/CE7000/CE LITE, generic
   GP-GL/HP-GL/DMPL) with unknowns left unknown; `encode_job` rejects out-of-range force,

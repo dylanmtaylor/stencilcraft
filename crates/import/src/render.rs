@@ -111,7 +111,12 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
     }
 
     let mut out = RgbaImage::new(pixmap.width(), pixmap.height());
-    for (dst, src) in out.as_chunks_mut::<4>().0.iter_mut().zip(pixmap.data().as_chunks::<4>().0) {
+    for (dst, src) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(pixmap.data().as_chunks::<4>().0)
+    {
         // The sheet is opaque white, so premultiplied equals straight colour.
         dst.copy_from_slice(src);
     }

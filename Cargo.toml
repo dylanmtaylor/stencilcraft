@@ -31,6 +31,11 @@ craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+# Shared format crates. craft-gcode and craft-svg-paths are pinned to their open pull requests
+# (storytold/craft-libs#801, #802) until those merge.
+craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "081078bb1b44aeedfa5bef3d4f13d978dc77510a" }
+craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "0b6290107523ff56992c55910ae58f246c3d7aac" }
+craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "6f9525b87b9a22d25818e9d6b36b99ca88639260" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }

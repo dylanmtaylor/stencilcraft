@@ -35,7 +35,7 @@ pub trait FormatHandler: Sync {
 
 | Format | Crate | Read | Write | Notes |
 | --- | --- | --- | --- | --- |
-| Silhouette Studio `.studio` (v2), `.studio3` (v3) | `crates/studio` | lossy | none yet | [silhouette-studio.md](silhouette-studio.md). Protected store designs are rejected |
+| Silhouette Studio `.studio` (v2), `.studio3` (v3) | `crates/studio` over craft-libs' `craft-silhouette-studio` | lossy | none yet | [silhouette-studio.md](silhouette-studio.md). Protected store designs are rejected |
 | Silhouette/Graphtec GSD, GSP | none yet | none | none | no samples yet |
 | SVG | `crates/svg` | yes | yes | not yet moved behind the trait |
 

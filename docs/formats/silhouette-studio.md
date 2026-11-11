@@ -7,7 +7,7 @@ in one thing, then compare the bytes. We did not disassemble, decompile or debug
 We did not read any other project's code for these formats. Posture:
 [`docs/reference-apps.md`](../reference-apps.md) (branch `docs/reference-apps`).
 
-Reader: [`crates/studio`](../../crates/studio/src/lib.rs). Status: **read, lossy**. It reads every
+Reader: craft-libs' `craft-silhouette-studio` parses the bytes; [`crates/studio`](../../crates/studio/src/lib.rs) maps its shapes to a document. Status: **read, lossy**. It reads every
 object's outline in page coordinates: open and closed paths, straight and Bézier segments,
 compound paths, and text as glyph outlines. It also reads the page size. Colours, groups and live text
 are not kept. Writing is not done yet (see [Writing](#writing)).

@@ -6,12 +6,16 @@ use crate::{Capabilities, MachineError, Mat, ProtocolId, ToolKind};
 use stencilcraft_geom as geom;
 use vectorcraft_geom::{FillRule, PathData};
 
-/// Hard caps on job size from untrusted documents.
-pub const MAX_POINTS: usize = 2_000_000;
-pub const MAX_PASSES: u8 = 10;
-pub const MAX_OPERATIONS: usize = 64;
-/// Largest line-segment overcut the encoder accepts, mm.
-pub const MAX_OVERCUT_MM: f64 = 2.0;
+pub(crate) use craft_plotter::bbox_rect;
+#[cfg(test)]
+pub(crate) use craft_plotter::overcut_path;
+/// Hard caps on job size from untrusted documents, and the job types the
+/// protocol encoders share.
+pub use craft_plotter::{
+    BBoxMm, MAX_OPERATIONS, MAX_OVERCUT_MM, MAX_PASSES, MAX_POINTS, Registration,
+    ToolSettings as OpSettings, find_bbox,
+};
+
 /// Largest closed-contour (software) overcut past the start point, mm.
 pub const MAX_CLOSED_OVERCUT_MM: f64 = 5.0;
 /// Cut-order sorting is quadratic in the path count; above this it falls back
@@ -32,41 +36,6 @@ pub enum OpKind {
     Emboss,
     Engrave,
     Foil,
-}
-
-/// Tool settings for one operation. `None` = use the machine panel's value.
-#[derive(Debug, Clone, PartialEq)]
-pub struct OpSettings {
-    /// Device force steps (Silhouette 1..33) or laser power (G-code S).
-    pub force: Option<u32>,
-    /// Device speed steps or mm/min, per the machine's `speed.unit`.
-    pub speed: Option<u32>,
-    pub passes: u8,
-    /// AutoBlade depth 0..10.
-    pub depth: Option<u8>,
-    /// Line-segment overcut at sharp corners, mm (0 = off).
-    pub overcut_mm: f64,
-    /// Blade swivel offset, mm (0.9 for the stock Silhouette blade).
-    pub blade_offset_mm: f64,
-    pub sharpen_corners: bool,
-    pub sharpen_start_mm: f64,
-    pub sharpen_end_mm: f64,
-}
-
-impl Default for OpSettings {
-    fn default() -> Self {
-        OpSettings {
-            force: None,
-            speed: None,
-            passes: 1,
-            depth: None,
-            overcut_mm: 0.0,
-            blade_offset_mm: 0.9,
-            sharpen_corners: false,
-            sharpen_start_mm: 0.1,
-            sharpen_end_mm: 0.1,
-        }
-    }
 }
 
 /// One ordered step of a job: geometry plus how to cut it.
@@ -90,24 +59,23 @@ impl Operation {
     pub fn is_pen(&self) -> bool {
         self.kind == OpKind::Draw || self.tool == Some(ToolKind::Pen)
     }
-}
 
-/// Print-and-cut registration: the optical sensor finds the printed marks
-/// before cutting. All mm.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Registration {
-    /// Distance between the marks across the media (right axis).
-    pub width_mm: f64,
-    /// Distance between the marks along the feed (down axis).
-    pub length_mm: f64,
-    /// Position of the top-left mark on the page; the design is shifted so
-    /// that the mark becomes the origin.
-    pub origin_right_mm: f64,
-    pub origin_down_mm: f64,
-    /// Automatic search; `false` = manual positioning.
-    pub search: bool,
-    /// Four-mark search (only machines whose capabilities say so).
-    pub quad: bool,
+    /// The operation as the protocol encoders take it. Blade depth is only
+    /// ever sent for the AutoBlade.
+    pub(crate) fn neutral(&self) -> craft_plotter::Operation {
+        let depth = (self.tool == Some(ToolKind::AutoBlade))
+            .then_some(self.settings.depth)
+            .flatten();
+        craft_plotter::Operation {
+            pen: self.is_pen(),
+            holder: self.holder,
+            paths: self.paths.clone(),
+            settings: OpSettings {
+                depth,
+                ..self.settings.clone()
+            },
+        }
+    }
 }
 
 /// Cut order within each operation (the reference's Send preferences:
@@ -331,25 +299,23 @@ impl CutJob {
     }
 }
 
-/// Bounding box in mm `(down-min, right-min, down-max, right-max)`.
-pub type BBoxMm = (f64, f64, f64, f64);
-
 /// A list of polylines in mm, `(x right, y down)`.
 pub type Paths = Vec<Vec<(f64, f64)>>;
 
-/// Compute the mm bounding box of a path list, or `None` when empty.
-pub fn find_bbox(paths: &[Vec<(f64, f64)>]) -> Option<BBoxMm> {
-    let mut bbox: Option<BBoxMm> = None;
-    for &(x, y) in paths.iter().flatten() {
-        bbox = Some(match bbox {
-            None => (y, x, y, x),
-            Some((d0, r0, d1, r1)) => (d0.min(y), r0.min(x), d1.max(y), r1.max(x)),
-        });
-    }
-    bbox
-}
-
 impl CutJob {
+    /// The job as the protocol encoders take it: geometry and tool settings,
+    /// without what only this crate's job layer uses (layers, order, weld).
+    pub(crate) fn neutral(&self) -> craft_plotter::Job {
+        craft_plotter::Job {
+            operations: self.operations.iter().map(Operation::neutral).collect(),
+            origin_down_mm: self.origin_down_mm,
+            origin_right_mm: self.origin_right_mm,
+            end_feed_mm: self.end_feed_mm,
+            bbox_only: self.bbox_only,
+            registration: self.registration,
+        }
+    }
+
     /// Bounding box over every operation's paths.
     pub fn bbox(&self) -> Option<BBoxMm> {
         let all: Vec<Vec<(f64, f64)>> = self
@@ -359,73 +325,6 @@ impl CutJob {
             .collect();
         find_bbox(&all)
     }
-}
-
-/// The closed rectangle path `(x, y)` around a bbox.
-pub(crate) fn bbox_rect(bb: BBoxMm) -> Vec<(f64, f64)> {
-    vec![
-        (bb.1, bb.0),
-        (bb.3, bb.0),
-        (bb.3, bb.2),
-        (bb.1, bb.2),
-        (bb.1, bb.0),
-    ]
-}
-
-/// Corners sharper than this turn (30°) get a line-segment overcut; gentler
-/// joints are flattened curves and must not be overcut.
-const OVERCUT_MIN_TURN_COS: f64 = 0.866;
-
-/// The paths an operation actually cuts: overcut applied, each path repeated
-/// `passes` times back to back, shifted by the registration origin.
-pub(crate) fn prepared_paths(op: &Operation, reg: Option<&Registration>) -> Vec<Vec<(f64, f64)>> {
-    let passes = op.settings.passes.max(1);
-    let (sd, sr) = reg.map_or((0.0, 0.0), |r| (r.origin_down_mm, r.origin_right_mm));
-    let mut out = Vec::with_capacity(op.paths.len() * usize::from(passes));
-    for path in op.paths.iter().filter(|p| p.len() >= 2) {
-        let cut = if op.settings.overcut_mm > 0.0 {
-            overcut_path(path, op.settings.overcut_mm)
-        } else {
-            path.clone()
-        };
-        let cut: Vec<(f64, f64)> = cut.into_iter().map(|(x, y)| (x - sr, y - sd)).collect();
-        for _ in 0..passes {
-            out.push(cut.clone());
-        }
-    }
-    out
-}
-
-pub(crate) fn overcut_path(path: &[(f64, f64)], o: f64) -> Vec<(f64, f64)> {
-    let closed = path.len() > 2 && path.first() == path.last();
-    let n = path.len();
-    let mut out = Vec::with_capacity(n * 3);
-    for (i, &b) in path.iter().enumerate() {
-        out.push(b);
-        // The segment arriving at b, and the one leaving it (wrapping on closed paths).
-        let Some(&a) = i.checked_sub(1).and_then(|j| path.get(j)) else {
-            continue;
-        };
-        let next = if i + 1 < n {
-            path.get(i + 1)
-        } else if closed {
-            path.get(1)
-        } else {
-            None
-        };
-        let Some(&c) = next else { continue };
-        let (ux, uy, ul) = (b.0 - a.0, b.1 - a.1, (b.0 - a.0).hypot(b.1 - a.1));
-        let (vx, vy, vl) = (c.0 - b.0, c.1 - b.1, (c.0 - b.0).hypot(c.1 - b.1));
-        if ul <= f64::EPSILON || vl <= f64::EPSILON {
-            continue;
-        }
-        let cos = (ux * vx + uy * vy) / (ul * vl);
-        if cos < OVERCUT_MIN_TURN_COS {
-            out.push((b.0 + ux / ul * o, b.1 + uy / ul * o));
-            out.push(b);
-        }
-    }
-    out
 }
 
 fn is_closed(path: &[(f64, f64)]) -> bool {

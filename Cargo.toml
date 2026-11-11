@@ -33,7 +33,9 @@ craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Shared format crates.
 craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "73702b326a7ed3bd7ecfc6bd352f711de8ac6402" }
-craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "73702b326a7ed3bd7ecfc6bd352f711de8ac6402" }
+# craft-gcode and craft-plotter: one rev (the machine protocols).
+craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1" }
+craft-plotter = { git = "https://github.com/storytold/craft-libs", rev = "d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1", features = ["serde"] }
 craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["write"] }
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "73702b326a7ed3bd7ecfc6bd352f711de8ac6402" }
 craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "73702b326a7ed3bd7ecfc6bd352f711de8ac6402" }

@@ -1070,7 +1070,7 @@ source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59ba
 [[package]]
 name = "craft-gcode"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=73702b326a7ed3bd7ecfc6bd352f711de8ac6402#73702b326a7ed3bd7ecfc6bd352f711de8ac6402"
+source = "git+https://github.com/storytold/craft-libs?rev=d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1#d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1152,6 +1152,15 @@ dependencies = [
  "x11rb",
  "xcap",
  "zbus",
+]
+
+[[package]]
+name = "craft-plotter"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1#d95cec67e2bd0da3ca40ddc62868ac4ef9469dd1"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5419,6 +5428,8 @@ name = "stencilcraft-machine"
 version = "0.1.0"
 dependencies = [
  "bluer",
+ "craft-gcode",
+ "craft-plotter",
  "futures-util",
  "nusb",
  "serde",

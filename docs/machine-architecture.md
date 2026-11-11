@@ -54,10 +54,15 @@ Tool ids: `autoblade`, `ratchet`, `deep-cut`, `kraft`, `rotary`, `punch`, `pen`,
 
 ### `Protocol` (`protocol/`)
 
+The command languages are craft-libs crates: `craft-plotter` (GP-GL incl. the Silhouette
+dialect, HP-GL, DMPL: encoders, device queries, reply parsers) and `craft-gcode` (G-code
+lines, Grbl real-time commands and replies). Each implementation below maps the job and the
+machine onto them and runs the session over the transport.
+
 ```rust
 trait Protocol {
     fn id(&self) -> ProtocolId;
-    fn encode(&self, caps: &Capabilities, job: &CutJob) -> CutProgram;
+    fn encode(&self, caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError>;
     fn status(&self, t: &mut dyn Transport) -> Result<MachineStatus, _>; // default: Unsupported
     fn pause / resume / cancel(&self, t) -> Result<(), _>;              // default: Unsupported
     fn send(&self, t, caps, program, hooks) -> Result<SendReport, _>;   // default: stream

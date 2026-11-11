@@ -13,7 +13,7 @@ pub fn dry_run(caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineE
     validate(caps, job)?;
     let job = apply_job_settings(caps, job)?;
     validate(caps, &job)?;
-    Ok(protocol_for(caps.protocol).encode(caps, &job))
+    protocol_for(caps.protocol).encode(caps, &job)
 }
 
 pub struct MachineDriver {

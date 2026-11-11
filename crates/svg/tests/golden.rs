@@ -2,6 +2,8 @@
 //! writes. Regenerate with `UPDATE_GOLDEN=1 cargo test -p stencilcraft-svg --test golden`,
 //! then review the diff by hand.
 
+#![allow(clippy::unwrap_used)] // helpers outside #[test] fail loudly, like tests
+
 use stencilcraft_doc::{CutStyle, Document, Group, GroupChild, Layer};
 use stencilcraft_svg::{TilePreviewOptions, export, export_print_and_cut, export_tile_preview};
 use stencilcraft_testkit::{line_path, rect_path, starter};

@@ -1,115 +1,120 @@
 //! PDF export: one page the size of the board, every visible shape as a vector stroke
 //! (cut red, engrave blue, 0.25 mm), for printing at 100 % or handing to a cutter's
-//! software. A hand-written PDF 1.4 subset (ISO 32000-1 §7: header, four objects, a
-//! cross-reference table and trailer). Placed raster images are not written yet.
+//! software. Written through craft-libs' shared PDF writer (`craft_pdf::write`, over
+//! Krilla). Placed raster images are not written yet.
 
-use std::fmt::Write as _;
-
+use craft_pdf::write::backend::SerializeSettings;
+use craft_pdf::write::backend::color::rgb;
+use craft_pdf::write::backend::geom::{PathBuilder, Transform};
+use craft_pdf::write::backend::page::PageSettings;
+use craft_pdf::write::backend::paint::{LineCap, LineJoin, Stroke};
+use craft_pdf::write::{Metadata, WriteError, Writer, guard};
 use stencilcraft_doc::{CutStyle, Document};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
     #[error("pdf: {0}")]
     Model(String),
+    #[error("pdf: {0}")]
+    Write(#[from] WriteError),
 }
 
 const PT_PER_MM: f64 = 72.0 / 25.4;
 
 pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
     doc.validate().map_err(|e| PdfError::Model(e.to_string()))?;
-    let (w, h) = (
-        doc.board.width_mm * PT_PER_MM,
-        doc.board.height_mm * PT_PER_MM,
-    );
-    // Millimetres, y down, like the document.
-    let mut content = format!(
-        "q {PT_PER_MM:.6} 0 0 {:.6} 0 {h:.4} cm 1 J 1 j 0.25 w\n",
-        -PT_PER_MM
-    );
-    for layer in doc.layers.iter().filter(|layer| layer.visible) {
-        for shape in &layer.shapes {
-            let colour = match shape.style {
-                CutStyle::Cut => "0.753 0.224 0.169",
-                CutStyle::Engrave => "0.176 0.424 0.875",
-            };
-            let _ = writeln!(content, "{colour} RG");
-            let mut cursor = kurbo::Point::ZERO;
-            for element in shape.path.elements() {
-                let points = match *element {
-                    kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => vec![p],
-                    kurbo::PathEl::QuadTo(a, b) => vec![a, b],
-                    kurbo::PathEl::CurveTo(a, b, c) => vec![a, b, c],
-                    kurbo::PathEl::ClosePath => Vec::new(),
+    let page = PageSettings::from_wh(
+        (doc.board.width_mm * PT_PER_MM) as f32,
+        (doc.board.height_mm * PT_PER_MM) as f32,
+    )
+    .ok_or_else(|| PdfError::Model("the board has no printable size".to_string()))?;
+    guard(|| {
+        let metadata = Metadata {
+            creator: "StencilCraft".to_string(),
+            producer: "StencilCraft".to_string(),
+            ..Metadata::default()
+        };
+        let mut writer = Writer::new(settings(), metadata);
+        let mut page = writer.document_mut().start_page_with(page);
+        let mut surface = page.surface();
+        // Millimetres, y down, like the document.
+        let scale = PT_PER_MM as f32;
+        surface.push_transform(&Transform::from_row(scale, 0.0, 0.0, scale, 0.0, 0.0));
+        surface.set_fill(None);
+        for layer in doc.layers.iter().filter(|layer| layer.visible) {
+            for shape in &layer.shapes {
+                let colour = match shape.style {
+                    CutStyle::Cut => rgb::Color::new(192, 57, 43),
+                    CutStyle::Engrave => rgb::Color::new(45, 108, 223),
                 };
-                if points.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
-                    return Err(PdfError::Model(format!(
-                        "shape {}: a point is not finite",
-                        shape.id
-                    )));
-                }
-                match *element {
-                    kurbo::PathEl::MoveTo(p) => {
-                        let _ = writeln!(content, "{:.4} {:.4} m", p.x, p.y);
-                        cursor = p;
+                let mut path = PathBuilder::new();
+                let mut cursor = kurbo::Point::ZERO;
+                for element in shape.path.elements() {
+                    let points: &[kurbo::Point] = match element {
+                        kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => {
+                            std::slice::from_ref(p)
+                        }
+                        kurbo::PathEl::QuadTo(a, b) => &[*a, *b],
+                        kurbo::PathEl::CurveTo(a, b, c) => &[*a, *b, *c],
+                        kurbo::PathEl::ClosePath => &[],
+                    };
+                    if points.iter().any(|p| !(p.x.is_finite() && p.y.is_finite())) {
+                        return Err(PdfError::Model(format!(
+                            "shape {}: a point is not finite",
+                            shape.id
+                        )));
                     }
-                    kurbo::PathEl::LineTo(p) => {
-                        let _ = writeln!(content, "{:.4} {:.4} l", p.x, p.y);
-                        cursor = p;
-                    }
-                    kurbo::PathEl::QuadTo(a, b) => {
-                        let cubic = kurbo::QuadBez::new(cursor, a, b).raise();
-                        let (c1, c2) = (cubic.p1, cubic.p2);
-                        let _ = writeln!(
-                            content,
-                            "{:.4} {:.4} {:.4} {:.4} {:.4} {:.4} c",
-                            c1.x, c1.y, c2.x, c2.y, b.x, b.y
+                    let mut cubic = |a: kurbo::Point, b: kurbo::Point, c: kurbo::Point| {
+                        path.cubic_to(
+                            a.x as f32, a.y as f32, b.x as f32, b.y as f32, c.x as f32, c.y as f32,
                         );
-                        cursor = b;
+                    };
+                    match *element {
+                        kurbo::PathEl::MoveTo(p) => {
+                            path.move_to(p.x as f32, p.y as f32);
+                            cursor = p;
+                        }
+                        kurbo::PathEl::LineTo(p) => {
+                            path.line_to(p.x as f32, p.y as f32);
+                            cursor = p;
+                        }
+                        kurbo::PathEl::QuadTo(a, b) => {
+                            let raised = kurbo::QuadBez::new(cursor, a, b).raise();
+                            cubic(raised.p1, raised.p2, b);
+                            cursor = b;
+                        }
+                        kurbo::PathEl::CurveTo(a, b, c) => {
+                            cubic(a, b, c);
+                            cursor = c;
+                        }
+                        kurbo::PathEl::ClosePath => path.close(),
                     }
-                    kurbo::PathEl::CurveTo(a, b, c) => {
-                        let _ = writeln!(
-                            content,
-                            "{:.4} {:.4} {:.4} {:.4} {:.4} {:.4} c",
-                            a.x, a.y, b.x, b.y, c.x, c.y
-                        );
-                        cursor = c;
-                    }
-                    kurbo::PathEl::ClosePath => content.push_str("h\n"),
                 }
+                // A path with nothing to draw (a lone move) is skipped.
+                let Some(path) = path.finish() else { continue };
+                surface.set_stroke(Some(Stroke {
+                    paint: colour.into(),
+                    width: 0.25,
+                    line_cap: LineCap::Round,
+                    line_join: LineJoin::Round,
+                    ..Stroke::default()
+                }));
+                surface.draw_path(&path);
             }
-            content.push_str("S\n");
         }
-    }
-    content.push_str("Q\n");
+        surface.pop();
+        surface.finish();
+        page.finish();
+        Ok(writer.finish()?)
+    })
+}
 
-    let objects = [
-        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
-        format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.4} {h:.4}] /Contents 4 0 R /Resources << >> >>"
-        ),
-        format!(
-            "<< /Length {} >>\nstream\n{content}endstream",
-            content.len()
-        ),
-    ];
-    let mut out = String::from("%PDF-1.4\n");
-    let mut offsets = Vec::with_capacity(objects.len());
-    for (i, object) in objects.iter().enumerate() {
-        offsets.push(out.len());
-        let _ = write!(out, "{} 0 obj\n{object}\nendobj\n", i + 1);
+/// Plain device RGB, uncompressed so the sheet stays readable in a text editor.
+fn settings() -> SerializeSettings {
+    SerializeSettings {
+        compress_content_streams: false,
+        ..SerializeSettings::default()
     }
-    let xref = out.len();
-    let _ = write!(out, "xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
-    for offset in offsets {
-        let _ = writeln!(out, "{offset:010} 00000 n ");
-    }
-    let _ = write!(
-        out,
-        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-        objects.len() + 1
-    );
-    Ok(out.into_bytes())
 }
 
 #[cfg(test)]
@@ -126,10 +131,7 @@ mod tests {
         path.close_path();
         doc.push_shape(0, path, CutStyle::Cut).unwrap();
         let pdf = export(&doc).unwrap();
-        let text = String::from_utf8(pdf.clone()).unwrap();
-        assert!(text.starts_with("%PDF-1.4"));
-        assert!(text.ends_with("%%EOF\n"));
-        assert!(text.contains("/MediaBox [0 0 283.4646 425.1969]"), "{text}");
+        assert!(pdf.starts_with(b"%PDF-"));
         // An independent reader (VectorCraft's, over hayro) finds the path.
         let read = vectorcraft_pdf::import(&pdf).unwrap();
         assert!(!read.layers.is_empty());

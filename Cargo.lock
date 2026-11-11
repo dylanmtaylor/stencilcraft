@@ -1179,6 +1179,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-silhouette-studio"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=3e6bf238566491fb97a7c25b26417eb17ec104d5#3e6bf238566491fb97a7c25b26417eb17ec104d5"
+dependencies = [
+ "kurbo 0.13.1",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-svg-paths"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=6f9525b87b9a22d25818e9d6b36b99ca88639260#6f9525b87b9a22d25818e9d6b36b99ca88639260"
@@ -5449,6 +5458,7 @@ dependencies = [
 name = "stencilcraft-pdf"
 version = "0.1.0"
 dependencies = [
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "thiserror 2.0.21",
@@ -5472,6 +5482,7 @@ dependencies = [
 name = "stencilcraft-studio"
 version = "0.1.0"
 dependencies = [
+ "craft-silhouette-studio",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "thiserror 2.0.21",

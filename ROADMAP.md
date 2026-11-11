@@ -99,6 +99,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-11 — M3: PDF export is written through craft-libs' shared PDF writer (`craft-pdf`,
+  over Krilla) instead of a hand-written one, and Silhouette Studio files are parsed by
+  craft-libs' `craft-silhouette-studio`; `crates/pdf` and `crates/studio` are now adapters.
 - 2026-11-03 — Ubuntu build guide now calls out the Rust 1.95 minimum, using rustup
   ahead of older distro toolchains, and the D-Bus headers needed for the Bluetooth build.
 

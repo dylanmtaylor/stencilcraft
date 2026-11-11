@@ -36,7 +36,7 @@ craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "081078bb1b44aeedfa5bef3d4f13d978dc77510a" }
 craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "0b6290107523ff56992c55910ae58f246c3d7aac" }
 craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0", features = ["write"] }
-craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "d9be1b9cacc2c2dfa741ced834e6bea1d2205ff7" }
+craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "3e6bf238566491fb97a7c25b26417eb17ec104d5" }
 craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "6f9525b87b9a22d25818e9d6b36b99ca88639260" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.

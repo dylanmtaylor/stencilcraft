@@ -32,13 +32,13 @@ craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e848
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Shared format crates.
-craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
+craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
 # craft-gcode and craft-plotter: the machine protocols.
-craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-craft-plotter = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b", features = ["serde"] }
-craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b", features = ["write"] }
-craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
+craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+craft-plotter = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3", features = ["serde"] }
+craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3", features = ["write"] }
+craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
@@ -106,12 +106,12 @@ codegen-units = 1
 # craft-ui uses the suite's egui and winit forks for shared IME and docking support.
 [patch.crates-io]
 # VectorCraft's PDF import/export dependencies use the matching Craft-Libs API revisions.
-hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "5375f49ffcda947d286b537eb6ac7d36560a0c9b" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
 emath = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
 epaint = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }

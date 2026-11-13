@@ -5694,6 +5694,7 @@ dependencies = [
 name = "stencilcraft-layout"
 version = "0.1.0"
 dependencies = [
+ "craft-file-import",
  "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "kurbo 0.13.1",
  "serde",
@@ -5701,7 +5702,6 @@ dependencies = [
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-kerf",
- "stencilcraft-pdf",
  "thiserror 2.0.21",
  "tiny-skia",
 ]

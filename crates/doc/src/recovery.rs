@@ -8,15 +8,14 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+pub use craft_stencilcraft_document::{MAX_RECENT_FILES, RecentFiles};
+
 use crate::{DocError, Document, load_from};
 
 /// File extension of a recovery snapshot.
 pub const RECOVERY_EXTENSION: &str = "stencilcraft-recovery";
 /// Longest snapshot id, in bytes.
 pub const MAX_RECOVERY_ID: usize = 64;
-/// Most entries in the recent-files list.
-pub const MAX_RECENT_FILES: usize = 10;
-
 /// A recovery directory with bounds on how many snapshots and bytes it keeps.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Recovery {
@@ -166,46 +165,6 @@ fn snapshot_id(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
     let id = name.strip_suffix(RECOVERY_EXTENSION)?.strip_suffix('.')?;
     Some(id.to_string())
-}
-
-/// Most recently used document paths, newest first, without duplicates.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct RecentFiles {
-    pub paths: Vec<String>,
-}
-
-impl RecentFiles {
-    /// Moves `path` to the front, keeping at most [`MAX_RECENT_FILES`].
-    pub fn push(&mut self, path: &str) {
-        self.paths.retain(|p| p != path);
-        self.paths.insert(0, path.to_string());
-        self.paths.truncate(MAX_RECENT_FILES);
-    }
-
-    pub fn remove(&mut self, path: &str) {
-        self.paths.retain(|p| p != path);
-    }
-
-    /// Reads the list; a missing or damaged file gives an empty list.
-    pub fn load(file: &Path) -> Self {
-        let mut list: Self = std::fs::read_to_string(file)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
-        list.paths.truncate(MAX_RECENT_FILES);
-        list
-    }
-
-    pub fn save(&self, file: &Path) -> Result<(), DocError> {
-        let json = serde_json::to_string_pretty(self).map_err(|e| DocError::Structure {
-            path: file.display().to_string(),
-            message: e.to_string(),
-        })?;
-        craft_atomic::atomic_write(file, json.as_bytes()).map_err(|source| DocError::Io {
-            path: file.display().to_string(),
-            source,
-        })
-    }
 }
 
 #[cfg(test)]

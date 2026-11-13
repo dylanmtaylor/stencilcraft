@@ -210,7 +210,12 @@ pub fn trace_command(args: &[String]) -> Result<(), String> {
     });
     let input = input.ok_or("trace: --in FILE is required")?;
     let output = output.ok_or("trace: --out FILE.stencilcraft is required")?;
-    let mut engine = if input.to_ascii_lowercase().ends_with(".stencilcraft") {
+    let is_native = std::path::Path::new(&input)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::StencilCraft);
+    let mut engine = if is_native {
         Engine::new(stencilcraft_doc::load_from(&input).map_err(|e| e.to_string())?)
     } else {
         let options = ImportOptions {

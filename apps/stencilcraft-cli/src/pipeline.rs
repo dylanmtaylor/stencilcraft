@@ -19,22 +19,21 @@ impl ExportKind {
     /// `.svg`, `.dxf`, `.gcode` by extension, defaulting to SVG — and honest about
     /// which one it picked, per the CLI's message contract.
     pub fn from_filename(name: &str) -> (Self, String) {
-        let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".dxf") {
-            (Self::Dxf, name.to_string())
-        } else if lower.ends_with(".pdf") {
-            (Self::Pdf, name.to_string())
-        } else if lower.ends_with(".png") {
-            (Self::Png, name.to_string())
-        } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
-            (Self::Jpeg, name.to_string())
-        } else if lower.ends_with(".gcode") || lower.ends_with(".nc") {
-            (Self::Gcode, name.to_string())
-        } else if lower.ends_with(".svg") {
-            (Self::Svg, name.to_string())
-        } else {
-            (Self::Svg, format!("{name}.svg"))
-        }
+        let extension = std::path::Path::new(name)
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or_default();
+        let kind = craft_file_formats::from_extension(extension);
+        let output = match kind {
+            Some(craft_file_formats::Format::Dxf) => Self::Dxf,
+            Some(craft_file_formats::Format::Pdf) => Self::Pdf,
+            Some(craft_file_formats::Format::Png) => Self::Png,
+            Some(craft_file_formats::Format::Jpeg) => Self::Jpeg,
+            Some(craft_file_formats::Format::Gcode) => Self::Gcode,
+            Some(craft_file_formats::Format::Svg) => Self::Svg,
+            _ => return (Self::Svg, format!("{name}.svg")),
+        };
+        (output, name.to_string())
     }
 }
 

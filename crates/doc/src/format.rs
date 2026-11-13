@@ -70,9 +70,11 @@ pub fn read_path(
     handlers: &[&dyn FormatHandler],
     path: &str,
 ) -> Result<Option<Converted<Document>>, String> {
-    if path
-        .to_ascii_lowercase()
-        .ends_with(&format!(".{}", crate::FORMAT_EXTENSION))
+    if std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::StencilCraft)
     {
         return Ok(None);
     }

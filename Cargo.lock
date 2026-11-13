@@ -999,7 +999,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d#166d0d21274aba0b761cd312438b7f075b5b8e5d"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b#81b88332b59f16db5e64e59e4116cdde1c6ba0f7"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1019,6 +1019,11 @@ source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59ba
 dependencies = [
  "rayon",
 ]
+
+[[package]]
+name = "craft-codepage"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
 
 [[package]]
 name = "craft-codepage"
@@ -1073,9 +1078,21 @@ dependencies = [
 [[package]]
 name = "craft-dxf"
 version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "craft-codepage 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "encoding_rs",
+ "kurbo 0.13.1",
+ "log",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-dxf"
+version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
 dependencies = [
- "craft-codepage",
+ "craft-codepage 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
  "encoding_rs",
  "kurbo 0.13.1",
  "log",
@@ -1090,7 +1107,7 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444
 [[package]]
 name = "craft-eps"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
 dependencies = [
  "kurbo 0.13.1",
  "thiserror 2.0.21",
@@ -1104,11 +1121,40 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93#686b5478eaadd68444e9690a8e6cc4b85d6a1f93"
 dependencies = [
  "craft-eps 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
- "craft-idml",
+ "craft-idml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
- "craft-zip",
+ "craft-zip 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "craft-file-formats"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "craft-eps 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-idml 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-zip 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "craft-file-import"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "craft-dxf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-eps 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-file-formats 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "kurbo 0.13.1",
+ "thiserror 2.0.21",
+ "vectorcraft-geom",
 ]
 
 [[package]]
@@ -1179,7 +1225,29 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93#686b5478eaadd68444e9690a8e6cc4b85d6a1f93"
 dependencies = [
  "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
- "craft-zip",
+ "craft-zip 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-idml"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "craft-xml 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "craft-zip 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "hayro-interpret",
+ "hayro-syntax",
+ "krilla",
+ "kurbo 0.13.1",
  "thiserror 2.0.21",
 ]
 
@@ -1257,6 +1325,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-raster-codecs"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "base64 0.23.1",
+ "image",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-settings"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1282,11 +1361,11 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-document"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d#166d0d21274aba0b761cd312438b7f075b5b8e5d"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b#81b88332b59f16db5e64e59e4116cdde1c6ba0f7"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d)",
+ "craft-atomic 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b)",
  "craft-stencilcraft-format",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d)",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -1296,22 +1375,10 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-format"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d#166d0d21274aba0b761cd312438b7f075b5b8e5d"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b#81b88332b59f16db5e64e59e4116cdde1c6ba0f7"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "craft-svg"
-version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d#166d0d21274aba0b761cd312438b7f075b5b8e5d"
-dependencies = [
- "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d)",
- "flate2",
- "kurbo 0.13.1",
- "roxmltree 0.21.2",
  "thiserror 2.0.21",
 ]
 
@@ -1330,9 +1397,23 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
 dependencies = [
- "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-xml 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
+ "flate2",
+ "kurbo 0.13.1",
+ "roxmltree 0.21.2",
+ "thiserror 2.0.21",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
+]
+
+[[package]]
+name = "craft-svg"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b#81b88332b59f16db5e64e59e4116cdde1c6ba0f7"
+dependencies = [
+ "craft-xml 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b)",
  "flate2",
  "kurbo 0.13.1",
  "roxmltree 0.21.2",
@@ -1417,15 +1498,6 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=166d0d21274aba0b761cd312438b7f075b5b8e5d#166d0d21274aba0b761cd312438b7f075b5b8e5d"
-dependencies = [
- "quick-xml",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "craft-xml"
-version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93#686b5478eaadd68444e9690a8e6cc4b85d6a1f93"
 dependencies = [
  "quick-xml",
@@ -1435,7 +1507,16 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
+dependencies = [
+ "quick-xml",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-xml"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=81b88332b#81b88332b59f16db5e64e59e4116cdde1c6ba0f7"
 dependencies = [
  "quick-xml",
  "thiserror 2.0.21",
@@ -1445,6 +1526,16 @@ dependencies = [
 name = "craft-zip"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93#686b5478eaadd68444e9690a8e6cc4b85d6a1f93"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.21",
+ "zip",
+]
+
+[[package]]
+name = "craft-zip"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4#697a655f40a5cb721394f61edebace9be450f089"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -5426,7 +5517,7 @@ version = "0.1.0"
 dependencies = [
  "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
  "craft-draw",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "craft-settings",
  "craft-theme",
  "craft-ui",
@@ -5453,9 +5544,9 @@ dependencies = [
 name = "stencilcraft-cli"
 version = "0.1.0"
 dependencies = [
- "craft-file-formats",
- "craft-raster-codecs",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-file-formats 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5489,7 +5580,7 @@ name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
  "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
- "craft-file-formats",
+ "craft-file-formats 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
  "craft-stencilcraft-document",
  "kurbo 0.13.1",
  "serde",
@@ -5500,7 +5591,7 @@ dependencies = [
 name = "stencilcraft-dxf"
 version = "0.1.0"
 dependencies = [
- "craft-dxf",
+ "craft-dxf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
@@ -5511,8 +5602,8 @@ dependencies = [
 name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
- "craft-raster-codecs",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5567,19 +5658,14 @@ dependencies = [
 name = "stencilcraft-import"
 version = "0.1.0"
 dependencies = [
- "craft-dxf",
- "craft-eps 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
- "craft-file-formats",
- "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
- "craft-raster-codecs",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-file-import",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-dxf",
  "stencilcraft-geom",
  "stencilcraft-pdf",
  "stencilcraft-raster",
- "stencilcraft-svg",
  "thiserror 2.0.21",
  "tiny-skia",
 ]
@@ -5599,7 +5685,7 @@ dependencies = [
 name = "stencilcraft-layout"
 version = "0.1.0"
 dependencies = [
- "craft-raster-codecs",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5632,8 +5718,8 @@ dependencies = [
 name = "stencilcraft-mcp"
 version = "0.1.0"
 dependencies = [
- "craft-file-formats",
- "craft-raster-codecs",
+ "craft-file-formats 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5666,7 +5752,7 @@ dependencies = [
 name = "stencilcraft-raster"
 version = "0.1.0"
 dependencies = [
- "craft-raster-codecs",
+ "craft-raster-codecs 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3)",
  "kurbo 0.13.1",
  "serde",
  "stencilcraft-doc",
@@ -5678,7 +5764,7 @@ dependencies = [
 name = "stencilcraft-studio"
 version = "0.1.0"
 dependencies = [
- "craft-file-formats",
+ "craft-file-formats 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=686b5478eaadd68444e9690a8e6cc4b85d6a1f93)",
  "craft-silhouette-studio",
  "kurbo 0.13.1",
  "stencilcraft-doc",
@@ -5689,14 +5775,12 @@ dependencies = [
 name = "stencilcraft-svg"
 version = "0.1.0"
 dependencies = [
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-file-import",
+ "craft-svg 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs.git?rev=697a655f4)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
- "stencilcraft-generate",
  "stencilcraft-geom",
  "thiserror 2.0.21",
- "vectorcraft-geom",
- "vectorcraft-pathops",
 ]
 
 [[package]]

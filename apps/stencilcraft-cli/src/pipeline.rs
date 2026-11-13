@@ -102,8 +102,8 @@ pub fn run_pipeline(
     let mut reports = Vec::with_capacity(pieces.len());
     for (i, piece) in pieces.iter().enumerate() {
         let tile_name = format!("{}-{i:02}.svg", tiling.prefix);
-        let text =
-            stencilcraft_svg::export(piece).map_err(|e| PipelineError::User(e.to_string()))?;
+        let text = stencilcraft_import::write_document(piece, "svg", 300.0)
+            .map_err(|e| PipelineError::User(e.to_string()))?;
         std::fs::write(&tile_name, text)
             .map_err(|e| PipelineError::User(format!("{tile_name}: {e}")))?;
         reports.push(format!(
@@ -132,25 +132,24 @@ fn render(
     let (kind, final_name) = ExportKind::from_filename(path);
     let user = |e: &dyn std::fmt::Display| PipelineError::User(e.to_string());
     let text = match kind {
-        ExportKind::Pdf => stencilcraft_pdf::export(doc).map_err(|e| user(&e))?,
-        ExportKind::Png | ExportKind::Jpeg => {
-            let format = if matches!(kind, ExportKind::Png) {
-                stencilcraft_import::RenderFormat::Png
-            } else {
-                stencilcraft_import::RenderFormat::Jpeg
-            };
-            stencilcraft_import::render_document(doc, dpi, format).map_err(|e| user(&e))?
+        ExportKind::Pdf => {
+            stencilcraft_import::write_document(doc, "pdf", dpi).map_err(|e| user(&e))?
         }
-        ExportKind::Svg => stencilcraft_svg::export(doc)
-            .map_err(|e| user(&e))?
-            .into_bytes(),
+        ExportKind::Png => {
+            stencilcraft_import::write_document(doc, "png", dpi).map_err(|e| user(&e))?
+        }
+        ExportKind::Jpeg => {
+            stencilcraft_import::write_document(doc, "jpg", dpi).map_err(|e| user(&e))?
+        }
+        ExportKind::Svg => {
+            stencilcraft_import::write_document(doc, "svg", dpi).map_err(|e| user(&e))?
+        }
         ExportKind::Svgz => {
-            let svg = stencilcraft_svg::export(doc).map_err(|e| user(&e))?;
-            craft_svg::svgz::compress(svg.as_bytes())
+            stencilcraft_import::write_document(doc, "svgz", dpi).map_err(|e| user(&e))?
         }
-        ExportKind::Dxf => stencilcraft_dxf::export(doc)
-            .map_err(|e| user(&e))?
-            .into_bytes(),
+        ExportKind::Dxf => {
+            stencilcraft_import::write_document(doc, "dxf", dpi).map_err(|e| user(&e))?
+        }
         ExportKind::Gcode => stencilcraft_gcode::export(doc, gcode)
             .map_err(|e| user(&e))?
             .into_bytes(),

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use kurbo::{BezPath, Point};
+use kurbo::BezPath;
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
@@ -328,34 +328,6 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     .write())
 }
 
-#[derive(Debug, Clone, Copy)]
-struct Kind(CutStyle);
-impl Default for Kind {
-    fn default() -> Self {
-        Self(CutStyle::Cut)
-    }
-}
-impl craft_svg::paths::Kind for Kind {
-    const PROPERTIES: &'static [&'static str] = &["data-kind"];
-    fn of(style: &craft_svg::paths::StyleMap, class: &str) -> Option<Self> {
-        let value = style.get("data-kind").map(String::as_str);
-        if value == Some("engrave")
-            || class
-                .split_ascii_whitespace()
-                .any(|c| c == "stencilcraft-engrave")
-        {
-            Some(Self(CutStyle::Engrave))
-        } else if value == Some("cut")
-            || class
-                .split_ascii_whitespace()
-                .any(|c| c == "stencilcraft-cut")
-        {
-            Some(Self(CutStyle::Cut))
-        } else {
-            None
-        }
-    }
-}
 #[derive(Debug)]
 pub struct SvgImport {
     pub document: Document,
@@ -365,73 +337,44 @@ pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
     import_with_warnings(svg, name).map(|got| got.document)
 }
 pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
-    let imported =
-        craft_svg::paths::import::<Kind>(svg, name).map_err(|e| SvgError::Import(e.to_string()))?;
+    let imported = craft_file_import::import(name, svg.as_bytes(), Default::default())
+        .map_err(|error| SvgError::Import(error.to_string()))?;
+    let craft_file_import::Imported::Vector(scene) = imported else {
+        return Err(SvgError::Import("SVG reader returned raster data".into()));
+    };
     let mut doc = Document {
         board: stencilcraft_doc::Board {
-            width_mm: imported.width_mm,
-            height_mm: imported.height_mm,
+            width_mm: scene.width_mm,
+            height_mm: scene.height_mm,
         },
         ..Document::default()
     };
     let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
     layers.insert(("cut".into(), false, None), 0);
-    let mut warnings = imported.warnings;
-    for shape in imported.shapes {
-        let mut path = shape.path;
-        for clip_index in shape.clips {
-            let Some(clip) = imported.clips.get(clip_index) else {
-                warnings.push(format!("{}: missing clip region {clip_index}", shape.label));
-                continue;
-            };
-            if clip.pieces.is_empty() {
-                path = BezPath::new();
-                break;
-            }
-            let pieces: Vec<_> = clip
-                .pieces
-                .iter()
-                .map(|(p, _)| vectorcraft_geom::PathData::from_bezpath(p))
-                .collect();
-            let inputs: Vec<_> = clip
-                .pieces
-                .iter()
-                .zip(&pieces)
-                .map(|((_, r), p)| {
-                    (
-                        p,
-                        match r {
-                            craft_svg::paths::FillRule::EvenOdd => {
-                                vectorcraft_geom::FillRule::EvenOdd
-                            }
-                            craft_svg::paths::FillRule::NonZero => {
-                                vectorcraft_geom::FillRule::NonZero
-                            }
-                        },
-                    )
-                })
-                .collect();
-            let region = vectorcraft_pathops::try_boolean_n(&inputs, |inside: &[bool]| {
-                inside.iter().any(|v| *v)
-            })
-            .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?
-            .to_bezpath();
-            path = clip_to_region(&path, &region)
-                .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?;
-        }
-        if path.elements().is_empty() {
+    let mut warnings = scene.warnings;
+    for shape in scene.shapes {
+        if shape.path.elements().is_empty() {
             continue;
         }
-        let style = shape.kind.0;
+        let classes = shape
+            .class
+            .as_deref()
+            .unwrap_or("")
+            .split_ascii_whitespace();
+        let style = if shape.tag.as_deref() == Some("engrave")
+            || classes.clone().any(|class| class == "stencilcraft-engrave")
+        {
+            CutStyle::Engrave
+        } else {
+            CutStyle::Cut
+        };
         let layer_name = shape.layer.unwrap_or_else(|| match style {
             CutStyle::Cut => "cut".into(),
             CutStyle::Engrave => "engrave".into(),
         });
         let color = shape
-            .stroke
-            .as_deref()
-            .and_then(|s| craft_svg::color::parse_color(s).ok())
-            .map(|c| format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b));
+            .stroke_rgb
+            .map(|[red, green, blue]| format!("#{red:02x}{green:02x}{blue:02x}"));
         let key = (
             layer_name.clone(),
             style == CutStyle::Engrave,
@@ -447,13 +390,13 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
             layers.insert(key, i);
             i
         };
-        doc.push_shape(index, path, style)
+        doc.push_shape(index, shape.path, style)
             .map_err(|e| SvgError::Model(e.to_string()))?;
     }
-    if imported.dropped_warnings > 0 {
+    if scene.dropped_warnings > 0 {
         warnings.push(format!(
             "{} additional SVG warnings omitted",
-            imported.dropped_warnings
+            scene.dropped_warnings
         ));
     }
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
@@ -461,55 +404,6 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
         document: doc,
         warnings,
     })
-}
-fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
-    if region.elements().is_empty() {
-        return Ok(BezPath::new());
-    }
-    let (mut closed, mut open) = (BezPath::new(), BezPath::new());
-    let mut contour = Vec::new();
-    for el in path
-        .elements()
-        .iter()
-        .copied()
-        .chain([kurbo::PathEl::MoveTo(Point::ZERO)])
-    {
-        if matches!(el, kurbo::PathEl::MoveTo(_)) && !contour.is_empty() {
-            let target = if matches!(contour.last(), Some(kurbo::PathEl::ClosePath)) {
-                &mut closed
-            } else {
-                &mut open
-            };
-            target.extend(contour.drain(..));
-        }
-        contour.push(el);
-    }
-    let mut out = BezPath::new();
-    if !closed.elements().is_empty() {
-        let kept = vectorcraft_pathops::try_boolean(
-            &vectorcraft_geom::PathData::from_bezpath(&closed),
-            vectorcraft_geom::FillRule::EvenOdd,
-            &vectorcraft_geom::PathData::from_bezpath(region),
-            vectorcraft_geom::FillRule::NonZero,
-            vectorcraft_pathops::BoolOp::Intersect,
-            0.001,
-        )
-        .map_err(|e| e.to_string())?;
-        out.extend(kept.to_bezpath());
-    }
-    if !open.elements().is_empty() {
-        let polygons: Vec<Vec<Point>> = stencilcraft_generate::flatten(region)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|c| c.closed && c.points.len() >= 3)
-            .map(|c| c.points)
-            .collect();
-        for line in stencilcraft_generate::flatten(&open).map_err(|e| e.to_string())? {
-            let pieces = stencilcraft_generate::clip::clip_polyline(&line.points, &polygons, true);
-            out.extend(stencilcraft_generate::polylines_path(&pieces, false));
-        }
-    }
-    Ok(out)
 }
 pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
     path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)

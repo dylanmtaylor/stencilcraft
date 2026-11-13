@@ -1,6 +1,6 @@
-//! File import into a StencilCraft document: SVG (our reader), DXF, PDF, EPS/PS and
-//! Illustrator `.ai` and raster images (PNG, JPEG, BMP, GIF, TIFF, WebP) placed as an
-//! image object to trace. Format probes and vector parsers come from craft-libs.
+//! File import into a StencilCraft document: SVG/SVGZ, DXF, PDF, EPS/PS, Illustrator `.ai`,
+//! and raster images placed as an image object to trace. Format probes, text decoding, codecs,
+//! and vector parsers come from craft-libs.
 //!
 //! Vector art comes in "as is" (1:1, the source page as the board) or fitted to a
 //! page, and open paths whose endpoints meet within a tolerance can be joined into
@@ -31,6 +31,7 @@ const MM_PER_PT: f64 = 25.4 / 72.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Svg,
+    Svgz,
     Dxf,
     Pdf,
     /// EPS, PostScript, or a PostScript-based (legacy) Illustrator file.
@@ -43,6 +44,7 @@ impl Format {
     pub fn detect(name: &str, bytes: &[u8]) -> Option<Self> {
         match craft_file_formats::detect(name, bytes)? {
             craft_file_formats::Format::Svg => Some(Self::Svg),
+            craft_file_formats::Format::Svgz => Some(Self::Svgz),
             craft_file_formats::Format::Dxf => Some(Self::Dxf),
             craft_file_formats::Format::Pdf => Some(Self::Pdf),
             craft_file_formats::Format::Eps
@@ -65,6 +67,16 @@ impl Format {
             | craft_file_formats::Format::Pdn
             | craft_file_formats::Format::Raw
             | craft_file_formats::Format::Pcraft
+            | craft_file_formats::Format::Idml
+            | craft_file_formats::Format::DesignCraft
+            | craft_file_formats::Format::Indd
+            | craft_file_formats::Format::Docx
+            | craft_file_formats::Format::Rtf
+            | craft_file_formats::Format::Xlsx
+            | craft_file_formats::Format::TaggedText
+            | craft_file_formats::Format::Pptx
+            | craft_file_formats::Format::LegacyDoc
+            | craft_file_formats::Format::PlainText
             | craft_file_formats::Format::Gcode => None,
         }
     }
@@ -124,7 +136,7 @@ pub fn import_bytes(
     let format = Format::detect(name, bytes).ok_or_else(|| {
         bad(
             name,
-            "unrecognised file format (SVG, DXF, PDF, EPS, AI and raster images are supported)",
+            "unrecognised file format (SVG/SVGZ, DXF, PDF, EPS, AI and raster images are supported)",
         )
     })?;
     read_format(format, bytes, name, options)
@@ -151,14 +163,14 @@ fn read_format(
     }
     let mut doc = match format {
         Format::Raster => return raster(bytes, name, options.dpi),
-        Format::Svg => {
-            let text =
-                std::str::from_utf8(bytes).map_err(|_| bad(name, "SVG is not UTF-8 text"))?;
+        Format::Svg | Format::Svgz => {
+            let text = craft_svg::svgz::text(bytes, stencilcraft_raster::MAX_FILE_BYTES)
+                .map_err(|error| bad(name, error))?;
             // Unsupported features (text, masks, filters, some CSS) import without them.
             // shortcut: warnings go to stderr; return them to MCP/desktop callers once
             // `import_file` has a warnings channel.
             let imported =
-                stencilcraft_svg::import_with_warnings(text, name).map_err(|e| bad(name, e))?;
+                stencilcraft_svg::import_with_warnings(&text, name).map_err(|e| bad(name, e))?;
             for warning in &imported.warnings {
                 eprintln!("{name}: {warning}");
             }

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 craft-file-formats = { workspace = true }
+craft-svg = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 craft-raster-codecs = { workspace = true }

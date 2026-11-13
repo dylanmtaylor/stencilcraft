@@ -37,7 +37,7 @@ pub trait FormatHandler: Sync {
 | --- | --- | --- | --- | --- |
 | Silhouette Studio `.studio` (v2), `.studio3` (v3) | `crates/studio` | lossy | none yet | [silhouette-studio.md](silhouette-studio.md). Protected store designs are rejected |
 | Silhouette/Graphtec GSD, GSP | none yet | none | none | no samples yet |
-| SVG | `crates/svg` | yes | yes | not yet moved behind the trait |
+| SVG / SVGZ | `crates/svg` | yes | yes | SVGZ compression and text decoding are shared through `craft-svg` |
 
 Wired in: CLI `import --in FILE` and every `--in FILE` (`run`, `tile-preview`, `cut`,
 `print-cut`), and MCP `doc.open` / `doc_open`.

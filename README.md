@@ -112,7 +112,7 @@ Every image below is rendered by StencilCraft's own SVG exporter (`stencilcraft-
 git clone https://github.com/dylanmtaylor/stencilcraft
 cd stencilcraft
 cargo run --release -p stencilcraft                      # desktop app (Design → Make)
-cargo run --release -p stencilcraft-cli -- import-svg --in artwork.svg --out artwork.stencilcraft
+cargo run --release -p stencilcraft-cli -- import-svg --in artwork.svg --out artwork.stencilcraft # SVGZ also accepted
 cargo run --release -p stencilcraft-cli -- run --in examples/starter.stencilcraft --export out.svg
 cargo run --release -p stencilcraft-cli -- run --in examples/stencil-frame.stencilcraft --export out.svg   # kerf applied (0.2 mm)
 cargo run --release -p stencilcraft-cli -- run --in examples/poster.stencilcraft \

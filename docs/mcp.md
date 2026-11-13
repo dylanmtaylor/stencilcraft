@@ -441,7 +441,7 @@ to hardware; a real send is only `stencilcraft-cli cut --device …`, run by a p
 
 ## Import and trace
 
-`import_file` adds a file to the **current** document (undoable): SVG, DXF, PDF, EPS/PS
+`import_file` adds a file to the **current** document (undoable): SVG/SVGZ, DXF, PDF, EPS/PS
 and Illustrator `.ai` vector paths become cut shapes (as is, 1:1, unless `fit_to_page`
 scales them to the board), with open paths whose ends meet within `join_tolerance` mm
 (default 0.05) joined into polylines unless `join: false`. Raster files (PNG, JPEG, BMP,

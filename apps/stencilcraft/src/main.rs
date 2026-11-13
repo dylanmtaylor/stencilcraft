@@ -1831,7 +1831,7 @@ impl StencilApp {
             }
             TopMenuAction::ImportSvg => {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("SVG", &["svg"])
+                    .add_filter("SVG", &["svg", "svgz"])
                     .pick_file()
                 {
                     self.import_svg(path);

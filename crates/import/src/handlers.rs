@@ -59,6 +59,7 @@ pub fn handlers() -> Vec<Box<dyn FormatHandler>> {
         Box::new(Handler(Format::Eps)),
         Box::new(Handler(Format::Dxf)),
         Box::new(Handler(Format::Svg)),
+        Box::new(Handler(Format::Svgz)),
         Box::new(Handler(Format::Raster)),
     ]
 }
@@ -83,6 +84,7 @@ impl FormatHandler for Handler {
     fn name(&self) -> &'static str {
         match self.0 {
             Format::Svg => "SVG",
+            Format::Svgz => "SVGZ",
             Format::Dxf => "DXF",
             Format::Pdf => "PDF",
             Format::Eps => "EPS / PostScript / Illustrator",
@@ -93,6 +95,7 @@ impl FormatHandler for Handler {
     fn formats(&self) -> &'static [craft_file_formats::Format] {
         match self.0 {
             Format::Svg => &[craft_file_formats::Format::Svg],
+            Format::Svgz => &[craft_file_formats::Format::Svgz],
             Format::Dxf => &[craft_file_formats::Format::Dxf],
             Format::Pdf => &[craft_file_formats::Format::Pdf],
             Format::Eps => &[
@@ -126,6 +129,9 @@ impl FormatHandler for Handler {
             Format::Svg => stencilcraft_svg::export(doc)
                 .map(String::into_bytes)
                 .map_err(|e| bad(&name, e)),
+            Format::Svgz => stencilcraft_svg::export(doc)
+                .map(|svg| craft_svg::svgz::compress(svg.as_bytes()))
+                .map_err(|e| bad(&name, e)),
             Format::Dxf => stencilcraft_dxf::export(doc)
                 .map(String::into_bytes)
                 .map_err(|e| bad(&name, e)),
@@ -149,6 +155,12 @@ impl FormatHandler for Handler {
                     "placed images are not written",
                     "unsupported SVG features fail import explicitly",
                 ],
+            },
+            Format::Svgz => Capabilities {
+                read: true,
+                write: true,
+                lossless: false,
+                warnings: VECTOR_READ,
             },
             Format::Dxf => Capabilities {
                 read: true,

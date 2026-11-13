@@ -1,9 +1,9 @@
 //! `stencilcraft-cli`: the headless driver and agent surface.
 //!
 //! Subcommands:
-//! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.dxf|.gcode]`
+//! - `run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM] --export OUT[.svg|.svgz|.dxf|.gcode]`
 //! - `tile-preview --in FILE --sheet WxH --out PAGE.svg` — every sheet on one page
-//! - `import-svg --in FILE.svg --out FILE.stencilcraft` — import SVG into the native document format
+//! - `import-svg --in FILE.svg|svgz --out FILE.stencilcraft` — import SVG into the native document format
 //! - `import --in FILE --out DOC` — SVG/DXF/PDF/EPS/AI vectors or a raster image to place
 //!   (`.studio` / `.studio3` Silhouette Studio documents are read by `crates/studio`)
 //! - `trace --in IMAGE|DOC --out DOC [options]` — trace a placed image into cut contours
@@ -148,7 +148,7 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
             }
             "-h" | "--help" => {
                 println!(
-                    "usage: stencilcraft-cli import-svg --in FILE.svg --out FILE.stencilcraft"
+                    "usage: stencilcraft-cli import-svg --in FILE.svg|FILE.svgz --out FILE.stencilcraft"
                 );
                 return Ok(());
             }
@@ -156,11 +156,13 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let input = input.ok_or("import-svg: --in FILE.svg is required")?;
+    let input = input.ok_or("import-svg: --in FILE.svg or FILE.svgz is required")?;
     let output = output.ok_or("import-svg: --out FILE.stencilcraft is required")?;
     let bytes = std::fs::read(&input).map_err(|e| format!("{input}: could not read: {e}"))?;
-    let is_svg =
-        craft_file_formats::detect(&input, &bytes) == Some(craft_file_formats::Format::Svg);
+    let is_svg = matches!(
+        craft_file_formats::detect(&input, &bytes),
+        Some(craft_file_formats::Format::Svg | craft_file_formats::Format::Svgz)
+    );
     let doc = if is_svg {
         stencilcraft_import::import_bytes(
             &bytes,
@@ -286,7 +288,9 @@ fn print_help() {
     println!();
     println!("  run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]");
     println!("      [--tile-prefix PREFIX] [--tile-marks] --export OUT");
-    println!("      Export is .svg, .dxf, .gcode, .pdf, .png or .jpg (--dpi N, default 300);");
+    println!(
+        "      Export is .svg, .svgz, .dxf, .gcode, .pdf, .png or .jpg (--dpi N, default 300);"
+    );
     println!("      with --tile-sheet the tiles go");
     println!("      to PREFIX-00.svg … (tiles export as SVG, open in the app to inspect).");
     println!("      --tile-marks stamps registration brackets and overlap guides on each sheet.");
@@ -295,8 +299,8 @@ fn print_help() {
     println!("  tile-preview --in FILE --sheet WxH --out PAGE.svg");
     println!("      [--overlap MM] [--columns N] [--scale N] [--marks]");
     println!("      Every sheet of the tiling on one framed page, for inspection before cutting.");
-    println!("  import-svg --in FILE.svg --out FILE.stencilcraft");
-    println!("  import --in FILE[.svg|.studio|.studio3] --out FILE.stencilcraft");
+    println!("  import-svg --in FILE.svg|FILE.svgz --out FILE.stencilcraft");
+    println!("  import --in FILE --out FILE.stencilcraft [--fit-page ...] [--dpi N]");
     println!("      Any --in FILE also opens Silhouette Studio .studio/.studio3 documents.");
     println!("      Import common SVG shapes/groups/transforms into the native format.");
     println!(

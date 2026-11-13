@@ -10,7 +10,7 @@ use stencilcraft_raster::{ColourRange, TraceMode, TraceOptions};
 pub const IMPORT_USAGE: &str =
     "usage: stencilcraft-cli import --in FILE --out DOC.stencilcraft [--into DOC.stencilcraft]
        [--fit-page [WxH]] [--no-join] [--join-tolerance MM] [--dpi N]
-  FILE: .svg .dxf .pdf .eps .ps .ai, or a PNG/JPEG/BMP/GIF/TIFF/WebP image (placed to trace).
+  FILE: .svg/.svgz .dxf .pdf .eps .ps .ai, or a PNG/JPEG/BMP/GIF/TIFF/WebP image (placed to trace).
   --fit-page scales vector art to the page (default: the target's board), else 1:1.";
 
 pub const TRACE_USAGE: &str =

@@ -8,6 +8,7 @@ description = "StencilCraft file import: SVG, DXF, PDF, EPS/AI vectors and raste
 
 [dependencies]
 craft-file-formats = { workspace = true }
+craft-svg = { workspace = true }
 craft-dxf = { workspace = true }
 craft-eps = { workspace = true }
 craft-pdf = { workspace = true }

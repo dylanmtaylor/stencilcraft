@@ -1195,6 +1195,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-silhouette-studio"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
+ "kurbo 0.13.1",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-stencilcraft-format"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=5407ea822#5407ea8220a350b1b34f6fe41fa45cd4c71566a6"
@@ -5510,6 +5519,7 @@ dependencies = [
 name = "stencilcraft-studio"
 version = "0.1.0"
 dependencies = [
+ "craft-silhouette-studio",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "thiserror 2.0.21",

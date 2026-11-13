@@ -1,19 +1,10 @@
-//! Reader for Silhouette Studio documents: `.studio` (header `silhouette04;`) and
-//! `.studio3` (header `silhouette05;`).
-//!
-//! Everything here comes from differential analysis of documents we drew and saved
-//! ourselves in Silhouette Studio; see `docs/formats/silhouette-studio.md` for the
-//! layout, the sample pairs behind each fact, and what is still unknown.
-//!
-//! The bytes are read by craft-libs' `craft-silhouette-studio` (bounded, fails closed,
-//! protected designs rejected); this crate turns its shapes into a document: y-up
-//! coordinates and one cut layer per line colour.
+//! Adapter from the shared Silhouette Studio reader to the StencilCraft document model.
 
-use kurbo::Affine;
+use kurbo::{Affine, BezPath};
 use stencilcraft_doc::format::{Capabilities, Converted, Fidelity, FormatHandler};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 
-pub use craft_silhouette_studio::{MAX_FILE_BYTES, Version, is_studio_path, sniff};
+pub const MAX_FILE_BYTES: usize = craft_silhouette_studio::MAX_FILE_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StudioError {
@@ -31,7 +22,12 @@ pub enum StudioError {
     Malformed { name: String, what: String },
 }
 
-/// A successful import: the document plus notes about what was skipped or assumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Version {
+    V2,
+    V3,
+}
+
 #[derive(Debug, Clone)]
 pub struct Imported {
     pub doc: Document,
@@ -39,54 +35,67 @@ pub struct Imported {
     pub warnings: Vec<String>,
 }
 
-/// Reads a `.studio` / `.studio3` document into a StencilCraft document.
+pub fn is_studio_path(path: &str) -> bool {
+    craft_silhouette_studio::is_studio_path(path)
+}
+
+pub fn sniff(bytes: &[u8]) -> Option<Version> {
+    craft_silhouette_studio::sniff(bytes).map(|v| match v {
+        craft_silhouette_studio::Version::V2 => Version::V2,
+        craft_silhouette_studio::Version::V3 => Version::V3,
+    })
+}
+
 pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
-    use craft_silhouette_studio::Error;
-    let bad = |what: &str| StudioError::Malformed {
-        name: name.to_string(),
-        what: what.to_string(),
-    };
-    let read = craft_silhouette_studio::import(bytes).map_err(|e| match e {
-        Error::NotStudio => StudioError::NotStudio(name.to_string()),
-        Error::Unsupported { version } => StudioError::Unsupported {
-            name: name.to_string(),
-            version,
-        },
-        Error::Protected => StudioError::Protected(name.to_string()),
-        Error::TooLarge => StudioError::TooLarge(name.to_string()),
-        Error::Malformed(what) => bad(&what),
+    let parsed = craft_silhouette_studio::import(bytes).map_err(|error| {
+        use craft_silhouette_studio::Error as E;
+        match error {
+            E::NotStudio => StudioError::NotStudio(name.to_owned()),
+            E::Unsupported { version } => StudioError::Unsupported {
+                name: name.to_owned(),
+                version,
+            },
+            E::Protected => StudioError::Protected(name.to_owned()),
+            E::TooLarge => StudioError::TooLarge(name.to_owned()),
+            E::Malformed(what) => StudioError::Malformed {
+                name: name.to_owned(),
+                what,
+            },
+        }
     })?;
-    let mut warnings = Vec::new();
+    let height = parsed.page_mm.map_or(210.0, |(_, h)| h);
     let mut doc = Document {
         layers: Vec::new(),
         ..Document::default()
     };
-    match read.page_mm {
-        Some((w, h)) => {
-            doc.board.width_mm = w;
-            doc.board.height_mm = h;
-        }
-        None => {
-            warnings.push("page size not found; using the default sheet".to_string());
-        }
+    if let Some((w, h)) = parsed.page_mm {
+        doc.board.width_mm = w;
+        doc.board.height_mm = h;
     }
-    warnings.extend(read.warnings);
-    // Silhouette is y-down from the page's top-left; documents are y-up.
-    let to_doc = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, doc.board.height_mm]);
-    for shape in read.shapes {
+    let to_doc = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, height]);
+    for shape in parsed.shapes {
         let layer = layer_for(&mut doc, shape.line_color);
-        doc.push_shape(layer, to_doc * shape.path, CutStyle::Cut)
-            .map_err(|e| bad(&e.to_string()))?;
+        let path: BezPath = to_doc * shape.path;
+        doc.push_shape(layer, path, CutStyle::Cut)
+            .map_err(|e| StudioError::Malformed {
+                name: name.to_owned(),
+                what: e.to_string(),
+            })?;
     }
     if doc.layers.is_empty() {
         doc.layers.push(Layer::new("cut", CutStyle::Cut));
     }
-
-    doc.validate().map_err(|e| bad(&e.to_string()))?;
+    doc.validate().map_err(|e| StudioError::Malformed {
+        name: name.to_owned(),
+        what: e.to_string(),
+    })?;
     Ok(Imported {
         doc,
-        version: read.version,
-        warnings,
+        version: match parsed.version {
+            craft_silhouette_studio::Version::V2 => Version::V2,
+            craft_silhouette_studio::Version::V3 => Version::V3,
+        },
+        warnings: parsed.warnings,
     })
 }
 

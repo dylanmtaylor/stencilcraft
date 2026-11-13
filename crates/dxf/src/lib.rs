@@ -39,7 +39,9 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
         ));
     }
     let mut drawing = craft_dxf::model::write::Drawing::default();
-    drawing.format = craft_dxf::model::write::Format::R14;
+    // `$INSUNITS` is defined beginning with R2000; use that format so readers
+    // land the drawing in millimetres as promised by the app export.
+    drawing.format = craft_dxf::model::write::Format::R2000;
     drawing.insunits = 4;
     drawing.metric = true;
     drawing.extents = [0.0, 0.0, doc.board.width_mm, doc.board.height_mm];
@@ -129,6 +131,21 @@ mod tests {
     use super::*;
     use stencilcraft_geom::Point;
 
+    fn parsed_entities(dxf: &str) -> Vec<craft_dxf::model::Entity> {
+        let tags = craft_dxf::parse_ascii(dxf).unwrap();
+        let drawing = craft_dxf::model::Document::read(&tags);
+        drawing
+            .entities
+            .iter()
+            .map(craft_dxf::model::Entity::read)
+            .collect()
+    }
+
+    fn parsed_layers(dxf: &str) -> Vec<craft_dxf::model::Layer> {
+        let tags = craft_dxf::parse_ascii(dxf).unwrap();
+        craft_dxf::model::Document::read(&tags).layers()
+    }
+
     fn tri() -> kurbo::BezPath {
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
@@ -142,11 +159,11 @@ mod tests {
     fn has_header_entities_and_eof() {
         let doc = Document::default();
         let dxf = export(&doc).unwrap();
-        assert!(dxf.contains("SECTION"));
-        assert!(dxf.contains("$INSUNITS"));
-        assert!(dxf.contains("ENDSEC"));
-        assert!(dxf.starts_with("0\nSECTION"));
-        assert!(dxf.ends_with("0\nEOF\n"));
+        let tags = craft_dxf::parse_ascii(&dxf).unwrap();
+        let drawing = craft_dxf::model::Document::read(&tags);
+        assert!(drawing.sections > 0);
+        assert_eq!(drawing.header.insunits(), 4);
+        assert_eq!(tags.last().and_then(craft_dxf::Tag::str_ref), Some("EOF"));
     }
 
     #[test]
@@ -154,9 +171,13 @@ mod tests {
         let mut doc = Document::default();
         doc.push_shape(0, tri(), CutStyle::Cut).unwrap();
         let dxf = export(&doc).unwrap();
-        assert!(dxf.contains("LWPOLYLINE"));
-        assert!(dxf.contains("\n70\n1\n"), "closed flag: {dxf}");
-        assert!(dxf.contains("STENCILCRAFT-CUT"));
+        let entity = parsed_entities(&dxf).remove(0);
+        assert_eq!(entity.common.layer, "STENCILCRAFT-CUT");
+        let craft_dxf::model::EntityKind::LwPolyline(polyline) = entity.kind else {
+            panic!("expected LWPOLYLINE")
+        };
+        assert!(polyline.closed);
+        assert_eq!(polyline.vertices.len(), 3);
     }
 
     #[test]
@@ -166,9 +187,19 @@ mod tests {
             .push(stencilcraft_doc::Layer::new("score", CutStyle::Engrave));
         doc.layers[1].visible = false;
         let dxf = export(&doc).unwrap();
-        // Layer table: red cut layer, then the hidden engrave layer written negative.
-        assert!(dxf.contains("STENCILCRAFT-CUT\n70\n0\n62\n1\n"), "{dxf}");
-        assert!(dxf.contains("STENCILCRAFT-SCORE\n70\n0\n62\n-5\n"), "{dxf}");
+        let layers = parsed_layers(&dxf);
+        let cut = layers
+            .iter()
+            .find(|layer| layer.name == "STENCILCRAFT-CUT")
+            .unwrap();
+        let score = layers
+            .iter()
+            .find(|layer| layer.name == "STENCILCRAFT-SCORE")
+            .unwrap();
+        assert_eq!(cut.color, craft_dxf::model::Color::Index(1));
+        assert!(cut.on);
+        assert_eq!(score.color, craft_dxf::model::Color::Index(5));
+        assert!(!score.on);
         assert_eq!(layer_color(CutStyle::Cut), 1);
         assert_eq!(layer_color(CutStyle::Engrave), 5);
     }
@@ -182,8 +213,12 @@ mod tests {
         ));
         doc.push_shape(1, tri(), CutStyle::Engrave).unwrap();
         let dxf = export(&doc).unwrap();
-        assert!(dxf.contains("STENCILCRAFT-SCORING-PASS"), "{dxf}");
-        assert!(dxf.contains("\n70\n0\n"), "open flag for engrave");
+        let entity = parsed_entities(&dxf).remove(0);
+        assert_eq!(entity.common.layer, "STENCILCRAFT-SCORING-PASS");
+        let craft_dxf::model::EntityKind::LwPolyline(polyline) = entity.kind else {
+            panic!("expected LWPOLYLINE")
+        };
+        assert!(!polyline.closed);
     }
 
     #[test]
@@ -197,7 +232,16 @@ mod tests {
         path.close_path();
         doc.push_shape(0, path, CutStyle::Cut).unwrap();
         let dxf = export(&doc).unwrap();
-        assert!(dxf.contains("10\n10.000000\n20\n80.000000\n10\n40.000000\n20\n80.000000\n10\n10.000000\n20\n30.000000\n"), "{dxf}");
+        let entity = parsed_entities(&dxf).remove(0);
+        let craft_dxf::model::EntityKind::LwPolyline(polyline) = entity.kind else {
+            panic!("expected LWPOLYLINE")
+        };
+        let coords: Vec<_> = polyline
+            .vertices
+            .iter()
+            .map(|vertex| (vertex.x, vertex.y))
+            .collect();
+        assert_eq!(coords, [(10.0, 80.0), (40.0, 80.0), (10.0, 30.0)]);
     }
 
     #[test]

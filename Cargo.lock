@@ -1274,7 +1274,7 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-format"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=93d75f44d78f08a2d206dcb7d89e940ba47da696#93d75f44d78f08a2d206dcb7d89e940ba47da696"
+source = "git+https://github.com/storytold/craft-libs.git?rev=370f6714ed544cab99c4f4be05035d824eb77d1c#370f6714ed544cab99c4f4be05035d824eb77d1c"
 dependencies = [
  "serde",
  "serde_json",

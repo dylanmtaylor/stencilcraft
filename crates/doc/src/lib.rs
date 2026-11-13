@@ -1,4 +1,4 @@
-//! StencilCraft document model and the `.stencilcraft` JSON format.
+//! StencilCraft document model and domain validation.
 //!
 //! A document holds an artboard in millimetres, kerf settings and layers of shapes.
 //! Every read path returns `Result` with a calm, printable error: a malformed file
@@ -453,6 +453,22 @@ pub struct Document {
     pub meta: Metadata,
 }
 
+/// Typed fields in the native wire format. Field names and version-1 defaults are owned by
+/// `craft-stencilcraft-format`; this alias supplies only StencilCraft's domain types.
+type NativeFileFields = craft_stencilcraft_format::DocumentFields<
+    Board,
+    KerfSettings,
+    Vec<Layer>,
+    RasterImage,
+    PageSetup,
+    Vec<Page>,
+    Vec<Guide>,
+    Grid,
+    SnapSettings,
+    Vec<Group>,
+    Metadata,
+>;
+
 impl Default for Document {
     fn default() -> Self {
         Self {
@@ -583,34 +599,21 @@ impl Document {
     /// set, so a plain document saves exactly as it did before they existed.
     pub fn save_json(&self) -> Result<String, DocError> {
         self.validate()?;
-        let groups = self.pruned_groups();
-        let fields = craft_stencilcraft_format::DocumentFields {
-            board: json(&self.board)?,
-            kerf: json(&self.kerf)?,
-            layers: json(&self.layers)?,
+        let fields = NativeFileFields {
+            board: self.board.clone(),
+            kerf: self.kerf.clone(),
+            layers: self.layers.clone(),
             next_shape_id: self.next_shape_id,
-            images: self.images.iter().map(json).collect::<Result<_, _>>()?,
-            board_setup: (!self.board_setup.is_empty())
-                .then(|| json(&self.board_setup))
-                .transpose()?,
-            pages: (!self.pages.is_empty())
-                .then(|| json(&self.pages))
-                .transpose()?,
-            guides: (!self.guides.is_empty())
-                .then(|| json(&self.guides))
-                .transpose()?,
-            grid: (self.grid != Grid::default())
-                .then(|| json(&self.grid))
-                .transpose()?,
-            snap: (self.snap != SnapSettings::default())
-                .then(|| json(&self.snap))
-                .transpose()?,
-            groups: (!groups.is_empty()).then(|| json(&groups)).transpose()?,
-            meta: (!self.meta.is_empty())
-                .then(|| json(&self.meta))
-                .transpose()?,
+            images: self.images.clone(),
+            board_setup: self.board_setup.clone(),
+            pages: self.pages.clone(),
+            guides: self.guides.clone(),
+            grid: self.grid.clone(),
+            snap: self.snap.clone(),
+            groups: self.pruned_groups(),
+            meta: self.meta.clone(),
         };
-        craft_stencilcraft_format::File::new(fields)
+        craft_stencilcraft_format::File::<NativeFileFields>::new(fields)
             .to_json_pretty()
             .map_err(|e| DocError::Structure {
                 path: "output".to_string(),
@@ -625,65 +628,46 @@ impl Document {
 }
 
 fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
-    let file = craft_stencilcraft_format::File::read(json).map_err(|e| match e {
-        craft_stencilcraft_format::Error::Json(source) => DocError::Parse {
-            path: path.to_string(),
-            source,
+    let file = craft_stencilcraft_format::File::<NativeFileFields>::read_typed(json).map_err(
+        |e| match e {
+            craft_stencilcraft_format::Error::Json(source) => DocError::Parse {
+                path: path.to_string(),
+                source,
+            },
+            craft_stencilcraft_format::Error::NotStencilCraft => DocError::NotAStencilcraftFile {
+                path: path.to_string(),
+            },
+            craft_stencilcraft_format::Error::Version { found, supported } => {
+                DocError::FormatVersion {
+                    path: path.to_string(),
+                    found,
+                    expected: supported,
+                }
+            }
+            craft_stencilcraft_format::Error::Document { source } => structure_err(path, &source),
+            _ => DocError::NotAStencilcraftFile {
+                path: path.to_string(),
+            },
         },
-        craft_stencilcraft_format::Error::NotStencilCraft => DocError::NotAStencilcraftFile {
-            path: path.to_string(),
-        },
-        craft_stencilcraft_format::Error::Version { found, supported } => DocError::FormatVersion {
-            path: path.to_string(),
-            found,
-            expected: supported,
-        },
-        craft_stencilcraft_format::Error::Document { source } => structure_err(path, &source),
-        _ => DocError::NotAStencilcraftFile {
-            path: path.to_string(),
-        },
-    })?;
+    )?;
     let fields = file.document;
-    let board: Board = from_wire(fields.board, path)?;
-    let kerf: KerfSettings = from_wire(fields.kerf, path)?;
-    let layers: Vec<Layer> = from_wire(fields.layers, path)?;
-    let next_shape_id = fields.next_shape_id;
-    let images: Vec<RasterImage> = from_wire(serde_json::Value::Array(fields.images), path)?;
     let mut doc = Document {
-        board,
-        kerf,
-        layers,
-        next_shape_id,
-        images,
-        board_setup: from_wire_optional(fields.board_setup, path)?,
-        pages: from_wire_optional(fields.pages, path)?,
-        guides: from_wire_optional(fields.guides, path)?,
-        grid: from_wire_optional(fields.grid, path)?,
-        snap: from_wire_optional(fields.snap, path)?,
-        groups: from_wire_optional(fields.groups, path)?,
-        meta: from_wire_optional(fields.meta, path)?,
+        board: fields.board,
+        kerf: fields.kerf,
+        layers: fields.layers,
+        next_shape_id: fields.next_shape_id,
+        images: fields.images,
+        board_setup: fields.board_setup,
+        pages: fields.pages,
+        guides: fields.guides,
+        grid: fields.grid,
+        snap: fields.snap,
+        groups: fields.groups,
+        meta: fields.meta,
     };
     doc.validate()?;
     doc.groups = doc.pruned_groups();
     Ok(doc)
-}
-
-fn json<T: Serialize>(value: &T) -> Result<serde_json::Value, DocError> {
-    serde_json::to_value(value).map_err(|e| structure_err("output", &e))
-}
-
-fn from_wire<T: serde::de::DeserializeOwned>(
-    value: serde_json::Value,
-    path: &str,
-) -> Result<T, DocError> {
-    serde_json::from_value(value).map_err(|e| structure_err(path, &e))
-}
-
-fn from_wire_optional<T: serde::de::DeserializeOwned + Default>(
-    value: Option<serde_json::Value>,
-    path: &str,
-) -> Result<T, DocError> {
-    value.map_or_else(|| Ok(T::default()), |value| from_wire(value, path))
 }
 
 fn structure_err(path: &str, e: &serde_json::Error) -> DocError {

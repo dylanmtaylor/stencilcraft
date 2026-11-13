@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "StencilCraft document model and the .stencilcraft JSON format"
+description = "StencilCraft document model and domain validation"
 
 [dependencies]
 craft-file-formats = { workspace = true }

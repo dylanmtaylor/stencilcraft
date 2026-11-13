@@ -1,11 +1,11 @@
-//! Generic plotter protocols for cutters outside the Silhouette family:
-//! HP-GL (the HP-GL/2 subset `IN SP PU PD`: Roland, USCutter, Vinyl Express,
-//! many Chinese plotters, Graphtec in HP-GL mode), plain GP-GL, and DMPL.
-//! The encoders are `craft-plotter`'s; none of these has a session beyond
-//! streaming the program.
+//! Stencil job adapters for shared GP-GL, HP-GL and DMPL command encoders.
 
-use super::{Protocol, refused};
-use crate::{Capabilities, CutJob, CutProgram, MachineError, ProtocolId};
+use super::{Protocol, from_plotter_program, to_plotter_job};
+use crate::{Capabilities, CutJob, CutProgram, ProtocolId};
+
+pub const HPGL_PER_MM: f64 = craft_plotter::hpgl::UNITS_PER_MM;
+pub const GPGL_PER_MM: f64 = craft_plotter::gpgl::UNITS_PER_MM;
+pub const DMPL_PER_MM: f64 = craft_plotter::dmpl::UNITS_PER_MM;
 
 pub struct HpglProtocol;
 
@@ -14,8 +14,10 @@ impl Protocol for HpglProtocol {
         ProtocolId::Hpgl
     }
 
-    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
-        craft_plotter::hpgl::encode(&job.neutral()).map_err(refused)
+    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> CutProgram {
+        craft_plotter::hpgl::encode(&to_plotter_job(job))
+            .map(from_plotter_program)
+            .unwrap_or_default()
     }
 }
 
@@ -26,12 +28,13 @@ impl Protocol for DmplProtocol {
         ProtocolId::Dmpl
     }
 
-    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
-        craft_plotter::dmpl::encode(&job.neutral()).map_err(refused)
+    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> CutProgram {
+        craft_plotter::dmpl::encode(&to_plotter_job(job))
+            .map(from_plotter_program)
+            .unwrap_or_default()
     }
 }
 
-/// Plain GP-GL: same axis order as the Silhouette dialect (down, right).
 pub struct GpglProtocol;
 
 impl Protocol for GpglProtocol {
@@ -39,7 +42,9 @@ impl Protocol for GpglProtocol {
         ProtocolId::Gpgl
     }
 
-    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
-        craft_plotter::gpgl::encode(&job.neutral()).map_err(refused)
+    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> CutProgram {
+        craft_plotter::gpgl::encode(&to_plotter_job(job))
+            .map(from_plotter_program)
+            .unwrap_or_default()
     }
 }

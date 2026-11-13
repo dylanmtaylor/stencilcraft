@@ -1,40 +1,22 @@
-//! Silhouette / Graphtec GP-GL, three generations (legacy, Cameo 3, Cameo 4
-//! line): the mapping of a job and a machine onto `craft-plotter`'s Silhouette
-//! dialect, and the send session. See `docs/machine.md`.
+//! Stencil machine and registration adapters for the shared Silhouette GP-GL encoder.
 
-use super::{DriverEvent, MachineStatus, Protocol, SendReport, SessionHooks, refused};
+use super::{
+    DriverEvent, MachineStatus, Protocol, SendReport, SessionHooks, from_plotter_command,
+    from_plotter_program, to_plotter_job, to_plotter_operation, to_plotter_setup,
+};
 use crate::{
     Capabilities, Command, CutJob, CutProgram, DeviceRegistry, DeviceStatus, ESC_INIT,
-    MachineError, Operation, ProtocolId, Transport, parse_status, query_status, query_version,
+    MachineError, Operation, ProtocolId, Registration, Transport, parse_status, query_status,
+    query_version, stream_of,
 };
-use craft_plotter::gpgl::silhouette::{self, Generation, Setup};
-use craft_plotter::stream;
+
+const READY_POLLS: usize = 15;
+const REGISTRATION_READS: usize = 20;
 
 /// Silhouette-family GP-GL; the id picks the generation.
 pub struct SilhouetteProtocol(pub ProtocolId);
 
-/// What the preamble announces for this machine and job. The cutting region
-/// (down, right) is the machine's documented area, else the loaded media.
-fn setup_for(dialect: ProtocolId, caps: &Capabilities, job: &CutJob) -> Setup {
-    let media = job.media_size_mm;
-    Setup {
-        generation: match dialect {
-            ProtocolId::SilhouetteCameo4 => Generation::Cameo4,
-            ProtocolId::SilhouetteCameo3 => Generation::Cameo3,
-            _ => Generation::Legacy,
-        },
-        two_holders: caps.tool_holders == Some(2),
-        area_down_mm: caps.cut_length_mm.or(media.map(|m| m.1)).unwrap_or(0.0),
-        area_right_mm: caps.cut_width_mm.or(media.map(|m| m.0)).unwrap_or(0.0),
-        mat: job.mat,
-        landscape: job.landscape,
-        track_enhancing: job.track_enhancing,
-        media_id: job.media_id,
-    }
-}
-
-/// The preamble for one operation. `first` adds the job-level block (mat,
-/// region, media, track enhancing); later operations only re-tool.
+/// Encodes the shared setup preamble as Stencil's public command type.
 pub(crate) fn setup(
     dialect: ProtocolId,
     caps: &Capabilities,
@@ -42,21 +24,57 @@ pub(crate) fn setup(
     op: &Operation,
     first: bool,
 ) -> Vec<Command> {
-    silhouette::setup(&setup_for(dialect, caps, job), &op.neutral(), first)
+    craft_plotter::gpgl::silhouette::setup(
+        &to_plotter_setup(dialect, caps, job),
+        &to_plotter_operation(op),
+        first,
+    )
+    .into_iter()
+    .map(from_plotter_command)
+    .collect()
 }
 
-/// Status polls before giving up on a busy device.
-const READY_POLLS: usize = 15;
-/// Reads to wait for the registration result (each read times out on its own).
-const REGISTRATION_READS: usize = 20;
+/// Shared registration-mark geometry and search commands.
+pub fn encode_registration(reg: &Registration) -> Vec<Command> {
+    craft_plotter::gpgl::silhouette::registration(&craft_plotter::Registration {
+        width_mm: reg.width_mm,
+        length_mm: reg.length_mm,
+        origin_right_mm: reg.origin_right_mm,
+        origin_down_mm: reg.origin_down_mm,
+        search: reg.search,
+        quad: reg.quad,
+    })
+    .into_iter()
+    .map(from_plotter_command)
+    .collect()
+}
+
+pub(crate) fn plot_body(paths: &[Vec<(f64, f64)>], down: f64, right: f64) -> Vec<Command> {
+    craft_plotter::gpgl::silhouette::plot_body(paths, down, right)
+        .into_iter()
+        .map(from_plotter_command)
+        .collect()
+}
+
+pub(crate) fn park(bb: crate::BBoxMm, end_feed_mm: f64) -> Vec<Command> {
+    craft_plotter::gpgl::silhouette::park(bb, end_feed_mm)
+        .into_iter()
+        .map(from_plotter_command)
+        .collect()
+}
 
 impl Protocol for SilhouetteProtocol {
     fn id(&self) -> ProtocolId {
         self.0
     }
 
-    fn encode(&self, caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
-        silhouette::encode(&setup_for(self.0, caps, job), &job.neutral()).map_err(refused)
+    fn encode(&self, caps: &Capabilities, job: &CutJob) -> CutProgram {
+        craft_plotter::gpgl::silhouette::encode(
+            &to_plotter_setup(self.0, caps, job),
+            &to_plotter_job(job),
+        )
+        .map(from_plotter_program)
+        .unwrap_or_default()
     }
 
     fn status(&self, t: &mut dyn Transport) -> Result<MachineStatus, MachineError> {
@@ -122,10 +140,14 @@ impl Protocol for SilhouetteProtocol {
                 "device never reported ready".to_string(),
             ));
         }
-        let (head, rest) = program.split_at_registration();
+        let split = program
+            .registration_wait
+            .unwrap_or(0)
+            .min(program.commands.len());
+        let (head, rest) = program.commands.split_at(split);
         let mut bytes = 0;
         if !head.is_empty() {
-            bytes += t.write(&stream(head, program.framing))?;
+            bytes += t.write(&stream_of(head, program.framing))?;
             hooks.event(DriverEvent::Waiting("registration marks"));
             let mut found = false;
             for _ in 0..REGISTRATION_READS {
@@ -145,7 +167,7 @@ impl Protocol for SilhouetteProtocol {
                 ));
             }
         }
-        bytes += t.write(&stream(rest, program.framing))?;
+        bytes += t.write(&stream_of(rest, program.framing))?;
         hooks.event(DriverEvent::Sent { bytes, total });
         hooks.event(DriverEvent::Done);
         Ok(SendReport {

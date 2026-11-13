@@ -29,6 +29,133 @@ fn refused(e: impl core::fmt::Display) -> MachineError {
     MachineError::Limit(e.to_string())
 }
 
+pub(crate) fn to_plotter_job(job: &CutJob) -> craft_plotter::Job {
+    craft_plotter::Job {
+        operations: job.operations.iter().map(to_plotter_operation).collect(),
+        origin_down_mm: job.origin_down_mm,
+        origin_right_mm: job.origin_right_mm,
+        end_feed_mm: job.end_feed_mm,
+        bbox_only: job.bbox_only,
+        registration: job.registration.map(|reg| craft_plotter::Registration {
+            width_mm: reg.width_mm,
+            length_mm: reg.length_mm,
+            origin_right_mm: reg.origin_right_mm,
+            origin_down_mm: reg.origin_down_mm,
+            search: reg.search,
+            quad: reg.quad,
+        }),
+    }
+}
+
+pub(crate) fn to_plotter_operation(op: &crate::Operation) -> craft_plotter::Operation {
+    craft_plotter::Operation {
+        pen: op.is_pen(),
+        holder: op.holder,
+        paths: op.paths.clone(),
+        settings: craft_plotter::ToolSettings {
+            force: op.settings.force,
+            speed: op.settings.speed,
+            passes: op.settings.passes,
+            depth: op.settings.depth,
+            overcut_mm: op.settings.overcut_mm,
+            blade_offset_mm: op.settings.blade_offset_mm,
+            sharpen_corners: op.settings.sharpen_corners,
+            sharpen_start_mm: op.settings.sharpen_start_mm,
+            sharpen_end_mm: op.settings.sharpen_end_mm,
+        },
+    }
+}
+
+pub(crate) fn to_plotter_setup(
+    dialect: ProtocolId,
+    caps: &Capabilities,
+    job: &CutJob,
+) -> craft_plotter::gpgl::silhouette::Setup {
+    use craft_plotter::gpgl::silhouette::{Generation, Setup};
+    let generation = match dialect {
+        ProtocolId::SilhouetteCameo4 => Generation::Cameo4,
+        ProtocolId::SilhouetteCameo3 => Generation::Cameo3,
+        _ => Generation::Legacy,
+    };
+    let media = job.media_size_mm;
+    Setup {
+        generation,
+        two_holders: caps.tool_holders == Some(2),
+        area_down_mm: caps.cut_length_mm.or(media.map(|m| m.1)).unwrap_or(0.0),
+        area_right_mm: caps.cut_width_mm.or(media.map(|m| m.0)).unwrap_or(0.0),
+        mat: job.mat.into(),
+        landscape: job.landscape,
+        track_enhancing: job.track_enhancing,
+        media_id: job.media_id,
+    }
+}
+
+pub(crate) fn from_plotter_program(program: craft_plotter::Program) -> CutProgram {
+    let commands = program
+        .commands
+        .into_iter()
+        .map(from_plotter_command)
+        .collect();
+    CutProgram {
+        commands,
+        bbox_mm: program.bbox_mm,
+        framing: match program.framing {
+            craft_plotter::Framing::Etx => crate::Framing::Etx,
+            craft_plotter::Framing::Newline => crate::Framing::Newline,
+        },
+        registration_wait: program.registration_wait,
+    }
+}
+
+pub(crate) fn from_plotter_command(command: craft_plotter::Command) -> crate::Command {
+    use crate::Command as A;
+    use craft_plotter::Command as C;
+    match command {
+        C::SelectTool(t) => A::SelectTool(t),
+        C::Pressure(p, t) => A::Pressure(p, t),
+        C::Speed(s, t) => A::Speed(s, t),
+        C::Depth(d, t) => A::Depth(d, t),
+        C::CutterOffset {
+            x_mm,
+            y_mm,
+            toolholder,
+        } => A::CutterOffset {
+            x_mm,
+            y_mm,
+            toolholder,
+        },
+        C::Lift { lift, toolholder } => A::Lift { lift, toolholder },
+        C::SharpenCorners {
+            start_tenths,
+            end_tenths,
+            toolholder,
+        } => A::SharpenCorners {
+            start_tenths,
+            end_tenths,
+            toolholder,
+        },
+        C::Acceleration(a) => A::Acceleration(a),
+        C::Move { down_mm, right_mm } => A::Move { down_mm, right_mm },
+        C::Draw { down_mm, right_mm } => A::Draw { down_mm, right_mm },
+        C::BoundaryTopLeft { down_mm, right_mm } => A::BoundaryTopLeft { down_mm, right_mm },
+        C::BoundaryBottomRight { down_mm, right_mm } => {
+            A::BoundaryBottomRight { down_mm, right_mm }
+        }
+        C::TrackEnhancing(on) => A::TrackEnhancing(on),
+        C::SelectMat(mat) => A::SelectMat(mat.into()),
+        C::Reset => A::Reset,
+        C::PortraitMode(landscape) => A::PortraitMode(landscape),
+        C::PenUp => A::PenUp,
+        C::Origin => A::Origin,
+        C::Home => A::Home,
+        C::MediaSelect(id) => A::MediaSelect(id),
+        C::PressureLegacy(p) => A::PressureLegacy(p),
+        C::SpeedLegacy(s) => A::SpeedLegacy(s),
+        C::CutterOffsetLegacy(d) => A::CutterOffsetLegacy(d),
+        C::Raw(text) => A::Raw(text),
+    }
+}
+
 /// Machine state as a protocol reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MachineStatus {

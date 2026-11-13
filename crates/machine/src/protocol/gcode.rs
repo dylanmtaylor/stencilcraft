@@ -10,23 +10,13 @@ use crate::{
     Capabilities, Command, CutJob, CutProgram, Framing, MachineError, ProtocolId, Transport,
 };
 
-/// Feed used when an operation leaves speed to the machine (the G-code
-/// exporter's documented default); `G1` without a feed is a Grbl error.
+/// Feed used when an operation leaves speed to the machine; `G1` without a
+/// feed is a Grbl error.
 const DEFAULT_FEED: u32 = 1000;
 /// Reads to wait for one line's `ok`.
 const ACK_READS: usize = 30;
 
 pub struct GcodeProtocol;
-
-fn fmt(v: f64) -> String {
-    let s = format!("{v:.3}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s == "-0" {
-        "0".to_string()
-    } else {
-        s.to_string()
-    }
-}
 
 /// Decode a Grbl status report (`<Idle|MPos:…>`).
 pub fn parse_grbl_status(reply: &str) -> MachineStatus {
@@ -59,44 +49,44 @@ impl Protocol for GcodeProtocol {
         let Some(bb) = find_bbox(&all) else {
             return CutProgram::default();
         };
-        let raw = |s: String| Command::Raw(s);
         let (dm, rm) = (job.origin_down_mm, job.origin_right_mm);
-        // G-code is y-up: flip about the design's bottom edge.
-        let xy = |&(x, y): &(f64, f64)| (fmt(x + rm), fmt(bb.2 - y + dm));
-        let mut c = vec![
-            raw("G21".to_string()),
-            raw("G90".to_string()),
-            raw("G17".to_string()),
-            raw("M5".to_string()),
-        ];
+        let settings = craft_gcode::Settings {
+            feed_mm_per_min: f64::from(DEFAULT_FEED),
+            ..craft_gcode::Settings::default()
+        };
+        let Ok(mut writer) = craft_gcode::Writer::bare(settings) else {
+            return CutProgram::default();
+        };
         for (op, paths) in &ops {
             let feed = op.settings.speed.unwrap_or(DEFAULT_FEED);
             let power = op.settings.force.unwrap_or(0);
+            if writer.set_feed(f64::from(feed)).is_err() {
+                return CutProgram::default();
+            }
             let body: Vec<Vec<(f64, f64)>> = if job.bbox_only {
                 vec![bbox_rect(bb)]
             } else {
                 paths.clone()
             };
             for path in &body {
-                let Some((first, rest)) = path.split_first() else {
-                    continue;
-                };
-                let (x, y) = xy(first);
-                c.push(raw(format!("G0 X{x} Y{y}")));
-                c.push(raw(format!("M4 S{power}")));
-                for q in rest {
-                    let (x, y) = xy(q);
-                    c.push(raw(format!("G1 X{x} Y{y} F{feed}")));
+                // G-code is y-up: flip about the design's bottom edge. The
+                // shared writer owns coordinate formatting and command syntax.
+                let points: Vec<_> = path.iter().map(|&(x, y)| (x + rm, bb.2 - y + dm)).collect();
+                if writer.contour(&points, false, power).is_err() {
+                    return CutProgram::default();
                 }
-                c.push(raw("M5".to_string()));
             }
             if job.bbox_only {
                 break;
             }
         }
-        c.push(raw("G0 X0 Y0".to_string()));
+        let commands = writer
+            .finish()
+            .lines()
+            .map(|line| Command::Raw(line.to_owned()))
+            .collect();
         CutProgram {
-            commands: c,
+            commands,
             bbox_mm: Some(bb),
             framing: Framing::Newline,
             registration_wait: None,

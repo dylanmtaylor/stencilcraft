@@ -5702,6 +5702,7 @@ name = "stencilcraft-machine"
 version = "0.1.0"
 dependencies = [
  "bluer",
+ "craft-gcode",
  "futures-util",
  "nusb",
  "serde",

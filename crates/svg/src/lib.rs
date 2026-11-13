@@ -427,6 +427,9 @@ mod tests_group_walk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use craft_svg::paths::{
+        MAX_CSS_BYTES, MAX_SVG_BYTES, MAX_SVG_DEPTH, MAX_SVG_NODES, MAX_SVG_WARNINGS,
+    };
     use stencilcraft_geom::Point;
 
     fn rect(x: f64, y: f64, w: f64, h: f64) -> BezPath {

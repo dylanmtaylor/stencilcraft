@@ -634,7 +634,7 @@ mod tests {
 
     #[test]
     fn threshold_colour_range_filters_and_detach() {
-        let grey = RgbaImage::from_pixel(5, 5, Rgba([100, 100, 100, 255]));
+        let grey = RgbaImage::from_pixel(5, 5, Pixel([100, 100, 100, 255]));
         let at = |t: f64| {
             trace(
                 &grey,
@@ -652,9 +652,9 @@ mod tests {
         // Red square on blue: only the red is in the 340–20 hue range.
         let img = RgbaImage::from_fn(20, 20, |x, y| {
             if (5..15).contains(&x) && (5..15).contains(&y) {
-                Rgba([220, 10, 10, 255])
+                Pixel([220, 10, 10, 255])
             } else {
-                Rgba([10, 10, 220, 255])
+                Pixel([10, 10, 220, 255])
             }
         });
         let range = ColourRange {

@@ -221,9 +221,9 @@ mod tests {
         let pixels = RgbaImage::from_fn(9, 9, |x, y| {
             let d = (x as i32 - 4).abs().max((y as i32 - 4).abs());
             if d == 2 || d == 3 {
-                Rgba([0, 0, 0, 255])
+                Pixel([0, 0, 0, 255])
             } else {
-                Rgba([250, 252, 255, 255])
+                Pixel([250, 252, 255, 255])
             }
         });
         let out = remove_background(&pixels, 5.0).unwrap();

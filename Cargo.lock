@@ -1210,7 +1210,7 @@ dependencies = [
 [[package]]
 name = "craft-raster-codecs"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=dc705aa36#dc705aa3647ef658b1367995796d20458d0b4882"
+source = "git+https://github.com/storytold/craft-libs.git?rev=e95c99e7bcba0f70bae630596355c3ebd372fff6#e95c99e7bcba0f70bae630596355c3ebd372fff6"
 dependencies = [
  "image",
  "rayon",
@@ -1243,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-format"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=5407ea822#5407ea8220a350b1b34f6fe41fa45cd4c71566a6"
+source = "git+https://github.com/storytold/craft-libs.git?rev=93d75f44d78f08a2d206dcb7d89e940ba47da696#93d75f44d78f08a2d206dcb7d89e940ba47da696"
 dependencies = [
  "serde",
  "serde_json",

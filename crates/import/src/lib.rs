@@ -79,6 +79,8 @@ impl Format {
             | craft_file_formats::Format::Pptx
             | craft_file_formats::Format::LegacyDoc
             | craft_file_formats::Format::PlainText
+            | craft_file_formats::Format::Csv
+            | craft_file_formats::Format::Tsv
             | craft_file_formats::Format::Gcode => None,
         }
     }

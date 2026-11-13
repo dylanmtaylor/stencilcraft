@@ -10,9 +10,9 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{DocError, Document, load_from, save_to};
+use craft_stencilcraft_document::LibraryIndex as Index;
+pub use craft_stencilcraft_document::LibraryTrashEntry as TrashEntry;
 
 pub const DOCUMENT_EXTENSION: &str = "stencilcraft";
 const INDEX_FILE: &str = ".library.json";
@@ -42,22 +42,6 @@ pub struct LibraryListing {
     pub folders: Vec<String>,
     /// Documents in the folder, sorted by path.
     pub items: Vec<LibraryItem>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TrashEntry {
-    /// File name inside the bin.
-    pub name: String,
-    /// Where it was, for restoring.
-    pub original: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-struct Index {
-    #[serde(default)]
-    favourites: Vec<String>,
-    #[serde(default)]
-    trash: Vec<TrashEntry>,
 }
 
 pub struct Library {
@@ -127,13 +111,13 @@ impl Library {
     fn index(&self) -> Index {
         std::fs::read_to_string(self.root.join(INDEX_FILE))
             .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
+            .and_then(|text| Index::from_json(&text).ok())
             .unwrap_or_default()
     }
 
     fn save_index(&self, index: &Index) -> Result<(), DocError> {
         let path = self.root.join(INDEX_FILE);
-        let json = serde_json::to_string_pretty(index).map_err(|e| bad(e.to_string()))?;
+        let json = index.to_json_pretty().map_err(|e| bad(e.to_string()))?;
         std::fs::create_dir_all(&self.root).map_err(io_err(&self.root))?;
         craft_atomic::atomic_write(&path, json.as_bytes()).map_err(io_err(&path))
     }

@@ -12,6 +12,8 @@ craft-atomic = { workspace = true }
 craft-stencilcraft-document = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
+
+[dev-dependencies]
 serde_json = { workspace = true }
 
 [lints]

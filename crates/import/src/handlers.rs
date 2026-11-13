@@ -39,7 +39,8 @@ impl Default for ExportOptions {
 
 pub trait FormatHandler {
     fn name(&self) -> &'static str;
-    fn extensions(&self) -> &'static [&'static str];
+    /// Shared format identifiers accepted by this app handler.
+    fn formats(&self) -> &'static [craft_file_formats::Format];
     fn detect(&self, bytes: &[u8], extension: &str) -> bool;
     fn read(
         &self,
@@ -64,10 +65,10 @@ pub fn handlers() -> Vec<Box<dyn FormatHandler>> {
 
 /// The handler for a file to write, by extension.
 pub fn writer_for(extension: &str) -> Option<Box<dyn FormatHandler>> {
-    let extension = extension.to_ascii_lowercase();
+    let format = craft_file_formats::from_extension(extension)?;
     handlers()
         .into_iter()
-        .find(|h| h.capabilities().write && h.extensions().contains(&extension.as_str()))
+        .find(|handler| handler.capabilities().write && handler.formats().contains(&format))
 }
 
 struct Handler(Format);
@@ -89,13 +90,20 @@ impl FormatHandler for Handler {
         }
     }
 
-    fn extensions(&self) -> &'static [&'static str] {
+    fn formats(&self) -> &'static [craft_file_formats::Format] {
         match self.0 {
-            Format::Svg => &["svg"],
-            Format::Dxf => &["dxf"],
-            Format::Pdf => &["pdf"],
-            Format::Eps => &["eps", "ps", "ai"],
-            Format::Raster => &["png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp"],
+            Format::Svg => &[craft_file_formats::Format::Svg],
+            Format::Dxf => &[craft_file_formats::Format::Dxf],
+            Format::Pdf => &[craft_file_formats::Format::Pdf],
+            Format::Eps => &[
+                craft_file_formats::Format::Eps,
+                craft_file_formats::Format::PostScript,
+                craft_file_formats::Format::Illustrator,
+            ],
+            Format::Raster => &[
+                craft_file_formats::Format::Png,
+                craft_file_formats::Format::Jpeg,
+            ],
         }
     }
 

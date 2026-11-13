@@ -175,9 +175,9 @@ mod tests {
         assert!(text.starts_with("%PDF-1.4"));
         assert!(text.ends_with("%%EOF\n"));
         assert!(text.contains("/MediaBox [0 0 283.4646 425.1969]"), "{text}");
-        // An independent reader (VectorCraft's, over hayro) finds the path.
-        let read = vectorcraft_pdf::import(&pdf).unwrap();
-        assert!(!read.layers.is_empty());
+        let read = craft_pdf::paths::import(&pdf, Default::default()).unwrap();
+        assert!(!read.pages.is_empty());
+        assert!(!read.pages[0].paths.is_empty());
         let mut bad = doc.clone();
         bad.board.width_mm = f64::NAN;
         assert!(export(&bad).is_err());

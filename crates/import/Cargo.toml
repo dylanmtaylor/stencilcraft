@@ -8,6 +8,9 @@ description = "StencilCraft file import: SVG, DXF, PDF, EPS/AI vectors and raste
 
 [dependencies]
 craft-file-formats = { workspace = true }
+craft-dxf = { workspace = true }
+craft-eps = { workspace = true }
+craft-pdf = { workspace = true }
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 craft-raster-codecs = { workspace = true }
@@ -18,10 +21,6 @@ stencilcraft-geom = { workspace = true }
 stencilcraft-pdf = { workspace = true }
 stencilcraft-raster = { workspace = true }
 stencilcraft-svg = { workspace = true }
-vectorcraft-cad = { workspace = true }
-vectorcraft-doc = { workspace = true }
-vectorcraft-eps = { workspace = true }
-vectorcraft-pdf = { workspace = true }
 
 [dev-dependencies]
 

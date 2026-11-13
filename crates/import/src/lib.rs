@@ -1,7 +1,6 @@
 //! File import into a StencilCraft document: SVG (our reader), DXF, PDF, EPS/PS and
-//! Illustrator `.ai` (VectorCraft's readers, MIT OR Apache-2.0, already in the tree
-//! through the engine), and raster images (PNG, JPEG, BMP, GIF, TIFF, WebP) placed as
-//! an image object to trace.
+//! Illustrator `.ai` and raster images (PNG, JPEG, BMP, GIF, TIFF, WebP) placed as an
+//! image object to trace. Format probes and vector parsers come from craft-libs.
 //!
 //! Vector art comes in "as is" (1:1, the source page as the board) or fitted to a
 //! page, and open paths whose endpoints meet within a tolerance can be joined into
@@ -166,18 +165,77 @@ fn read_format(
             imported.document
         }
         Format::Dxf => {
-            let imported =
-                vectorcraft_cad::import(bytes, &vectorcraft_cad::ImportOptions::default())
-                    .map_err(|e| bad(name, e))?;
-            from_vectorcraft(&imported.document, name)?
+            let imported = craft_dxf::paths::import(bytes).map_err(|e| bad(name, e))?;
+            for warning in imported.warnings {
+                eprintln!("{name}: {warning}");
+            }
+            let (size, transform) = match imported.bounds {
+                Some(bounds) => (
+                    (
+                        (bounds.width() * imported.unit_to_mm).max(1.0),
+                        (bounds.height() * imported.unit_to_mm).max(1.0),
+                    ),
+                    kurbo::Affine::scale(imported.unit_to_mm)
+                        * kurbo::Affine::translate(-bounds.origin().to_vec2()),
+                ),
+                None => ((100.0, 150.0), kurbo::Affine::IDENTITY),
+            };
+            paths_document(imported.paths, size, transform, name)?
         }
         Format::Pdf => {
-            let imported = vectorcraft_pdf::import(bytes).map_err(|e| bad(name, e))?;
-            from_vectorcraft(&imported, name)?
+            let imported = craft_pdf::paths::import(
+                bytes,
+                craft_pdf::paths::Limits {
+                    max_input_bytes: stencilcraft_raster::MAX_FILE_BYTES,
+                    ..Default::default()
+                },
+            )
+            .map_err(|e| bad(name, e))?;
+            for warning in &imported.warnings {
+                eprintln!("{name}: {warning}");
+            }
+            let page_count = imported.pages.len();
+            let page = imported
+                .pages
+                .into_iter()
+                .next()
+                .ok_or_else(|| bad(name, "PDF has no pages"))?;
+            if page_count > 1 {
+                eprintln!("{name}: only the first PDF page was imported");
+            }
+            let bounds = page.crop_box;
+            let scale = MM_PER_PT;
+            let transform = kurbo::Affine::scale(scale)
+                * kurbo::Affine::new([1.0, 0.0, 0.0, -1.0, -bounds.x0, bounds.y1]);
+            paths_document(
+                page.paths,
+                (bounds.width() * scale, bounds.height() * scale),
+                transform,
+                name,
+            )?
         }
         Format::Eps => {
-            let imported = vectorcraft_eps::import(bytes).map_err(|e| bad(name, e))?;
-            from_vectorcraft(&imported.document, name)?
+            let imported =
+                craft_eps::paths::import(bytes, Default::default()).map_err(|e| bad(name, e))?;
+            for warning in &imported.warnings {
+                eprintln!("{name}: {warning}");
+            }
+            if imported.preview_fallback {
+                eprintln!(
+                    "{name}: the embedded preview is a raster image and was not imported as paths"
+                );
+            }
+            let bounds = imported.page_bounds;
+            paths_document(
+                imported.paths,
+                (
+                    (bounds.width() * MM_PER_PT).max(1.0),
+                    (bounds.height() * MM_PER_PT).max(1.0),
+                ),
+                kurbo::Affine::scale(MM_PER_PT)
+                    * kurbo::Affine::translate(-bounds.origin().to_vec2()),
+                name,
+            )?
         }
     };
     if options.join {
@@ -205,74 +263,49 @@ fn raster(bytes: &[u8], name: &str, dpi: f64) -> Result<Document, ImportError> {
     Ok(doc)
 }
 
-/// VectorCraft documents are in points, y down, on artboards; ours are millimetres
-/// with the first artboard's corner as the origin and its size as the board.
-fn from_vectorcraft(
-    source: &vectorcraft_doc::Document,
+/// Adapt shared neutral Bézier paths to StencilCraft's flat millimetre document.
+fn paths_document(
+    paths: Vec<BezPath>,
+    board_mm: (f64, f64),
+    transform: kurbo::Affine,
     name: &str,
 ) -> Result<Document, ImportError> {
-    let origin = source
-        .artboards
-        .first()
-        .map_or(Point::ZERO, |a| Point::new(a.rect.x0, a.rect.y0));
-    let mut paths = Vec::new();
-    for layer in &source.layers {
-        collect(layer, &mut paths);
-        if paths.len() > MAX_SHAPES {
-            return Err(bad(name, format!("more than {MAX_SHAPES} paths")));
-        }
+    if !(board_mm.0.is_finite() && board_mm.1.is_finite() && board_mm.0 > 0.0 && board_mm.1 > 0.0) {
+        return Err(bad(name, "the vector page has invalid dimensions"));
     }
-    let to_mm = kurbo::Affine::scale(MM_PER_PT) * kurbo::Affine::translate(-origin.to_vec2());
+    if paths.len() > MAX_SHAPES {
+        return Err(bad(name, format!("more than {MAX_SHAPES} paths")));
+    }
     let mut doc = Document {
+        board: stencilcraft_doc::Board {
+            width_mm: board_mm.0,
+            height_mm: board_mm.1,
+        },
         layers: vec![Layer::new("cut", CutStyle::Cut)],
         ..Document::default()
     };
     for path in paths {
-        let path = to_mm * path;
-        if path.elements().iter().any(|e| {
-            e.end_point()
-                .is_some_and(|p| !(p.x.is_finite() && p.y.is_finite()))
-        }) {
+        let path = transform * path;
+        if !path_is_finite(&path) {
             return Err(bad(name, "a coordinate is not finite"));
         }
         doc.push_shape(0, path, CutStyle::Cut)
             .map_err(|e| bad(name, e))?;
     }
-    let art = doc.layers.first().and_then(Layer::bounds);
-    match (source.artboards.first(), art) {
-        (Some(a), _) if a.rect.width() > 0.0 && a.rect.height() > 0.0 => {
-            doc.board.width_mm = a.rect.width() * MM_PER_PT;
-            doc.board.height_mm = a.rect.height() * MM_PER_PT;
-        }
-        (_, Some(bounds)) => move_to_origin(&mut doc, bounds),
-        _ => {}
-    }
+    doc.validate().map_err(|e| bad(name, e))?;
     Ok(doc)
 }
 
-fn collect(node: &vectorcraft_doc::Node, out: &mut Vec<BezPath>) {
-    if !node.visible || out.len() > MAX_SHAPES {
-        return;
-    }
-    if let Some(path) = node.path_data() {
-        let path = path.to_bezpath();
-        if !path.elements().is_empty() {
-            out.push(path);
+fn path_is_finite(path: &BezPath) -> bool {
+    path.elements().iter().all(|element| {
+        let finite = |point: Point| point.x.is_finite() && point.y.is_finite();
+        match *element {
+            PathEl::MoveTo(point) | PathEl::LineTo(point) => finite(point),
+            PathEl::QuadTo(a, b) => finite(a) && finite(b),
+            PathEl::CurveTo(a, b, c) => finite(a) && finite(b) && finite(c),
+            PathEl::ClosePath => true,
         }
-    } else if let Some(children) = node.children() {
-        for child in children {
-            collect(child, out);
-        }
-    }
-}
-
-fn move_to_origin(doc: &mut Document, bounds: kurbo::Rect) {
-    let shift = kurbo::Affine::translate(-bounds.origin().to_vec2());
-    for shape in doc.layers.iter_mut().flat_map(|l| l.shapes.iter_mut()) {
-        shape.path = shift * shape.path.clone();
-    }
-    doc.board.width_mm = bounds.width().max(1.0);
-    doc.board.height_mm = bounds.height().max(1.0);
+    })
 }
 
 /// Scale the art uniformly to fill the page, its corner at the page's.

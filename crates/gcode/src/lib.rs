@@ -125,6 +125,8 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
 
 #[cfg(test)]
 mod tests {
+    use kurbo::Point;
+
     use super::*;
 
     fn line_doc() -> Document {

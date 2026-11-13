@@ -8,7 +8,6 @@
 
 mod trace;
 
-use base64::Engine as _;
 use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
 use stencilcraft_doc::RasterImage;
 
@@ -22,6 +21,16 @@ pub const MAX_SIDE: u32 = 10_000;
 pub const MAX_PIXELS: u64 = 16_000_000;
 const MAX_ALLOC: u64 = 256 * 1024 * 1024;
 
+fn decode_limits() -> DecodeLimits {
+    DecodeLimits {
+        max_file_bytes: MAX_FILE_BYTES,
+        max_width: MAX_SIDE,
+        max_height: MAX_SIDE,
+        max_pixels: MAX_PIXELS,
+        max_alloc_bytes: MAX_ALLOC,
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum RasterError {
     #[error("image: {0}")]
@@ -34,32 +43,18 @@ fn bad(message: impl Into<String>) -> RasterError {
 
 /// Decode an image file under the caps. Animated GIFs give their first frame.
 pub fn decode(bytes: &[u8]) -> Result<RgbaImage, RasterError> {
-    common::decode_rgba(
-        bytes,
-        DecodeLimits {
-            max_file_bytes: MAX_FILE_BYTES,
-            max_width: MAX_SIDE,
-            max_height: MAX_SIDE,
-            max_pixels: MAX_PIXELS,
-            max_alloc_bytes: MAX_ALLOC,
-        },
-    )
-    .map_err(|e| bad(e.to_string()))
+    common::decode_rgba(bytes, decode_limits()).map_err(|e| bad(e.to_string()))
 }
 
 /// Encode pixels as base64 PNG, the document's image storage.
 pub fn encode_png_base64(pixels: &RgbaImage) -> Result<String, RasterError> {
-    common::encode_png(pixels)
-        .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes))
-        .map_err(|e| bad(e.to_string()))
+    common::encode_png_base64(pixels).map_err(|e| bad(e.to_string()))
 }
 
 /// Decode a placed image's pixels (document data is untrusted too).
 pub fn image_pixels(image: &RasterImage) -> Result<RgbaImage, RasterError> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(image.png_base64.as_bytes())
+    let pixels = common::decode_png_base64(&image.png_base64, decode_limits())
         .map_err(|e| bad(format!("image {}: bad pixel data: {e}", image.id)))?;
-    let pixels = decode(&bytes)?;
     if pixels.dimensions() != (image.width_px, image.height_px) {
         return Err(bad(format!(
             "image {}: pixel data does not match its {}×{} size",

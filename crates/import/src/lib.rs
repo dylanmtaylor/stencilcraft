@@ -16,9 +16,7 @@ use std::collections::HashMap;
 use kurbo::{BezPath, PathEl, Point, Shape as _};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 
-pub use handlers::{
-    Capabilities, ExportOptions, FormatHandler, handlers, write_document, writer_for,
-};
+pub use handlers::{FORMAT_CAPABILITIES, FormatCapabilities, write_document};
 pub use render::{RenderFormat, render, render_document};
 
 #[derive(Debug, thiserror::Error)]

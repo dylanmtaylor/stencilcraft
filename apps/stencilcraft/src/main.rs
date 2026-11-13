@@ -1860,7 +1860,7 @@ impl StencilApp {
                     .set_file_name("export.svg")
                     .save_file()
                 {
-                    match stencilcraft_svg::export(&self.engine.doc) {
+                    match stencilcraft_import::write_document(&self.engine.doc, "svg", 300.0) {
                         Ok(svg) => {
                             if let Err(e) = std::fs::write(&path, svg) {
                                 self.status = format!("export failed: {e}");
@@ -1897,7 +1897,7 @@ impl StencilApp {
                     .set_file_name("export.dxf")
                     .save_file()
                 {
-                    match stencilcraft_dxf::export(&self.engine.doc) {
+                    match stencilcraft_import::write_document(&self.engine.doc, "dxf", 300.0) {
                         Ok(dxf) => {
                             if let Err(e) = std::fs::write(&path, dxf) {
                                 self.status = format!("export failed: {e}");
@@ -1944,7 +1944,8 @@ impl StencilApp {
                             let mut saved = 0;
                             for (i, sheet_doc) in sheets.iter().enumerate() {
                                 let out_file = dir.join(format!("sheet_{:02}.svg", i + 1));
-                                if let Ok(svg) = stencilcraft_svg::export(sheet_doc)
+                                if let Ok(svg) =
+                                    stencilcraft_import::write_document(sheet_doc, "svg", 300.0)
                                     && std::fs::write(&out_file, svg).is_ok()
                                 {
                                     saved += 1;

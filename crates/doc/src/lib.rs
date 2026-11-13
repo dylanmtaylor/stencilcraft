@@ -4,7 +4,6 @@
 //! `craft-stencilcraft-document`. This crate keeps application library/recovery features, built-in
 //! templates, and dispatch to other supported file formats.
 
-pub mod format;
 pub mod library;
 pub mod recovery;
 pub mod templates;

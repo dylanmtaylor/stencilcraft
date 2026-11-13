@@ -257,7 +257,7 @@ impl Session {
             }
             "export.svg" => {
                 let path = str_param(params, "path")?;
-                let text = stencilcraft_svg::export(&self.engine.doc)
+                let text = stencilcraft_import::write_document(&self.engine.doc, "svg", 300.0)
                     .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 std::fs::write(&path, text)
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
@@ -265,7 +265,7 @@ impl Session {
             }
             "export.dxf" => {
                 let path = str_param(params, "path")?;
-                let text = stencilcraft_dxf::export(&self.engine.doc)
+                let text = stencilcraft_import::write_document(&self.engine.doc, "dxf", 300.0)
                     .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 std::fs::write(&path, text)
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
@@ -305,7 +305,7 @@ impl Session {
                 let count = pieces.len();
                 for (i, piece) in pieces.iter().enumerate() {
                     let tile_path = format!("{path}-{i:02}.svg");
-                    let text = stencilcraft_svg::export(piece)
+                    let text = stencilcraft_import::write_document(piece, "svg", 300.0)
                         .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                     std::fs::write(&tile_path, text)
                         .map_err(|e| ProtocolError::Bad(format!("{tile_path}: {e}")))?;
@@ -400,7 +400,7 @@ impl Session {
             }
             "export.pdf" => {
                 let path = str_param(params, "path")?;
-                let bytes = stencilcraft_pdf::export(&self.engine.doc)
+                let bytes = stencilcraft_import::write_document(&self.engine.doc, "pdf", 300.0)
                     .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 std::fs::write(&path, bytes)
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
@@ -413,13 +413,7 @@ impl Session {
                     .and_then(serde_json::Value::as_f64)
                     .unwrap_or(300.0);
                 let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
-                let format =
-                    stencilcraft_import::RenderFormat::from_extension(ext).ok_or_else(|| {
-                        ProtocolError::Bad(format!(
-                            "export.image: {path}: use a .png, .jpg or .jpeg name"
-                        ))
-                    })?;
-                let bytes = stencilcraft_import::render_document(&self.engine.doc, dpi, format)
+                let bytes = stencilcraft_import::write_document(&self.engine.doc, ext, dpi)
                     .map_err(|e| ProtocolError::Bad(e.to_string()))?;
                 std::fs::write(&path, bytes)
                     .map_err(|e| ProtocolError::Bad(format!("{path}: {e}")))?;
@@ -1657,10 +1651,8 @@ fn stencilcraft_effect_json(effect: stencilcraft_engine::Effect) -> serde_json::
 /// Native documents load as is; Silhouette Studio documents are imported, with the
 /// reader's notes about skipped records returned alongside.
 fn open_document(path: &str) -> Result<(stencilcraft_doc::Document, Vec<String>), ProtocolError> {
-    match stencilcraft_doc::format::read_path(&[&stencilcraft_studio::StudioHandler], path)
-        .map_err(ProtocolError::Bad)?
-    {
-        Some(read) => Ok((read.value, read.warnings)),
+    match stencilcraft_studio::import_path(path).map_err(ProtocolError::Bad)? {
+        Some(imported) => Ok((imported.doc, imported.warnings)),
         None => stencilcraft_doc::load_from(path)
             .map(|doc| (doc, Vec::new()))
             .map_err(|e| ProtocolError::Bad(e.to_string())),

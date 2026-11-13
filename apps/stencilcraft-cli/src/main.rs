@@ -158,20 +158,16 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
     }
     let input = input.ok_or("import-svg: --in FILE.svg is required")?;
     let output = output.ok_or("import-svg: --out FILE.stencilcraft is required")?;
-    let is_svg = std::path::Path::new(&input)
-        .extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .and_then(craft_file_formats::from_extension)
-        == Some(craft_file_formats::Format::Svg);
+    let bytes = std::fs::read(&input).map_err(|e| format!("{input}: could not read: {e}"))?;
+    let is_svg =
+        craft_file_formats::detect(&input, &bytes) == Some(craft_file_formats::Format::Svg);
     let doc = if is_svg {
-        let contents = std::fs::read_to_string(&input)
-            .map_err(|e| format!("{input}: could not read SVG: {e}"))?;
-        let imported =
-            stencilcraft_svg::import_with_warnings(&contents, &input).map_err(|e| e.to_string())?;
-        for warning in &imported.warnings {
-            eprintln!("{input}: {warning}");
-        }
-        imported.document
+        stencilcraft_import::import_bytes(
+            &bytes,
+            &input,
+            &stencilcraft_import::ImportOptions::default(),
+        )
+        .map_err(|e| e.to_string())?
     } else {
         load_document(&input)?
     };

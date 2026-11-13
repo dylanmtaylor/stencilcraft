@@ -30,10 +30,10 @@ craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
 craft-raster-codecs = { git = "https://github.com/dylanmtaylor/craft-libs.git", rev = "dc705aa36" }
 craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "5407ea822" }
-craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
-craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "a94020885" }
+craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "a94020885", features = ["paths"] }
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
-craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa", features = ["write"] }
+craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "a94020885", features = ["write", "paths"] }
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
 craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "d8cc88a77" }
 craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
@@ -44,11 +44,6 @@ craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e8
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
 vectorcraft-geom = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 vectorcraft-pathops = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
-# VectorCraft's readers (already in the tree through vectorcraft-engine) for DXF/PDF/EPS/AI import.
-vectorcraft-doc = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
-vectorcraft-cad = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
-vectorcraft-pdf = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
-vectorcraft-eps = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e" }
 # Font database, shaping and glyph outlines for live text (already in the build through
 # vectorcraft-engine); its bundled fonts stay off, so no font ships with StencilCraft.
 vectorcraft-text = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
@@ -107,12 +102,12 @@ codegen-units = 1
 # craft-ui uses the suite's egui and winit forks for shared IME and docking support.
 [patch.crates-io]
 # VectorCraft's PDF import/export dependencies use the matching Craft-Libs API revisions.
-hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
+hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
+hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
+hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
+krilla = { git = "https://github.com/storytold/craft-libs", rev = "a94020885" }
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
 emath = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }
 epaint = { git = "https://github.com/storytold/egui.git", rev = "35a72e6b786d65ba92532566251947d4b80c4611" }

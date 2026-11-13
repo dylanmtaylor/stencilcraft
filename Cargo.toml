@@ -16,7 +16,6 @@ thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
-base64 = "0.22"
 # Raster import/trace; every decoder here is pure Rust (MIT/Apache) and builds for wasm.
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 # ui

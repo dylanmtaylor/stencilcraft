@@ -561,26 +561,68 @@ impl Document {
     /// long: shapes past the budget are left out. Coordinates keep two decimals.
     pub fn render_thumbnail(&self, max_bytes: usize) -> String {
         let (w, h) = (self.board.width_mm, self.board.height_mm);
-        // Documents are y-up; flip into SVG's y-down space.
-        let mut svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w:.2} {h:.2}\">\
-             <g transform=\"matrix(1 0 0 -1 0 {h:.2})\" fill=\"none\" stroke=\"#000\" \
-             stroke-width=\"{:.2}\">",
-            (w.max(h) / 200.0).max(0.01)
-        );
-        let tail = "</g></svg>";
+        // Documents are y-up; flip into SVG's y-down space. The shared SVG writer owns markup,
+        // escaping, numeric formatting, and path-data formatting.
+        let mut svg = thumbnail_writer(w, h);
+        let mut empty = svg.clone();
+        empty.line(1);
+        empty.close();
+        empty.line(0);
+        empty.close();
+        let empty_len = empty.finish().len();
+        if empty_len > max_bytes {
+            return String::new();
+        }
+        let mut remaining = max_bytes - empty_len;
         'layers: for layer in self.layers.iter().filter(|l| l.is_output()) {
             for shape in layer.shapes.iter().filter(|s| !s.hidden) {
-                let element = format!("<path d=\"{}\"/>", short_path_data(&shape.path));
-                if svg.len() + element.len() + tail.len() > max_bytes {
+                let mut element = craft_svg::write::SvgWriter::fragment();
+                element.line(2);
+                element
+                    .tag("path")
+                    .attr("d", craft_svg::write::path_data_fixed(&shape.path, 2))
+                    .empty();
+                let element = element.finish();
+                if element.len() > remaining {
                     break 'layers;
                 }
-                svg.push_str(&element);
+                remaining -= element.len();
+                svg.raw(&element);
             }
         }
-        svg.push_str(tail);
-        svg
+        svg.line(1);
+        svg.close();
+        svg.line(0);
+        svg.close();
+        svg.finish()
     }
+}
+
+fn thumbnail_writer(width_mm: f64, height_mm: f64) -> craft_svg::write::SvgWriter {
+    use craft_svg::write::{SvgWriter, num};
+
+    let mut writer = SvgWriter::fragment();
+    writer
+        .root()
+        .attr(
+            "viewBox",
+            format!("0 0 {} {}", num(width_mm, 2), num(height_mm, 2)),
+        )
+        .open();
+    writer
+        .tag("g")
+        .attr(
+            "transform",
+            format!("matrix(1 0 0 -1 0 {})", num(height_mm, 2)),
+        )
+        .attr("fill", "none")
+        .attr("stroke", "#000")
+        .attr(
+            "stroke-width",
+            num((width_mm.max(height_mm) / 200.0).max(0.01), 2),
+        )
+        .open();
+    writer
 }
 
 /// Groups holding `child` according to `parents` ([`Document::group_parent_map`]),
@@ -597,26 +639,6 @@ pub fn group_chain_in(parents: &BTreeMap<GroupChild, u64>, child: GroupChild) ->
     }
     chain.reverse();
     chain
-}
-
-fn short_path_data(path: &kurbo::BezPath) -> String {
-    use kurbo::PathEl;
-    use std::fmt::Write;
-    let mut d = String::new();
-    for el in path.elements() {
-        let _ = match el {
-            PathEl::MoveTo(p) => write!(d, "M{:.2} {:.2}", p.x, p.y),
-            PathEl::LineTo(p) => write!(d, "L{:.2} {:.2}", p.x, p.y),
-            PathEl::QuadTo(a, p) => write!(d, "Q{:.2} {:.2} {:.2} {:.2}", a.x, a.y, p.x, p.y),
-            PathEl::CurveTo(a, b, p) => write!(
-                d,
-                "C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
-                a.x, a.y, b.x, b.y, p.x, p.y
-            ),
-            PathEl::ClosePath => write!(d, "Z"),
-        };
-    }
-    d
 }
 
 #[cfg(test)]

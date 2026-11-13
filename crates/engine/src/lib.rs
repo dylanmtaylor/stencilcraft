@@ -2344,7 +2344,7 @@ impl Engine {
                 .execute("layer.setCurrent", &json!({"id": layer_id.0}))
                 .map_err(|error| EngineError::Invalid(format!("{command}: {error}")))?;
             let path_points = transform_path(path, kurbo::Affine::scale(POINTS_PER_MM));
-            let path_data = path_to_svg_data(&path_points);
+            let path_data = craft_svg::write::path_data(&path_points);
             let created = self
                 .session
                 .execute("path.create", &json!({"d": path_data, "closed": false}))
@@ -2738,25 +2738,6 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         Command::Production(c) => c.targets(),
         _ => Vec::new(),
     }
-}
-
-fn path_to_svg_data(path: &BezPath) -> String {
-    path.elements()
-        .iter()
-        .map(|element| match *element {
-            kurbo::PathEl::MoveTo(point) => format!("M{} {}", point.x, point.y),
-            kurbo::PathEl::LineTo(point) => format!("L{} {}", point.x, point.y),
-            kurbo::PathEl::QuadTo(control, point) => {
-                format!("Q{} {} {} {}", control.x, control.y, point.x, point.y)
-            }
-            kurbo::PathEl::CurveTo(control1, control2, point) => format!(
-                "C{} {} {} {} {} {}",
-                control1.x, control1.y, control2.x, control2.y, point.x, point.y
-            ),
-            kurbo::PathEl::ClosePath => "Z".to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn transform_path(path: &BezPath, transform: kurbo::Affine) -> BezPath {

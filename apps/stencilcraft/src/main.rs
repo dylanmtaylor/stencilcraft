@@ -1487,25 +1487,11 @@ impl StencilApp {
 
     pub fn import_svg(&mut self, path: std::path::PathBuf) {
         let name = path.to_string_lossy();
-        let result = std::fs::read_to_string(&path)
-            .map_err(|error| format!("{name}: could not read SVG: {error}"))
-            .and_then(|svg| {
-                stencilcraft_svg::import_with_warnings(&svg, &name)
-                    .map_err(|error| error.to_string())
-            });
+        let result =
+            stencilcraft_import::import_file(&name, &stencilcraft_import::ImportOptions::default())
+                .map_err(|error| error.to_string());
         match result {
-            Ok(imported) => {
-                self.add_imported_shapes(imported.document, &name);
-                // Skipped text, masks and filters must reach the user, not vanish.
-                if let Some(first) = imported.warnings.first() {
-                    let more = imported.warnings.len() - 1;
-                    self.status = if more == 0 {
-                        format!("{}; warning: {first}", self.status)
-                    } else {
-                        format!("{}; warning: {first} (+{more} more)", self.status)
-                    };
-                }
-            }
+            Ok(document) => self.add_imported_shapes(document, &name),
             Err(error) => self.status = error,
         }
     }

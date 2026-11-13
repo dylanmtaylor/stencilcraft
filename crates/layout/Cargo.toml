@@ -13,7 +13,7 @@ thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
-stencilcraft-pdf = { workspace = true }
+craft-file-import = { workspace = true }
 craft-raster-codecs = { workspace = true }
 tiny-skia = "0.11"
 

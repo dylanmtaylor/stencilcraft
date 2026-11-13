@@ -10,27 +10,12 @@ pub enum PdfError {
     Model(String),
 }
 
-/// One path to draw on a [`PdfPage`]. RGB values and width are model units, not PDF syntax.
-#[derive(Debug, Clone)]
-pub struct PdfPath {
-    pub path: kurbo::BezPath,
-    pub color: [u8; 3],
-    pub stroke_width_mm: Option<f64>,
-}
-
-/// A physical page and its vector paths, used by print layout and document export adapters.
-#[derive(Debug, Clone)]
-pub struct PdfPage {
-    pub width_mm: f64,
-    pub height_mm: f64,
-    pub paths: Vec<PdfPath>,
-}
-
 pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
     doc.validate().map_err(|e| PdfError::Model(e.to_string()))?;
-    let mut page = PdfPage {
+    let mut page = craft_file_import::write::PdfPage {
         width_mm: doc.board.width_mm,
         height_mm: doc.board.height_mm,
+        view_box: [0.0, 0.0, doc.board.width_mm, doc.board.height_mm],
         paths: Vec::new(),
     };
     for layer in doc.layers.iter().filter(|layer| layer.visible) {
@@ -39,36 +24,14 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
                 CutStyle::Cut => [192, 57, 43],
                 CutStyle::Engrave => [45, 108, 223],
             };
-            page.paths.push(PdfPath {
+            page.paths.push(craft_file_import::write::PdfPath {
                 path: shape.path.clone(),
-                color,
+                color_rgb: color,
                 stroke_width_mm: Some(0.25),
             });
         }
     }
-    export_pages(&[page])
-}
-
-/// Serialize one or more application-adapted vector pages through the shared PDF writer.
-pub fn export_pages(pages: &[PdfPage]) -> Result<Vec<u8>, PdfError> {
-    let pages = pages
-        .iter()
-        .map(|page| craft_file_import::write::PdfPage {
-            width_mm: page.width_mm,
-            height_mm: page.height_mm,
-            view_box: [0.0, 0.0, page.width_mm, page.height_mm],
-            paths: page
-                .paths
-                .iter()
-                .map(|path| craft_file_import::write::PdfPath {
-                    path: path.path.clone(),
-                    color_rgb: path.color,
-                    stroke_width_mm: path.stroke_width_mm,
-                })
-                .collect(),
-        })
-        .collect::<Vec<_>>();
-    craft_file_import::write::write_pdf_pages(&pages)
+    craft_file_import::write::write_pdf_pages(&[page])
         .map_err(|error| PdfError::Model(error.to_string()))
 }
 

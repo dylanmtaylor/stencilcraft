@@ -209,9 +209,9 @@ pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Result<Vec<u8>> {
                 .chain(sheet.items.iter().filter(|item| !item.bleed))
                 .map(|item| {
                     let (r, g, b) = rgb(&item.color);
-                    stencilcraft_pdf::PdfPath {
+                    craft_file_import::write::PdfPath {
                         path: item.path.clone(),
-                        color: [r, g, b],
+                        color_rgb: [r, g, b],
                         stroke_width_mm: None,
                     }
                 })
@@ -223,20 +223,21 @@ pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Result<Vec<u8>> {
                 path.line_to((mark[0] + mark[2], mark[1] + mark[3]));
                 path.line_to((mark[0], mark[1] + mark[3]));
                 path.close_path();
-                paths.push(stencilcraft_pdf::PdfPath {
+                paths.push(craft_file_import::write::PdfPath {
                     path,
-                    color: [0, 0, 0],
+                    color_rgb: [0, 0, 0],
                     stroke_width_mm: None,
                 });
             }
-            stencilcraft_pdf::PdfPage {
+            craft_file_import::write::PdfPage {
                 width_mm: sheet.width_mm,
                 height_mm: sheet.height_mm,
+                view_box: [0.0, 0.0, sheet.width_mm, sheet.height_mm],
                 paths,
             }
         })
         .collect::<Vec<_>>();
-    stencilcraft_pdf::export_pages(&pages)
+    craft_file_import::write::write_pdf_pages(&pages)
         .map_err(|error| crate::LayoutError::Invalid(error.to_string()))
 }
 

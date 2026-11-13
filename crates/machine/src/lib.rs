@@ -56,23 +56,24 @@ use stencilcraft_geom::Point;
 
 /// Device units: the Silhouette native resolution is 0.05 mm, so all
 /// movements are sent as integer "Silhouette Units" (20 per mm, 508 per inch).
-pub const SU_PER_MM: f64 = 20.0;
-pub const SU_PER_INCH: f64 = 508.0;
+pub const SU_PER_MM: f64 = craft_plotter::gpgl::silhouette::SU_PER_MM;
+pub const SU_PER_INCH: f64 = craft_plotter::gpgl::silhouette::SU_PER_INCH;
 
 /// Command terminator: every GP-GL command is followed by ETX (0x03).
-pub const ETX: u8 = 0x03;
+pub const ETX: u8 = craft_plotter::gpgl::ETX;
 /// Escape `\x1b\x04` (EOT): initializes the device.
-pub const ESC_INIT: &str = "\u{1b}\u{4}";
+pub const ESC_INIT: &str = craft_plotter::gpgl::silhouette::INIT;
 /// Escape `\x1b\x05` (ENQ): device status query, replies one of `0`,`1`,`2`.
-pub const ESC_STATUS: &str = "\u{1b}\u{5}";
+pub const ESC_STATUS: &str = craft_plotter::gpgl::silhouette::STATUS_QUERY;
 /// Escape `\x1b\x15` (NAK): tool-setup query (Cameo 4 family).
-pub const ESC_TOOL_SETUP: &str = "\u{1b}\u{15}";
+pub const ESC_TOOL_SETUP: &str = craft_plotter::gpgl::silhouette::TOOL_QUERY;
 /// Query `FG` — firmware version string, e.g. `CAMEO 4 PRO V1.02`.
-pub const QUERY_VERSION: &str = "FG";
+pub const QUERY_VERSION: &str = craft_plotter::gpgl::silhouette::VERSION_COMMAND;
 
 /// Convert millimetres to device units by rounding.
+#[cfg(test)]
 pub(crate) fn su(mm: f64) -> i64 {
-    (mm * SU_PER_MM).round() as i64
+    craft_plotter::gpgl::silhouette::su(mm)
 }
 
 /// A typed handle for the built-in machines, kept for the desktop app and
@@ -669,12 +670,26 @@ impl ToolKind {
 
 /// Parse a tool-setup reply (`"2,7\x03"`: holder 1, holder 2 codes).
 pub fn parse_tool_setup(response: &[u8]) -> Vec<Option<ToolKind>> {
-    String::from_utf8_lossy(response)
-        .trim_matches(|c: char| c == '\u{3}' || c.is_whitespace())
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.trim().parse::<u8>().ok().and_then(ToolKind::from_code))
+    craft_plotter::gpgl::silhouette::parse_tool_setup(response)
+        .into_iter()
+        .map(|tool| tool.map(ToolKind::from))
         .collect()
+}
+
+impl From<craft_plotter::gpgl::silhouette::Tool> for ToolKind {
+    fn from(tool: craft_plotter::gpgl::silhouette::Tool) -> Self {
+        use craft_plotter::gpgl::silhouette::Tool as T;
+        match tool {
+            T::Empty => ToolKind::Empty,
+            T::RatchetBlade => ToolKind::RatchetBlade,
+            T::AutoBlade => ToolKind::AutoBlade,
+            T::DeepCutBlade => ToolKind::DeepCutBlade,
+            T::KraftBlade => ToolKind::KraftBlade,
+            T::RotaryBlade => ToolKind::RotaryBlade,
+            T::Pen => ToolKind::Pen,
+            T::Error => ToolKind::Error,
+        }
+    }
 }
 
 /// Device status from the Silhouette status escape query.
@@ -689,16 +704,11 @@ pub enum DeviceStatus {
 /// Parse a status query response (e.g. `b"    0\x03"` — an ASCII digit
 /// before the ETX terminator, possibly zero-padded).
 pub fn parse_status(response: &[u8]) -> DeviceStatus {
-    let code = response
-        .iter()
-        .find(|b| **b != b' ' && **b != 0x03)
-        .copied();
-    match code {
-        Some(b'0') => DeviceStatus::Ready,
-        Some(b'1') => DeviceStatus::Moving,
-        Some(b'2') => DeviceStatus::Unloaded,
-        Some(other) => DeviceStatus::Unknown(other),
-        None => DeviceStatus::Unknown(255),
+    match craft_plotter::gpgl::silhouette::parse_status(response) {
+        craft_plotter::gpgl::silhouette::Status::Ready => DeviceStatus::Ready,
+        craft_plotter::gpgl::silhouette::Status::Moving => DeviceStatus::Moving,
+        craft_plotter::gpgl::silhouette::Status::Unloaded => DeviceStatus::Unloaded,
+        craft_plotter::gpgl::silhouette::Status::Unknown(code) => DeviceStatus::Unknown(code),
     }
 }
 
@@ -891,43 +901,97 @@ pub enum Command {
 
 impl Command {
     pub fn to_ascii(&self) -> String {
-        match self {
-            Command::SelectTool(t) => format!("J{t}"),
-            Command::Pressure(p, t) => format!("FX{p},{t}"),
-            Command::Speed(s, t) => format!("!{s},{t}"),
-            Command::Depth(d, t) => format!("TF{d},{t}"),
-            Command::CutterOffset {
-                x_mm,
-                y_mm,
-                toolholder,
-            } => format!("FC{},{},{}", su(*x_mm), su(*y_mm), toolholder),
-            Command::Lift { lift, toolholder } => format!("FE{},{}", u8::from(*lift), toolholder),
-            Command::SharpenCorners {
-                start_tenths,
-                end_tenths,
-                toolholder,
-            } => format!("FF{start_tenths},{end_tenths},{toolholder}"),
-            Command::Acceleration(a) => format!("TJ{a}"),
-            Command::Move { down_mm, right_mm } => format!("M{},{}", su(*down_mm), su(*right_mm)),
-            Command::Draw { down_mm, right_mm } => format!("D{},{}", su(*down_mm), su(*right_mm)),
-            Command::BoundaryTopLeft { down_mm, right_mm } => {
-                format!("\\{},{}", su(*down_mm), su(*right_mm))
-            }
-            Command::BoundaryBottomRight { down_mm, right_mm } => {
-                format!("Z{},{}", su(*down_mm), su(*right_mm))
-            }
-            Command::TrackEnhancing(on) => format!("FY{}", if *on { 0 } else { 1 }),
-            Command::SelectMat(mat) => format!("TG{}", mat.code()),
-            Command::Reset => "FN0".to_string(),
-            Command::PortraitMode(landscape) => format!("TB50,{}", u8::from(*landscape)),
-            Command::PenUp => "L0".to_string(),
-            Command::Origin => "SO0".to_string(),
-            Command::Home => "H".to_string(),
-            Command::MediaSelect(id) => format!("FW{id}"),
-            Command::PressureLegacy(p) => format!("FX{p}"),
-            Command::SpeedLegacy(s) => format!("!{s}"),
-            Command::CutterOffsetLegacy(d) => format!("FC{}", su(*d)),
-            Command::Raw(s) => s.clone(),
+        to_plotter_command(self).to_ascii()
+    }
+}
+
+fn to_plotter_command(command: &Command) -> craft_plotter::Command {
+    use craft_plotter::Command as C;
+    match command {
+        Command::SelectTool(t) => C::SelectTool(*t),
+        Command::Pressure(p, t) => C::Pressure(*p, *t),
+        Command::Speed(s, t) => C::Speed(*s, *t),
+        Command::Depth(d, t) => C::Depth(*d, *t),
+        Command::CutterOffset {
+            x_mm,
+            y_mm,
+            toolholder,
+        } => C::CutterOffset {
+            x_mm: *x_mm,
+            y_mm: *y_mm,
+            toolholder: *toolholder,
+        },
+        Command::Lift { lift, toolholder } => C::Lift {
+            lift: *lift,
+            toolholder: *toolholder,
+        },
+        Command::SharpenCorners {
+            start_tenths,
+            end_tenths,
+            toolholder,
+        } => C::SharpenCorners {
+            start_tenths: *start_tenths,
+            end_tenths: *end_tenths,
+            toolholder: *toolholder,
+        },
+        Command::Acceleration(a) => C::Acceleration(*a),
+        Command::Move { down_mm, right_mm } => C::Move {
+            down_mm: *down_mm,
+            right_mm: *right_mm,
+        },
+        Command::Draw { down_mm, right_mm } => C::Draw {
+            down_mm: *down_mm,
+            right_mm: *right_mm,
+        },
+        Command::BoundaryTopLeft { down_mm, right_mm } => C::BoundaryTopLeft {
+            down_mm: *down_mm,
+            right_mm: *right_mm,
+        },
+        Command::BoundaryBottomRight { down_mm, right_mm } => C::BoundaryBottomRight {
+            down_mm: *down_mm,
+            right_mm: *right_mm,
+        },
+        Command::TrackEnhancing(on) => C::TrackEnhancing(*on),
+        Command::SelectMat(mat) => C::SelectMat((*mat).into()),
+        Command::Reset => C::Reset,
+        Command::PortraitMode(landscape) => C::PortraitMode(*landscape),
+        Command::PenUp => C::PenUp,
+        Command::Origin => C::Origin,
+        Command::Home => C::Home,
+        Command::MediaSelect(id) => C::MediaSelect(*id),
+        Command::PressureLegacy(p) => C::PressureLegacy(*p),
+        Command::SpeedLegacy(s) => C::SpeedLegacy(*s),
+        Command::CutterOffsetLegacy(d) => C::CutterOffsetLegacy(*d),
+        Command::Raw(s) => C::Raw(s.clone()),
+    }
+}
+
+impl From<Mat> for craft_plotter::gpgl::silhouette::Mat {
+    fn from(mat: Mat) -> Self {
+        use craft_plotter::gpgl::silhouette::Mat as M;
+        match mat {
+            Mat::None => M::None,
+            Mat::Cameo12x12 => M::Cameo12x12,
+            Mat::Cameo12x24 => M::Cameo12x24,
+            Mat::Portrait8x12 => M::Portrait8x12,
+            Mat::CameoPlus15x15 => M::CameoPlus15x15,
+            Mat::CameoPro24x24 => M::CameoPro24x24,
+            Mat::Portrait8_5x12 => M::Portrait8_5x12,
+        }
+    }
+}
+
+impl From<craft_plotter::gpgl::silhouette::Mat> for Mat {
+    fn from(mat: craft_plotter::gpgl::silhouette::Mat) -> Self {
+        use craft_plotter::gpgl::silhouette::Mat as M;
+        match mat {
+            M::None => Mat::None,
+            M::Cameo12x12 => Mat::Cameo12x12,
+            M::Cameo12x24 => Mat::Cameo12x24,
+            M::Portrait8x12 => Mat::Portrait8x12,
+            M::CameoPlus15x15 => Mat::CameoPlus15x15,
+            M::CameoPro24x24 => Mat::CameoPro24x24,
+            M::Portrait8_5x12 => Mat::Portrait8_5x12,
         }
     }
 }
@@ -935,12 +999,8 @@ impl Command {
 /// Delimit commands into a GP-GL byte stream: each command's ASCII followed
 /// by an ETX byte.
 pub fn delimit(commands: &[Command]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(commands.len() * 8);
-    for cmd in commands {
-        out.extend_from_slice(cmd.to_ascii().as_bytes());
-        out.push(ETX);
-    }
-    out
+    let shared: Vec<_> = commands.iter().map(to_plotter_command).collect();
+    craft_plotter::stream(&shared, craft_plotter::Framing::Etx)
 }
 
 /// Margins and end feed for the single-operation API.
@@ -1076,17 +1136,12 @@ impl CutProgram {
 }
 
 pub(crate) fn stream_of(commands: &[Command], framing: Framing) -> Vec<u8> {
-    match framing {
-        Framing::Etx => delimit(commands),
-        Framing::Newline => {
-            let mut out = Vec::new();
-            for c in commands {
-                out.extend_from_slice(c.to_ascii().as_bytes());
-                out.push(b'\n');
-            }
-            out
-        }
-    }
+    let commands: Vec<_> = commands.iter().map(to_plotter_command).collect();
+    let framing = match framing {
+        Framing::Etx => craft_plotter::Framing::Etx,
+        Framing::Newline => craft_plotter::Framing::Newline,
+    };
+    craft_plotter::stream(&commands, framing)
 }
 
 /// Errors surfaced by encoders, transports and sessions.
@@ -1159,11 +1214,10 @@ pub fn query_status(transport: &mut dyn Transport) -> Result<DeviceStatus, Machi
 
 /// Ask for the firmware version string (`FG`), trimmed of ETX/padding.
 pub fn query_version(transport: &mut dyn Transport) -> Result<String, MachineError> {
-    transport.write(b"FG\x03")?;
-    let reply = read_reply(transport)?;
-    Ok(String::from_utf8_lossy(&reply)
-        .trim_matches(|c: char| c == '\u{3}' || c.is_whitespace())
-        .to_string())
+    transport.write(craft_plotter::gpgl::silhouette::VERSION_QUERY)?;
+    Ok(craft_plotter::gpgl::silhouette::parse_version(&read_reply(
+        transport,
+    )?))
 }
 
 /// Ask a Cameo-4-family device which tools sit in its holders (`ESC NAK`).

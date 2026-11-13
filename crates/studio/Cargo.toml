@@ -10,6 +10,7 @@ description = "Bounded, fail-closed reader for Silhouette Studio .studio (v2) an
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
+craft-silhouette-studio = { workspace = true }
 
 [lints]
 workspace = true

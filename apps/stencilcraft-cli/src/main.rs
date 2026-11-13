@@ -18,7 +18,6 @@ mod cut;
 mod import;
 mod mcp_proxy;
 mod pipeline;
-mod print_cut;
 mod run;
 mod tile_preview;
 mod trace;
@@ -277,7 +276,8 @@ fn print_cut_command(args: &[String]) -> Result<(), String> {
     let input = input.ok_or("print-cut: --in FILE.stencilcraft is required")?;
     let output = output.ok_or("print-cut: --out SHEET.svg is required")?;
     let doc = load_document(&input)?;
-    let svg = print_cut::export_sheet(&doc)?;
+    let svg = stencilcraft_svg::export_print_and_cut(&doc)
+        .map_err(|error| error.to_string())?;
     std::fs::write(&output, svg).map_err(|error| format!("{output}: {error}"))?;
     println!("wrote printable registration sheet: {output}");
     Ok(())

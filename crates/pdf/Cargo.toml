@@ -13,6 +13,7 @@ stencilcraft-layout = { workspace = true }
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
+craft-pdf = { workspace = true }
 
 [dev-dependencies]
 vectorcraft-pdf = { workspace = true }

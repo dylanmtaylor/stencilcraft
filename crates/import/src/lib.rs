@@ -42,27 +42,15 @@ pub enum Format {
 impl Format {
     /// From the file's leading bytes, then its extension.
     pub fn detect(name: &str, bytes: &[u8]) -> Option<Self> {
-        if bytes.starts_with(b"%PDF") {
-            return Some(Self::Pdf);
-        }
-        if bytes.starts_with(b"%!") || bytes.starts_with(&[0xC5, 0xD0, 0xD3, 0xC6]) {
-            return Some(Self::Eps);
-        }
-        let ext = name
-            .rsplit_once('.')
-            .map(|(_, e)| e.to_ascii_lowercase())
-            .unwrap_or_default();
-        match ext.as_str() {
-            "svg" => Some(Self::Svg),
-            "dxf" => Some(Self::Dxf),
-            "pdf" => Some(Self::Pdf),
-            "eps" | "ps" | "ai" => Some(Self::Eps),
-            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tif" | "tiff" | "webp" | "heic" | "heif" => {
-                Some(Self::Raster)
-            }
-            _ if vectorcraft_cad::is_dxf(bytes) => Some(Self::Dxf),
-            _ if bytes.trim_ascii_start().starts_with(b"<") => Some(Self::Svg),
-            _ => None,
+        match craft_file_formats::detect(name, bytes)? {
+            craft_file_formats::Format::Svg => Some(Self::Svg),
+            craft_file_formats::Format::Dxf => Some(Self::Dxf),
+            craft_file_formats::Format::Pdf => Some(Self::Pdf),
+            craft_file_formats::Format::Eps
+            | craft_file_formats::Format::PostScript
+            | craft_file_formats::Format::Illustrator => Some(Self::Eps),
+            craft_file_formats::Format::Raster => Some(Self::Raster),
+            craft_file_formats::Format::Studio | craft_file_formats::Format::StencilCraft => None,
         }
     }
 }

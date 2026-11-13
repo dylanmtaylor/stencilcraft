@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "StencilCraft file import: SVG, DXF, PDF, EPS/AI vectors and raster images into a document"
 
 [dependencies]
+craft-file-formats = { workspace = true }
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 craft-raster-codecs = { workspace = true }

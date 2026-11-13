@@ -10,6 +10,9 @@ description = "PDF (vector cut/print sheet) export for StencilCraft documents"
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
+craft-file-import = { workspace = true }
+
+[dev-dependencies]
 craft-pdf = { workspace = true }
 
 [lints]

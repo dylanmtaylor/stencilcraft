@@ -81,6 +81,7 @@ impl Format {
             | craft_file_formats::Format::PlainText
             | craft_file_formats::Format::Csv
             | craft_file_formats::Format::Tsv
+            | craft_file_formats::Format::LegacyExcel
             | craft_file_formats::Format::Gcode => None,
         }
     }

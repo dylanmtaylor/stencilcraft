@@ -1,8 +1,6 @@
 //! Print Then Cut / Print & Cut sheets: the page a home printer prints, with registration marks
 //! and bleed, as PDF or PNG.
 
-use std::fmt::Write as _;
-
 use kurbo::{BezPath, PathEl, Rect};
 use serde::{Deserialize, Serialize};
 use stencilcraft_doc::{Document, GroupKind, Shape};
@@ -200,108 +198,46 @@ fn rgb(color: &str) -> (u8, u8, u8) {
 }
 
 /// A multi-page PDF, one page per sheet, at actual size (print at 100%, no fit-to-page).
-pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Vec<u8> {
-    const PT: f64 = 72.0 / 25.4;
-    let mut objects: Vec<String> = Vec::new();
-    let pages = sheets.len();
-    let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", 3 + 2 * i)).collect();
-    objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
-    objects.push(format!(
-        "<< /Type /Pages /Kids [{}] /Count {pages} >>",
-        kids.join(" ")
-    ));
-    for (i, sheet) in sheets.iter().enumerate() {
-        let (w, h) = (sheet.width_mm * PT, sheet.height_mm * PT);
-        let y = |v: f64| (sheet.height_mm - v) * PT;
-        let mut c = String::new();
-        let fill = |c: &mut String, color: &str| {
-            let (r, g, b) = rgb(color);
-            let _ = writeln!(
-                c,
-                "{:.4} {:.4} {:.4} rg",
-                f64::from(r) / 255.0,
-                f64::from(g) / 255.0,
-                f64::from(b) / 255.0
-            );
-        };
-        for item in sheet
-            .items
-            .iter()
-            .filter(|i| i.bleed)
-            .chain(sheet.items.iter().filter(|i| !i.bleed))
-        {
-            fill(&mut c, &item.color);
-            let mut last = kurbo::Point::ZERO;
-            for el in item.path.elements() {
-                let _ = match *el {
-                    PathEl::MoveTo(p) => writeln!(c, "{:.3} {:.3} m", p.x * PT, y(p.y)),
-                    PathEl::LineTo(p) => writeln!(c, "{:.3} {:.3} l", p.x * PT, y(p.y)),
-                    PathEl::QuadTo(q, p) => {
-                        let c1 = last + (q - last) * (2.0 / 3.0);
-                        let c2 = p + (q - p) * (2.0 / 3.0);
-                        writeln!(
-                            c,
-                            "{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c",
-                            c1.x * PT,
-                            y(c1.y),
-                            c2.x * PT,
-                            y(c2.y),
-                            p.x * PT,
-                            y(p.y)
-                        )
+pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Result<Vec<u8>> {
+    let pages = sheets
+        .iter()
+        .map(|sheet| {
+            let mut paths = sheet
+                .items
+                .iter()
+                .filter(|item| item.bleed)
+                .chain(sheet.items.iter().filter(|item| !item.bleed))
+                .map(|item| {
+                    let (r, g, b) = rgb(&item.color);
+                    stencilcraft_pdf::PdfPath {
+                        path: item.path.clone(),
+                        color: [r, g, b],
+                        stroke_width_mm: None,
                     }
-                    PathEl::CurveTo(a, b, p) => writeln!(
-                        c,
-                        "{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} c",
-                        a.x * PT,
-                        y(a.y),
-                        b.x * PT,
-                        y(b.y),
-                        p.x * PT,
-                        y(p.y)
-                    ),
-                    PathEl::ClosePath => writeln!(c, "h"),
-                };
-                if let Some(p) = el.end_point() {
-                    last = p;
-                }
+                })
+                .collect::<Vec<_>>();
+            for mark in &sheet.marks {
+                let mut path = BezPath::new();
+                path.move_to((mark[0], mark[1]));
+                path.line_to((mark[0] + mark[2], mark[1]));
+                path.line_to((mark[0] + mark[2], mark[1] + mark[3]));
+                path.line_to((mark[0], mark[1] + mark[3]));
+                path.close_path();
+                paths.push(stencilcraft_pdf::PdfPath {
+                    path,
+                    color: [0, 0, 0],
+                    stroke_width_mm: None,
+                });
             }
-            let _ = writeln!(c, "f");
-        }
-        fill(&mut c, "#000000");
-        for m in &sheet.marks {
-            let _ = writeln!(
-                c,
-                "{:.3} {:.3} {:.3} {:.3} re f",
-                m[0] * PT,
-                y(m[1] + m[3]),
-                m[2] * PT,
-                m[3] * PT
-            );
-        }
-        objects.push(format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.3} {h:.3}] /Contents {} 0 R >>",
-            4 + 2 * i
-        ));
-        objects.push(format!("<< /Length {} >>\nstream\n{c}endstream", c.len()));
-    }
-    let mut out = String::from("%PDF-1.4\n");
-    let mut offsets = Vec::with_capacity(objects.len());
-    for (i, body) in objects.iter().enumerate() {
-        offsets.push(out.len());
-        let _ = write!(out, "{} 0 obj\n{body}\nendobj\n", i + 1);
-    }
-    let xref = out.len();
-    let _ = write!(out, "xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
-    for o in offsets {
-        let _ = writeln!(out, "{o:010} 00000 n ");
-    }
-    let _ = write!(
-        out,
-        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-        objects.len() + 1
-    );
-    out.into_bytes()
+            stencilcraft_pdf::PdfPage {
+                width_mm: sheet.width_mm,
+                height_mm: sheet.height_mm,
+                paths,
+            }
+        })
+        .collect::<Vec<_>>();
+    stencilcraft_pdf::export_pages(&pages)
+        .map_err(|error| crate::LayoutError::Invalid(error.to_string()))
 }
 
 /// A PNG of one sheet at `dpi` (50–1200) on a white page.
@@ -454,7 +390,7 @@ mod tests {
     #[test]
     fn pdf_and_png_export() {
         let sheets = print_sheets(&ptc_doc(), &PrintOptions::default()).unwrap();
-        let pdf = sheets_to_pdf(&sheets);
+        let pdf = sheets_to_pdf(&sheets).unwrap();
         let text = String::from_utf8(pdf).unwrap();
         assert!(text.starts_with("%PDF-1.4") && text.ends_with("%%EOF\n"));
         assert!(text.contains("/MediaBox [0 0 612.000 792.000]"));

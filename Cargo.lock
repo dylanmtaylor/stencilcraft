@@ -1061,12 +1061,12 @@ dependencies = [
 [[package]]
 name = "craft-eps"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=c1a1b976d#c1a1b976d0decf496d132bf71eecaec0de198675"
+source = "git+https://github.com/storytold/craft-libs.git?rev=d8cc88a77#d8cc88a7720755e0054038ebc0e152b2e0dcfa00"
 
 [[package]]
 name = "craft-file-formats"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=c1a1b976d#c1a1b976d0decf496d132bf71eecaec0de198675"
+source = "git+https://github.com/storytold/craft-libs.git?rev=d8cc88a77#d8cc88a7720755e0054038ebc0e152b2e0dcfa00"
 dependencies = [
  "craft-eps",
 ]
@@ -5473,6 +5473,7 @@ dependencies = [
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-kerf",
+ "stencilcraft-pdf",
  "thiserror 2.0.21",
  "tiny-skia",
 ]

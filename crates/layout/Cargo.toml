@@ -13,6 +13,7 @@ thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
+stencilcraft-pdf = { workspace = true }
 tiny-skia = "0.11"
 
 [dev-dependencies]

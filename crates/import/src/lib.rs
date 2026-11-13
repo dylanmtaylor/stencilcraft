@@ -58,6 +58,14 @@ impl Format {
             | craft_file_formats::Format::Heif => Some(Self::Raster),
             craft_file_formats::Format::Studio
             | craft_file_formats::Format::StencilCraft
+            | craft_file_formats::Format::Psd
+            | craft_file_formats::Format::Affinity
+            | craft_file_formats::Format::Ora
+            | craft_file_formats::Format::Kra
+            | craft_file_formats::Format::Xcf
+            | craft_file_formats::Format::Pdn
+            | craft_file_formats::Format::Raw
+            | craft_file_formats::Format::Pcraft
             | craft_file_formats::Format::Gcode => None,
         }
     }

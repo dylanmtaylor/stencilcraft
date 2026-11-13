@@ -1062,11 +1062,6 @@ dependencies = [
 [[package]]
 name = "craft-eps"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c#6ba1ca33ca21c33de55ef155141db08ca6048e8d"
-
-[[package]]
-name = "craft-eps"
-version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
 dependencies = [
  "kurbo 0.13.1",
@@ -1076,12 +1071,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-eps"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1#b4ada28f19067d4693e902e0e5f32eb292241e3a"
+
+[[package]]
 name = "craft-file-formats"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c#6ba1ca33ca21c33de55ef155141db08ca6048e8d"
+source = "git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1#b4ada28f19067d4693e902e0e5f32eb292241e3a"
 dependencies = [
- "craft-eps 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c)",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c)",
+ "craft-eps 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1)",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1)",
 ]
 
 [[package]]
@@ -1254,9 +1254,9 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c#6ba1ca33ca21c33de55ef155141db08ca6048e8d"
+source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
 dependencies = [
- "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c)",
+ "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
  "flate2",
  "kurbo 0.13.1",
  "roxmltree 0.21.2",
@@ -1266,9 +1266,9 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
+source = "git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1#b4ada28f19067d4693e902e0e5f32eb292241e3a"
 dependencies = [
- "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
+ "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1)",
  "flate2",
  "kurbo 0.13.1",
  "roxmltree 0.21.2",
@@ -1353,7 +1353,7 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=6ba1ca33c#6ba1ca33ca21c33de55ef155141db08ca6048e8d"
+source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
 dependencies = [
  "quick-xml",
  "thiserror 2.0.21",
@@ -1362,7 +1362,7 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
+source = "git+https://github.com/storytold/craft-libs.git?rev=b4ada28f1#b4ada28f19067d4693e902e0e5f32eb292241e3a"
 dependencies = [
  "quick-xml",
  "thiserror 2.0.21",

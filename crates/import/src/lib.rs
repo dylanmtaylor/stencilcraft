@@ -67,6 +67,7 @@ impl Format {
             | craft_file_formats::Format::Pdn
             | craft_file_formats::Format::Raw
             | craft_file_formats::Format::Pcraft
+            | craft_file_formats::Format::Ase
             | craft_file_formats::Format::Idml
             | craft_file_formats::Format::DesignCraft
             | craft_file_formats::Format::Indd

@@ -1,5 +1,5 @@
 //! Print Then Cut / Print & Cut sheets: the page a home printer prints, with registration marks
-//! and bleed, as PNG (PDF: `stencilcraft_pdf::export_print_sheets`).
+//! and bleed, as PDF or PNG.
 
 use kurbo::{BezPath, PathEl, Rect};
 use serde::{Deserialize, Serialize};
@@ -183,10 +183,61 @@ pub fn print_sheets(doc: &Document, options: &PrintOptions) -> Result<Vec<PrintS
     Ok(sheets)
 }
 
-/// Sheet colours are `#rrggbb`; anything else draws black.
 fn rgb(color: &str) -> (u8, u8, u8) {
-    let c = craft_svg_paths::color::parse_color(color).unwrap_or_default();
-    (c.r, c.g, c.b)
+    let hex = color.trim_start_matches('#');
+    let channel = |i: usize| {
+        hex.get(i..i + 2)
+            .and_then(|h| u8::from_str_radix(h, 16).ok())
+            .unwrap_or(0)
+    };
+    if hex.len() == 6 {
+        (channel(0), channel(2), channel(4))
+    } else {
+        (0, 0, 0)
+    }
+}
+
+/// A multi-page PDF, one page per sheet, at actual size (print at 100%, no fit-to-page).
+pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Result<Vec<u8>> {
+    let pages = sheets
+        .iter()
+        .map(|sheet| {
+            let mut paths = sheet
+                .items
+                .iter()
+                .filter(|item| item.bleed)
+                .chain(sheet.items.iter().filter(|item| !item.bleed))
+                .map(|item| {
+                    let (r, g, b) = rgb(&item.color);
+                    stencilcraft_pdf::PdfPath {
+                        path: item.path.clone(),
+                        color: [r, g, b],
+                        stroke_width_mm: None,
+                    }
+                })
+                .collect::<Vec<_>>();
+            for mark in &sheet.marks {
+                let mut path = BezPath::new();
+                path.move_to((mark[0], mark[1]));
+                path.line_to((mark[0] + mark[2], mark[1]));
+                path.line_to((mark[0] + mark[2], mark[1] + mark[3]));
+                path.line_to((mark[0], mark[1] + mark[3]));
+                path.close_path();
+                paths.push(stencilcraft_pdf::PdfPath {
+                    path,
+                    color: [0, 0, 0],
+                    stroke_width_mm: None,
+                });
+            }
+            stencilcraft_pdf::PdfPage {
+                width_mm: sheet.width_mm,
+                height_mm: sheet.height_mm,
+                paths,
+            }
+        })
+        .collect::<Vec<_>>();
+    stencilcraft_pdf::export_pages(&pages)
+        .map_err(|error| crate::LayoutError::Invalid(error.to_string()))
 }
 
 /// A PNG of one sheet at `dpi` (50–1200) on a white page.
@@ -337,8 +388,12 @@ mod tests {
     }
 
     #[test]
-    fn png_export() {
+    fn pdf_and_png_export() {
         let sheets = print_sheets(&ptc_doc(), &PrintOptions::default()).unwrap();
+        let pdf = sheets_to_pdf(&sheets).unwrap();
+        let text = String::from_utf8(pdf).unwrap();
+        assert!(text.starts_with("%PDF-1.4") && text.ends_with("%%EOF\n"));
+        assert!(text.contains("/MediaBox [0 0 612.000 792.000]"));
         let png = sheet_to_png(&sheets[0], 72.0).unwrap();
         assert_eq!(&png[1..4], b"PNG");
         assert!(sheet_to_png(&sheets[0], 5000.0).is_err());

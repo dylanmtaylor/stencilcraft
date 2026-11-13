@@ -1,41 +1,35 @@
 //! Grbl-style G-code for lasers and knife/pen CNCs, from a `CutJob`. Force is
 //! the spindle/laser power `S` (Grbl `$30`, default 0–1000), speed the feed in
-//! mm/min. The lines are written by `craft-gcode`; its `grbl` module has the
-//! real-time commands (`?` status, `!` feed hold, `~` resume, `0x18` soft
-//! reset) and the reply parsers. This file maps the job onto them (y-up flip,
-//! per-operation feed and power) and runs the send-response session.
+//! mm/min. Real-time commands from the Grbl documentation
+//! (<https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface>): `?` status,
+//! `!` feed hold, `~` resume, `0x18` soft reset.
 
-use super::{DriverEvent, MachineStatus, Protocol, SendReport, SessionHooks, refused};
+use super::{DriverEvent, MachineStatus, Protocol, SendReport, SessionHooks};
+use crate::job::{bbox_rect, find_bbox, prepared_paths};
 use crate::{
     Capabilities, Command, CutJob, CutProgram, Framing, MachineError, ProtocolId, Transport,
 };
-use craft_gcode::grbl::{self, Ack, State};
-use craft_gcode::{Settings, Writer};
 
-/// Feed used when an operation leaves speed to the machine (the G-code
-/// exporter's documented default); `G1` without a feed is a Grbl error.
+/// Feed used when an operation leaves speed to the machine; `G1` without a
+/// feed is a Grbl error.
 const DEFAULT_FEED: u32 = 1000;
 /// Reads to wait for one line's `ok`.
 const ACK_READS: usize = 30;
-
-/// Laser/spindle off, sent when a job is abandoned mid-stream.
-fn tool_off(t: &mut dyn Transport) {
-    let _ = t.write(format!("{}\n", grbl::TOOL_OFF).as_bytes());
-}
 
 pub struct GcodeProtocol;
 
 /// Decode a Grbl status report (`<Idle|MPos:…>`).
 pub fn parse_grbl_status(reply: &str) -> MachineStatus {
-    match grbl::parse_status(reply) {
-        None => MachineStatus::Unknown(reply.trim().to_string()),
-        Some(State::Idle) => MachineStatus::Ready,
-        Some(State::Run | State::Jog | State::Home) => MachineStatus::Busy,
-        Some(State::Hold | State::Door) => MachineStatus::Paused,
-        Some(State::Alarm) => MachineStatus::Error("alarm".to_string()),
-        Some(State::Check) => MachineStatus::Unknown("Check".to_string()),
-        Some(State::Sleep) => MachineStatus::Unknown("Sleep".to_string()),
-        Some(State::Other(word)) => MachineStatus::Unknown(word),
+    let Some(body) = reply.trim().strip_prefix('<') else {
+        return MachineStatus::Unknown(reply.trim().to_string());
+    };
+    let state = body.split(['|', '>', ':']).next().unwrap_or("");
+    match state {
+        "Idle" => MachineStatus::Ready,
+        "Run" | "Jog" | "Home" => MachineStatus::Busy,
+        "Hold" | "Door" => MachineStatus::Paused,
+        "Alarm" => MachineStatus::Error("alarm".to_string()),
+        other => MachineStatus::Unknown(other.to_string()),
     }
 }
 
@@ -44,39 +38,63 @@ impl Protocol for GcodeProtocol {
         ProtocolId::Gcode
     }
 
-    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> Result<CutProgram, MachineError> {
-        let Some(prepared) = job.neutral().prepare().map_err(refused)? else {
-            return Ok(CutProgram::default());
+    fn encode(&self, _caps: &Capabilities, job: &CutJob) -> CutProgram {
+        let reg = job.registration.as_ref();
+        let ops: Vec<_> = job
+            .operations
+            .iter()
+            .map(|op| (op, prepared_paths(op, reg)))
+            .collect();
+        let all: Vec<Vec<(f64, f64)>> = ops.iter().flat_map(|(_, p)| p.iter().cloned()).collect();
+        let Some(bb) = find_bbox(&all) else {
+            return CutProgram::default();
         };
-        let bb = prepared.bbox_mm;
         let (dm, rm) = (job.origin_down_mm, job.origin_right_mm);
-        let mut w = Writer::bare(Settings::default()).map_err(refused)?;
-        for (op, paths) in job.operations.iter().zip(&prepared.operations) {
+        let settings = craft_gcode::Settings {
+            feed_mm_per_min: f64::from(DEFAULT_FEED),
+            ..craft_gcode::Settings::default()
+        };
+        let Ok(mut writer) = craft_gcode::Writer::bare(settings) else {
+            return CutProgram::default();
+        };
+        for (op, paths) in &ops {
             let feed = op.settings.speed.unwrap_or(DEFAULT_FEED);
-            w.set_feed(f64::from(feed)).map_err(refused)?;
             let power = op.settings.force.unwrap_or(0);
-            for path in paths {
-                // G-code is y-up: flip about the design's bottom edge.
-                let pts: Vec<(f64, f64)> =
-                    path.iter().map(|&(x, y)| (x + rm, bb.2 - y + dm)).collect();
-                w.contour(&pts, false, power).map_err(refused)?;
+            if writer.set_feed(f64::from(feed)).is_err() {
+                return CutProgram::default();
+            }
+            let body: Vec<Vec<(f64, f64)>> = if job.bbox_only {
+                vec![bbox_rect(bb)]
+            } else {
+                paths.clone()
+            };
+            for path in &body {
+                // G-code is y-up: flip about the design's bottom edge. The
+                // shared writer owns coordinate formatting and command syntax.
+                let points: Vec<_> = path.iter().map(|&(x, y)| (x + rm, bb.2 - y + dm)).collect();
+                if writer.contour(&points, false, power).is_err() {
+                    return CutProgram::default();
+                }
+            }
+            if job.bbox_only {
+                break;
             }
         }
-        let commands = w
+        let commands = writer
             .finish()
             .lines()
-            .map(|l| Command::Raw(l.to_string()))
+            .map(|line| Command::Raw(line.to_owned()))
             .collect();
-        Ok(CutProgram {
+        CutProgram {
             commands,
             bbox_mm: Some(bb),
             framing: Framing::Newline,
             registration_wait: None,
-        })
+        }
     }
 
     fn status(&self, t: &mut dyn Transport) -> Result<MachineStatus, MachineError> {
-        t.write(&[grbl::STATUS_QUERY])?;
+        t.write(b"?")?;
         let mut buf = [0u8; 128];
         let n = t.read(&mut buf)?;
         Ok(parse_grbl_status(&String::from_utf8_lossy(
@@ -85,15 +103,15 @@ impl Protocol for GcodeProtocol {
     }
 
     fn pause(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(&[grbl::FEED_HOLD]).map(|_| ())
+        t.write(b"!").map(|_| ())
     }
 
     fn resume(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(&[grbl::CYCLE_START]).map(|_| ())
+        t.write(b"~").map(|_| ())
     }
 
     fn cancel(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(&[grbl::SOFT_RESET]).map(|_| ())
+        t.write(&[0x18]).map(|_| ())
     }
 
     /// Send-response streaming: one line, wait for `ok`; an `error` reply
@@ -129,24 +147,21 @@ impl Protocol for GcodeProtocol {
                     continue;
                 }
                 reply.push_str(&String::from_utf8_lossy(buf.get(..n).unwrap_or_default()));
-                match grbl::parse_ack(&reply) {
-                    Some(Ack::Rejected) => {
-                        tool_off(t);
-                        return Err(MachineError::Protocol(format!(
-                            "controller rejected `{}`: {}",
-                            cmd.to_ascii(),
-                            reply.trim()
-                        )));
-                    }
-                    Some(Ack::Ok) => {
-                        acked = true;
-                        break;
-                    }
-                    None => {}
+                if reply.contains("error") || reply.contains("ALARM") {
+                    let _ = t.write(b"M5\n");
+                    return Err(MachineError::Protocol(format!(
+                        "controller rejected `{}`: {}",
+                        cmd.to_ascii(),
+                        reply.trim()
+                    )));
+                }
+                if reply.contains("ok") {
+                    acked = true;
+                    break;
                 }
             }
             if !acked {
-                tool_off(t);
+                let _ = t.write(b"M5\n");
                 return Err(MachineError::Protocol(format!(
                     "no `ok` for `{}`; laser/spindle switched off",
                     cmd.to_ascii()

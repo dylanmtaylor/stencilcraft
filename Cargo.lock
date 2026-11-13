@@ -5448,6 +5448,7 @@ dependencies = [
  "craft-atomic",
  "craft-file-formats",
  "craft-stencilcraft-format",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5471,6 +5472,7 @@ name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
  "craft-raster-codecs",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs?rev=92afb23de)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",

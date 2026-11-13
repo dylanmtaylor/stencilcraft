@@ -2344,7 +2344,7 @@ impl Engine {
                 .execute("layer.setCurrent", &json!({"id": layer_id.0}))
                 .map_err(|error| EngineError::Invalid(format!("{command}: {error}")))?;
             let path_points = transform_path(path, kurbo::Affine::scale(POINTS_PER_MM));
-            let path_data = craft_svg_paths::write::path_data(&path_points);
+            let path_data = craft_svg::write::path_data(&path_points);
             let created = self
                 .session
                 .execute("path.create", &json!({"d": path_data, "closed": false}))

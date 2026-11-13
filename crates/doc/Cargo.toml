@@ -8,6 +8,7 @@ description = "StencilCraft document model and mapping to the native JSON format
 
 [dependencies]
 craft-file-formats = { workspace = true }
+craft-svg = { workspace = true }
 craft-atomic = { workspace = true }
 craft-stencilcraft-format = { workspace = true }
 craft-svg-paths = { workspace = true }

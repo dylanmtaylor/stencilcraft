@@ -259,19 +259,23 @@ pub struct Group {
     pub children: Vec<GroupChild>,
 }
 
-/// `#rrggbb` (or `#rgb`) to RGB; `None` for anything else. The document stores only
-/// these two of the CSS forms.
+/// `#rrggbb` (or `#rgb`) to RGB; `None` for anything else.
 pub fn parse_hex_color(text: &str) -> Option<[u8; 3]> {
-    if !text.starts_with('#') || !matches!(text.len(), 4 | 7) {
-        return None;
+    let hex = text.strip_prefix('#')?;
+    let digit = |i: usize| u8::from_str_radix(hex.get(i..i + 1)?, 16).ok();
+    match hex.len() {
+        6 => {
+            let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        }
+        3 => Some([digit(0)? * 17, digit(1)? * 17, digit(2)? * 17]),
+        _ => None,
     }
-    let color = craft_svg_paths::color::parse_color(text).ok()?;
-    Some([color.r, color.g, color.b])
 }
 
 /// Canonical lowercase `#rrggbb`.
 pub fn format_hex_color([r, g, b]: [u8; 3]) -> String {
-    craft_svg_paths::color::Color::new(r, g, b).to_css()
+    format!("#{r:02x}{g:02x}{b:02x}")
 }
 
 /// Euclidean RGB distance (0 to about 441.7).
@@ -556,41 +560,69 @@ impl Document {
     /// A small standalone SVG preview of the board's output shapes, at most `max_bytes`
     /// long: shapes past the budget are left out. Coordinates keep two decimals.
     pub fn render_thumbnail(&self, max_bytes: usize) -> String {
-        use craft_svg_paths::write::{SvgWriter, num, path_data_fixed};
-        let (w, h) = (num(self.board.width_mm, 2), num(self.board.height_mm, 2));
-        let mut svg = SvgWriter::fragment();
-        svg.root()
-            .attr("viewBox", format_args!("0 0 {w} {h}"))
-            .open();
-        // Documents are y-up; flip into SVG's y-down space.
-        svg.tag("g")
-            .attr("transform", format_args!("matrix(1 0 0 -1 0 {h})"))
-            .attr("fill", "none")
-            .attr("stroke", "#000")
-            .attr(
-                "stroke-width",
-                num(
-                    (self.board.width_mm.max(self.board.height_mm) / 200.0).max(0.01),
-                    2,
-                ),
-            )
-            .open();
-        let tail = "</g></svg>".len();
+        let (w, h) = (self.board.width_mm, self.board.height_mm);
+        // Documents are y-up; flip into SVG's y-down space. The shared SVG writer owns markup,
+        // escaping, numeric formatting, and path-data formatting.
+        let mut svg = thumbnail_writer(w, h);
+        let mut empty = svg.clone();
+        empty.line(1);
+        empty.close();
+        empty.line(0);
+        empty.close();
+        let empty_len = empty.finish().len();
+        if empty_len > max_bytes {
+            return String::new();
+        }
+        let mut remaining = max_bytes - empty_len;
         'layers: for layer in self.layers.iter().filter(|l| l.is_output()) {
             for shape in layer.shapes.iter().filter(|s| !s.hidden) {
-                let mut element = SvgWriter::fragment();
+                let mut element = craft_svg::write::SvgWriter::fragment();
+                element.line(2);
                 element
                     .tag("path")
-                    .attr("d", path_data_fixed(&shape.path, 2))
+                    .attr("d", craft_svg::write::path_data_fixed(&shape.path, 2))
                     .empty();
-                if svg.len() + element.len() + tail > max_bytes {
+                let element = element.finish();
+                if element.len() > remaining {
                     break 'layers;
                 }
-                svg.raw(&element.finish());
+                remaining -= element.len();
+                svg.raw(&element);
             }
         }
+        svg.line(1);
+        svg.close();
+        svg.line(0);
+        svg.close();
         svg.finish()
     }
+}
+
+fn thumbnail_writer(width_mm: f64, height_mm: f64) -> craft_svg::write::SvgWriter {
+    use craft_svg::write::{SvgWriter, num};
+
+    let mut writer = SvgWriter::fragment();
+    writer
+        .root()
+        .attr(
+            "viewBox",
+            format!("0 0 {} {}", num(width_mm, 2), num(height_mm, 2)),
+        )
+        .open();
+    writer
+        .tag("g")
+        .attr(
+            "transform",
+            format!("matrix(1 0 0 -1 0 {})", num(height_mm, 2)),
+        )
+        .attr("fill", "none")
+        .attr("stroke", "#000")
+        .attr(
+            "stroke-width",
+            num((width_mm.max(height_mm) / 200.0).max(0.01), 2),
+        )
+        .open();
+    writer
 }
 
 /// Groups holding `child` according to `parents` ([`Document::group_parent_map`]),

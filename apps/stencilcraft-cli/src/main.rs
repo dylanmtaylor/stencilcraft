@@ -37,8 +37,11 @@ fn main() -> Result<(), String> {
         // .studio/.studio3 go through the Silhouette reader; everything else through crates/import.
         Some("import")
             if args.iter().any(|a| {
-                let a = a.to_ascii_lowercase();
-                a.ends_with(".studio") || a.ends_with(".studio3")
+                std::path::Path::new(a)
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .and_then(craft_file_formats::from_extension)
+                    == Some(craft_file_formats::Format::Studio)
             }) =>
         {
             import_svg_command(&args[1..])

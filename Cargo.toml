@@ -28,7 +28,8 @@ craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
 craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "eeee3d08b622fe6dd8de898d2e984978ed67cb34" }
-craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "370f6714ed544cab99c4f4be05035d824eb77d1c" }
+craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "166d0d21274aba0b761cd312438b7f075b5b8e5d" }
+craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "166d0d21274aba0b761cd312438b7f075b5b8e5d" }
 craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }
 craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de", features = ["paths"] }
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }

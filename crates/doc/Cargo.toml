@@ -4,18 +4,15 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "StencilCraft document model and domain validation"
+description = "StencilCraft app library, recovery, templates, and format dispatch"
 
 [dependencies]
 craft-file-formats = { workspace = true }
-craft-svg = { workspace = true }
 craft-atomic = { workspace = true }
+craft-stencilcraft-document = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-craft-stencilcraft-format = { workspace = true }
-thiserror = { workspace = true }
-stencilcraft-geom = { workspace = true }
 
 [lints]
 workspace = true

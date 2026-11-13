@@ -374,7 +374,7 @@ pub(crate) fn execute(
             let ids = checked(doc, &ids, name, 1)?;
             let color = |c: Option<String>| -> Result<Option<String>, EngineError> {
                 c.map(|c| {
-                    craft_svg_paths::color::parse_color(&c)
+                    craft_svg::color::parse_color(&c)
                         .map(|c| c.to_css())
                         .map_err(|e| EngineError::Invalid(format!("{name}: {e}")))
                 })

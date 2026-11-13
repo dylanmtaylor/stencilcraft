@@ -27,6 +27,7 @@ pub use machines::{MACHINES, MachineProfile, MarkStyle, MatSize, Roll, machine};
 pub use mats::{MatKey, MatLayout, MatOptions, MatPlan, PageOptions, Placement, layout_mats};
 pub use print::{
     PrintItem, PrintOptions, PrintSheet, art_area, print_sheets, registration_marks, sheet_to_png,
+    sheets_to_pdf,
 };
 
 use kurbo::{BezPath, PathEl, Point};

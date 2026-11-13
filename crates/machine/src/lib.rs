@@ -15,12 +15,16 @@
 //! undocumented; encoding never touches hardware; a real send is a separate,
 //! explicit [`MachineDriver::send`]. See `docs/machine-architecture.md`.
 //!
-//! Protocol facts come from public documentation and community specification
-//! (`inkscape-silhouette` GPL-2.0, read for facts only; Graphtec GP-GL list;
-//! Grbl wiki). No GPL code was ported. See `docs/machine.md`.
+//! The command languages themselves live in craft-libs: `craft-plotter`
+//! (GP-GL incl. the Silhouette dialect, HP-GL, DMPL: job to bytes, device
+//! queries, reply parsers) and `craft-gcode` (G-code lines, Grbl replies).
+//! This crate maps a `CutJob` and a machine's `Capabilities` onto them and
+//! runs the send sessions over a transport. Protocol provenance: the
+//! `craft-plotter` README and `docs/machine.md`.
 //!
-//! Layering: depends on `stencilcraft-geom` (points), `serde` + `toml` (the
-//! machine table), and optionally `serialport` / `nusb`.
+//! Layering: depends on `stencilcraft-geom` (points), `craft-plotter` and
+//! `craft-gcode` (protocols), `serde` + `toml` (the machine table), and
+//! optionally `serialport` / `nusb`.
 
 mod capabilities;
 mod driver;
@@ -52,29 +56,20 @@ pub use transport::{
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use transport::{UsbTransport, list_usb_devices};
 
-use stencilcraft_geom::Point;
-
-/// Device units: the Silhouette native resolution is 0.05 mm, so all
-/// movements are sent as integer "Silhouette Units" (20 per mm, 508 per inch).
-pub const SU_PER_MM: f64 = craft_plotter::gpgl::silhouette::SU_PER_MM;
-pub const SU_PER_INCH: f64 = craft_plotter::gpgl::silhouette::SU_PER_INCH;
-
-/// Command terminator: every GP-GL command is followed by ETX (0x03).
-pub const ETX: u8 = craft_plotter::gpgl::ETX;
-/// Escape `\x1b\x04` (EOT): initializes the device.
-pub const ESC_INIT: &str = craft_plotter::gpgl::silhouette::INIT;
-/// Escape `\x1b\x05` (ENQ): device status query, replies one of `0`,`1`,`2`.
-pub const ESC_STATUS: &str = craft_plotter::gpgl::silhouette::STATUS_QUERY;
-/// Escape `\x1b\x15` (NAK): tool-setup query (Cameo 4 family).
-pub const ESC_TOOL_SETUP: &str = craft_plotter::gpgl::silhouette::TOOL_QUERY;
-/// Query `FG` — firmware version string, e.g. `CAMEO 4 PRO V1.02`.
-pub const QUERY_VERSION: &str = craft_plotter::gpgl::silhouette::VERSION_COMMAND;
-
-/// Convert millimetres to device units by rounding.
+pub use craft_plotter::gpgl::ETX;
 #[cfg(test)]
-pub(crate) fn su(mm: f64) -> i64 {
-    craft_plotter::gpgl::silhouette::su(mm)
-}
+pub(crate) use craft_plotter::gpgl::silhouette::su;
+use craft_plotter::gpgl::silhouette::{self, Tool};
+/// Silhouette escapes and queries (`ESC EOT` init, `ESC ENQ` status, `ESC NAK`
+/// tool setup, `FG` firmware version), device units, mats and the status reply.
+pub use craft_plotter::gpgl::silhouette::{
+    INIT as ESC_INIT, Mat, STATUS_QUERY as ESC_STATUS, SU_PER_INCH, SU_PER_MM,
+    Status as DeviceStatus, TOOL_QUERY as ESC_TOOL_SETUP, VERSION_COMMAND as QUERY_VERSION,
+    parse_status,
+};
+/// An encoded program and its commands, framed for the wire.
+pub use craft_plotter::{Command, Framing, Program as CutProgram, delimit};
+use stencilcraft_geom::Point;
 
 /// A typed handle for the built-in machines, kept for the desktop app and
 /// older callers. New code addresses machines by registry id
@@ -242,99 +237,6 @@ impl Model {
         self.caps()
             .and_then(|c| c.speed.as_ref())
             .map_or(0, |r| u8::try_from(r.max).unwrap_or(u8::MAX))
-    }
-}
-
-/// A cutting-mat definition: device code plus usable extent in inches
-/// (the extents below come from the community mat tables; the Pro mat is
-/// 24 in × 24 in even though the tray takes 609.6 mm-wide material).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub enum Mat {
-    None,
-    Cameo12x12,
-    Cameo12x24,
-    Portrait8x12,
-    CameoPlus15x15,
-    CameoPro24x24,
-    Portrait8_5x12,
-}
-
-impl TryFrom<String> for Mat {
-    type Error = String;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Mat::parse(&s).ok_or_else(|| format!("unknown mat `{s}`"))
-    }
-}
-
-impl From<Mat> for String {
-    fn from(m: Mat) -> String {
-        m.id().to_string()
-    }
-}
-
-impl Mat {
-    pub const ALL: &'static [Mat] = &[
-        Mat::None,
-        Mat::Cameo12x12,
-        Mat::Cameo12x24,
-        Mat::Portrait8x12,
-        Mat::CameoPlus15x15,
-        Mat::CameoPro24x24,
-        Mat::Portrait8_5x12,
-    ];
-
-    /// The device's `TG` mat code.
-    pub fn code(self) -> u8 {
-        match self {
-            Mat::None => 0,
-            Mat::Cameo12x12 => 1,
-            Mat::Cameo12x24 => 2,
-            Mat::Portrait8x12 => 3,
-            Mat::CameoPlus15x15 => 8,
-            Mat::CameoPro24x24 => 9,
-            Mat::Portrait8_5x12 => 11,
-        }
-    }
-
-    /// CLI/MCP id (`12x24`, `none`, …).
-    pub fn id(self) -> &'static str {
-        match self {
-            Mat::None => "none",
-            Mat::Cameo12x12 => "12x12",
-            Mat::Cameo12x24 => "12x24",
-            Mat::Portrait8x12 => "8x12",
-            Mat::CameoPlus15x15 => "15x15",
-            Mat::CameoPro24x24 => "24x24",
-            Mat::Portrait8_5x12 => "8.5x12",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Mat> {
-        let s = s.trim().to_ascii_lowercase();
-        if s == "portrait8x12" {
-            return Some(Mat::Portrait8x12);
-        }
-        Mat::ALL.iter().copied().find(|m| m.id() == s)
-    }
-
-    /// Usable mat extent (down, right) in inches.
-    pub fn extent_inch(self) -> (f64, f64) {
-        match self {
-            Mat::None => (0.0, 0.0),
-            Mat::Cameo12x12 => (12.0, 12.0),
-            Mat::Cameo12x24 => (24.0, 12.0),
-            Mat::Portrait8x12 => (12.0, 8.0),
-            Mat::CameoPlus15x15 => (15.0, 15.0),
-            Mat::CameoPro24x24 => (24.0, 24.0),
-            Mat::Portrait8_5x12 => (12.0, 8.5),
-        }
-    }
-
-    /// Usable mat extent (down, right) in mm.
-    pub fn extent_mm(self) -> (f64, f64) {
-        let (d, r) = self.extent_inch();
-        (d * 25.4, r * 25.4)
     }
 }
 
@@ -618,19 +520,24 @@ impl From<ToolKind> for String {
     }
 }
 
+impl From<Tool> for ToolKind {
+    fn from(t: Tool) -> ToolKind {
+        match t {
+            Tool::Empty => ToolKind::Empty,
+            Tool::RatchetBlade => ToolKind::RatchetBlade,
+            Tool::AutoBlade => ToolKind::AutoBlade,
+            Tool::DeepCutBlade => ToolKind::DeepCutBlade,
+            Tool::KraftBlade => ToolKind::KraftBlade,
+            Tool::RotaryBlade => ToolKind::RotaryBlade,
+            Tool::Pen => ToolKind::Pen,
+            Tool::Error => ToolKind::Error,
+        }
+    }
+}
+
 impl ToolKind {
     pub fn from_code(code: u8) -> Option<ToolKind> {
-        Some(match code {
-            0 => ToolKind::Empty,
-            1 => ToolKind::RatchetBlade,
-            2 => ToolKind::AutoBlade,
-            3 => ToolKind::DeepCutBlade,
-            4 => ToolKind::KraftBlade,
-            5 => ToolKind::RotaryBlade,
-            7 => ToolKind::Pen,
-            255 => ToolKind::Error,
-            _ => return None,
-        })
+        Tool::from_code(code).map(ToolKind::from)
     }
 
     /// CLI/MCP/registry id.
@@ -670,46 +577,10 @@ impl ToolKind {
 
 /// Parse a tool-setup reply (`"2,7\x03"`: holder 1, holder 2 codes).
 pub fn parse_tool_setup(response: &[u8]) -> Vec<Option<ToolKind>> {
-    craft_plotter::gpgl::silhouette::parse_tool_setup(response)
+    silhouette::parse_tool_setup(response)
         .into_iter()
-        .map(|tool| tool.map(ToolKind::from))
+        .map(|t| t.map(ToolKind::from))
         .collect()
-}
-
-impl From<craft_plotter::gpgl::silhouette::Tool> for ToolKind {
-    fn from(tool: craft_plotter::gpgl::silhouette::Tool) -> Self {
-        use craft_plotter::gpgl::silhouette::Tool as T;
-        match tool {
-            T::Empty => ToolKind::Empty,
-            T::RatchetBlade => ToolKind::RatchetBlade,
-            T::AutoBlade => ToolKind::AutoBlade,
-            T::DeepCutBlade => ToolKind::DeepCutBlade,
-            T::KraftBlade => ToolKind::KraftBlade,
-            T::RotaryBlade => ToolKind::RotaryBlade,
-            T::Pen => ToolKind::Pen,
-            T::Error => ToolKind::Error,
-        }
-    }
-}
-
-/// Device status from the Silhouette status escape query.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DeviceStatus {
-    Ready,
-    Moving,
-    Unloaded,
-    Unknown(u8),
-}
-
-/// Parse a status query response (e.g. `b"    0\x03"` — an ASCII digit
-/// before the ETX terminator, possibly zero-padded).
-pub fn parse_status(response: &[u8]) -> DeviceStatus {
-    match craft_plotter::gpgl::silhouette::parse_status(response) {
-        craft_plotter::gpgl::silhouette::Status::Ready => DeviceStatus::Ready,
-        craft_plotter::gpgl::silhouette::Status::Moving => DeviceStatus::Moving,
-        craft_plotter::gpgl::silhouette::Status::Unloaded => DeviceStatus::Unloaded,
-        craft_plotter::gpgl::silhouette::Status::Unknown(code) => DeviceStatus::Unknown(code),
-    }
 }
 
 /// Single-operation job settings, the shape the desktop app and the first
@@ -836,173 +707,6 @@ impl CutSettings {
     }
 }
 
-/// One device command. `to_ascii` produces the exact text (without the
-/// terminator the program's `Framing` adds).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    /// `J<toolholder>` — select the active tool holder.
-    SelectTool(u8),
-    /// `FX<p>,<toolholder>` — cutting force.
-    Pressure(u8, u8),
-    /// `!<speed>,<toolholder>` — cut speed.
-    Speed(u8, u8),
-    /// `TF<depth>,<toolholder>` — blade depth (AutoBlade).
-    Depth(u8, u8),
-    /// `FC<x>,<y>,<toolholder>` — blade swivel circle (in device units).
-    CutterOffset {
-        x_mm: f64,
-        y_mm: f64,
-        toolholder: u8,
-    },
-    /// `FE<n>,<toolholder>` — lift head between paths when `n == 1`.
-    Lift { lift: bool, toolholder: u8 },
-    /// `FF<start>,<end>,<toolholder>` — corner sharpening range, tenths of mm.
-    SharpenCorners {
-        start_tenths: i64,
-        end_tenths: i64,
-        toolholder: u8,
-    },
-    /// `TJ<acceleration>` — acceleration ramp.
-    Acceleration(i64),
-    /// `M<down>,<right>` — head-up move, mm coordinates.
-    Move { down_mm: f64, right_mm: f64 },
-    /// `D<down>,<right>` — head-down draw/cut to point, mm coordinates.
-    Draw { down_mm: f64, right_mm: f64 },
-    /// `\<down>,<right>` — cutting-region upper-left bound.
-    BoundaryTopLeft { down_mm: f64, right_mm: f64 },
-    /// `Z<down>,<right>` — cutting-region lower-right bound.
-    BoundaryBottomRight { down_mm: f64, right_mm: f64 },
-    /// `FY<0|1>` — roller track enhancing (`FY0` = on).
-    TrackEnhancing(bool),
-    /// `TG<code>` — select cutting mat.
-    SelectMat(Mat),
-    /// `FN0` — device soft reset.
-    Reset,
-    /// `TB50,0` / `TB50,1` — portrait/landscape feed direction.
-    PortraitMode(bool),
-    /// `L0` — pen-up marker between plot sections.
-    PenUp,
-    /// `SO0` — mark origin/service position.
-    Origin,
-    /// `H` — full home (Cameo 3 and newer).
-    Home,
-    /// `FW<id>` — media select (legacy dialect only).
-    MediaSelect(u16),
-    /// `FX<p>` — force without a holder (legacy dialect).
-    PressureLegacy(u8),
-    /// `!<s>` — speed without a holder (legacy dialect).
-    SpeedLegacy(u8),
-    /// `FC<d>` — blade offset without a holder (legacy dialect).
-    CutterOffsetLegacy(f64),
-    /// A command built by another protocol (HP-GL, DMPL, G-code, plain
-    /// GP-GL) or a fixed-text Silhouette command (`TB99`, …).
-    Raw(String),
-}
-
-impl Command {
-    pub fn to_ascii(&self) -> String {
-        to_plotter_command(self).to_ascii()
-    }
-}
-
-fn to_plotter_command(command: &Command) -> craft_plotter::Command {
-    use craft_plotter::Command as C;
-    match command {
-        Command::SelectTool(t) => C::SelectTool(*t),
-        Command::Pressure(p, t) => C::Pressure(*p, *t),
-        Command::Speed(s, t) => C::Speed(*s, *t),
-        Command::Depth(d, t) => C::Depth(*d, *t),
-        Command::CutterOffset {
-            x_mm,
-            y_mm,
-            toolholder,
-        } => C::CutterOffset {
-            x_mm: *x_mm,
-            y_mm: *y_mm,
-            toolholder: *toolholder,
-        },
-        Command::Lift { lift, toolholder } => C::Lift {
-            lift: *lift,
-            toolholder: *toolholder,
-        },
-        Command::SharpenCorners {
-            start_tenths,
-            end_tenths,
-            toolholder,
-        } => C::SharpenCorners {
-            start_tenths: *start_tenths,
-            end_tenths: *end_tenths,
-            toolholder: *toolholder,
-        },
-        Command::Acceleration(a) => C::Acceleration(*a),
-        Command::Move { down_mm, right_mm } => C::Move {
-            down_mm: *down_mm,
-            right_mm: *right_mm,
-        },
-        Command::Draw { down_mm, right_mm } => C::Draw {
-            down_mm: *down_mm,
-            right_mm: *right_mm,
-        },
-        Command::BoundaryTopLeft { down_mm, right_mm } => C::BoundaryTopLeft {
-            down_mm: *down_mm,
-            right_mm: *right_mm,
-        },
-        Command::BoundaryBottomRight { down_mm, right_mm } => C::BoundaryBottomRight {
-            down_mm: *down_mm,
-            right_mm: *right_mm,
-        },
-        Command::TrackEnhancing(on) => C::TrackEnhancing(*on),
-        Command::SelectMat(mat) => C::SelectMat((*mat).into()),
-        Command::Reset => C::Reset,
-        Command::PortraitMode(landscape) => C::PortraitMode(*landscape),
-        Command::PenUp => C::PenUp,
-        Command::Origin => C::Origin,
-        Command::Home => C::Home,
-        Command::MediaSelect(id) => C::MediaSelect(*id),
-        Command::PressureLegacy(p) => C::PressureLegacy(*p),
-        Command::SpeedLegacy(s) => C::SpeedLegacy(*s),
-        Command::CutterOffsetLegacy(d) => C::CutterOffsetLegacy(*d),
-        Command::Raw(s) => C::Raw(s.clone()),
-    }
-}
-
-impl From<Mat> for craft_plotter::gpgl::silhouette::Mat {
-    fn from(mat: Mat) -> Self {
-        use craft_plotter::gpgl::silhouette::Mat as M;
-        match mat {
-            Mat::None => M::None,
-            Mat::Cameo12x12 => M::Cameo12x12,
-            Mat::Cameo12x24 => M::Cameo12x24,
-            Mat::Portrait8x12 => M::Portrait8x12,
-            Mat::CameoPlus15x15 => M::CameoPlus15x15,
-            Mat::CameoPro24x24 => M::CameoPro24x24,
-            Mat::Portrait8_5x12 => M::Portrait8_5x12,
-        }
-    }
-}
-
-impl From<craft_plotter::gpgl::silhouette::Mat> for Mat {
-    fn from(mat: craft_plotter::gpgl::silhouette::Mat) -> Self {
-        use craft_plotter::gpgl::silhouette::Mat as M;
-        match mat {
-            M::None => Mat::None,
-            M::Cameo12x12 => Mat::Cameo12x12,
-            M::Cameo12x24 => Mat::Cameo12x24,
-            M::Portrait8x12 => Mat::Portrait8x12,
-            M::CameoPlus15x15 => Mat::CameoPlus15x15,
-            M::CameoPro24x24 => Mat::CameoPro24x24,
-            M::Portrait8_5x12 => Mat::Portrait8_5x12,
-        }
-    }
-}
-
-/// Delimit commands into a GP-GL byte stream: each command's ASCII followed
-/// by an ETX byte.
-pub fn delimit(commands: &[Command]) -> Vec<u8> {
-    let shared: Vec<_> = commands.iter().map(to_plotter_command).collect();
-    craft_plotter::stream(&shared, craft_plotter::Framing::Etx)
-}
-
 /// Margins and end feed for the single-operation API.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlotOptions {
@@ -1052,8 +756,8 @@ pub fn encode_plot(
     } else {
         paths.to_vec()
     };
-    let mut commands = protocol::gpgl_plot_body(&body, opts.margin_down_mm, opts.margin_right_mm);
-    commands.extend(protocol::gpgl_park(bb, opts.end_paper_offset_mm));
+    let mut commands = silhouette::plot_body(&body, opts.margin_down_mm, opts.margin_right_mm);
+    commands.extend(silhouette::park(bb, opts.end_paper_offset_mm));
     (commands, Some(bb))
 }
 
@@ -1098,50 +802,9 @@ pub fn encode_cut(
     s.passes = s.passes.clamp(1, MAX_PASSES);
     let job = s.to_job(paths, opts, bbox_only);
     let job = apply_job_settings(caps, &job).unwrap_or(job);
-    protocol_for(caps.protocol).encode(caps, &job)
-}
-
-/// How a program's commands are framed on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Framing {
-    /// GP-GL: each command followed by ETX.
-    #[default]
-    Etx,
-    /// HP-GL / DMPL / G-code: commands carry their own terminators; newline between.
-    Newline,
-}
-
-/// An encoded program: the commands, their framing, and where a session must
-/// pause for the registration-mark search.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct CutProgram {
-    pub commands: Vec<Command>,
-    pub bbox_mm: Option<BBoxMm>,
-    pub framing: Framing,
-    /// Registration: after this many commands the sender must wait for the
-    /// device to report the marks found before streaming the rest.
-    pub registration_wait: Option<usize>,
-}
-
-impl CutProgram {
-    /// The exact byte stream for a transport to write.
-    pub fn to_stream(&self) -> Vec<u8> {
-        stream_of(&self.commands, self.framing)
-    }
-
-    /// One command per line, for dry-run transcripts.
-    pub fn transcript(&self) -> Vec<String> {
-        self.commands.iter().map(Command::to_ascii).collect()
-    }
-}
-
-pub(crate) fn stream_of(commands: &[Command], framing: Framing) -> Vec<u8> {
-    let commands: Vec<_> = commands.iter().map(to_plotter_command).collect();
-    let framing = match framing {
-        Framing::Etx => craft_plotter::Framing::Etx,
-        Framing::Newline => craft_plotter::Framing::Newline,
-    };
-    craft_plotter::stream(&commands, framing)
+    protocol_for(caps.protocol)
+        .encode(caps, &job)
+        .unwrap_or_default()
 }
 
 /// Errors surfaced by encoders, transports and sessions.
@@ -1214,10 +877,8 @@ pub fn query_status(transport: &mut dyn Transport) -> Result<DeviceStatus, Machi
 
 /// Ask for the firmware version string (`FG`), trimmed of ETX/padding.
 pub fn query_version(transport: &mut dyn Transport) -> Result<String, MachineError> {
-    transport.write(craft_plotter::gpgl::silhouette::VERSION_QUERY)?;
-    Ok(craft_plotter::gpgl::silhouette::parse_version(&read_reply(
-        transport,
-    )?))
+    transport.write(silhouette::VERSION_QUERY)?;
+    Ok(silhouette::parse_version(&read_reply(transport)?))
 }
 
 /// Ask a Cameo-4-family device which tools sit in its holders (`ESC NAK`).

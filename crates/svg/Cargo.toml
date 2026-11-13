@@ -14,5 +14,8 @@ craft-file-import = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 
+[dev-dependencies]
+stencilcraft-testkit = { workspace = true }
+
 [lints]
 workspace = true

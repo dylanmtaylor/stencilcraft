@@ -8,7 +8,6 @@ description = "PDF (vector cut/print sheet) export for StencilCraft documents"
 
 [dependencies]
 craft-pdf = { workspace = true }
-craft-svg-paths = { workspace = true }
 stencilcraft-layout = { workspace = true }
 kurbo = { workspace = true }
 thiserror = { workspace = true }

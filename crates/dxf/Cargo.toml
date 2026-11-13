@@ -12,7 +12,6 @@ kurbo = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
-craft-dxf = { workspace = true }
 
 [lints]
 workspace = true

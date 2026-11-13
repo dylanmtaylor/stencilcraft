@@ -11,8 +11,6 @@ description = "Vendor-neutral cutting-machine drivers for StencilCraft: capabili
 craft-plotter = { workspace = true }
 craft-gcode = { workspace = true }
 stencilcraft-geom = { workspace = true }
-craft-gcode = { workspace = true }
-craft-plotter = { workspace = true }
 # Weld on cut: the same boolean engine as the Pathfinder/Weld commands.
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }

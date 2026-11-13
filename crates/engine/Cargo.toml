@@ -19,7 +19,6 @@ stencilcraft-raster = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-generate = { workspace = true }
 stencilcraft-layout = { workspace = true }
-stencilcraft-color = { workspace = true }
 vectorcraft-engine = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }

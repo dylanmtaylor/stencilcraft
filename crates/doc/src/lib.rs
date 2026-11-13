@@ -9,3 +9,5 @@ pub mod recovery;
 pub mod templates;
 
 pub use craft_stencilcraft_document::*;
+
+pub use craft_stencilcraft_format::EXTENSION as FORMAT_EXTENSION;

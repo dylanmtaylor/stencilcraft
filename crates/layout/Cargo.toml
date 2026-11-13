@@ -7,7 +7,6 @@ rust-version.workspace = true
 description = "Cut production layout: machine mats, nesting, cut jobs (order, overcut, test cut, weeding) and Print Then Cut sheets"
 
 [dependencies]
-craft-svg-paths = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

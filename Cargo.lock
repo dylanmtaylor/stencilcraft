@@ -477,6 +477,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1234,8 +1240,9 @@ dependencies = [
 [[package]]
 name = "craft-raster-codecs"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=e95c99e7bcba0f70bae630596355c3ebd372fff6#e95c99e7bcba0f70bae630596355c3ebd372fff6"
+source = "git+https://github.com/storytold/craft-libs.git?rev=eeee3d08b622fe6dd8de898d2e984978ed67cb34#eeee3d08b622fe6dd8de898d2e984978ed67cb34"
 dependencies = [
+ "base64 0.23.1",
  "image",
  "rayon",
  "thiserror 2.0.21",
@@ -3201,7 +3208,7 @@ name = "krilla"
 version = "0.8.2"
 source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bumpalo",
  "flate2",
  "float-cmp",
@@ -5617,7 +5624,6 @@ dependencies = [
 name = "stencilcraft-raster"
 version = "0.1.0"
 dependencies = [
- "base64",
  "craft-raster-codecs",
  "kurbo 0.13.1",
  "serde",
@@ -6251,7 +6257,7 @@ version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "data-url",
  "flate2",
  "imagesize 0.13.0",

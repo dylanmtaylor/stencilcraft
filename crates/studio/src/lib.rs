@@ -35,17 +35,6 @@ pub struct Imported {
     pub warnings: Vec<String>,
 }
 
-pub fn is_studio_path(path: &str) -> bool {
-    craft_silhouette_studio::is_studio_path(path)
-}
-
-pub fn sniff(bytes: &[u8]) -> Option<Version> {
-    craft_silhouette_studio::sniff(bytes).map(|v| match v {
-        craft_silhouette_studio::Version::V2 => Version::V2,
-        craft_silhouette_studio::Version::V3 => Version::V3,
-    })
-}
-
 pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
     let parsed = craft_silhouette_studio::import(bytes).map_err(|error| {
         use craft_silhouette_studio::Error as E;
@@ -125,11 +114,8 @@ impl FormatHandler for StudioHandler {
     fn name(&self) -> &'static str {
         "Silhouette Studio (.studio, .studio3)"
     }
-    fn extensions(&self) -> &'static [&'static str] {
-        &["studio", "studio3"]
-    }
-    fn sniff(&self, bytes: &[u8]) -> bool {
-        sniff(bytes).is_some()
+    fn formats(&self) -> &'static [craft_file_formats::Format] {
+        &[craft_file_formats::Format::Studio]
     }
     fn capabilities(&self) -> Capabilities {
         Capabilities {

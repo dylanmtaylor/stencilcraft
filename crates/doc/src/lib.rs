@@ -458,6 +458,21 @@ pub struct Document {
     pub meta: Metadata,
 }
 
+/// The app's typed document values mapped into the shared native wire schema.
+type NativeFileFields = craft_stencilcraft_format::DocumentFields<
+    Board,
+    KerfSettings,
+    Vec<Layer>,
+    RasterImage,
+    PageSetup,
+    Vec<Page>,
+    Vec<Guide>,
+    Grid,
+    SnapSettings,
+    Vec<Group>,
+    Metadata,
+>;
+
 impl Default for Document {
     fn default() -> Self {
         Self {
@@ -587,36 +602,19 @@ impl Document {
     /// their defaults, preserving compact version 1 files.
     pub fn save_json(&self) -> Result<String, DocError> {
         self.validate()?;
-        let groups = self.pruned_groups();
-        let fields = craft_stencilcraft_format::DocumentFields {
-            board: json(&self.board)?,
-            kerf: json(&self.kerf)?,
-            layers: json(&self.layers)?,
+        let fields: NativeFileFields = craft_stencilcraft_format::DocumentFields {
+            board: self.board.clone(),
+            kerf: self.kerf.clone(),
+            layers: self.layers.clone(),
             next_shape_id: self.next_shape_id,
-            images: self
-                .images
-                .iter()
-                .map(json)
-                .collect::<Result<Vec<_>, _>>()?,
-            board_setup: (!self.board_setup.is_empty())
-                .then(|| json(&self.board_setup))
-                .transpose()?,
-            pages: (!self.pages.is_empty())
-                .then(|| json(&self.pages))
-                .transpose()?,
-            guides: (!self.guides.is_empty())
-                .then(|| json(&self.guides))
-                .transpose()?,
-            grid: (self.grid != Grid::default())
-                .then(|| json(&self.grid))
-                .transpose()?,
-            snap: (self.snap != SnapSettings::default())
-                .then(|| json(&self.snap))
-                .transpose()?,
-            groups: (!groups.is_empty()).then(|| json(&groups)).transpose()?,
-            meta: (!self.meta.is_empty())
-                .then(|| json(&self.meta))
-                .transpose()?,
+            images: self.images.clone(),
+            board_setup: self.board_setup.clone(),
+            pages: self.pages.clone(),
+            guides: self.guides.clone(),
+            grid: self.grid.clone(),
+            snap: self.snap.clone(),
+            groups: self.pruned_groups(),
+            meta: self.meta.clone(),
         };
         craft_stencilcraft_format::File::new(fields)
             .to_json_pretty()
@@ -634,9 +632,9 @@ impl Document {
 }
 
 fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
-    let file = craft_stencilcraft_format::File::read(json)
+    let file = craft_stencilcraft_format::File::<NativeFileFields>::read_typed(json)
         .map_err(|error| format_read_error(error, path))?;
-    load_document(file, path)
+    load_document(file)
 }
 
 fn format_read_error(error: craft_stencilcraft_format::Error, path: &str) -> DocError {
@@ -661,51 +659,27 @@ fn format_read_error(error: craft_stencilcraft_format::Error, path: &str) -> Doc
     }
 }
 
-fn load_document(file: craft_stencilcraft_format::File, path: &str) -> Result<Document, DocError> {
+fn load_document(
+    file: craft_stencilcraft_format::File<NativeFileFields>,
+) -> Result<Document, DocError> {
     let fields = file.document;
-    let board: Board = decode(fields.board, path)?;
-    let kerf: KerfSettings = decode(fields.kerf, path)?;
-    let layers: Vec<Layer> = decode(fields.layers, path)?;
-    let images: Vec<RasterImage> = fields
-        .images
-        .into_iter()
-        .map(|value| decode(value, path))
-        .collect::<Result<_, _>>()?;
     let mut doc = Document {
-        board,
-        kerf,
-        layers,
+        board: fields.board,
+        kerf: fields.kerf,
+        layers: fields.layers,
         next_shape_id: fields.next_shape_id,
-        images,
-        board_setup: decode_optional(fields.board_setup, path)?,
-        pages: decode_optional(fields.pages, path)?,
-        guides: decode_optional(fields.guides, path)?,
-        grid: decode_optional(fields.grid, path)?,
-        snap: decode_optional(fields.snap, path)?,
-        groups: decode_optional(fields.groups, path)?,
-        meta: decode_optional(fields.meta, path)?,
+        images: fields.images,
+        board_setup: fields.board_setup,
+        pages: fields.pages,
+        guides: fields.guides,
+        grid: fields.grid,
+        snap: fields.snap,
+        groups: fields.groups,
+        meta: fields.meta,
     };
     doc.validate()?;
     doc.groups = doc.pruned_groups();
     Ok(doc)
-}
-
-fn json<T: Serialize>(value: &T) -> Result<serde_json::Value, DocError> {
-    serde_json::to_value(value).map_err(|e| structure_err("output", &e))
-}
-
-fn decode<T: serde::de::DeserializeOwned>(
-    value: serde_json::Value,
-    path: &str,
-) -> Result<T, DocError> {
-    serde_json::from_value(value).map_err(|e| structure_err(path, &e))
-}
-
-fn decode_optional<T: serde::de::DeserializeOwned + Default>(
-    value: Option<serde_json::Value>,
-    path: &str,
-) -> Result<T, DocError> {
-    value.map_or_else(|| Ok(T::default()), |value| decode(value, path))
 }
 
 fn structure_err(path: &str, e: &serde_json::Error) -> DocError {
@@ -731,9 +705,9 @@ pub fn load_from(path: &str) -> Result<Document, DocError> {
         path: path.to_string(),
         source,
     })?;
-    let document = craft_stencilcraft_format::File::read_from(file)
+    let document = craft_stencilcraft_format::File::<NativeFileFields>::read_typed_from(file)
         .map_err(|error| format_read_error(error, path))?;
-    load_document(document, path)
+    load_document(document)
 }
 
 #[cfg(test)]

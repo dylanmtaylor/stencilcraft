@@ -2,7 +2,6 @@
 //! (cut red, engrave blue, 0.25 mm), for printing at 100 % or handing to a cutter's
 //! software. PDF serialization and drawing are delegated to the shared craft-pdf writer.
 
-use craft_pdf::write::{Metadata, Writer, backend};
 use stencilcraft_doc::{CutStyle, Document};
 
 #[derive(Debug, thiserror::Error)]
@@ -10,14 +9,6 @@ pub enum PdfError {
     #[error("pdf: {0}")]
     Model(String),
 }
-
-impl From<craft_pdf::write::WriteError> for PdfError {
-    fn from(error: craft_pdf::write::WriteError) -> Self {
-        Self::Model(error.to_string())
-    }
-}
-
-const PT_PER_MM: f64 = 72.0 / 25.4;
 
 /// One path to draw on a [`PdfPage`]. RGB values and width are model units, not PDF syntax.
 #[derive(Debug, Clone)]
@@ -60,101 +51,25 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
 
 /// Serialize one or more application-adapted vector pages through the shared PDF writer.
 pub fn export_pages(pages: &[PdfPage]) -> Result<Vec<u8>, PdfError> {
-    craft_pdf::write::guard(|| {
-        let mut settings = backend::SerializeSettings::default();
-        settings.configuration =
-            craft_pdf::write::configuration(backend::configure::PdfVersion::Pdf14, None)?;
-        let mut writer = Writer::new(settings, Metadata::default());
-        for (page_index, source) in pages.iter().enumerate() {
-            let width = source.width_mm * PT_PER_MM;
-            let height = source.height_mm * PT_PER_MM;
-            let page_settings = backend::page::PageSettings::from_wh(width as f32, height as f32)
-                .filter(|_| width.is_finite() && height.is_finite())
-                .ok_or_else(|| {
-                    PdfError::Model(format!(
-                        "page {page_index}: dimensions are not finite or positive"
-                    ))
-                })?;
-            let mut page = writer.document_mut().start_page_with(page_settings);
-            let mut surface = page.surface();
-            for source_path in &source.paths {
-                let mut path = backend::geom::PathBuilder::new();
-                for element in source_path.path.elements() {
-                    let scale = |p: kurbo::Point| -> Result<(f32, f32), PdfError> {
-                        if !(p.x.is_finite() && p.y.is_finite()) {
-                            return Err(PdfError::Model(format!(
-                                "page {page_index}: a path point is not finite"
-                            )));
-                        }
-                        let x = p.x * PT_PER_MM;
-                        let y = p.y * PT_PER_MM;
-                        if !(x.is_finite()
-                            && y.is_finite()
-                            && x.abs() <= f64::from(f32::MAX)
-                            && y.abs() <= f64::from(f32::MAX))
-                        {
-                            return Err(PdfError::Model(format!(
-                                "page {page_index}: a path point is outside the PDF coordinate range"
-                            )));
-                        }
-                        Ok((x as f32, y as f32))
-                    };
-                    match *element {
-                        kurbo::PathEl::MoveTo(p) => {
-                            let (x, y) = scale(p)?;
-                            path.move_to(x, y);
-                        }
-                        kurbo::PathEl::LineTo(p) => {
-                            let (x, y) = scale(p)?;
-                            path.line_to(x, y);
-                        }
-                        kurbo::PathEl::QuadTo(a, b) => {
-                            let (x1, y1) = scale(a)?;
-                            let (x, y) = scale(b)?;
-                            path.quad_to(x1, y1, x, y);
-                        }
-                        kurbo::PathEl::CurveTo(a, b, c) => {
-                            let (x1, y1) = scale(a)?;
-                            let (x2, y2) = scale(b)?;
-                            let (x, y) = scale(c)?;
-                            path.cubic_to(x1, y1, x2, y2, x, y);
-                        }
-                        kurbo::PathEl::ClosePath => path.close(),
-                    }
-                }
-                if let Some(path) = path.finish() {
-                    let color = backend::color::rgb::Color::new(
-                        source_path.color[0],
-                        source_path.color[1],
-                        source_path.color[2],
-                    );
-                    if let Some(width_mm) = source_path.stroke_width_mm {
-                        if !(width_mm.is_finite() && width_mm > 0.0) {
-                            return Err(PdfError::Model(format!(
-                                "page {page_index}: stroke width must be finite and positive"
-                            )));
-                        }
-                        surface.set_fill(None);
-                        surface.set_stroke(Some(backend::paint::Stroke {
-                            paint: color.into(),
-                            width: (width_mm * PT_PER_MM) as f32,
-                            ..Default::default()
-                        }));
-                    } else {
-                        surface.set_stroke(None);
-                        surface.set_fill(Some(backend::paint::Fill {
-                            paint: color.into(),
-                            ..Default::default()
-                        }));
-                    }
-                    surface.draw_path(&path);
-                }
-            }
-            surface.finish();
-            page.finish();
-        }
-        writer.finish().map_err(PdfError::from)
-    })
+    let pages = pages
+        .iter()
+        .map(|page| craft_file_import::write::PdfPage {
+            width_mm: page.width_mm,
+            height_mm: page.height_mm,
+            view_box: [0.0, 0.0, page.width_mm, page.height_mm],
+            paths: page
+                .paths
+                .iter()
+                .map(|path| craft_file_import::write::PdfPath {
+                    path: path.path.clone(),
+                    color_rgb: path.color,
+                    stroke_width_mm: path.stroke_width_mm,
+                })
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    craft_file_import::write::write_pdf_pages(&pages)
+        .map_err(|error| PdfError::Model(error.to_string()))
 }
 
 #[cfg(test)]

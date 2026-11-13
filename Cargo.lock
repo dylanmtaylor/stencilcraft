@@ -1059,6 +1059,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-eps"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3#79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3"
+
+[[package]]
+name = "craft-file-formats"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3#79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3"
+dependencies = [
+ "craft-eps",
+]
+
+[[package]]
 name = "craft-font-catalog"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1135,6 +1148,15 @@ source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13af
 dependencies = [
  "hayro-interpret",
  "hayro-syntax",
+ "krilla",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
  "krilla",
  "thiserror 2.0.21",
 ]
@@ -5411,6 +5433,7 @@ dependencies = [
 name = "stencilcraft-import"
 version = "0.1.0"
 dependencies = [
+ "craft-file-formats",
  "craft-raster-codecs",
  "kurbo 0.13.1",
  "stencilcraft-doc",
@@ -5496,6 +5519,7 @@ dependencies = [
 name = "stencilcraft-pdf"
 version = "0.1.0"
 dependencies = [
+ "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=f92a91afa)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "thiserror 2.0.21",

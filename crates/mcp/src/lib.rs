@@ -2374,14 +2374,17 @@ mod tests {
         let dir = std::env::temp_dir().join("stencilcraft-mcp-tests");
         std::fs::create_dir_all(&dir).unwrap();
         let png = dir.join("square.png");
-        image::RgbaImage::from_fn(30, 30, |x, y| {
+        let pixels = craft_raster_codecs::common::Pixels::from_fn(30, 30, |x, y| {
             if (10..20).contains(&x) && (10..20).contains(&y) {
-                image::Rgba([0, 0, 0, 255])
+                craft_raster_codecs::common::Pixel([0, 0, 0, 255])
             } else {
-                image::Rgba([255, 255, 255, 255])
+                craft_raster_codecs::common::Pixel([255, 255, 255, 255])
             }
-        })
-        .save(&png)
+        });
+        std::fs::write(
+            &png,
+            craft_raster_codecs::common::encode_png(&pixels).unwrap(),
+        )
         .unwrap();
         let mut session = Session::default();
         let call = |session: &mut Session,

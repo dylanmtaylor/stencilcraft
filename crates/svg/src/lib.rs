@@ -1,12 +1,8 @@
-//! SVG import/export for StencilCraft documents.
-//!
-//! Export: one `<g>` per layer with `data-kind` recording cut/engrave; the viewBox
-//! is millimetres, so 1 SVG user unit = 1 mm and the sheet prints true to size.
-//! Import supports common SVG shapes, groups, transforms, production styles, and
-//! local `<use>` references; see `docs/gaps.md` for remaining gaps.
+//! StencilCraft SVG import and export policy on shared Craft-Libs SVG parsing and writing.
 
-use craft_svg_paths::write::{SvgWriter, num, path_data};
-use kurbo::BezPath;
+use std::collections::HashMap;
+
+use kurbo::{BezPath, Point};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
@@ -20,131 +16,11 @@ pub enum SvgError {
     Model(String),
 }
 
-/// SVG class names, one per production style, stable for downstream tools that
-/// colour cut paths by class.
-fn class_for(style: CutStyle) -> &'static str {
-    match style {
-        CutStyle::Cut => "stencilcraft-cut",
-        CutStyle::Engrave => "stencilcraft-engrave",
-    }
-}
-
-/// Board and art bounds combined, defaulting to a 100 × 150 mm sheet for an empty
-/// document (the export must always be plottable in a viewbox).
-fn view_bounds(doc: &Document) -> kurbo::Rect {
-    let mut acc = kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm);
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        if let Some(b) = layer.bounds() {
-            acc = acc.union(b);
-        }
-    }
-    acc
-}
-
-/// Serialise a document to SVG, millimetres as user units, one `<g>` per layer
-/// (hidden layers included but marked invisible).
-pub fn export(doc: &Document) -> Result<String, SvgError> {
-    let mut svg = SvgWriter::new();
-    write_artwork(&mut svg, doc);
-    svg.line(0);
-    Ok(svg.finish())
-}
-
-/// A length or coordinate in millimetres, three decimals.
-fn mm(value: f64) -> craft_svg_paths::write::Num {
-    num(value, 3)
-}
-
-/// `<path class="…" d="…"/>` for one shape.
-fn write_shape(svg: &mut SvgWriter, shape: &stencilcraft_doc::Shape) {
-    svg.tag("path")
-        .attr("class", class_for(shape.style))
-        .attr("d", path_data(&shape.cut_path()))
-        .empty();
-}
-
-/// The document's `<svg>` element, without the XML declaration.
-fn write_artwork(svg: &mut SvgWriter, doc: &Document) {
-    let board = view_bounds(doc);
-    let (w, h) = (mm(board.width()), mm(board.height()));
-    svg.root()
-        .attr("version", "1.1")
-        .attr("width", format_args!("{w}mm"))
-        .attr("height", format_args!("{h}mm"))
-        .attr(
-            "viewBox",
-            format_args!("{} {} {w} {h}", mm(board.x0), mm(board.y0)),
-        )
-        .open();
-    svg.line(0);
-    svg.tag("title").text(&format!(
-        "stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm",
-        stencilcraft_doc::FORMAT_NAME,
-        doc.layers.len(),
-        doc.shape_count(),
-        doc.kerf.width_mm
-    ));
-    let parents = doc.group_parent_map();
-    // Template (guide) layers are canvas-only: never exported.
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        let vis = if layer.visible { "visible" } else { "hidden" };
-        svg.line(1);
-        svg.tag("g")
-            .attr("class", class_for(layer.kind))
-            .attr(
-                "data-kind",
-                match layer.kind {
-                    CutStyle::Cut => "cut",
-                    CutStyle::Engrave => "engrave",
-                },
-            )
-            .attr("style", format_args!("display:{vis}"))
-            .open();
-        // Groups nest inside the layer as `<g class="group" data-group="id">`; a group
-        // whose shapes are not adjacent in stacking order appears more than once.
-        let mut open: Vec<u64> = Vec::new();
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let chain = stencilcraft_doc::canvas::group_chain_in(
-                &parents,
-                stencilcraft_doc::GroupChild::Shape(shape.id),
-            );
-            let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
-            for _ in common..open.len() {
-                svg.line(2);
-                svg.close();
-            }
-            open.truncate(common);
-            for id in chain.iter().skip(common) {
-                svg.line(2);
-                svg.tag("g")
-                    .attr("class", "group")
-                    .attr("data-group", id)
-                    .open();
-                open.push(*id);
-            }
-            svg.line(2);
-            write_shape(svg, shape);
-        }
-        for _ in &open {
-            svg.line(2);
-            svg.close();
-        }
-        svg.line(1);
-        svg.close();
-    }
-    svg.line(0);
-    svg.close();
-}
-
-/// How to lay tiled sheets out on one preview page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TilePreviewOptions {
-    /// Cells per row; clamped to the number of sheets.
     pub columns: usize,
-    /// Page millimetres per sheet millimetre. 0.25 is a comfortable overview.
     pub scale: f64,
 }
-
 impl Default for TilePreviewOptions {
     fn default() -> Self {
         Self {
@@ -153,33 +29,144 @@ impl Default for TilePreviewOptions {
         }
     }
 }
-
-/// Space between preview cells and around the page, millimetres.
 pub const TILE_PREVIEW_GAP_MM: f64 = 6.0;
-
-/// Largest preview page this will build, millimetres per side.
 pub const TILE_PREVIEW_MAX_MM: f64 = 100_000.0;
 
-/// Render every sheet of a tiling onto one preview page.
-///
-/// Unlike a cut export, a preview is for looking at: paths are stroked, not filled
-/// (cut lines red, engrave/marks blue), and each sheet sits in a framed cell with a
-/// `sheet N of M` label so it is obvious where one sheet ends and the next begins.
-/// Cells follow the tiling order (first sheet top-left of the board) but rows are
-/// placed bottom-up and sheet content is flipped, because SVG y grows downwards while
-/// documents are y-up: the preview reads the way the assembled board does.
+fn class_for(style: CutStyle) -> &'static str {
+    match style {
+        CutStyle::Cut => "stencilcraft-cut",
+        CutStyle::Engrave => "stencilcraft-engrave",
+    }
+}
+fn view_bounds(doc: &Document) -> kurbo::Rect {
+    doc.layers
+        .iter()
+        .filter(|layer| !layer.template)
+        .filter_map(Layer::bounds)
+        .fold(
+            kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm),
+            |bounds, layer| bounds.union(layer),
+        )
+}
+fn root(writer: &mut craft_svg::write::SvgWriter, width_mm: f64, height_mm: f64, view_box: String) {
+    writer
+        .root()
+        .attr("version", "1.1")
+        .attr("width", format!("{width_mm:.3}mm"))
+        .attr("height", format!("{height_mm:.3}mm"))
+        .attr("viewBox", view_box)
+        .open();
+}
+fn title(writer: &mut craft_svg::write::SvgWriter, text: &str, depth: usize) {
+    writer.line(depth);
+    writer.tag("title").open();
+    writer.text(text);
+    writer.close();
+}
+fn write_document_contents(writer: &mut craft_svg::write::SvgWriter, doc: &Document, depth: usize) {
+    title(
+        writer,
+        &format!(
+            "stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm",
+            stencilcraft_doc::FORMAT_NAME,
+            doc.layers.len(),
+            doc.shape_count(),
+            doc.kerf.width_mm
+        ),
+        depth,
+    );
+    let parents = doc.group_parent_map();
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
+        writer.line(depth);
+        writer
+            .tag("g")
+            .attr("class", class_for(layer.kind))
+            .attr(
+                "data-kind",
+                match layer.kind {
+                    CutStyle::Cut => "cut",
+                    CutStyle::Engrave => "engrave",
+                },
+            )
+            .attr(
+                "style",
+                if layer.visible {
+                    "display:visible"
+                } else {
+                    "display:hidden"
+                },
+            )
+            .open();
+        let mut open = Vec::<u64>::new();
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+            let chain = stencilcraft_doc::canvas::group_chain_in(
+                &parents,
+                stencilcraft_doc::GroupChild::Shape(shape.id),
+            );
+            let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
+            for _ in common..open.len() {
+                writer.line(depth + 1);
+                writer.close();
+            }
+            open.truncate(common);
+            for id in chain.iter().skip(common) {
+                writer.line(depth + 1);
+                writer
+                    .tag("g")
+                    .attr("class", "group")
+                    .attr("data-group", id)
+                    .open();
+                open.push(*id);
+            }
+            writer.line(depth + 1 + open.len());
+            writer
+                .tag("path")
+                .attr("class", class_for(shape.style))
+                .attr("d", craft_svg::write::path_data(&shape.cut_path()))
+                .empty();
+        }
+        for _ in &open {
+            writer.line(depth + 1);
+            writer.close();
+        }
+        writer.line(depth);
+        writer.close();
+    }
+}
+
+pub fn export(doc: &Document) -> Result<String, SvgError> {
+    let bounds = view_bounds(doc);
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        bounds.width(),
+        bounds.height(),
+        format!(
+            "{:.3} {:.3} {:.3} {:.3}",
+            bounds.x0,
+            bounds.y0,
+            bounds.width(),
+            bounds.height()
+        ),
+    );
+    write_document_contents(&mut writer, doc, 1);
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
+}
+
 pub fn export_tile_preview(
     pieces: &[Document],
     options: &TilePreviewOptions,
 ) -> Result<String, SvgError> {
     if pieces.is_empty() {
         return Err(SvgError::Model(
-            "preview: the tiling produced no sheets to show".to_string(),
+            "preview: the tiling produced no sheets to show".into(),
         ));
     }
     if options.columns == 0 {
         return Err(SvgError::Model(
-            "preview: columns must be at least 1".to_string(),
+            "preview: columns must be at least 1".into(),
         ));
     }
     if !options.scale.is_finite() || options.scale <= 0.0 {
@@ -213,131 +200,130 @@ pub fn export_tile_preview(
             "preview: a {page_w:.0}×{page_h:.0} mm page is too big; use a smaller scale or fewer sheets"
         )));
     }
-
-    let mut svg = SvgWriter::new();
-    let (w, h) = (mm(page_w), mm(page_h));
-    svg.root()
-        .attr("version", "1.1")
-        .attr("width", format_args!("{w}mm"))
-        .attr("height", format_args!("{h}mm"))
-        .attr("viewBox", format_args!("0 0 {w} {h}"))
-        .open();
-    svg.line(1);
-    svg.tag("title").text(&format!(
-        "StencilCraft tiling preview: {} sheets, {} × {} cells",
-        pieces.len(),
-        columns,
-        rows
-    ));
-    // A preview shows outlines, not filled artwork: fill would hide the very detail
-    // the preview exists to show. Colours follow cutting-software convention.
-    svg.line(1);
-    svg.tag("style").text(
-        "\n    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n    \
-         .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n    \
-         .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n    \
-         .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }\n  ",
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        page_w,
+        page_h,
+        format!("0 0 {page_w:.3} {page_h:.3}"),
     );
+    title(
+        &mut writer,
+        &format!(
+            "StencilCraft tiling preview: {} sheets, {} × {} cells",
+            pieces.len(),
+            columns,
+            rows
+        ),
+        1,
+    );
+    writer.line(1);
+    writer.tag("style").open();
+    writer.text(
+        ".preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }
+.stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }
+.stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }
+.preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }",
+    );
+    writer.close();
     for (index, piece) in pieces.iter().enumerate() {
         let col = index % columns;
         let row = index / columns;
         let x = gap + col as f64 * (cell_w + gap);
-        // SVG y grows downwards while documents are y-up: the tiling's first row is
-        // the bottom of the board, so it belongs at the bottom of the page.
         let y = gap + (rows - 1 - row) as f64 * (cell_h + gap);
         let cell_height = piece.board.height_mm * options.scale;
-        let (board_w, board_h) = (piece.board.width_mm, piece.board.height_mm);
-        svg.line(1);
-        svg.tag("g")
+        writer.line(1);
+        writer
+            .tag("g")
             .attr("class", "sheet")
             .attr("data-sheet", index)
             .attr(
                 "data-size",
-                format_args!("{}x{}", num(board_w, 1), num(board_h, 1)),
+                format!("{:.1}x{:.1}", piece.board.width_mm, piece.board.height_mm),
             )
             .open();
-        svg.line(2);
-        svg.tag("text")
+        writer.line(2);
+        writer
+            .tag("text")
             .attr("class", "preview-label")
-            .attr("x", mm(x))
-            .attr("y", mm(y - 1.6))
-            .text(&format!(
-                "sheet {} of {} · {board_w:.0}×{board_h:.0} mm",
-                index + 1,
-                pieces.len(),
-            ));
-        svg.line(2);
-        svg.tag("rect")
+            .attr("x", format!("{x:.3}"))
+            .attr("y", format!("{:.3}", y - 1.6))
+            .open();
+        writer.text(&format!(
+            "sheet {} of {} · {:.0}×{:.0} mm",
+            index + 1,
+            pieces.len(),
+            piece.board.width_mm,
+            piece.board.height_mm
+        ));
+        writer.close();
+        writer.line(2);
+        writer
+            .tag("rect")
             .attr("class", "preview-frame")
-            .attr("x", mm(x))
-            .attr("y", mm(y))
-            .attr("width", mm(board_w * options.scale))
-            .attr("height", mm(cell_height))
+            .attr("x", format!("{x:.3}"))
+            .attr("y", format!("{y:.3}"))
+            .attr(
+                "width",
+                format!("{:.3}", piece.board.width_mm * options.scale),
+            )
+            .attr("height", format!("{cell_height:.3}"))
             .empty();
-        // Flip the sheet's y-up millimetres into the page's y-down space, so each cell
-        // reads the same way the sheet does on the mat.
-        svg.line(2);
-        svg.tag("g")
+        writer.line(2);
+        writer
+            .tag("g")
             .attr(
                 "transform",
-                format_args!(
-                    "translate({} {}) scale({} {})",
-                    mm(x),
-                    mm(y + cell_height),
-                    num(options.scale, 4),
-                    num(-options.scale, 4)
+                format!(
+                    "translate({x:.3} {:.3}) scale({:.4} {:.4})",
+                    y + cell_height,
+                    options.scale,
+                    -options.scale
                 ),
             )
             .open();
-        for layer in &piece.layers {
-            if !layer.is_output() {
-                continue;
-            }
+        for layer in piece.layers.iter().filter(|layer| layer.is_output()) {
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                svg.line(3);
-                write_shape(&mut svg, shape);
+                writer.line(3);
+                writer
+                    .tag("path")
+                    .attr("class", class_for(shape.style))
+                    .attr("d", craft_svg::write::path_data(&shape.cut_path()))
+                    .empty();
             }
         }
-        svg.line(2);
-        svg.close();
-        svg.line(1);
-        svg.close();
+        writer.line(2);
+        writer.close();
+        writer.line(1);
+        writer.close();
     }
-    svg.line(0);
-    svg.close();
-    svg.line(0);
-    Ok(svg.finish())
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
 }
 
-/// Export a physical-size Print & Cut SVG sheet with three high-contrast
-/// registration marks (top-left origin square, top-right and bottom-left L-corners)
-/// around the document board.
 pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
-    const PAGE_MARGIN_MM: f64 = 12.0;
-    const MARK_SIZE_MM: f64 = 6.0;
-
+    const MARGIN: f64 = 12.0;
+    const MARK: f64 = 6.0;
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
-    let page_width = doc.board.width_mm + 2.0 * PAGE_MARGIN_MM;
-    let page_height = doc.board.height_mm + 2.0 * PAGE_MARGIN_MM;
-    if !page_width.is_finite() || !page_height.is_finite() {
+    let page_w = doc.board.width_mm + 2.0 * MARGIN;
+    let page_h = doc.board.height_mm + 2.0 * MARGIN;
+    if !page_w.is_finite() || !page_h.is_finite() {
         return Err(SvgError::Model(
-            "print-cut: page dimensions are not finite".to_string(),
+            "print-cut: page dimensions are not finite".into(),
         ));
     }
-
-    let mut svg = SvgWriter::new();
-    let (w, h) = (mm(page_width), mm(page_height));
-    svg.root()
-        .attr("version", "1.1")
-        .attr("width", format_args!("{w}mm"))
-        .attr("height", format_args!("{h}mm"))
-        .attr("viewBox", format_args!("0 0 {w} {h}"))
-        .open();
-    svg.line(1);
-    svg.tag("title")
-        .text("StencilCraft print-and-cut alignment sheet");
-    svg.line(1);
-    svg.tag("g")
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        page_w,
+        page_h,
+        format!("0 0 {page_w:.3} {page_h:.3}"),
+    );
+    title(&mut writer, "StencilCraft print-and-cut alignment sheet", 1);
+    writer.line(1);
+    writer
+        .tag("g")
         .attr("id", "registration-marks")
         .attr("fill", "#000000")
         .attr(
@@ -345,296 +331,197 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
             "Registration marks: top-left square, top-right and bottom-left corners",
         )
         .open();
-    // A square establishes the origin. Asymmetric corner marks preserve page
-    // orientation and provide two additional, widely spaced alignment points.
-    svg.line(2);
-    svg.tag("rect")
+    writer.line(2);
+    writer
+        .tag("rect")
         .attr("x", "0")
         .attr("y", "0")
-        .attr("width", mm(MARK_SIZE_MM))
-        .attr("height", mm(MARK_SIZE_MM))
+        .attr("width", format!("{MARK:.3}"))
+        .attr("height", format!("{MARK:.3}"))
         .empty();
-    let far = MARK_SIZE_MM;
-    for corner in [
-        [
-            (page_width, 0.0),
-            (page_width - far, 0.0),
-            (page_width - far, far),
-            (page_width - 1.5, far),
-            (page_width - 1.5, 1.5),
-            (page_width - far, 1.5),
-        ],
-        [
-            (0.0, page_height),
-            (far, page_height),
-            (far, page_height - far),
-            (1.5, page_height - far),
-            (1.5, page_height - 1.5),
-            (0.0, page_height - 1.5),
-        ],
-    ] {
-        let mut mark = BezPath::new();
-        for (i, point) in corner.into_iter().enumerate() {
-            if i == 0 {
-                mark.move_to(point);
-            } else {
-                mark.line_to(point);
-            }
-        }
-        mark.close_path();
-        svg.line(2);
-        svg.tag("path").attr("d", path_data(&mark)).empty();
-    }
-    svg.line(1);
-    svg.close();
-    let (board_w, board_h) = (mm(doc.board.width_mm), mm(doc.board.height_mm));
-    svg.line(1);
-    svg.tag("svg")
-        .attr("x", mm(PAGE_MARGIN_MM))
-        .attr("y", mm(PAGE_MARGIN_MM))
-        .attr("width", format_args!("{board_w}mm"))
-        .attr("height", format_args!("{board_h}mm"))
-        .attr("viewBox", format_args!("0 0 {board_w} {board_h}"))
+    let mut top = BezPath::new();
+    top.move_to((page_w, 0.0));
+    top.line_to((page_w - MARK, 0.0));
+    top.line_to((page_w - MARK, MARK));
+    top.line_to((page_w - 1.5, MARK));
+    top.line_to((page_w - 1.5, 1.5));
+    top.line_to((page_w - MARK, 1.5));
+    top.close_path();
+    writer.line(2);
+    writer
+        .tag("path")
+        .attr("d", craft_svg::write::path_data(&top))
+        .empty();
+    let mut bottom = BezPath::new();
+    bottom.move_to((0.0, page_h));
+    bottom.line_to((MARK, page_h));
+    bottom.line_to((MARK, page_h - MARK));
+    bottom.line_to((1.5, page_h - MARK));
+    bottom.line_to((1.5, page_h - 1.5));
+    bottom.line_to((0.0, page_h - MARK));
+    bottom.close_path();
+    writer.line(2);
+    writer
+        .tag("path")
+        .attr("d", craft_svg::write::path_data(&bottom))
+        .empty();
+    writer.line(1);
+    writer.close();
+    writer.line(1);
+    writer
+        .tag("svg")
+        .attr("x", format!("{MARGIN:.3}"))
+        .attr("y", format!("{MARGIN:.3}"))
+        .attr("width", format!("{:.3}mm", doc.board.width_mm))
+        .attr("height", format!("{:.3}mm", doc.board.height_mm))
+        .attr(
+            "viewBox",
+            format!("0 0 {:.3} {:.3}", doc.board.width_mm, doc.board.height_mm),
+        )
         .attr("overflow", "hidden")
         .open();
-    svg.line(0);
-    write_artwork(&mut svg, doc);
-    svg.line(1);
-    svg.close();
-    svg.line(0);
-    svg.close();
-    svg.line(0);
-    Ok(svg.finish())
+    write_document_contents(&mut writer, doc, 2);
+    writer.line(1);
+    writer.close();
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
 }
 
-/// The cut or engrave tag an SVG element carries, as `craft-svg-paths` follows it down the tree.
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy)]
 struct Kind(CutStyle);
-
 impl Default for Kind {
     fn default() -> Self {
-        Kind(CutStyle::Cut)
+        Self(CutStyle::Cut)
     }
 }
-
-impl craft_svg_paths::Kind for Kind {
-    const PROPERTIES: &'static [&'static str] = &["data-kind", "data-style"];
-
-    fn of(style: &craft_svg_paths::StyleMap, class: &str) -> Option<Self> {
-        let explicit = style.get("data-kind").or_else(|| style.get("data-style"));
-        if let Some(value) = explicit {
-            match value.as_str() {
-                "cut" => return Some(Kind(CutStyle::Cut)),
-                "engrave" | "score" | "mark" => return Some(Kind(CutStyle::Engrave)),
-                _ => {}
-            }
-        }
-        let class = class.to_ascii_lowercase();
-        if class
-            .split_ascii_whitespace()
-            .any(|c| c.contains("engrave") || c.contains("score"))
+impl craft_svg::paths::Kind for Kind {
+    const PROPERTIES: &'static [&'static str] = &["data-kind"];
+    fn of(style: &craft_svg::paths::StyleMap, class: &str) -> Option<Self> {
+        let value = style.get("data-kind").map(String::as_str);
+        if value == Some("engrave")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-engrave")
         {
-            Some(Kind(CutStyle::Engrave))
-        } else if class.split_ascii_whitespace().any(|c| c.contains("cut")) {
-            Some(Kind(CutStyle::Cut))
+            Some(Self(CutStyle::Engrave))
+        } else if value == Some("cut")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-cut")
+        {
+            Some(Self(CutStyle::Cut))
         } else {
             None
         }
     }
-
-    // A line with fill:none can still be a cut path; stroke:none plus fill:none is empty
-    // and can safely be ignored.
-    fn skips_unpainted(&self) -> bool {
-        self.0 == CutStyle::Cut
-    }
 }
-
-/// A lenient import: the document plus every piece of the file that was skipped or
-/// approximated (text, masks, filters, ignored CSS, clips it could not apply).
 #[derive(Debug)]
 pub struct SvgImport {
     pub document: Document,
     pub warnings: Vec<String>,
 }
-
-/// Import common SVG artwork into a cutting document.
-///
-/// Supported geometry: `<path>`, `<rect>` (including rounded corners),
-/// `<circle>`, `<ellipse>`, `<line>`, `<polyline>`, and `<polygon>`. Nested
-/// groups, transforms (`matrix`, `translate`, `scale`, `rotate`, `skewX/Y`),
-/// and inherited presentation/inline styles (`display`, `visibility`, CSS
-/// `style`, `class`, `data-kind`) are applied. Stylesheets support simple type,
-/// class and ID selectors (including compound, descendant and child selectors)
-/// with specificity-based cascade. SVG paths are flattened nowhere
-/// here: curves remain curves in the document. Each imported shape is assigned
-/// to cut or engrave according to inherited `data-kind`/`data-style` or class.
-/// Embedded stylesheets support type, class, ID and attribute selectors (`=`, `~=`,
-/// `^=`, `$=`, `*=`, `|=`), descendant/child/sibling combinators, `:not()`,
-/// `:first-child`, `:last-child`, `:root`, selector lists, and a bounded
-/// presentation-property cascade. Shapes with a stroke colour (any CSS Color 4 form,
-/// or `currentColor`) go on one layer per colour — `Line #rrggbb` (or
-/// `engrave #rrggbb`) with the layer colour set. `clip-path` references to
-/// `<clipPath>` elements clip the geometry.
-///
-/// This strict form refuses a file with anything [`import_with_warnings`] would only
-/// warn about (text, masks, filters, ignored CSS), so nothing is lost silently.
-///
-/// Physical root dimensions accept unitless SVG px, `px`, `mm`, `cm`, `in`,
-/// `pt`, and `pc`; a `viewBox` maps its user coordinates onto that physical
-/// viewport, following `preserveAspectRatio`. Without physical dimensions,
-/// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
-/// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
-/// convention. Local fragment-only `<use>` references can instantiate supported
-/// shapes, groups and `<symbol>` templates with viewBox sizing; external references,
-/// text, masks, filters and percentage lengths are not expanded. Unsupported drawable
-/// elements are reported rather than silently lost.
-pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
-    let imported = import_with_warnings(svg, path_name)?;
-    if imported.warnings.is_empty() {
-        Ok(imported.document)
-    } else {
-        Err(svg_error(path_name, &imported.warnings.join("; ")))
-    }
+pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
+    import_with_warnings(svg, name).map(|got| got.document)
 }
-
-/// [`import`] that skips what it cannot represent and says so: `<text>` (no fonts
-/// here; convert text to paths first), masks and filters (the art is imported unmasked
-/// and unfiltered), ignored CSS at-rules and selectors, and clip paths it cannot apply.
-pub fn import_with_warnings(svg: &str, path_name: &str) -> Result<SvgImport, SvgError> {
-    let read =
-        craft_svg_paths::import::<Kind>(svg, path_name).map_err(|e| SvgError::Import(e.0))?;
-    let mut doc = Document::default();
-    doc.board.width_mm = read.width_mm;
-    doc.board.height_mm = read.height_mm;
-    let (mut warnings, mut dropped) = (read.warnings, read.dropped_warnings);
-    // (engrave?, stroke colour) → layer index; (cut, no colour) is layer 0.
-    let mut layer_index = std::collections::HashMap::from([((false, None), 0)]);
-    // Each clip region is unioned once, on first use.
-    let mut regions: Vec<Option<BezPath>> = vec![None; read.clips.len()];
-    for shape in read.shapes {
+pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
+    let imported =
+        craft_svg::paths::import::<Kind>(svg, name).map_err(|e| SvgError::Import(e.to_string()))?;
+    let mut doc = Document {
+        board: stencilcraft_doc::Board {
+            width_mm: imported.width_mm,
+            height_mm: imported.height_mm,
+        },
+        ..Document::default()
+    };
+    let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
+    layers.insert(("cut".into(), false, None), 0);
+    let mut warnings = imported.warnings;
+    for shape in imported.shapes {
         let mut path = shape.path;
-        for clip in &shape.clips {
-            let (Some(pieces), Some(slot)) = (read.clips.get(*clip), regions.get_mut(*clip)) else {
+        for clip_index in shape.clips {
+            let Some(clip) = imported.clips.get(clip_index) else {
+                warnings.push(format!("{}: missing clip region {clip_index}", shape.label));
                 continue;
             };
-            let region = match slot {
-                Some(region) => region,
-                None => slot.insert(
-                    clip_union(pieces)
-                        .map_err(|e| svg_error(path_name, &format!("clip-path: {e}")))?,
-                ),
-            };
-            path = clip_to_region(&path, region)
-                .map_err(|e| svg_error(path_name, &format!("clip-path: {e}")))?;
+            if clip.pieces.is_empty() {
+                path = BezPath::new();
+                break;
+            }
+            let pieces: Vec<_> = clip
+                .pieces
+                .iter()
+                .map(|(p, _)| vectorcraft_geom::PathData::from_bezpath(p))
+                .collect();
+            let inputs: Vec<_> = clip
+                .pieces
+                .iter()
+                .zip(&pieces)
+                .map(|((_, r), p)| {
+                    (
+                        p,
+                        match r {
+                            craft_svg::paths::FillRule::EvenOdd => {
+                                vectorcraft_geom::FillRule::EvenOdd
+                            }
+                            craft_svg::paths::FillRule::NonZero => {
+                                vectorcraft_geom::FillRule::NonZero
+                            }
+                        },
+                    )
+                })
+                .collect();
+            let region = vectorcraft_pathops::try_boolean_n(&inputs, |inside: &[bool]| {
+                inside.iter().any(|v| *v)
+            })
+            .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?
+            .to_bezpath();
+            path = clip_to_region(&path, &region)
+                .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?;
         }
         if path.elements().is_empty() {
             continue;
         }
-        let kind = shape.kind.0;
-        let color = shape.stroke.and_then(|paint| {
-            match craft_svg_paths::color::parse_color(&paint) {
-                Ok(color) => Some(color.to_css()),
-                Err(_) => {
-                    craft_svg_paths::push_warning(
-                        &mut warnings,
-                        &mut dropped,
-                        format!(
-                            "{}: stroke colour {:?} not understood; shape put on the uncoloured layer",
-                            shape.label,
-                            paint.chars().take(64).collect::<String>()
-                        ),
-                    );
-                    None
-                }
-            }
+        let style = shape.kind.0;
+        let layer_name = shape.layer.unwrap_or_else(|| match style {
+            CutStyle::Cut => "cut".into(),
+            CutStyle::Engrave => "engrave".into(),
         });
-        let index = layer_for(&mut doc, &mut layer_index, kind, color);
-        doc.push_shape(index, path, kind)
-            .map_err(|e| svg_error(path_name, &e.to_string()))?;
+        let color = shape
+            .stroke
+            .as_deref()
+            .and_then(|s| craft_svg::color::parse_color(s).ok())
+            .map(|c| format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b));
+        let key = (
+            layer_name.clone(),
+            style == CutStyle::Engrave,
+            color.clone(),
+        );
+        let index = if let Some(index) = layers.get(&key) {
+            *index
+        } else {
+            let mut layer = Layer::new(layer_name, style);
+            layer.color = color;
+            doc.layers.push(layer);
+            let i = doc.layers.len() - 1;
+            layers.insert(key, i);
+            i
+        };
+        doc.push_shape(index, path, style)
+            .map_err(|e| SvgError::Model(e.to_string()))?;
     }
-    if dropped > 0 {
-        warnings.push(format!("…and {dropped} more warnings"));
+    if imported.dropped_warnings > 0 {
+        warnings.push(format!(
+            "{} additional SVG warnings omitted",
+            imported.dropped_warnings
+        ));
     }
-
-    // SVG art may legitimately extend beyond its nominal viewport; do not clip
-    // cut geometry silently. Normalize negative coordinates onto the sheet.
-    let mut bounds: Option<kurbo::Rect> = None;
-    for layer in &doc.layers {
-        if let Some(b) = layer.bounds() {
-            bounds = Some(bounds.map_or(b, |prev| prev.union(b)));
-        }
-    }
-    if let Some(b) = bounds {
-        let shift_x = (-b.x0).max(0.0);
-        let shift_y = (-b.y0).max(0.0);
-        if shift_x != 0.0 || shift_y != 0.0 {
-            let shift = kurbo::Affine::translate((shift_x, shift_y));
-            for layer in &mut doc.layers {
-                for shape in &mut layer.shapes {
-                    shape.path = transform_path(&shape.path, shift);
-                }
-            }
-        }
-        doc.board.width_mm = doc.board.width_mm.max(b.x1 + shift_x).max(1.0);
-        doc.board.height_mm = doc.board.height_mm.max(b.y1 + shift_y).max(1.0);
-    }
-    doc.validate()
-        .map_err(|e| svg_error(path_name, &format!("invalid imported document: {e}")))?;
+    doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
     Ok(SvgImport {
         document: doc,
         warnings,
     })
 }
-
-/// The layer for a shape of `kind` stroked in `color`, created on first use.
-fn layer_for(
-    doc: &mut Document,
-    layer_index: &mut std::collections::HashMap<(bool, Option<String>), usize>,
-    kind: CutStyle,
-    color: Option<String>,
-) -> usize {
-    let key = (kind == CutStyle::Engrave, color);
-    if let Some(index) = layer_index.get(&key) {
-        return *index;
-    }
-    let name = match (&key.1, kind) {
-        (Some(hex), CutStyle::Cut) => format!("Line {hex}"),
-        (Some(hex), CutStyle::Engrave) => format!("engrave {hex}"),
-        (None, _) => "engrave".to_string(),
-    };
-    let mut layer = Layer::new(name, kind);
-    layer.color = key.1.clone();
-    let index = doc.layers.len();
-    doc.layers.push(layer);
-    layer_index.insert(key, index);
-    index
-}
-
-/// One clip region: the union of a `<clipPath>`'s pieces, each under its own `clip-rule`.
-fn clip_union(clip: &craft_svg_paths::Clip) -> Result<BezPath, String> {
-    // An empty clip path clips everything away (CSS Masking §6.1).
-    if clip.pieces.is_empty() {
-        return Ok(BezPath::new());
-    }
-    let pieces: Vec<_> = clip
-        .pieces
-        .iter()
-        .map(|(path, rule)| {
-            let rule = match rule {
-                craft_svg_paths::FillRule::EvenOdd => vectorcraft_geom::FillRule::EvenOdd,
-                craft_svg_paths::FillRule::NonZero => vectorcraft_geom::FillRule::NonZero,
-            };
-            (vectorcraft_geom::PathData::from_bezpath(path), rule)
-        })
-        .collect();
-    let inputs: Vec<_> = pieces.iter().map(|(p, rule)| (p, *rule)).collect();
-    vectorcraft_pathops::try_boolean_n(&inputs, |inside: &[bool]| inside.iter().any(|b| *b))
-        .map(|region| region.to_bezpath())
-        .map_err(|e| e.to_string())
-}
-
-/// `path` cut down to `region`: closed contours by boolean intersection (curves kept),
-/// open contours flattened and clipped as polylines.
 fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     if region.elements().is_empty() {
         return Ok(BezPath::new());
@@ -645,7 +532,7 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
         .elements()
         .iter()
         .copied()
-        .chain([kurbo::PathEl::MoveTo(kurbo::Point::ZERO)])
+        .chain([kurbo::PathEl::MoveTo(Point::ZERO)])
     {
         if matches!(el, kurbo::PathEl::MoveTo(_)) && !contour.is_empty() {
             let target = if matches!(contour.last(), Some(kurbo::PathEl::ClosePath)) {
@@ -659,7 +546,6 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     }
     let mut out = BezPath::new();
     if !closed.elements().is_empty() {
-        // Cut contours follow the engine's even-odd convention, so holes stay holes.
         let kept = vectorcraft_pathops::try_boolean(
             &vectorcraft_geom::PathData::from_bezpath(&closed),
             vectorcraft_geom::FillRule::EvenOdd,
@@ -672,7 +558,7 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
         out.extend(kept.to_bezpath());
     }
     if !open.elements().is_empty() {
-        let polygons: Vec<Vec<kurbo::Point>> = stencilcraft_generate::flatten(region)
+        let polygons: Vec<Vec<Point>> = stencilcraft_generate::flatten(region)
             .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|c| c.closed && c.points.len() >= 3)
@@ -685,23 +571,8 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     }
     Ok(out)
 }
-
-fn transform_path(path: &BezPath, affine: kurbo::Affine) -> BezPath {
-    let mut out = BezPath::new();
-    for elem in path.elements() {
-        match *elem {
-            kurbo::PathEl::MoveTo(p) => out.move_to(affine * p),
-            kurbo::PathEl::LineTo(p) => out.line_to(affine * p),
-            kurbo::PathEl::QuadTo(c, p) => out.quad_to(affine * c, affine * p),
-            kurbo::PathEl::CurveTo(c1, c2, p) => out.curve_to(affine * c1, affine * c2, affine * p),
-            kurbo::PathEl::ClosePath => out.close_path(),
-        }
-    }
-    out
-}
-
-fn svg_error(path_name: &str, message: &str) -> SvgError {
-    SvgError::Import(format!("{path_name}: {message}"))
+pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
+    path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
 }
 
 #[cfg(test)]
@@ -719,17 +590,9 @@ mod tests_group_walk {
     }
 }
 
-/// Rebuilds into polylines for downstream code needing points instead of `d`.
-pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
-    path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use craft_svg_paths::{
-        MAX_CSS_BYTES, MAX_SVG_BYTES, MAX_SVG_DEPTH, MAX_SVG_NODES, MAX_SVG_WARNINGS,
-    };
     use stencilcraft_geom::Point;
 
     fn rect(x: f64, y: f64, w: f64, h: f64) -> BezPath {

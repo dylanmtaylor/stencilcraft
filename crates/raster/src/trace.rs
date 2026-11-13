@@ -15,7 +15,7 @@
 //! Orientation: with y down (document coordinates), outer contours have positive
 //! shoelace area and holes negative.
 
-use image::RgbaImage;
+use craft_raster_codecs::common::Pixels as RgbaImage;
 use serde::{Deserialize, Serialize};
 use stencilcraft_geom::{BezPath, Point};
 
@@ -506,10 +506,10 @@ pub fn contour_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::Rgba;
+    use craft_raster_codecs::common::Pixel;
 
-    const BLACK: Rgba<u8> = Rgba([0, 0, 0, 255]);
-    const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
+    const BLACK: Pixel<u8> = Pixel([0, 0, 0, 255]);
+    const WHITE: Pixel<u8> = Pixel([255, 255, 255, 255]);
 
     fn image(w: u32, h: u32, f: impl Fn(u32, u32) -> bool) -> RgbaImage {
         RgbaImage::from_fn(w, h, |x, y| if f(x, y) { BLACK } else { WHITE })

@@ -8,8 +8,8 @@ description = "SVG import and export for StencilCraft documents"
 
 [dependencies]
 kurbo = { workspace = true }
-craft-svg-paths = { workspace = true }
 thiserror = { workspace = true }
+craft-svg = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-generate = { workspace = true }
@@ -18,6 +18,3 @@ vectorcraft-pathops = { workspace = true }
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-stencilcraft-testkit = { workspace = true }

@@ -8,10 +8,8 @@
 
 mod trace;
 
-use std::io::Cursor;
-
 use base64::Engine as _;
-use image::{ImageReader, Limits, RgbaImage};
+use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
 use stencilcraft_doc::RasterImage;
 
 pub use trace::{ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace};
@@ -36,70 +34,24 @@ fn bad(message: impl Into<String>) -> RasterError {
 
 /// Decode an image file under the caps. Animated GIFs give their first frame.
 pub fn decode(bytes: &[u8]) -> Result<RgbaImage, RasterError> {
-    if bytes.len() > MAX_FILE_BYTES {
-        return Err(bad("the file exceeds the 64 MiB input limit"));
-    }
-    if is_heif(bytes) {
-        return Err(bad(
-            "HEIC/HEIF images are not supported yet; convert the file to PNG or JPEG",
-        ));
-    }
-    let reader = || -> Result<ImageReader<Cursor<&[u8]>>, RasterError> {
-        let mut reader = ImageReader::new(Cursor::new(bytes))
-            .with_guessed_format()
-            .map_err(|e| bad(format!("could not identify the format: {e}")))?;
-        if reader.format().is_none() {
-            return Err(bad(
-                "unrecognised format (PNG, JPEG, BMP, GIF, TIFF and WebP are supported)",
-            ));
-        }
-        let mut limits = Limits::default();
-        limits.max_image_width = Some(MAX_SIDE);
-        limits.max_image_height = Some(MAX_SIDE);
-        limits.max_alloc = Some(MAX_ALLOC);
-        reader.limits(limits);
-        Ok(reader)
-    };
-    // Read the header first so the pixel cap holds before any pixel is allocated.
-    let (width, height) = reader()?
-        .into_dimensions()
-        .map_err(|e| bad(format!("could not read the image header: {e}")))?;
-    check_size(width, height)?;
-    let decoded = reader()?
-        .decode()
-        .map_err(|e| bad(format!("could not decode the image: {e}")))?;
-    check_size(decoded.width(), decoded.height())?;
-    Ok(decoded.to_rgba8())
-}
-
-fn check_size(width: u32, height: u32) -> Result<(), RasterError> {
-    if width == 0 || height == 0 {
-        return Err(bad("the image is empty"));
-    }
-    if u64::from(width) * u64::from(height) > MAX_PIXELS {
-        return Err(bad(format!(
-            "{width}×{height} exceeds the 16-million-pixel limit"
-        )));
-    }
-    Ok(())
-}
-
-/// ISO BMFF `ftyp` box naming a HEIF brand.
-fn is_heif(bytes: &[u8]) -> bool {
-    bytes.get(4..8) == Some(b"ftyp")
-        && matches!(
-            bytes.get(8..12),
-            Some(b"heic" | b"heix" | b"hevc" | b"mif1" | b"msf1" | b"avif")
-        )
+    common::decode_rgba(
+        bytes,
+        DecodeLimits {
+            max_file_bytes: MAX_FILE_BYTES,
+            max_width: MAX_SIDE,
+            max_height: MAX_SIDE,
+            max_pixels: MAX_PIXELS,
+            max_alloc_bytes: MAX_ALLOC,
+        },
+    )
+    .map_err(|e| bad(e.to_string()))
 }
 
 /// Encode pixels as base64 PNG, the document's image storage.
 pub fn encode_png_base64(pixels: &RgbaImage) -> Result<String, RasterError> {
-    let mut out = Cursor::new(Vec::new());
-    pixels
-        .write_to(&mut out, image::ImageFormat::Png)
-        .map_err(|e| bad(format!("could not encode PNG: {e}")))?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(out.into_inner()))
+    common::encode_png(pixels)
+        .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes))
+        .map_err(|e| bad(e.to_string()))
 }
 
 /// Decode a placed image's pixels (document data is untrusted too).
@@ -221,42 +173,25 @@ pub fn remove_background(pixels: &RgbaImage, tolerance: f64) -> Result<RgbaImage
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::Rgba;
+    use craft_raster_codecs::common::{Pixel, encode_for_path};
 
-    pub(crate) fn encode(image: &RgbaImage, format: image::ImageFormat) -> Vec<u8> {
-        let mut out = Cursor::new(Vec::new());
-        match format {
-            image::ImageFormat::Jpeg | image::ImageFormat::Bmp => {
-                image::DynamicImage::ImageRgba8(image.clone())
-                    .to_rgb8()
-                    .write_to(&mut out, format)
-                    .unwrap();
-            }
-            _ => image.write_to(&mut out, format).unwrap(),
-        }
-        out.into_inner()
+    fn encode(image: &RgbaImage, extension: &str) -> Vec<u8> {
+        encode_for_path(format!("fixture.{extension}"), image).unwrap()
     }
 
     #[test]
     fn decodes_every_supported_format() {
         let image = RgbaImage::from_fn(8, 6, |x, _| {
             if x < 4 {
-                Rgba([0, 0, 0, 255])
+                Pixel([0, 0, 0, 255])
             } else {
-                Rgba([255, 255, 255, 255])
+                Pixel([255, 255, 255, 255])
             }
         });
-        for format in [
-            image::ImageFormat::Png,
-            image::ImageFormat::Jpeg,
-            image::ImageFormat::Bmp,
-            image::ImageFormat::Gif,
-            image::ImageFormat::Tiff,
-            image::ImageFormat::WebP,
-        ] {
+        for extension in ["png", "jpg", "bmp", "gif", "tiff", "webp"] {
             let decoded =
-                decode(&encode(&image, format)).unwrap_or_else(|e| panic!("{format:?}: {e}"));
-            assert_eq!(decoded.dimensions(), (8, 6), "{format:?}");
+                decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
+            assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
     }
 
@@ -267,7 +202,7 @@ mod tests {
         let heic = b"\0\0\0\x18ftypheic\0\0\0\0mif1heic";
         assert!(decode(heic).unwrap_err().to_string().contains("HEIC"));
         // A BMP header claiming 60000×60000 must fail before allocating pixels.
-        let mut bmp = encode(&RgbaImage::new(1, 1), image::ImageFormat::Bmp);
+        let mut bmp = encode(&RgbaImage::new(1, 1), "bmp");
         bmp[18..22].copy_from_slice(&60_000_i32.to_le_bytes());
         bmp[22..26].copy_from_slice(&60_000_i32.to_le_bytes());
         assert!(decode(&bmp).is_err());
@@ -275,7 +210,7 @@ mod tests {
 
     #[test]
     fn place_sizes_by_dpi_and_round_trips_pixels() {
-        let pixels = RgbaImage::from_pixel(96, 48, Rgba([10, 20, 30, 255]));
+        let pixels = RgbaImage::from_pixel(96, 48, Pixel([10, 20, 30, 255]));
         let mut placed = place(&pixels, "p", 96.0).unwrap();
         assert!((placed.width_mm - 25.4).abs() < 1e-9);
         assert!((placed.height_mm - 12.7).abs() < 1e-9);

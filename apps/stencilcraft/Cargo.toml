@@ -33,7 +33,7 @@ stencilcraft-mcp = { workspace = true }
 stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+craft-raster-codecs = { workspace = true }
 
 [features]
 default = ["usb", "bluetooth"]

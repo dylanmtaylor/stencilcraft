@@ -1,15 +1,11 @@
 //! Bounded raster-to-vector threshold silhouette tracing for the CLI.
 
 use std::collections::BTreeSet;
-use std::io::Cursor;
-
-use image::{ImageReader, Limits};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::BezPath;
 use stencilcraft_geom::Point;
 
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_IMAGE_SIDE: u32 = 10_000;
 const MAX_PIXELS: usize = 16_000_000;
 const MAX_BOUNDARY_EDGES: usize = 1_000_000;
 const MAX_CONTOURS: usize = 100_000;
@@ -27,7 +23,7 @@ impl Default for TraceOptions {
     }
 }
 
-/// Read PNG/JPEG bytes under strict limits, then make one closed cut path per
+/// Read supported raster bytes under strict limits, then make one closed cut path per
 /// connected boundary contour. The SVG/CSS UI isn't involved; imports remain
 /// deterministic and work headlessly.
 pub fn trace_file(path: &str, options: TraceOptions) -> Result<Document, String> {
@@ -43,18 +39,12 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err("image exceeds the 64 MiB input limit".to_string());
     }
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|error| format!("could not identify image format: {error}"))?;
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(MAX_IMAGE_SIDE);
-    limits.max_image_height = Some(MAX_IMAGE_SIDE);
-    limits.max_alloc = Some(128 * 1024 * 1024);
-    reader.limits(limits);
-    let decoded = reader
-        .decode()
-        .map_err(|error| format!("could not decode PNG/JPEG image: {error}"))?;
-    let (width, height) = (decoded.width(), decoded.height());
+    let rgba = craft_raster_codecs::common::decode_rgba(
+        bytes,
+        craft_raster_codecs::common::DecodeLimits::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    let (width, height) = rgba.dimensions();
     let pixel_count = (width as usize)
         .checked_mul(height as usize)
         .ok_or_else(|| "image dimensions overflow".to_string())?;
@@ -64,7 +54,6 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
         ));
     }
 
-    let rgba = decoded.to_rgba8();
     let foreground: Vec<bool> = rgba
         .as_chunks::<4>()
         .0
@@ -214,24 +203,20 @@ fn simplify_collinear(points: &mut Vec<Point>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::{ImageBuffer, Rgba};
+    use craft_raster_codecs::common::{Pixel, Pixels};
 
-    fn png(width: u32, height: u32, pixels: impl Fn(u32, u32) -> Rgba<u8>) -> Vec<u8> {
-        let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_fn(width, height, pixels);
-        let mut output = Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgba8(image)
-            .write_to(&mut output, image::ImageFormat::Png)
-            .expect("encode png");
-        output.into_inner()
+    fn png(width: u32, height: u32, pixels: impl Fn(u32, u32) -> Pixel<u8>) -> Vec<u8> {
+        let image = Pixels::from_fn(width, height, pixels);
+        craft_raster_codecs::common::encode_png(&image).expect("encode png")
     }
 
     #[test]
     fn traces_a_closed_dark_silhouette_and_preserves_scale() {
         let bytes = png(4, 3, |x, y| {
             if x == 1 || x == 2 && y == 1 {
-                Rgba([0, 0, 0, 255])
+                Pixel([0, 0, 0, 255])
             } else {
-                Rgba([255, 255, 255, 255])
+                Pixel([255, 255, 255, 255])
             }
         });
         let doc = trace_bytes(&bytes, TraceOptions::default()).expect("traces PNG");
@@ -250,9 +235,9 @@ mod tests {
     fn traces_disjoint_contours_and_white_holes() {
         let bytes = png(7, 5, |x, y| {
             if x < 5 && y < 5 && (x == 0 || x == 4 || y == 0 || y == 4) || x == 6 && y == 2 {
-                Rgba([0, 0, 0, 255])
+                Pixel([0, 0, 0, 255])
             } else {
-                Rgba([255, 255, 255, 255])
+                Pixel([255, 255, 255, 255])
             }
         });
         let doc = trace_bytes(&bytes, TraceOptions::default()).expect("traces contours");
@@ -275,7 +260,7 @@ mod tests {
 
     #[test]
     fn transparent_black_is_not_traced_as_foreground() {
-        let bytes = png(2, 2, |_, _| Rgba([0, 0, 0, 0]));
+        let bytes = png(2, 2, |_, _| Pixel([0, 0, 0, 0]));
         let doc = trace_bytes(&bytes, TraceOptions::default()).expect("traces PNG");
         assert_eq!(doc.shape_count(), 0);
     }
@@ -295,19 +280,15 @@ mod tests {
 
     #[test]
     fn decodes_jpeg_raster_inputs() {
-        let image =
-            image::DynamicImage::ImageRgb8(ImageBuffer::from_pixel(2, 2, image::Rgb([0_u8, 0, 0])));
-        let mut output = Cursor::new(Vec::new());
-        image
-            .write_to(&mut output, image::ImageFormat::Jpeg)
-            .expect("encode jpeg");
-        let doc = trace_bytes(output.get_ref(), TraceOptions::default()).expect("traces JPEG");
+        let image = Pixels::from_pixel(2, 2, Pixel([0_u8, 0, 0, 255]));
+        let bytes = craft_raster_codecs::common::encode_jpeg(&image, 90).expect("encode jpeg");
+        let doc = trace_bytes(&bytes, TraceOptions::default()).expect("traces JPEG");
         assert_eq!(doc.shape_count(), 1);
     }
 
     #[test]
     fn threshold_is_configurable() {
-        let bytes = png(1, 1, |_, _| Rgba([160, 160, 160, 255]));
+        let bytes = png(1, 1, |_, _| Pixel([160, 160, 160, 255]));
         assert_eq!(
             trace_bytes(&bytes, TraceOptions { threshold: 128 })
                 .unwrap()

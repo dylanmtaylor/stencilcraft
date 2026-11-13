@@ -29,7 +29,7 @@ usb = ["stencilcraft-machine/usb"]
 bluetooth = ["stencilcraft-machine/bluetooth"]
 
 [dev-dependencies]
-image = { workspace = true }
+craft-raster-codecs = { workspace = true }
 serde_json = { workspace = true }
 # Fonts built in code for tests (no font file in this repository).
 vectorcraft-text = { workspace = true, features = ["test-fonts"] }

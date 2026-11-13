@@ -483,8 +483,10 @@ fn main() -> Result<(), String> {
         .with_inner_size([1120.0, 760.0])
         .with_title("StencilCraft");
 
-    if let Ok(img) = image::load_from_memory(APP_ICON_PNG) {
-        let rgba = img.to_rgba8();
+    if let Ok(rgba) = craft_raster_codecs::common::decode_rgba(
+        APP_ICON_PNG,
+        craft_raster_codecs::common::DecodeLimits::default(),
+    ) {
         let (w, h) = rgba.dimensions();
         viewport = viewport.with_icon(egui::IconData {
             rgba: rgba.into_raw(),
@@ -4298,11 +4300,14 @@ fn request_screenshot(ctx: &egui::Context, path: String, job: control::Job) {
         let saved = u32::try_from(w)
             .ok()
             .zip(u32::try_from(h).ok())
-            .and_then(|(w, h)| image::RgbaImage::from_raw(w, h, bytes))
+            .and_then(|(w, h)| craft_raster_codecs::common::Pixels::from_raw(w, h, bytes))
             .ok_or_else(|| "screenshot: malformed image".to_string())
             .and_then(|img| {
-                img.save(&path)
+                craft_raster_codecs::common::encode_for_path(&path, &img)
                     .map_err(|e| format!("screenshot: {path}: {e}"))
+                    .and_then(|bytes| {
+                        std::fs::write(&path, bytes).map_err(|e| format!("screenshot: {path}: {e}"))
+                    })
             });
         let reply = match saved {
             Ok(()) => {

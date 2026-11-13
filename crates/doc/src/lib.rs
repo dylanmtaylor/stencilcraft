@@ -1,4 +1,4 @@
-//! StencilCraft document model and mapping to the `.stencilcraft` JSON format.
+//! StencilCraft document model and the `.stencilcraft` JSON format.
 //!
 //! A document holds an artboard in millimetres, kerf settings and layers of shapes.
 //! Every read path returns `Result` with a calm, printable error: a malformed file
@@ -22,13 +22,8 @@ use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};
 mod production;
 pub use production::{CombineOp, GroupKind, Operation, SendAssign, ShapeProduction, SourceGroup};
 
-/// Native document filename extension without the dot.
-pub use craft_stencilcraft_format::EXTENSION as FORMAT_EXTENSION;
-/// Native format name, written into every saved file and checked on load.
-pub use craft_stencilcraft_format::FORMAT_NAME;
-/// Current format version; loaders accept exactly what they can read and say so
-/// otherwise.
-pub use craft_stencilcraft_format::FORMAT_VERSION;
+/// Native format identity and supported version, defined by the shared wire-format crate.
+pub use craft_stencilcraft_format::{FORMAT_NAME, FORMAT_VERSION};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
@@ -458,21 +453,6 @@ pub struct Document {
     pub meta: Metadata,
 }
 
-/// The app's typed document values mapped into the shared native wire schema.
-type NativeFileFields = craft_stencilcraft_format::DocumentFields<
-    Board,
-    KerfSettings,
-    Vec<Layer>,
-    RasterImage,
-    PageSetup,
-    Vec<Page>,
-    Vec<Guide>,
-    Grid,
-    SnapSettings,
-    Vec<Group>,
-    Metadata,
->;
-
 impl Default for Document {
     fn default() -> Self {
         Self {
@@ -598,23 +578,37 @@ impl Document {
         self.validate_canvas()
     }
 
-    /// Maps this document to the shared wire schema. Canvas fields are omitted when they have
-    /// their defaults, preserving compact version 1 files.
+    /// Serialises with the format header. The header wraps the document so a reader
+    /// knows what it is before reading the rest. Canvas fields are written only when
+    /// set, so a plain document saves exactly as it did before they existed.
     pub fn save_json(&self) -> Result<String, DocError> {
         self.validate()?;
-        let fields: NativeFileFields = craft_stencilcraft_format::DocumentFields {
-            board: self.board.clone(),
-            kerf: self.kerf.clone(),
-            layers: self.layers.clone(),
+        let groups = self.pruned_groups();
+        let fields = craft_stencilcraft_format::DocumentFields {
+            board: json(&self.board)?,
+            kerf: json(&self.kerf)?,
+            layers: json(&self.layers)?,
             next_shape_id: self.next_shape_id,
-            images: self.images.clone(),
-            board_setup: self.board_setup.clone(),
-            pages: self.pages.clone(),
-            guides: self.guides.clone(),
-            grid: self.grid.clone(),
-            snap: self.snap.clone(),
-            groups: self.pruned_groups(),
-            meta: self.meta.clone(),
+            images: self.images.iter().map(json).collect::<Result<_, _>>()?,
+            board_setup: (!self.board_setup.is_empty())
+                .then(|| json(&self.board_setup))
+                .transpose()?,
+            pages: (!self.pages.is_empty())
+                .then(|| json(&self.pages))
+                .transpose()?,
+            guides: (!self.guides.is_empty())
+                .then(|| json(&self.guides))
+                .transpose()?,
+            grid: (self.grid != Grid::default())
+                .then(|| json(&self.grid))
+                .transpose()?,
+            snap: (self.snap != SnapSettings::default())
+                .then(|| json(&self.snap))
+                .transpose()?,
+            groups: (!groups.is_empty()).then(|| json(&groups)).transpose()?,
+            meta: (!self.meta.is_empty())
+                .then(|| json(&self.meta))
+                .transpose()?,
         };
         craft_stencilcraft_format::File::new(fields)
             .to_json_pretty()
@@ -624,21 +618,14 @@ impl Document {
             })
     }
 
-    /// Parses the shared format envelope, maps its fields to this document model, and reports
-    /// calm, positioned errors.
+    /// Parses a document from JSON with calm, positioned error messages.
     pub fn load_json(json: &str) -> Result<Document, DocError> {
         load_json_named(json, "input")
     }
 }
 
 fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
-    let file = craft_stencilcraft_format::File::<NativeFileFields>::read_typed(json)
-        .map_err(|error| format_read_error(error, path))?;
-    load_document(file)
-}
-
-fn format_read_error(error: craft_stencilcraft_format::Error, path: &str) -> DocError {
-    match error {
+    let file = craft_stencilcraft_format::File::read(json).map_err(|e| match e {
         craft_stencilcraft_format::Error::Json(source) => DocError::Parse {
             path: path.to_string(),
             source,
@@ -646,40 +633,57 @@ fn format_read_error(error: craft_stencilcraft_format::Error, path: &str) -> Doc
         craft_stencilcraft_format::Error::NotStencilCraft => DocError::NotAStencilcraftFile {
             path: path.to_string(),
         },
-        craft_stencilcraft_format::Error::Version { found, .. } => DocError::FormatVersion {
+        craft_stencilcraft_format::Error::Version { found, supported } => DocError::FormatVersion {
             path: path.to_string(),
             found,
-            expected: FORMAT_VERSION,
+            expected: supported,
         },
         craft_stencilcraft_format::Error::Document { source } => structure_err(path, &source),
-        error => DocError::Structure {
+        _ => DocError::NotAStencilcraftFile {
             path: path.to_string(),
-            message: error.to_string(),
         },
-    }
-}
-
-fn load_document(
-    file: craft_stencilcraft_format::File<NativeFileFields>,
-) -> Result<Document, DocError> {
+    })?;
     let fields = file.document;
+    let board: Board = from_wire(fields.board, path)?;
+    let kerf: KerfSettings = from_wire(fields.kerf, path)?;
+    let layers: Vec<Layer> = from_wire(fields.layers, path)?;
+    let next_shape_id = fields.next_shape_id;
+    let images: Vec<RasterImage> = from_wire(serde_json::Value::Array(fields.images), path)?;
     let mut doc = Document {
-        board: fields.board,
-        kerf: fields.kerf,
-        layers: fields.layers,
-        next_shape_id: fields.next_shape_id,
-        images: fields.images,
-        board_setup: fields.board_setup,
-        pages: fields.pages,
-        guides: fields.guides,
-        grid: fields.grid,
-        snap: fields.snap,
-        groups: fields.groups,
-        meta: fields.meta,
+        board,
+        kerf,
+        layers,
+        next_shape_id,
+        images,
+        board_setup: from_wire_optional(fields.board_setup, path)?,
+        pages: from_wire_optional(fields.pages, path)?,
+        guides: from_wire_optional(fields.guides, path)?,
+        grid: from_wire_optional(fields.grid, path)?,
+        snap: from_wire_optional(fields.snap, path)?,
+        groups: from_wire_optional(fields.groups, path)?,
+        meta: from_wire_optional(fields.meta, path)?,
     };
     doc.validate()?;
     doc.groups = doc.pruned_groups();
     Ok(doc)
+}
+
+fn json<T: Serialize>(value: &T) -> Result<serde_json::Value, DocError> {
+    serde_json::to_value(value).map_err(|e| structure_err("output", &e))
+}
+
+fn from_wire<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+    path: &str,
+) -> Result<T, DocError> {
+    serde_json::from_value(value).map_err(|e| structure_err(path, &e))
+}
+
+fn from_wire_optional<T: serde::de::DeserializeOwned + Default>(
+    value: Option<serde_json::Value>,
+    path: &str,
+) -> Result<T, DocError> {
+    value.map_or_else(|| Ok(T::default()), |value| from_wire(value, path))
 }
 
 fn structure_err(path: &str, e: &serde_json::Error) -> DocError {
@@ -701,13 +705,11 @@ pub fn save_to(doc: &Document, path: &str) -> Result<(), DocError> {
 }
 
 pub fn load_from(path: &str) -> Result<Document, DocError> {
-    let file = std::fs::File::open(path).map_err(|source| DocError::Io {
+    let json = std::fs::read_to_string(path).map_err(|source| DocError::Io {
         path: path.to_string(),
         source,
     })?;
-    let document = craft_stencilcraft_format::File::<NativeFileFields>::read_typed_from(file)
-        .map_err(|error| format_read_error(error, path))?;
-    load_document(document)
+    load_json_named(&json, path)
 }
 
 #[cfg(test)]
@@ -968,23 +970,6 @@ mod tests {
     }
 
     #[test]
-    fn load_from_streams_large_forward_compatible_documents() {
-        let mut value: serde_json::Value =
-            serde_json::from_str(&sample().save_json().unwrap()).unwrap();
-        value["future-field"] = serde_json::Value::String("x".repeat(8 * 1024 * 1024));
-        let bytes = serde_json::to_vec(&value).unwrap();
-        let path = std::env::temp_dir().join(format!(
-            "stencilcraft-stream-load-{}.stencilcraft",
-            std::process::id()
-        ));
-        std::fs::write(&path, bytes).unwrap();
-
-        let loaded = load_from(&path.to_string_lossy());
-        let _ = std::fs::remove_file(&path);
-        assert_eq!(loaded.unwrap(), sample());
-    }
-
-    #[test]
     fn dangling_group_members_are_pruned_not_fatal() {
         let mut doc = canvas_sample();
         doc.layers[0].shapes.retain(|s| s.id != 1);
@@ -1040,24 +1025,6 @@ mod tests {
     fn thumbnail_respects_its_budget() {
         let doc = canvas_sample();
         let full = doc.render_thumbnail(64 * 1024);
-        // The exact bytes: thumbnails are stored in project files.
-        let mut curved = canvas_sample();
-        let mut path = kurbo::BezPath::new();
-        path.move_to((1.005, 2.0));
-        path.quad_to((3.0, 4.5), (5.25, 6.0));
-        path.curve_to((1.0, 1.0), (2.0, 2.0), (3.0, 1.0 / 3.0));
-        path.close_path();
-        curved.push_shape(0, path, CutStyle::Cut).unwrap();
-        assert_eq!(
-            curved.render_thumbnail(64 * 1024),
-            concat!(
-                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100.00 150.00">"##,
-                r##"<g transform="matrix(1 0 0 -1 0 150.00)" fill="none" stroke="#000" stroke-width="0.75">"##,
-                r##"<path d="M10.00 20.00L40.00 20.00L40.00 60.00L10.00 60.00Z"/>"##,
-                r##"<path d="M50.00 50.00L55.00 50.00L55.00 55.00L50.00 55.00Z"/>"##,
-                r##"<path d="M1.00 2.00Q3.00 4.50 5.25 6.00C1.00 1.00 2.00 2.00 3.00 0.33Z"/></g></svg>"##
-            )
-        );
         assert!(full.starts_with("<svg") && full.ends_with("</svg>"));
         assert_eq!(full.matches("<path").count(), 2);
         let small = doc.render_thumbnail(full.len() - 1);

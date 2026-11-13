@@ -13,7 +13,7 @@ path = "src/main.rs"
 [dependencies]
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+craft-raster-codecs = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-dxf = { workspace = true }

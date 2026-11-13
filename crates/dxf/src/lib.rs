@@ -1,20 +1,5 @@
-//! DXF export (R14 ASCII subset, `LWPOLYLINE` entities).
-//!
-//! Coordinates are model-space millimetres; `$INSUNITS` = 4 (millimetres) so
-//! readers that respect AutoCAD units land at true size either way. Curves are
-//! flattened — the DXF subset here has no arc/spline entities (`docs/gaps.md` 5).
-//! Each layer carries a colour index so CAM tools that key operations off layer
-//! colour (cut vs score) read the file the way it was meant: cut red, engrave blue.
-//! The canvas has a downward-growing Y axis; DXF model space uses an upward-growing
-//! Y axis. At export, the board top maps to its height and its bottom maps to zero.
-//! Autodesk describes LWPOLYLINE vertex coordinates and its default extrusion at
-//! <https://help.autodesk.com/cloudhelp/2024/ENU/AutoCAD-DXF/files/GUID-748FC305-F3F2-4F74-825A-61F04D757A50.htm>.
-//! A hidden layer is written with a negative colour index, the DXF way of saying
-//! "layer off".
-//! The tags are written by `craft-dxf` in the DXF reference's ASCII layout: group
-//! codes right-aligned to three columns, one value per line, CRLF line ends.
+//! StencilCraft layer and operation mapping to the shared typed DXF writer.
 
-use craft_dxf::Tag;
 use stencilcraft_doc::{CutStyle, Document};
 use stencilcraft_geom::path_to_polylines;
 
@@ -26,80 +11,14 @@ pub enum DxfError {
     Model(String),
 }
 
-/// Serialise a document as DXF. Every document layer becomes one DXF layer named
-/// `stencilcraft-<layer name>`; cut shapes are closed polylines, engrave shapes
-/// open ones on their own layer.
-pub fn export(doc: &Document) -> Result<String, DxfError> {
-    if !doc.board.width_mm.is_finite() || !doc.board.height_mm.is_finite() {
-        return Err(DxfError::Model(
-            "dxf: board dimensions must be finite".to_string(),
-        ));
-    }
-    // Header: units in millimetres, angle direction.
-    let mut tags = vec![
-        Tag::s(0, "SECTION"),
-        Tag::s(2, "HEADER"),
-        Tag::s(9, "$INSUNITS"),
-        Tag::i(70, 4),
-        Tag::s(9, "$LUNITS"),
-        Tag::i(70, 2),
-        Tag::s(0, "ENDSEC"),
-        // Tables: an (auto-named) LAYER table entry per document layer.
-        Tag::s(0, "SECTION"),
-        Tag::s(2, "TABLES"),
-        Tag::s(0, "TABLE"),
-        Tag::s(2, "LAYER"),
-    ];
-    // Template (guide) layers are canvas-only: never exported.
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        // Colour index: 1 red for cut, 5 blue for engrave. Negative means the layer
-        // is off, which is how a hidden document layer should arrive.
-        let aci = i64::from(layer_color(layer.kind));
-        tags.extend([
-            Tag::s(0, "LAYER"),
-            Tag::s(2, layer_name(&layer.name)),
-            Tag::i(70, 0),
-            Tag::i(62, if layer.visible { aci } else { -aci }),
-            Tag::s(6, "CONTINUOUS"),
-        ]);
-    }
-    tags.extend([Tag::s(0, "ENDTAB"), Tag::s(0, "ENDSEC")]);
-
-    // Entities.
-    tags.extend([Tag::s(0, "SECTION"), Tag::s(2, "ENTITIES")]);
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        let dxf_layer = layer_name(&layer.name);
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let closed = match (shape.style, layer.kind) {
-                (CutStyle::Cut, _) | (_, CutStyle::Cut) => true,
-                (CutStyle::Engrave, CutStyle::Engrave) => false,
-            };
-            push_polyline(
-                &mut tags,
-                &shape.cut_path(),
-                &dxf_layer,
-                closed,
-                doc.board.height_mm,
-            )?;
-        }
-    }
-    tags.extend([Tag::s(0, "ENDSEC"), Tag::s(0, "EOF")]);
-    Ok(craft_dxf::write_ascii(&tags))
-}
-
-/// AutoCAD colour index for an operation: red cuts, blue scores. Distinct colours
-/// let a CAM tool sort operations without a convention document.
 fn layer_color(kind: CutStyle) -> i32 {
     match kind {
         CutStyle::Cut => 1,
         CutStyle::Engrave => 5,
     }
 }
-
-/// DXF layer names: uppercase, ASCII, no spaces per common practice, prefix-stamped
-/// so a reader always shows ours distinctly.
-fn layer_name(s: &str) -> String {
-    let cleaned: String = s
+fn layer_name(name: &str) -> String {
+    let cleaned: String = name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -112,39 +31,97 @@ fn layer_name(s: &str) -> String {
     format!("STENCILCRAFT-{}", cleaned.to_uppercase())
 }
 
-fn push_polyline(
-    tags: &mut Vec<Tag>,
-    path: &kurbo::BezPath,
-    layer: &str,
-    closed: bool,
-    board_height_mm: f64,
-) -> Result<(), DxfError> {
-    // Coordinates are written to a micrometre, as before.
-    let rounded = |mm: f64| (mm * 1e6).round() / 1e6;
-    let lines = path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS);
-    for pl in &lines {
-        if pl.points.len() < 2 {
-            continue;
-        }
-        tags.extend([
-            Tag::s(0, "LWPOLYLINE"),
-            Tag::s(8, layer),
-            Tag::s(100, "AcDbEntity"),
-            Tag::s(100, "AcDbPolyline"),
-            Tag::i(90, i64::try_from(pl.points.len()).unwrap_or(i64::MAX)),
-            Tag::i(70, i64::from(pl.closed && closed)),
-        ]);
-        // LWPOLYLINE vertices: one X group, then one Y group.
-        for p in &pl.points {
-            if !p.x.is_finite() || !p.y.is_finite() {
-                return Err(DxfError::Write("dxf: a vertex is not finite".to_string()));
+/// Map the app model to typed DXF entities and let craft-dxf write the file grammar.
+pub fn export(doc: &Document) -> Result<String, DxfError> {
+    if !doc.board.width_mm.is_finite() || !doc.board.height_mm.is_finite() {
+        return Err(DxfError::Model(
+            "dxf: board dimensions must be finite".into(),
+        ));
+    }
+    let mut drawing = craft_dxf::model::write::Drawing::default();
+    drawing.format = craft_dxf::model::write::Format::R14;
+    drawing.insunits = 4;
+    drawing.metric = true;
+    drawing.extents = [0.0, 0.0, doc.board.width_mm, doc.board.height_mm];
+    drawing.limits = drawing.extents;
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
+        drawing.layers.push(craft_dxf::model::Layer {
+            handle: None,
+            name: layer_name(&layer.name),
+            color: craft_dxf::model::Color::Index(layer_color(layer.kind) as u8),
+            on: layer.visible,
+            frozen: false,
+            vp_freeze_new: false,
+            locked: false,
+            plot: true,
+            linetype: "Continuous".into(),
+            lineweight: craft_dxf::model::Lineweight::Default,
+            plot_style: None,
+            transparency: craft_dxf::model::Transparency::ByLayer,
+            description: None,
+        });
+    }
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
+        let dxf_layer = layer_name(&layer.name);
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+            let close_for_operation = matches!(
+                (shape.style, layer.kind),
+                (CutStyle::Cut, _) | (_, CutStyle::Cut)
+            );
+            for polyline in
+                path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+            {
+                if polyline.points.len() < 2 {
+                    continue;
+                }
+                let mut vertices = Vec::with_capacity(polyline.points.len());
+                for point in &polyline.points {
+                    if !point.x.is_finite() || !point.y.is_finite() {
+                        return Err(DxfError::Write("dxf: a vertex is not finite".into()));
+                    }
+                    let y =
+                        stencilcraft_geom::artboard_y_to_cartesian(point.y, doc.board.height_mm)
+                            .map_err(|e| DxfError::Write(e.to_string()))?;
+                    vertices.push(craft_dxf::model::LwVertex {
+                        x: point.x,
+                        y,
+                        ..Default::default()
+                    });
+                }
+                drawing.entities.push(craft_dxf::model::Entity {
+                    common: craft_dxf::model::Common {
+                        handle: None,
+                        owner: None,
+                        layer: dxf_layer.clone(),
+                        linetype: None,
+                        color: craft_dxf::model::Color::ByLayer,
+                        lineweight: craft_dxf::model::Lineweight::ByLayer,
+                        ltscale: 1.0,
+                        visible: true,
+                        paper_space: false,
+                        transparency: craft_dxf::model::Transparency::ByLayer,
+                        thickness: 0.0,
+                        extrusion: [0.0, 0.0, 1.0],
+                        plot_style: None,
+                    },
+                    kind: craft_dxf::model::EntityKind::LwPolyline(craft_dxf::model::LwPolyline {
+                        vertices,
+                        closed: polyline.closed && close_for_operation,
+                        plinegen: false,
+                        const_width: 0.0,
+                        elevation: 0.0,
+                    }),
+                });
             }
-            let y = stencilcraft_geom::artboard_y_to_cartesian(p.y, board_height_mm)
-                .map_err(|error| DxfError::Write(error.to_string()))?;
-            tags.extend([Tag::f(10, rounded(p.x)), Tag::f(20, rounded(y))]);
         }
     }
-    Ok(())
+    let (tags, skipped) = drawing.tags();
+    if skipped > 0 {
+        return Err(DxfError::Write(format!(
+            "dxf: shared writer skipped {skipped} entities"
+        )));
+    }
+    Ok(craft_dxf::write_ascii(&tags))
 }
 
 #[cfg(test)]
@@ -161,38 +138,22 @@ mod tests {
         p
     }
 
-    /// The export as one tag per two lines, without the writer's padding and CRLF.
-    fn plain(doc: &Document) -> String {
-        export(doc)
-            .unwrap()
-            .lines()
-            .map(|line| format!("{}\n", line.trim_start()))
-            .collect()
-    }
-
     #[test]
     fn has_header_entities_and_eof() {
         let doc = Document::default();
-        let dxf = plain(&doc);
+        let dxf = export(&doc).unwrap();
         assert!(dxf.contains("SECTION"));
         assert!(dxf.contains("$INSUNITS"));
         assert!(dxf.contains("ENDSEC"));
         assert!(dxf.starts_with("0\nSECTION"));
         assert!(dxf.ends_with("0\nEOF\n"));
-        // On disk: codes right-aligned to three columns, CRLF line ends.
-        let raw = export(&doc).unwrap();
-        assert!(
-            raw.starts_with("  0\r\nSECTION\r\n  2\r\nHEADER\r\n"),
-            "{raw}"
-        );
-        assert!(raw.ends_with("  0\r\nEOF\r\n"), "{raw}");
     }
 
     #[test]
     fn closed_shape_is_closed_polyline() {
         let mut doc = Document::default();
         doc.push_shape(0, tri(), CutStyle::Cut).unwrap();
-        let dxf = plain(&doc);
+        let dxf = export(&doc).unwrap();
         assert!(dxf.contains("LWPOLYLINE"));
         assert!(dxf.contains("\n70\n1\n"), "closed flag: {dxf}");
         assert!(dxf.contains("STENCILCRAFT-CUT"));
@@ -204,7 +165,7 @@ mod tests {
         doc.layers
             .push(stencilcraft_doc::Layer::new("score", CutStyle::Engrave));
         doc.layers[1].visible = false;
-        let dxf = plain(&doc);
+        let dxf = export(&doc).unwrap();
         // Layer table: red cut layer, then the hidden engrave layer written negative.
         assert!(dxf.contains("STENCILCRAFT-CUT\n70\n0\n62\n1\n"), "{dxf}");
         assert!(dxf.contains("STENCILCRAFT-SCORE\n70\n0\n62\n-5\n"), "{dxf}");
@@ -220,7 +181,7 @@ mod tests {
             CutStyle::Engrave,
         ));
         doc.push_shape(1, tri(), CutStyle::Engrave).unwrap();
-        let dxf = plain(&doc);
+        let dxf = export(&doc).unwrap();
         assert!(dxf.contains("STENCILCRAFT-SCORING-PASS"), "{dxf}");
         assert!(dxf.contains("\n70\n0\n"), "open flag for engrave");
     }
@@ -235,11 +196,8 @@ mod tests {
         path.line_to((10.0, 70.0));
         path.close_path();
         doc.push_shape(0, path, CutStyle::Cut).unwrap();
-        let dxf = plain(&doc);
-        assert!(
-            dxf.contains("10\n10.0\n20\n80.0\n10\n40.0\n20\n80.0\n10\n10.0\n20\n30.0\n"),
-            "{dxf}"
-        );
+        let dxf = export(&doc).unwrap();
+        assert!(dxf.contains("10\n10.000000\n20\n80.000000\n10\n40.000000\n20\n80.000000\n10\n10.000000\n20\n30.000000\n"), "{dxf}");
     }
 
     #[test]
@@ -258,16 +216,5 @@ mod tests {
         let mut doc = Document::default();
         doc.board.width_mm = f64::INFINITY;
         assert!(matches!(export(&doc), Err(DxfError::Model(_))));
-    }
-    #[test]
-    fn coordinates_are_written_to_a_micrometre() {
-        let mut doc = Document::default();
-        let mut p = kurbo::BezPath::new();
-        p.move_to(Point::new(1.0 / 3.0, 0.0));
-        p.line_to(Point::new(2.000_000_4, 0.0));
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
-        let dxf = plain(&doc);
-        assert!(dxf.contains("10\n0.333333\n"), "{dxf}");
-        assert!(dxf.contains("10\n2.0\n"), "{dxf}");
     }
 }

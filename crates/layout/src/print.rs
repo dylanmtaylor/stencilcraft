@@ -302,8 +302,11 @@ pub fn sheet_to_png(sheet: &PrintSheet, dpi: f64) -> Result<Vec<u8>> {
         p.close_path();
         draw(&mut pixmap, &mut paint, &p, "#000000");
     }
-    pixmap
-        .encode_png()
+    let pixels = craft_raster_codecs::common::Pixels::from_raw(pw, ph, pixmap.data().to_vec())
+        .ok_or_else(|| {
+            crate::LayoutError::Invalid("could not build the PNG pixel buffer".into())
+        })?;
+    craft_raster_codecs::common::encode_png(&pixels)
         .map_err(|e| crate::LayoutError::Invalid(format!("png: {e}")))
 }
 

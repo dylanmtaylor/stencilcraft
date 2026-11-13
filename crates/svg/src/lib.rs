@@ -6,6 +6,8 @@ use kurbo::{BezPath, Point};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
+use craft_svg::write::{Attribute as SvgAttribute, Element as SvgElement, Scene as SvgScene};
+
 #[derive(Debug, thiserror::Error)]
 pub enum SvgError {
     #[error("svg export: failure to build markup: {0}")]
@@ -48,111 +50,84 @@ fn view_bounds(doc: &Document) -> kurbo::Rect {
             |bounds, layer| bounds.union(layer),
         )
 }
-fn root(writer: &mut craft_svg::write::SvgWriter, width_mm: f64, height_mm: f64, view_box: String) {
-    writer
-        .root()
-        .attr("version", "1.1")
-        .attr("width", format!("{width_mm:.3}mm"))
-        .attr("height", format!("{height_mm:.3}mm"))
-        .attr("viewBox", view_box)
-        .open();
-}
-fn title(writer: &mut craft_svg::write::SvgWriter, text: &str, depth: usize) {
-    writer.line(depth);
-    writer.tag("title").open();
-    writer.text(text);
-    writer.close();
-}
-fn write_document_contents(writer: &mut craft_svg::write::SvgWriter, doc: &Document, depth: usize) {
-    title(
-        writer,
-        &format!(
+fn document_elements(
+    doc: &Document,
+    output_layers_only: bool,
+    include_title: bool,
+) -> Vec<SvgElement> {
+    let mut elements = Vec::new();
+    if include_title {
+        elements.push(SvgElement::Title(format!(
             "stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm",
             stencilcraft_doc::FORMAT_NAME,
             doc.layers.len(),
             doc.shape_count(),
             doc.kerf.width_mm
-        ),
-        depth,
-    );
+        )));
+    }
     let parents = doc.group_parent_map();
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        writer.line(depth);
-        writer
-            .tag("g")
-            .attr("class", class_for(layer.kind))
-            .attr(
-                "data-kind",
-                match layer.kind {
-                    CutStyle::Cut => "cut",
-                    CutStyle::Engrave => "engrave",
-                },
-            )
-            .attr(
-                "style",
-                if layer.visible {
-                    "display:visible"
-                } else {
-                    "display:hidden"
-                },
-            )
-            .open();
-        let mut open = Vec::<u64>::new();
+    for layer in doc.layers.iter().filter(|layer| {
+        if output_layers_only {
+            layer.is_output()
+        } else {
+            !layer.template
+        }
+    }) {
+        let mut children = Vec::new();
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let chain = stencilcraft_doc::canvas::group_chain_in(
                 &parents,
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
-            let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
-            for _ in common..open.len() {
-                writer.line(depth + 1);
-                writer.close();
+            let mut element = SvgElement::Path {
+                attributes: vec![SvgAttribute::text("class", class_for(shape.style))],
+                path: shape.cut_path().into_owned(),
+            };
+            for id in chain.iter().rev() {
+                element = SvgElement::Group {
+                    attributes: vec![
+                        SvgAttribute::text("class", "group"),
+                        SvgAttribute::text("data-group", id.to_string()),
+                    ],
+                    children: vec![element],
+                };
             }
-            open.truncate(common);
-            for id in chain.iter().skip(common) {
-                writer.line(depth + 1);
-                writer
-                    .tag("g")
-                    .attr("class", "group")
-                    .attr("data-group", id)
-                    .open();
-                open.push(*id);
-            }
-            writer.line(depth + 1 + open.len());
-            writer
-                .tag("path")
-                .attr("class", class_for(shape.style))
-                .attr("d", craft_svg::write::path_data(&shape.cut_path()))
-                .empty();
+            children.push(element);
         }
-        for _ in &open {
-            writer.line(depth + 1);
-            writer.close();
-        }
-        writer.line(depth);
-        writer.close();
+        elements.push(SvgElement::Group {
+            attributes: vec![
+                SvgAttribute::text("class", class_for(layer.kind)),
+                SvgAttribute::text(
+                    "data-kind",
+                    match layer.kind {
+                        CutStyle::Cut => "cut",
+                        CutStyle::Engrave => "engrave",
+                    },
+                ),
+                SvgAttribute::text(
+                    "style",
+                    if layer.visible {
+                        "display:visible"
+                    } else {
+                        "display:hidden"
+                    },
+                ),
+            ],
+            children,
+        });
     }
+    elements
 }
 
 pub fn export(doc: &Document) -> Result<String, SvgError> {
     let bounds = view_bounds(doc);
-    let mut writer = craft_svg::write::SvgWriter::new();
-    root(
-        &mut writer,
-        bounds.width(),
-        bounds.height(),
-        format!(
-            "{:.3} {:.3} {:.3} {:.3}",
-            bounds.x0,
-            bounds.y0,
-            bounds.width(),
-            bounds.height()
-        ),
-    );
-    write_document_contents(&mut writer, doc, 1);
-    writer.line(0);
-    writer.close();
-    Ok(writer.finish())
+    Ok(SvgScene {
+        width_mm: bounds.width(),
+        height_mm: bounds.height(),
+        view_box: [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
+        elements: document_elements(doc, false, true),
+    }
+    .write())
 }
 
 pub fn export_tile_preview(
@@ -200,106 +175,81 @@ pub fn export_tile_preview(
             "preview: a {page_w:.0}×{page_h:.0} mm page is too big; use a smaller scale or fewer sheets"
         )));
     }
-    let mut writer = craft_svg::write::SvgWriter::new();
-    root(
-        &mut writer,
-        page_w,
-        page_h,
-        format!("0 0 {page_w:.3} {page_h:.3}"),
-    );
-    title(
-        &mut writer,
-        &format!(
+    let mut elements = vec![
+        SvgElement::Title(format!(
             "StencilCraft tiling preview: {} sheets, {} × {} cells",
             pieces.len(),
             columns,
             rows
+        )),
+        SvgElement::Style(
+            concat!(
+                ".preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n",
+                ".stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n",
+                ".stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n",
+                ".preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }"
+            )
+            .into(),
         ),
-        1,
-    );
-    writer.line(1);
-    writer.tag("style").open();
-    writer.text(
-        ".preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }
-.stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }
-.stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }
-.preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }",
-    );
-    writer.close();
+    ];
     for (index, piece) in pieces.iter().enumerate() {
         let col = index % columns;
         let row = index / columns;
         let x = gap + col as f64 * (cell_w + gap);
         let y = gap + (rows - 1 - row) as f64 * (cell_h + gap);
         let cell_height = piece.board.height_mm * options.scale;
-        writer.line(1);
-        writer
-            .tag("g")
-            .attr("class", "sheet")
-            .attr("data-sheet", index)
-            .attr(
-                "data-size",
-                format!("{:.1}x{:.1}", piece.board.width_mm, piece.board.height_mm),
-            )
-            .open();
-        writer.line(2);
-        writer
-            .tag("text")
-            .attr("class", "preview-label")
-            .attr("x", format!("{x:.3}"))
-            .attr("y", format!("{:.3}", y - 1.6))
-            .open();
-        writer.text(&format!(
-            "sheet {} of {} · {:.0}×{:.0} mm",
-            index + 1,
-            pieces.len(),
-            piece.board.width_mm,
-            piece.board.height_mm
-        ));
-        writer.close();
-        writer.line(2);
-        writer
-            .tag("rect")
-            .attr("class", "preview-frame")
-            .attr("x", format!("{x:.3}"))
-            .attr("y", format!("{y:.3}"))
-            .attr(
-                "width",
-                format!("{:.3}", piece.board.width_mm * options.scale),
-            )
-            .attr("height", format!("{cell_height:.3}"))
-            .empty();
-        writer.line(2);
-        writer
-            .tag("g")
-            .attr(
-                "transform",
-                format!(
-                    "translate({x:.3} {:.3}) scale({:.4} {:.4})",
-                    y + cell_height,
-                    options.scale,
-                    -options.scale
+        let children = vec![
+            SvgElement::Text {
+                attributes: vec![SvgAttribute::text("class", "preview-label")],
+                x,
+                y: y - 1.6,
+                text: format!(
+                    "sheet {} of {} · {:.0}×{:.0} mm",
+                    index + 1,
+                    pieces.len(),
+                    piece.board.width_mm,
+                    piece.board.height_mm
                 ),
-            )
-            .open();
-        for layer in piece.layers.iter().filter(|layer| layer.is_output()) {
-            for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                writer.line(3);
-                writer
-                    .tag("path")
-                    .attr("class", class_for(shape.style))
-                    .attr("d", craft_svg::write::path_data(&shape.cut_path()))
-                    .empty();
-            }
-        }
-        writer.line(2);
-        writer.close();
-        writer.line(1);
-        writer.close();
+            },
+            SvgElement::Rect {
+                attributes: vec![SvgAttribute::text("class", "preview-frame")],
+                x,
+                y,
+                width: piece.board.width_mm * options.scale,
+                height: cell_height,
+            },
+            SvgElement::Group {
+                attributes: vec![SvgAttribute {
+                    name: "transform".into(),
+                    value: craft_svg::write::Value::TranslateScale {
+                        x,
+                        y: y + cell_height,
+                        scale_x: options.scale,
+                        scale_y: -options.scale,
+                    },
+                }],
+                children: document_elements(piece, true, false),
+            },
+        ];
+        elements.push(SvgElement::Group {
+            attributes: vec![
+                SvgAttribute::text("class", "sheet"),
+                SvgAttribute::number("data-sheet", index as f64),
+                SvgAttribute::text(
+                    "data-size",
+                    format!("{:.1}x{:.1}", piece.board.width_mm, piece.board.height_mm),
+                ),
+            ],
+            children,
+        });
     }
-    writer.line(0);
-    writer.close();
-    Ok(writer.finish())
+    Ok(SvgScene {
+        width_mm: page_w,
+        height_mm: page_h,
+        view_box: [0.0, 0.0, page_w, page_h],
+        elements,
+    }
+    .write())
 }
 
 pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
@@ -313,32 +263,13 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
             "print-cut: page dimensions are not finite".into(),
         ));
     }
-    let mut writer = craft_svg::write::SvgWriter::new();
-    root(
-        &mut writer,
-        page_w,
-        page_h,
-        format!("0 0 {page_w:.3} {page_h:.3}"),
-    );
-    title(&mut writer, "StencilCraft print-and-cut alignment sheet", 1);
-    writer.line(1);
-    writer
-        .tag("g")
-        .attr("id", "registration-marks")
-        .attr("fill", "#000000")
-        .attr(
-            "aria-label",
-            "Registration marks: top-left square, top-right and bottom-left corners",
-        )
-        .open();
-    writer.line(2);
-    writer
-        .tag("rect")
-        .attr("x", "0")
-        .attr("y", "0")
-        .attr("width", format!("{MARK:.3}"))
-        .attr("height", format!("{MARK:.3}"))
-        .empty();
+    let mut marks = vec![SvgElement::Rect {
+        attributes: Vec::new(),
+        x: 0.0,
+        y: 0.0,
+        width: MARK,
+        height: MARK,
+    }];
     let mut top = BezPath::new();
     top.move_to((page_w, 0.0));
     top.line_to((page_w - MARK, 0.0));
@@ -347,11 +278,10 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     top.line_to((page_w - 1.5, 1.5));
     top.line_to((page_w - MARK, 1.5));
     top.close_path();
-    writer.line(2);
-    writer
-        .tag("path")
-        .attr("d", craft_svg::write::path_data(&top))
-        .empty();
+    marks.push(SvgElement::Path {
+        attributes: Vec::new(),
+        path: top,
+    });
     let mut bottom = BezPath::new();
     bottom.move_to((0.0, page_h));
     bottom.line_to((MARK, page_h));
@@ -360,32 +290,42 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     bottom.line_to((1.5, page_h - 1.5));
     bottom.line_to((0.0, page_h - MARK));
     bottom.close_path();
-    writer.line(2);
-    writer
-        .tag("path")
-        .attr("d", craft_svg::write::path_data(&bottom))
-        .empty();
-    writer.line(1);
-    writer.close();
-    writer.line(1);
-    writer
-        .tag("svg")
-        .attr("x", format!("{MARGIN:.3}"))
-        .attr("y", format!("{MARGIN:.3}"))
-        .attr("width", format!("{:.3}mm", doc.board.width_mm))
-        .attr("height", format!("{:.3}mm", doc.board.height_mm))
-        .attr(
-            "viewBox",
-            format!("0 0 {:.3} {:.3}", doc.board.width_mm, doc.board.height_mm),
-        )
-        .attr("overflow", "hidden")
-        .open();
-    write_document_contents(&mut writer, doc, 2);
-    writer.line(1);
-    writer.close();
-    writer.line(0);
-    writer.close();
-    Ok(writer.finish())
+    marks.push(SvgElement::Path {
+        attributes: Vec::new(),
+        path: bottom,
+    });
+    let elements = vec![
+        SvgElement::Title("StencilCraft print-and-cut alignment sheet".into()),
+        SvgElement::Group {
+            attributes: vec![
+                SvgAttribute::text("id", "registration-marks"),
+                SvgAttribute::text("fill", "#000000"),
+                SvgAttribute::text(
+                    "aria-label",
+                    "Registration marks: top-left square, top-right and bottom-left corners",
+                ),
+            ],
+            children: marks,
+        },
+        SvgElement::NestedSvg {
+            attributes: vec![
+                SvgAttribute::number("x", MARGIN),
+                SvgAttribute::number("y", MARGIN),
+                SvgAttribute::millimetres("width", doc.board.width_mm),
+                SvgAttribute::millimetres("height", doc.board.height_mm),
+                SvgAttribute::view_box([0.0, 0.0, doc.board.width_mm, doc.board.height_mm]),
+                SvgAttribute::text("overflow", "hidden"),
+            ],
+            children: document_elements(doc, false, true),
+        },
+    ];
+    Ok(SvgScene {
+        width_mm: page_w,
+        height_mm: page_h,
+        view_box: [0.0, 0.0, page_w, page_h],
+        elements,
+    }
+    .write())
 }
 
 #[derive(Debug, Clone, Copy)]

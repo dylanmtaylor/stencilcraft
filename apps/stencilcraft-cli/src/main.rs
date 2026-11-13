@@ -187,12 +187,12 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
 /// Opens a native document, or imports a Silhouette Studio `.studio` / `.studio3`
 /// document (warnings about skipped records go to stderr).
 pub(crate) fn load_document(path: &str) -> Result<stencilcraft_doc::Document, String> {
-    match stencilcraft_doc::format::read_path(&[&stencilcraft_studio::StudioHandler], path)? {
-        Some(read) => {
-            for warning in &read.warnings {
+    match stencilcraft_studio::import_path(path)? {
+        Some(imported) => {
+            for warning in &imported.warnings {
                 eprintln!("{path}: {warning}");
             }
-            Ok(read.value)
+            Ok(imported.doc)
         }
         None => stencilcraft_doc::load_from(path).map_err(|e| e.to_string()),
     }

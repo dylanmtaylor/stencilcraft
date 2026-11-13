@@ -1,10 +1,17 @@
 //! Adapter from the shared Silhouette Studio reader to the StencilCraft document model.
 
 use kurbo::{Affine, BezPath};
-use stencilcraft_doc::format::{Capabilities, Converted, Fidelity, FormatHandler};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 
 pub const MAX_FILE_BYTES: usize = craft_silhouette_studio::MAX_FILE_BYTES;
+
+pub fn is_studio_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::Studio)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum StudioError {
@@ -88,6 +95,40 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
     })
 }
 
+/// Detect and import a Silhouette document from disk. Format recognition stays in the shared
+/// file-format registry; this crate only adapts the recognized Studio document into Stencil data.
+pub fn import_path(path: &str) -> Result<Option<Imported>, String> {
+    if std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::StencilCraft)
+    {
+        return Ok(None);
+    }
+    let size = std::fs::metadata(path)
+        .map_err(|error| format!("{path}: {error}"))?
+        .len();
+    if size > MAX_FILE_BYTES as u64 {
+        let is_studio_extension = std::path::Path::new(path)
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .and_then(craft_file_formats::from_extension)
+            == Some(craft_file_formats::Format::Studio);
+        if is_studio_extension {
+            return Err(StudioError::TooLarge(path.to_owned()).to_string());
+        }
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path).map_err(|error| format!("{path}: {error}"))?;
+    if craft_file_formats::detect(path, &bytes) != Some(craft_file_formats::Format::Studio) {
+        return Ok(None);
+    }
+    import(&bytes, path)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 /// One cut layer per line colour, like Silhouette's Send by Line Color; shapes whose
 /// style was not found go on a plain `cut` layer.
 fn layer_for(doc: &mut Document, color: Option<[u8; 3]>) -> usize {
@@ -105,34 +146,4 @@ fn layer_for(doc: &mut Document, color: Option<[u8; 3]>) -> usize {
     layer.color = color;
     doc.layers.push(layer);
     doc.layers.len() - 1
-}
-
-/// The Silhouette Studio handler for the shared format seam (`.studio` and `.studio3`).
-pub struct StudioHandler;
-
-impl FormatHandler for StudioHandler {
-    fn name(&self) -> &'static str {
-        "Silhouette Studio (.studio, .studio3)"
-    }
-    fn formats(&self) -> &'static [craft_file_formats::Format] {
-        &[craft_file_formats::Format::Studio]
-    }
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            read: Fidelity::Lossy,
-            write: Fidelity::None,
-            notes: &[
-                "Reads every object's outline in page coordinates (open and closed paths, lines and Bézier curves, compound paths, text as outlines) and the page size.",
-                "Open paths, text, colours, layers and cut settings are not read yet.",
-                "Protected or encrypted store designs are rejected, never decrypted.",
-            ],
-        }
-    }
-    fn read(&self, bytes: &[u8], name: &str) -> Result<Converted<Document>, String> {
-        let got = import(bytes, name).map_err(|e| e.to_string())?;
-        Ok(Converted {
-            value: got.doc,
-            warnings: got.warnings,
-        })
-    }
 }

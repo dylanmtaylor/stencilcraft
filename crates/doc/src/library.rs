@@ -97,7 +97,11 @@ fn check_rel(rel: &str, allow_root: bool) -> Result<Vec<&str>, DocError> {
 }
 
 fn is_document(rel: &str) -> bool {
-    rel.ends_with(&format!(".{DOCUMENT_EXTENSION}"))
+    std::path::Path::new(rel)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::StencilCraft)
 }
 
 impl Library {

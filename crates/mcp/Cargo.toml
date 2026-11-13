@@ -24,7 +24,7 @@ stencilcraft-tiling = { workspace = true }
 stencilcraft-layout = { workspace = true }
 
 [dev-dependencies]
-image = { workspace = true }
+craft-raster-codecs = { workspace = true }
 stencilcraft-testkit = { workspace = true }
 
 [lints]

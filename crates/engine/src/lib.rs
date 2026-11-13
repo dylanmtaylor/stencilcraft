@@ -4182,11 +4182,11 @@ mod tests {
     #[test]
     fn image_place_trace_detach_and_undo() {
         // A 20×20 px image at 10 px/mm with a dark 10 px square in the middle.
-        let pixels = image::RgbaImage::from_fn(20, 20, |x, y| {
+        let pixels = craft_raster_codecs::common::Pixels::from_fn(20, 20, |x, y| {
             if (5..15).contains(&x) && (5..15).contains(&y) {
-                image::Rgba([0, 0, 0, 255])
+                craft_raster_codecs::common::Pixel([0, 0, 0, 255])
             } else {
-                image::Rgba([255, 255, 255, 255])
+                craft_raster_codecs::common::Pixel([255, 255, 255, 255])
             }
         });
         let mut placed = stencilcraft_raster::place(&pixels, "sq", 254.0).unwrap();

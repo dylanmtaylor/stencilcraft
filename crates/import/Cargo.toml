@@ -9,7 +9,7 @@ description = "StencilCraft file import: SVG, DXF, PDF, EPS/AI vectors and raste
 [dependencies]
 kurbo = { workspace = true }
 thiserror = { workspace = true }
-image = { workspace = true }
+craft-raster-codecs = { workspace = true }
 tiny-skia = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-dxf = { workspace = true }

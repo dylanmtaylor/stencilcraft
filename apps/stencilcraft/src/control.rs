@@ -207,9 +207,12 @@ fn no_frame_answer(request: Option<&serde_json::Value>, snapshot: &Mutex<Documen
         .map_err(|e| e.to_string())
         .and_then(|img| {
             let size = [img.width(), img.height()];
-            img.save(path)
-                .map(|()| size)
+            craft_raster_codecs::common::encode_for_path(path, &img)
                 .map_err(|e| format!("screenshot: {path}: {e}"))
+                .and_then(|bytes| {
+                    std::fs::write(path, bytes).map_err(|e| format!("screenshot: {path}: {e}"))
+                })
+                .map(|()| size)
         });
     match rendered {
         Ok(size) => serde_json::json!({"id": id, "ok": true, "result": {
@@ -268,7 +271,12 @@ mod tests {
         assert_eq!(value["ok"], true, "{response}");
         assert_eq!(value["id"], 3);
         assert_eq!(value["result"]["source"], "render");
-        let img = image::open(&path).expect("png written");
+        let bytes = std::fs::read(&path).expect("png written");
+        let img = craft_raster_codecs::common::decode_rgba(
+            &bytes,
+            craft_raster_codecs::common::DecodeLimits::default(),
+        )
+        .expect("png decodes");
         assert_eq!((img.width(), img.height()), (96, 192));
         let _ = std::fs::remove_dir_all(&dir);
     }

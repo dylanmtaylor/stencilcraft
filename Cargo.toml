@@ -18,7 +18,6 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 log = "0.4"
 base64 = "0.22"
 # Raster import/trace; every decoder here is pure Rust (MIT/Apache) and builds for wasm.
-image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "gif", "tiff", "webp"] }
 tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 # ui
 egui = "0.37"
@@ -29,6 +28,14 @@ craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805
 craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
+craft-raster-codecs = { git = "https://github.com/dylanmtaylor/craft-libs.git", rev = "dc705aa36" }
+craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "5407ea822" }
+craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
+craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its

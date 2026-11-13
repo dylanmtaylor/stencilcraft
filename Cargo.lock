@@ -949,6 +949,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
+
+[[package]]
 name = "core_maths"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -990,6 +996,11 @@ source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59ba
 dependencies = [
  "rayon",
 ]
+
+[[package]]
+name = "craft-codepage"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
 
 [[package]]
 name = "craft-color"
@@ -1037,6 +1048,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-dxf"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
+ "craft-codepage",
+ "encoding_rs",
+ "log",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-font-catalog"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1050,6 +1072,14 @@ dependencies = [
 name = "craft-fonts-build"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+
+[[package]]
+name = "craft-gcode"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "craft-host"
@@ -1141,6 +1171,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-raster-codecs"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs.git?rev=dc705aa36#dc705aa3647ef658b1367995796d20458d0b4882"
+dependencies = [
+ "image",
+ "rayon",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-settings"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1152,6 +1192,28 @@ dependencies = [
  "serde_json",
  "toml",
  "toml_edit",
+]
+
+[[package]]
+name = "craft-stencilcraft-format"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=5407ea822#5407ea8220a350b1b34f6fe41fa45cd4c71566a6"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-svg"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
+ "craft-xml",
+ "flate2",
+ "kurbo 0.13.1",
+ "roxmltree 0.21.2",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1227,6 +1289,15 @@ dependencies = [
  "serde",
  "serde_json",
  "wayland-client",
+]
+
+[[package]]
+name = "craft-xml"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=f92a91afa#f92a91afa400883309aa46d8a3c0d0baa31c4f35"
+dependencies = [
+ "quick-xml",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1703,6 +1774,20 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "encoding_rs"
+version = "0.8.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89253175e704ab869b04f9db224d38630e0211a53841a79181deae0889e169f5"
+dependencies = [
+ "cfg-if",
+ "core_detect",
+ "multiversion_no_op",
+ "rustversion",
+ "scopeguard",
+ "simdutf8",
+]
 
 [[package]]
 name = "endi"
@@ -3328,6 +3413,12 @@ dependencies = [
  "num-traits",
  "pxfm",
 ]
+
+[[package]]
+name = "multiversion_no_op"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "naga"
@@ -5172,12 +5263,12 @@ version = "0.1.0"
 dependencies = [
  "craft-atomic",
  "craft-draw",
+ "craft-raster-codecs",
  "craft-settings",
  "craft-theme",
  "craft-ui",
  "craft-window",
  "eframe",
- "image",
  "rfd",
  "serde",
  "serde_json",
@@ -5199,7 +5290,7 @@ dependencies = [
 name = "stencilcraft-cli"
 version = "0.1.0"
 dependencies = [
- "image",
+ "craft-raster-codecs",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5233,6 +5324,7 @@ name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
  "craft-atomic",
+ "craft-stencilcraft-format",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5244,6 +5336,7 @@ dependencies = [
 name = "stencilcraft-dxf"
 version = "0.1.0"
 dependencies = [
+ "craft-dxf",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
@@ -5254,7 +5347,7 @@ dependencies = [
 name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
- "image",
+ "craft-raster-codecs",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5278,6 +5371,7 @@ dependencies = [
 name = "stencilcraft-gcode"
 version = "0.1.0"
 dependencies = [
+ "craft-gcode",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
@@ -5308,7 +5402,7 @@ dependencies = [
 name = "stencilcraft-import"
 version = "0.1.0"
 dependencies = [
- "image",
+ "craft-raster-codecs",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5370,7 +5464,7 @@ dependencies = [
 name = "stencilcraft-mcp"
 version = "0.1.0"
 dependencies = [
- "image",
+ "craft-raster-codecs",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5404,7 +5498,7 @@ name = "stencilcraft-raster"
 version = "0.1.0"
 dependencies = [
  "base64",
- "image",
+ "craft-raster-codecs",
  "kurbo 0.13.1",
  "serde",
  "stencilcraft-doc",
@@ -5425,9 +5519,8 @@ dependencies = [
 name = "stencilcraft-svg"
 version = "0.1.0"
 dependencies = [
+ "craft-svg",
  "kurbo 0.13.1",
- "roxmltree 0.21.2",
- "stencilcraft-color",
  "stencilcraft-doc",
  "stencilcraft-generate",
  "stencilcraft-geom",

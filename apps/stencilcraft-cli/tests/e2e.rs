@@ -11,6 +11,8 @@ use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
+use craft_raster_codecs::common::{Pixel, Pixels, encode_for_path, encode_png};
+
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_stencilcraft-cli"))
 }
@@ -529,15 +531,9 @@ fn trace_image_cli_imports_png_to_native_document() {
     let dir = fresh_out_dir();
     let image_path = dir.join("silhouette.png");
     let native = dir.join("silhouette.stencilcraft");
-    let mut png = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
-        1,
-        1,
-        image::Rgba([0_u8, 0, 0, 255]),
-    ))
-    .write_to(&mut png, image::ImageFormat::Png)
-    .expect("PNG fixture encodes");
-    std::fs::write(&image_path, png.into_inner()).expect("image fixture written");
+    let png = encode_png(&Pixels::from_pixel(1, 1, Pixel([0_u8, 0, 0, 255])))
+        .expect("PNG fixture encodes");
+    std::fs::write(&image_path, png).expect("image fixture written");
 
     let mut cmd = bin();
     cmd.args([
@@ -742,16 +738,19 @@ fn import_rejects_a_non_studio_file_with_a_clear_message() {
 fn import_trace_and_raster_pdf_exports() {
     let dir = fresh_out_dir();
     let image_path = dir.join("ring.gif");
-    image::RgbaImage::from_fn(40, 40, |x, y| {
+    let pixels = Pixels::from_fn(40, 40, |x, y| {
         let d = (x as f64 - 20.0).hypot(y as f64 - 20.0);
         if (8.0..16.0).contains(&d) {
-            image::Rgba([0, 0, 0, 255])
+            Pixel([0, 0, 0, 255])
         } else {
-            image::Rgba([255, 255, 255, 255])
+            Pixel([255, 255, 255, 255])
         }
-    })
-    .save(&image_path)
-    .expect("GIF fixture written");
+    });
+    std::fs::write(
+        &image_path,
+        encode_for_path(&image_path, &pixels).expect("GIF fixture written"),
+    )
+    .expect("image fixture saved");
     let placed = dir.join("placed.stencilcraft");
     let traced = dir.join("traced.stencilcraft");
     let run = |args: &[&str]| {

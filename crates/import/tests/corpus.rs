@@ -4,7 +4,7 @@
 //! validate and re-save.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::io::Cursor;
+use craft_raster_codecs::common::{Pixel, Pixels, encode_for_path};
 
 use stencilcraft_doc::{CutStyle, Document};
 use stencilcraft_import::{ImportOptions, import_bytes};
@@ -219,10 +219,9 @@ fn eps_paths_are_read() {
 
 #[test]
 fn raster_imports_place_an_image() {
-    let pixels = image::RgbaImage::from_pixel(96, 48, image::Rgba([0, 0, 0, 255]));
-    let mut png = Cursor::new(Vec::new());
-    pixels.write_to(&mut png, image::ImageFormat::Png).unwrap();
-    let doc = import_bytes(png.get_ref(), "dir/photo.png", &ImportOptions::default()).unwrap();
+    let pixels = Pixels::from_pixel(96, 48, Pixel([0, 0, 0, 255]));
+    let png = encode_for_path("photo.png", &pixels).unwrap();
+    let doc = import_bytes(&png, "dir/photo.png", &ImportOptions::default()).unwrap();
     assert_eq!(doc.images.len(), 1);
     assert_eq!(doc.images[0].name, "photo.png");
     assert!((doc.board.width_mm - 25.4).abs() < 1e-9);
@@ -286,26 +285,12 @@ fn eps_corpus_never_panics() {
 
 #[test]
 fn raster_corpus_never_panics() {
-    let pixels = image::RgbaImage::from_fn(12, 9, |x, y| {
-        image::Rgba([(x * 20) as u8, (y * 25) as u8, 128, 255])
+    let pixels = Pixels::from_fn(12, 9, |x, y| {
+        Pixel([(x * 20) as u8, (y * 25) as u8, 128, 255])
     });
-    for (format, name) in [
-        (image::ImageFormat::Png, "m.png"),
-        (image::ImageFormat::Gif, "m.gif"),
-        (image::ImageFormat::Tiff, "m.tiff"),
-        (image::ImageFormat::WebP, "m.webp"),
-        (image::ImageFormat::Jpeg, "m.jpg"),
-        (image::ImageFormat::Bmp, "m.bmp"),
-    ] {
-        let mut out = Cursor::new(Vec::new());
-        let rgb = image::DynamicImage::ImageRgba8(pixels.clone()).to_rgb8();
-        match format {
-            image::ImageFormat::Jpeg | image::ImageFormat::Bmp => {
-                rgb.write_to(&mut out, format).unwrap()
-            }
-            _ => pixels.write_to(&mut out, format).unwrap(),
-        }
-        mutate(out.get_ref(), name, 300, 3);
+    for name in ["m.png", "m.gif", "m.tiff", "m.webp", "m.jpg", "m.bmp"] {
+        let out = encode_for_path(name, &pixels).unwrap();
+        mutate(&out, name, 300, 3);
     }
 }
 

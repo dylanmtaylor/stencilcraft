@@ -1,9 +1,7 @@
 //! Document → PNG/JPEG at a chosen resolution: white sheet, placed images, then cut
 //! lines red and engrave lines blue (the SVG exporter's colours), hairlines 0.25 mm.
 
-use std::io::Cursor;
-
-use image::RgbaImage;
+use craft_raster_codecs::common::{self, Pixels as RgbaImage};
 use stencilcraft_doc::{CutStyle, Document};
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
@@ -151,15 +149,11 @@ pub fn render_document(
     format: RenderFormat,
 ) -> Result<Vec<u8>, RasterError> {
     let pixels = render(doc, dpi)?;
-    let mut out = Cursor::new(Vec::new());
     let written = match format {
-        RenderFormat::Png => pixels.write_to(&mut out, image::ImageFormat::Png),
-        RenderFormat::Jpeg => image::DynamicImage::ImageRgba8(pixels)
-            .to_rgb8()
-            .write_to(&mut out, image::ImageFormat::Jpeg),
+        RenderFormat::Png => common::encode_png(&pixels),
+        RenderFormat::Jpeg => common::encode_jpeg(&pixels, 90),
     };
-    written.map_err(|e| bad(format!("render: could not encode: {e}")))?;
-    Ok(out.into_inner())
+    written.map_err(|e| bad(format!("render: could not encode: {e}")))
 }
 
 #[cfg(test)]

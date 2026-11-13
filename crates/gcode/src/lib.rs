@@ -1,21 +1,14 @@
-//! Grbl-style G-code export for cutting lasers and plotting routers.
-//!
-//! Modality: `G21` millimetres, `G90` absolute, feed in mm/min. Each subpath is
-//! one cut: rapid (`G0`) to the start with the beam off, power on, `G1` along the
-//! path, power off. Laser machines take `M4` (dynamic power) plus an `S` power
-//! value in the conventional 0–1000 range, or `M3` for controllers that only model
-//! a spindle (`LaserMode`). Coordinates are absolute millimetres from the sheet
-//! origin, exactly where the document says.
-//!
-//! Profile knobs (`GcodeSettings`) cover what a real job needs beyond geometry:
-//! power per operation, repeated passes with an optional power ramp, and the
-//! on/off command for the controller family. Material/machine presets are the
-//! caller's business; nothing here guesses at a specific machine's numbers.
-
-use std::fmt::Write as _;
+//! StencilCraft G-code job policy mapped onto the shared Craft-Libs G-code writer.
 
 use stencilcraft_doc::{CutStyle, Document};
-use stencilcraft_geom::{Point, path_to_polylines};
+use stencilcraft_geom::path_to_polylines;
+
+pub use craft_gcode::LaserMode;
+
+/// Most repeated passes a job may ask for.
+pub const MAX_PASSES: u32 = craft_gcode::MAX_PASSES;
+/// Highest power Grbl's `S` word conventionally accepts.
+pub const MAX_POWER: u32 = craft_gcode::MAX_POWER;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GcodeError {
@@ -25,59 +18,15 @@ pub enum GcodeError {
     Write(String),
 }
 
-/// Most repeated passes a job may ask for: past this the settings are a mistake, not
-/// a thick material.
-pub const MAX_PASSES: u32 = 10;
-
-/// Highest power Grbl's `S` word conventionally accepts.
-pub const MAX_POWER: u32 = 1000;
-
-/// How the controller is told to fire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LaserMode {
-    /// `M4`: power tracks motion (Grbl laser mode). Rapides go dark on their own,
-    /// but we still switch off explicitly so the output is safe on any sender.
-    #[default]
-    Dynamic,
-    /// `M3`: constant power while moving, for controllers that only understand a
-    /// spindle on/off.
-    Constant,
-}
-
-impl LaserMode {
-    /// The G-code word that turns the tool on.
-    pub fn on_command(self) -> &'static str {
-        match self {
-            Self::Dynamic => "M4",
-            Self::Constant => "M3",
-        }
-    }
-
-    /// Parse the CLI/protocol spelling.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "dynamic" | "m4" => Some(Self::Dynamic),
-            "constant" | "m3" => Some(Self::Constant),
-            _ => None,
-        }
-    }
-}
-
-/// Output settings; a document-independent knob set the CLI and UI can pass in.
+/// Output settings shared by the CLI and UI. Mapping layers and selecting operation power is
+/// StencilCraft policy; command syntax and encoding belong to `craft-gcode`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GcodeSettings {
-    /// Feed rate while cutting, millimetres per minute.
     pub feed_mm_per_min: f64,
-    /// Power for cut layers, 0–1000 (Grbl convention).
     pub power: u32,
-    /// Power for engrave layers; `None` uses `power`.
     pub engrave_power: Option<u32>,
-    /// How many times each contour is traced, 1–[`MAX_PASSES`].
     pub passes: u32,
-    /// Spread the power across passes so the last one runs at full power. Useful on
-    /// material that scorches at full power in one hit.
     pub ramp_power: bool,
-    /// Which on/off command the controller understands.
     pub mode: LaserMode,
 }
 
@@ -95,172 +44,83 @@ impl Default for GcodeSettings {
 }
 
 impl GcodeSettings {
-    /// Checks every knob is inside its range. Errors name the knob and the value.
+    fn shared(&self) -> craft_gcode::Settings {
+        craft_gcode::Settings {
+            feed_mm_per_min: self.feed_mm_per_min,
+            passes: self.passes,
+            ramp_power: self.ramp_power,
+            mode: self.mode,
+        }
+    }
+
     pub fn validate(&self) -> Result<(), GcodeError> {
-        if !self.feed_mm_per_min.is_finite() || self.feed_mm_per_min <= 0.0 {
-            return Err(GcodeError::Invalid(format!(
-                "feed rate {} mm/min is not a positive finite rate",
-                self.feed_mm_per_min
-            )));
-        }
-        if self.power > MAX_POWER {
-            return Err(GcodeError::Invalid(format!(
-                "power {} is outside the 0–{MAX_POWER} range",
-                self.power
-            )));
-        }
-        if let Some(engrave) = self.engrave_power
-            && engrave > MAX_POWER
-        {
-            return Err(GcodeError::Invalid(format!(
-                "engrave power {engrave} is outside the 0–{MAX_POWER} range"
-            )));
-        }
-        if self.passes == 0 || self.passes > MAX_PASSES {
-            return Err(GcodeError::Invalid(format!(
-                "passes {} is outside the 1–{MAX_PASSES} range",
-                self.passes
-            )));
+        self.shared()
+            .validate()
+            .map_err(|e| GcodeError::Invalid(e.to_string()))?;
+        craft_gcode::check_power("power", self.power)
+            .map_err(|e| GcodeError::Invalid(e.to_string()))?;
+        if let Some(power) = self.engrave_power {
+            craft_gcode::check_power("engrave power", power)
+                .map_err(|e| GcodeError::Invalid(e.to_string()))?;
         }
         Ok(())
     }
 
-    /// Power for one pass of a contour running at `base` power. Without a ramp every
-    /// pass is at `base`; with one, pass `n` of `N` gets `base × n / N`, so the last
-    /// pass is the full-power pass.
     pub fn power_for_pass(&self, base: u32, pass: u32) -> u32 {
-        if !self.ramp_power || self.passes <= 1 || pass >= self.passes {
-            return base;
-        }
-        let scaled = u64::from(base) * u64::from(pass) / u64::from(self.passes);
-        let scaled = u32::try_from(scaled).unwrap_or(base);
-        // A pass at S0 would trace the path with the beam off.
-        scaled.max(1).min(base)
+        self.shared().power_for_pass(base, pass)
     }
 }
 
-/// Serialise a document to G-code.
+/// Serialise a document to G-code using the shared writer. Layer filtering, per-operation power,
+/// and document metadata remain app policy; G-code syntax and safe comments are library behavior.
 pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeError> {
     settings.validate()?;
     doc.validate()
         .map_err(|e| GcodeError::Invalid(e.to_string()))?;
-
-    let mut out = String::with_capacity(4096);
-    let _ = writeln!(
-        out,
-        "; generated by stencilcraft ({} shapes, kerf {:.3} mm)",
+    let banner = format!(
+        "generated by stencilcraft ({} shapes, kerf {:.3} mm)",
         doc.shape_count(),
         doc.kerf.width_mm
     );
-    let _ = writeln!(out, "G21 ; millimetres");
-    let _ = writeln!(out, "G90 ; absolute coordinates");
-    let _ = writeln!(out, "G17 ; XY plane");
-    // Start dark: the first move is a rapid to the first contour.
-    let _ = writeln!(
-        out,
-        "{} S0 ; laser off until the first cut",
-        settings.mode.on_command()
-    );
-    // Template (guide) layers are canvas-only: never cut.
+    let mut writer = craft_gcode::Writer::new(settings.shared(), &banner)
+        .map_err(|e| GcodeError::Invalid(e.to_string()))?;
     for layer in doc.layers.iter().filter(|layer| !layer.template) {
         let kind = match layer.kind {
             CutStyle::Cut => "cut",
             CutStyle::Engrave => "engrave",
         };
-        let _ = writeln!(out, "; layer {} ({kind})", layer.name);
+        writer.comment(&format!("layer {} ({kind})", layer.name));
         if !layer.visible {
-            let _ = writeln!(out, "; (layer hidden, skipped)");
+            writer.comment("(layer hidden, skipped)");
             continue;
         }
-        let base_power = match layer.kind {
-            CutStyle::Engrave => settings.engrave_power.unwrap_or(settings.power),
+        let power = match layer.kind {
             CutStyle::Cut => settings.power,
+            CutStyle::Engrave => settings.engrave_power.unwrap_or(settings.power),
         };
         if settings.passes > 1 {
-            let _ = writeln!(
-                out,
-                "; {base_power} power, {} passes{}",
+            writer.comment(&format!(
+                "{power} power, {} passes{}",
                 settings.passes,
                 if settings.ramp_power { ", ramped" } else { "" }
-            );
+            ));
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            for pl in
-                &path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+            for polyline in
+                path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
             {
-                emit_contour(&mut out, &contour_points(pl), settings, base_power)?;
+                let points: Vec<(f64, f64)> = polyline
+                    .points
+                    .iter()
+                    .map(|point| (point.x, point.y))
+                    .collect();
+                writer
+                    .contour(&points, polyline.closed, power)
+                    .map_err(|e| GcodeError::Write(e.to_string()))?;
             }
         }
     }
-    let _ = writeln!(out, "M5 ; tool off");
-    let _ = writeln!(out, "G0 X0 Y0 ; return to origin");
-    Ok(out)
-}
-
-/// The point list one cut traces: a closed contour ends where it started, and a
-/// single-point subpath becomes a minimal in-and-out dot.
-fn contour_points(pl: &stencilcraft_geom::Polyline) -> Vec<Point> {
-    let Some(first) = pl.points.first().copied() else {
-        return Vec::new();
-    };
-    if pl.points.len() < 2 {
-        return vec![first, Point::new(first.x + 0.001, first.y), first];
-    }
-    let mut points = pl.points.clone();
-    if pl.closed {
-        points.push(first);
-    }
-    points
-}
-
-fn emit_contour(
-    out: &mut String,
-    points: &[Point],
-    settings: &GcodeSettings,
-    base_power: u32,
-) -> Result<(), GcodeError> {
-    let Some(first) = points.first().copied() else {
-        return Ok(());
-    };
-    for pass in 1..=settings.passes {
-        emit_travel(out, first)?;
-        let power = settings.power_for_pass(base_power, pass);
-        if settings.passes > 1 {
-            let _ = writeln!(
-                out,
-                "{} S{power} ; pass {pass} of {}",
-                settings.mode.on_command(),
-                settings.passes
-            );
-        } else {
-            let _ = writeln!(out, "{} S{power}", settings.mode.on_command());
-        }
-        for p in &points[1..] {
-            if !p.x.is_finite() || !p.y.is_finite() {
-                return Err(GcodeError::Write(
-                    "gcode: a vertex is not finite".to_string(),
-                ));
-            }
-            let _ = writeln!(
-                out,
-                "G1 X{:.4} Y{:.4} F{:.0}",
-                p.x, p.y, settings.feed_mm_per_min
-            );
-        }
-        // Never rapid with the beam on, whatever the mode or controller.
-        let _ = writeln!(out, "M5");
-    }
-    Ok(())
-}
-
-fn emit_travel(out: &mut String, p: Point) -> Result<(), GcodeError> {
-    if !p.x.is_finite() || !p.y.is_finite() {
-        return Err(GcodeError::Write(
-            "gcode: a vertex is not finite".to_string(),
-        ));
-    }
-    let _ = writeln!(out, "G0 X{:.4} Y{:.4}", p.x, p.y);
-    Ok(())
+    Ok(writer.finish())
 }
 
 #[cfg(test)]

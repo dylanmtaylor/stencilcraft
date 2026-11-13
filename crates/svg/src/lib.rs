@@ -1,13 +1,8 @@
-//! SVG import/export for StencilCraft documents.
-//!
-//! Export: one `<g>` per layer with `data-kind` recording cut/engrave; the viewBox
-//! is millimetres, so 1 SVG user unit = 1 mm and the sheet prints true to size.
-//! Import supports common SVG shapes, groups, transforms, production styles, and
-//! local `<use>` references; see `docs/gaps.md` for remaining gaps.
+//! StencilCraft SVG import and export policy on shared Craft-Libs SVG parsing and writing.
 
-use std::fmt::Write as _;
+use std::collections::HashMap;
 
-use kurbo::BezPath;
+use kurbo::{BezPath, Point};
 use stencilcraft_doc::{CutStyle, Document, Layer};
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
@@ -21,104 +16,11 @@ pub enum SvgError {
     Model(String),
 }
 
-/// SVG class names, one per production style, stable for downstream tools that
-/// colour cut paths by class.
-fn class_for(style: CutStyle) -> &'static str {
-    match style {
-        CutStyle::Cut => "stencilcraft-cut",
-        CutStyle::Engrave => "stencilcraft-engrave",
-    }
-}
-
-/// Board and art bounds combined, defaulting to a 100 × 150 mm sheet for an empty
-/// document (the export must always be plottable in a viewbox).
-fn view_bounds(doc: &Document) -> kurbo::Rect {
-    let mut acc = kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm);
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        if let Some(b) = layer.bounds() {
-            acc = acc.union(b);
-        }
-    }
-    acc
-}
-
-/// Serialise a document to SVG, millimetres as user units, one `<g>` per layer
-/// (hidden layers included but marked invisible).
-pub fn export(doc: &Document) -> Result<String, SvgError> {
-    let board = view_bounds(doc);
-    let mut svg = String::with_capacity(1024);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" ");
-    let _ = write!(
-        svg,
-        "width=\"{:.3}mm\" height=\"{:.3}mm\" viewBox=\"{:.3} {:.3} {:.3} {:.3}\"",
-        board.width(),
-        board.height(),
-        board.x0,
-        board.y0,
-        board.width(),
-        board.height()
-    );
-    svg.push_str(">\n");
-    let title = svg_title(doc);
-    svg.push_str(&title);
-    let parents = doc.group_parent_map();
-    // Template (guide) layers are canvas-only: never exported.
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        let vis = if layer.visible { "visible" } else { "hidden" };
-        let _ = writeln!(
-            svg,
-            "  <g class=\"{}\" data-kind=\"{}\" style=\"display:{}\">",
-            class_for(layer.kind),
-            match layer.kind {
-                CutStyle::Cut => "cut",
-                CutStyle::Engrave => "engrave",
-            },
-            vis
-        );
-        // Groups nest inside the layer as `<g class="group" data-group="id">`; a group
-        // whose shapes are not adjacent in stacking order appears more than once.
-        let mut open: Vec<u64> = Vec::new();
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let chain = stencilcraft_doc::canvas::group_chain_in(
-                &parents,
-                stencilcraft_doc::GroupChild::Shape(shape.id),
-            );
-            let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
-            for _ in common..open.len() {
-                svg.push_str("    </g>\n");
-            }
-            open.truncate(common);
-            for id in chain.iter().skip(common) {
-                let _ = writeln!(svg, "    <g class=\"group\" data-group=\"{id}\">");
-                open.push(*id);
-            }
-            let d = path_to_svg_d(&shape.cut_path())?;
-            let _ = writeln!(
-                svg,
-                "    <path class=\"{}\" d=\"{}\"/>",
-                class_for(shape.style),
-                d
-            );
-        }
-        for _ in &open {
-            svg.push_str("    </g>\n");
-        }
-        svg.push_str("  </g>\n");
-    }
-    svg.push_str("</svg>\n");
-    Ok(svg)
-}
-
-/// How to lay tiled sheets out on one preview page.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TilePreviewOptions {
-    /// Cells per row; clamped to the number of sheets.
     pub columns: usize,
-    /// Page millimetres per sheet millimetre. 0.25 is a comfortable overview.
     pub scale: f64,
 }
-
 impl Default for TilePreviewOptions {
     fn default() -> Self {
         Self {
@@ -127,33 +29,144 @@ impl Default for TilePreviewOptions {
         }
     }
 }
-
-/// Space between preview cells and around the page, millimetres.
 pub const TILE_PREVIEW_GAP_MM: f64 = 6.0;
-
-/// Largest preview page this will build, millimetres per side.
 pub const TILE_PREVIEW_MAX_MM: f64 = 100_000.0;
 
-/// Render every sheet of a tiling onto one preview page.
-///
-/// Unlike a cut export, a preview is for looking at: paths are stroked, not filled
-/// (cut lines red, engrave/marks blue), and each sheet sits in a framed cell with a
-/// `sheet N of M` label so it is obvious where one sheet ends and the next begins.
-/// Cells follow the tiling order (first sheet top-left of the board) but rows are
-/// placed bottom-up and sheet content is flipped, because SVG y grows downwards while
-/// documents are y-up: the preview reads the way the assembled board does.
+fn class_for(style: CutStyle) -> &'static str {
+    match style {
+        CutStyle::Cut => "stencilcraft-cut",
+        CutStyle::Engrave => "stencilcraft-engrave",
+    }
+}
+fn view_bounds(doc: &Document) -> kurbo::Rect {
+    doc.layers
+        .iter()
+        .filter(|layer| !layer.template)
+        .filter_map(Layer::bounds)
+        .fold(
+            kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm),
+            |bounds, layer| bounds.union(layer),
+        )
+}
+fn root(writer: &mut craft_svg::write::SvgWriter, width_mm: f64, height_mm: f64, view_box: String) {
+    writer
+        .root()
+        .attr("version", "1.1")
+        .attr("width", format!("{width_mm:.3}mm"))
+        .attr("height", format!("{height_mm:.3}mm"))
+        .attr("viewBox", view_box)
+        .open();
+}
+fn title(writer: &mut craft_svg::write::SvgWriter, text: &str, depth: usize) {
+    writer.line(depth);
+    writer.tag("title").open();
+    writer.text(text);
+    writer.close();
+}
+fn write_document_contents(writer: &mut craft_svg::write::SvgWriter, doc: &Document, depth: usize) {
+    title(
+        writer,
+        &format!(
+            "stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm",
+            stencilcraft_doc::FORMAT_NAME,
+            doc.layers.len(),
+            doc.shape_count(),
+            doc.kerf.width_mm
+        ),
+        depth,
+    );
+    let parents = doc.group_parent_map();
+    for layer in doc.layers.iter().filter(|layer| !layer.template) {
+        writer.line(depth);
+        writer
+            .tag("g")
+            .attr("class", class_for(layer.kind))
+            .attr(
+                "data-kind",
+                match layer.kind {
+                    CutStyle::Cut => "cut",
+                    CutStyle::Engrave => "engrave",
+                },
+            )
+            .attr(
+                "style",
+                if layer.visible {
+                    "display:visible"
+                } else {
+                    "display:hidden"
+                },
+            )
+            .open();
+        let mut open = Vec::<u64>::new();
+        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+            let chain = stencilcraft_doc::canvas::group_chain_in(
+                &parents,
+                stencilcraft_doc::GroupChild::Shape(shape.id),
+            );
+            let common = open.iter().zip(&chain).take_while(|(a, b)| a == b).count();
+            for _ in common..open.len() {
+                writer.line(depth + 1);
+                writer.close();
+            }
+            open.truncate(common);
+            for id in chain.iter().skip(common) {
+                writer.line(depth + 1);
+                writer
+                    .tag("g")
+                    .attr("class", "group")
+                    .attr("data-group", id)
+                    .open();
+                open.push(*id);
+            }
+            writer.line(depth + 1 + open.len());
+            writer
+                .tag("path")
+                .attr("class", class_for(shape.style))
+                .attr("d", craft_svg::write::path_data(&shape.cut_path()))
+                .empty();
+        }
+        for _ in &open {
+            writer.line(depth + 1);
+            writer.close();
+        }
+        writer.line(depth);
+        writer.close();
+    }
+}
+
+pub fn export(doc: &Document) -> Result<String, SvgError> {
+    let bounds = view_bounds(doc);
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        bounds.width(),
+        bounds.height(),
+        format!(
+            "{:.3} {:.3} {:.3} {:.3}",
+            bounds.x0,
+            bounds.y0,
+            bounds.width(),
+            bounds.height()
+        ),
+    );
+    write_document_contents(&mut writer, doc, 1);
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
+}
+
 pub fn export_tile_preview(
     pieces: &[Document],
     options: &TilePreviewOptions,
 ) -> Result<String, SvgError> {
     if pieces.is_empty() {
         return Err(SvgError::Model(
-            "preview: the tiling produced no sheets to show".to_string(),
+            "preview: the tiling produced no sheets to show".into(),
         ));
     }
     if options.columns == 0 {
         return Err(SvgError::Model(
-            "preview: columns must be at least 1".to_string(),
+            "preview: columns must be at least 1".into(),
         ));
     }
     if !options.scale.is_finite() || options.scale <= 0.0 {
@@ -187,890 +200,328 @@ pub fn export_tile_preview(
             "preview: a {page_w:.0}×{page_h:.0} mm page is too big; use a smaller scale or fewer sheets"
         )));
     }
-
-    let mut svg = String::with_capacity(2048 + pieces.len() * 512);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let _ = writeln!(
-        svg,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_w:.3}mm\" height=\"{page_h:.3}mm\" viewBox=\"0 0 {page_w:.3} {page_h:.3}\">"
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        page_w,
+        page_h,
+        format!("0 0 {page_w:.3} {page_h:.3}"),
     );
-    let _ = writeln!(
-        svg,
-        "  <title>StencilCraft tiling preview: {} sheets, {} × {} cells</title>",
-        pieces.len(),
-        columns,
-        rows
+    title(
+        &mut writer,
+        &format!(
+            "StencilCraft tiling preview: {} sheets, {} × {} cells",
+            pieces.len(),
+            columns,
+            rows
+        ),
+        1,
     );
-    // A preview shows outlines, not filled artwork: fill would hide the very detail
-    // the preview exists to show. Colours follow cutting-software convention.
-    svg.push_str("  <style>\n");
-    svg.push_str("    .preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }\n");
-    svg.push_str("    .stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }\n");
-    svg.push_str("    .stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }\n");
-    svg.push_str(
-        "    .preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }\n",
+    writer.line(1);
+    writer.tag("style").open();
+    writer.text(
+        ".preview-frame { fill: none; stroke: #9aa0a6; stroke-width: 0.25; }
+.stencilcraft-cut { fill: none; stroke: #c0392b; stroke-width: 0.3; }
+.stencilcraft-engrave { fill: none; stroke: #2d6cdf; stroke-width: 0.2; }
+.preview-label { fill: #5f6368; font-family: sans-serif; font-size: 3.2px; }",
     );
-    svg.push_str("  </style>\n");
+    writer.close();
     for (index, piece) in pieces.iter().enumerate() {
         let col = index % columns;
         let row = index / columns;
         let x = gap + col as f64 * (cell_w + gap);
-        // SVG y grows downwards while documents are y-up: the tiling's first row is
-        // the bottom of the board, so it belongs at the bottom of the page.
         let y = gap + (rows - 1 - row) as f64 * (cell_h + gap);
         let cell_height = piece.board.height_mm * options.scale;
-        let _ = writeln!(
-            svg,
-            "  <g class=\"sheet\" data-sheet=\"{}\" data-size=\"{:.1}x{:.1}\">",
-            index, piece.board.width_mm, piece.board.height_mm
-        );
-        let _ = writeln!(
-            svg,
-            "    <text class=\"preview-label\" x=\"{x:.3}\" y=\"{:.3}\">sheet {} of {} · {:.0}×{:.0} mm</text>",
-            y - 1.6,
+        writer.line(1);
+        writer
+            .tag("g")
+            .attr("class", "sheet")
+            .attr("data-sheet", index)
+            .attr(
+                "data-size",
+                format!("{:.1}x{:.1}", piece.board.width_mm, piece.board.height_mm),
+            )
+            .open();
+        writer.line(2);
+        writer
+            .tag("text")
+            .attr("class", "preview-label")
+            .attr("x", format!("{x:.3}"))
+            .attr("y", format!("{:.3}", y - 1.6))
+            .open();
+        writer.text(&format!(
+            "sheet {} of {} · {:.0}×{:.0} mm",
             index + 1,
             pieces.len(),
             piece.board.width_mm,
             piece.board.height_mm
-        );
-        let _ = writeln!(
-            svg,
-            "    <rect class=\"preview-frame\" x=\"{x:.3}\" y=\"{y:.3}\" width=\"{:.3}\" height=\"{cell_height:.3}\"/>",
-            piece.board.width_mm * options.scale
-        );
-        // Flip the sheet's y-up millimetres into the page's y-down space, so each cell
-        // reads the same way the sheet does on the mat.
-        let _ = writeln!(
-            svg,
-            "    <g transform=\"translate({x:.3} {:.3}) scale({:.4} {:.4})\">",
-            y + cell_height,
-            options.scale,
-            -options.scale
-        );
-        for layer in &piece.layers {
-            if !layer.is_output() {
-                continue;
-            }
+        ));
+        writer.close();
+        writer.line(2);
+        writer
+            .tag("rect")
+            .attr("class", "preview-frame")
+            .attr("x", format!("{x:.3}"))
+            .attr("y", format!("{y:.3}"))
+            .attr(
+                "width",
+                format!("{:.3}", piece.board.width_mm * options.scale),
+            )
+            .attr("height", format!("{cell_height:.3}"))
+            .empty();
+        writer.line(2);
+        writer
+            .tag("g")
+            .attr(
+                "transform",
+                format!(
+                    "translate({x:.3} {:.3}) scale({:.4} {:.4})",
+                    y + cell_height,
+                    options.scale,
+                    -options.scale
+                ),
+            )
+            .open();
+        for layer in piece.layers.iter().filter(|layer| layer.is_output()) {
             for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-                let d = path_to_svg_d(&shape.cut_path())?;
-                let _ = writeln!(
-                    svg,
-                    "      <path class=\"{}\" d=\"{}\"/>",
-                    class_for(shape.style),
-                    d
-                );
+                writer.line(3);
+                writer
+                    .tag("path")
+                    .attr("class", class_for(shape.style))
+                    .attr("d", craft_svg::write::path_data(&shape.cut_path()))
+                    .empty();
             }
         }
-        svg.push_str("    </g>\n  </g>\n");
+        writer.line(2);
+        writer.close();
+        writer.line(1);
+        writer.close();
     }
-    svg.push_str("</svg>\n");
-    Ok(svg)
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
 }
 
-/// Export a physical-size Print & Cut SVG sheet with three high-contrast
-/// registration marks (top-left origin square, top-right and bottom-left L-corners)
-/// around the document board.
 pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
-    const PAGE_MARGIN_MM: f64 = 12.0;
-    const MARK_SIZE_MM: f64 = 6.0;
-
+    const MARGIN: f64 = 12.0;
+    const MARK: f64 = 6.0;
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
-    let artwork = export(doc)?;
-    let page_width = doc.board.width_mm + 2.0 * PAGE_MARGIN_MM;
-    let page_height = doc.board.height_mm + 2.0 * PAGE_MARGIN_MM;
-    if !page_width.is_finite() || !page_height.is_finite() {
+    let page_w = doc.board.width_mm + 2.0 * MARGIN;
+    let page_h = doc.board.height_mm + 2.0 * MARGIN;
+    if !page_w.is_finite() || !page_h.is_finite() {
         return Err(SvgError::Model(
-            "print-cut: page dimensions are not finite".to_string(),
+            "print-cut: page dimensions are not finite".into(),
         ));
     }
-
-    let mut svg = String::with_capacity(artwork.len() + 1024);
-    svg.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let _ = writeln!(
-        svg,
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" width=\"{page_width:.3}mm\" height=\"{page_height:.3}mm\" viewBox=\"0 0 {page_width:.3} {page_height:.3}\">"
+    let mut writer = craft_svg::write::SvgWriter::new();
+    root(
+        &mut writer,
+        page_w,
+        page_h,
+        format!("0 0 {page_w:.3} {page_h:.3}"),
     );
-    svg.push_str("  <title>StencilCraft print-and-cut alignment sheet</title>\n");
-    let _ = writeln!(
-        svg,
-        "  <g id=\"registration-marks\" fill=\"#000000\" aria-label=\"Registration marks: top-left square, top-right and bottom-left corners\">"
-    );
-    let _ = writeln!(
-        svg,
-        "    <rect x=\"0\" y=\"0\" width=\"{MARK_SIZE_MM:.3}\" height=\"{MARK_SIZE_MM:.3}\"/>"
-    );
-    let _ = writeln!(
-        svg,
-        "    <path d=\"M {:.3} 0 H {:.3} V {:.3} H {:.3} V {:.3} H {:.3} Z\"/>",
-        page_width,
-        page_width - MARK_SIZE_MM,
-        MARK_SIZE_MM,
-        page_width - 1.5,
-        1.5,
-        page_width - MARK_SIZE_MM,
-    );
-    let _ = writeln!(
-        svg,
-        "    <path d=\"M 0 {:.3} H {:.3} V {:.3} H {:.3} V {:.3} H 0 Z\"/>",
-        page_height,
-        MARK_SIZE_MM,
-        page_height - MARK_SIZE_MM,
-        1.5,
-        page_height - 1.5,
-    );
-    svg.push_str("  </g>\n");
-    let _ = writeln!(
-        svg,
-        "  <svg x=\"{PAGE_MARGIN_MM:.3}\" y=\"{PAGE_MARGIN_MM:.3}\" width=\"{:.3}mm\" height=\"{:.3}mm\" viewBox=\"0 0 {:.3} {:.3}\" overflow=\"hidden\">",
-        doc.board.width_mm, doc.board.height_mm, doc.board.width_mm, doc.board.height_mm,
-    );
-    if let Some(root_start) = artwork.find('>')
-        && let Some(root_end) = artwork.rfind("</svg>")
-        && root_start < root_end
-    {
-        svg.push_str(&artwork[root_start + 1..root_end]);
-    } else {
-        return Err(SvgError::Write(
-            "print-cut: could not embed SVG artwork".to_string(),
-        ));
-    }
-    svg.push_str("  </svg>\n</svg>\n");
-    Ok(svg)
+    title(&mut writer, "StencilCraft print-and-cut alignment sheet", 1);
+    writer.line(1);
+    writer
+        .tag("g")
+        .attr("id", "registration-marks")
+        .attr("fill", "#000000")
+        .attr(
+            "aria-label",
+            "Registration marks: top-left square, top-right and bottom-left corners",
+        )
+        .open();
+    writer.line(2);
+    writer
+        .tag("rect")
+        .attr("x", "0")
+        .attr("y", "0")
+        .attr("width", format!("{MARK:.3}"))
+        .attr("height", format!("{MARK:.3}"))
+        .empty();
+    let mut top = BezPath::new();
+    top.move_to((page_w, 0.0));
+    top.line_to((page_w - MARK, 0.0));
+    top.line_to((page_w - MARK, MARK));
+    top.line_to((page_w - 1.5, MARK));
+    top.line_to((page_w - 1.5, 1.5));
+    top.line_to((page_w - MARK, 1.5));
+    top.close_path();
+    writer.line(2);
+    writer
+        .tag("path")
+        .attr("d", craft_svg::write::path_data(&top))
+        .empty();
+    let mut bottom = BezPath::new();
+    bottom.move_to((0.0, page_h));
+    bottom.line_to((MARK, page_h));
+    bottom.line_to((MARK, page_h - MARK));
+    bottom.line_to((1.5, page_h - MARK));
+    bottom.line_to((1.5, page_h - 1.5));
+    bottom.line_to((0.0, page_h - MARK));
+    bottom.close_path();
+    writer.line(2);
+    writer
+        .tag("path")
+        .attr("d", craft_svg::write::path_data(&bottom))
+        .empty();
+    writer.line(1);
+    writer.close();
+    writer.line(1);
+    writer
+        .tag("svg")
+        .attr("x", format!("{MARGIN:.3}"))
+        .attr("y", format!("{MARGIN:.3}"))
+        .attr("width", format!("{:.3}mm", doc.board.width_mm))
+        .attr("height", format!("{:.3}mm", doc.board.height_mm))
+        .attr(
+            "viewBox",
+            format!("0 0 {:.3} {:.3}", doc.board.width_mm, doc.board.height_mm),
+        )
+        .attr("overflow", "hidden")
+        .open();
+    write_document_contents(&mut writer, doc, 2);
+    writer.line(1);
+    writer.close();
+    writer.line(0);
+    writer.close();
+    Ok(writer.finish())
 }
 
-fn svg_title(doc: &Document) -> String {
-    let mut s = String::new();
-    let _ = writeln!(
-        s,
-        "<title>stencilcraft {}: {} layers, {} shapes, kerf {:.3} mm</title>",
-        stencilcraft_doc::FORMAT_NAME,
-        doc.layers.len(),
-        doc.shape_count(),
-        doc.kerf.width_mm
-    );
-    s
-}
-
-/// kurbo's SVG grammar on a BezPath escapes attribute-quoting issues: no quotes
-/// appear in path data. Guarded anyway against a future kurbo grammar change.
-fn path_to_svg_d(path: &BezPath) -> Result<String, SvgError> {
-    let s = path.to_svg();
-    if s.contains('"') || s.contains('<') {
-        return Err(SvgError::Write(format!(
-            "path data has markup characters: {s}"
-        )));
-    }
-    Ok(s)
-}
-
-const MAX_SVG_BYTES: usize = 16 * 1024 * 1024;
-const MAX_SVG_NODES: usize = 100_000;
-const MAX_SVG_DEPTH: usize = 128;
-const MAX_SVG_INSTANCES: usize = 10_000;
-
-#[derive(Clone)]
-struct ImportState {
-    transform: kurbo::Affine,
-    kind: CutStyle,
-    display_none: bool,
-    visibility_hidden: bool,
-    inherited_style: std::collections::HashMap<String, String>,
-    /// Active `clip-path` regions, already in document space, outermost first.
-    clips: Vec<BezPath>,
-}
-
-impl Default for ImportState {
+#[derive(Debug, Clone, Copy)]
+struct Kind(CutStyle);
+impl Default for Kind {
     fn default() -> Self {
-        Self {
-            transform: kurbo::Affine::IDENTITY,
-            kind: CutStyle::Cut,
-            display_none: false,
-            visibility_hidden: false,
-            inherited_style: std::collections::HashMap::new(),
-            clips: Vec::new(),
+        Self(CutStyle::Cut)
+    }
+}
+impl craft_svg::paths::Kind for Kind {
+    const PROPERTIES: &'static [&'static str] = &["data-kind"];
+    fn of(style: &craft_svg::paths::StyleMap, class: &str) -> Option<Self> {
+        let value = style.get("data-kind").map(String::as_str);
+        if value == Some("engrave")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-engrave")
+        {
+            Some(Self(CutStyle::Engrave))
+        } else if value == Some("cut")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-cut")
+        {
+            Some(Self(CutStyle::Cut))
+        } else {
+            None
         }
     }
 }
-
-/// Most warnings one import keeps; the rest are counted in one summary line.
-const MAX_SVG_WARNINGS: usize = 64;
-/// Most nested `clip-path` regions one shape is clipped by.
-const MAX_SVG_CLIPS: usize = 16;
-
-/// A lenient import: the document plus every piece of the file that was skipped or
-/// approximated (text, masks, filters, ignored CSS, clips it could not apply).
 #[derive(Debug)]
 pub struct SvgImport {
     pub document: Document,
     pub warnings: Vec<String>,
 }
-
-/// Import common SVG artwork into a cutting document.
-///
-/// Supported geometry: `<path>`, `<rect>` (including rounded corners),
-/// `<circle>`, `<ellipse>`, `<line>`, `<polyline>`, and `<polygon>`. Nested
-/// groups, transforms (`matrix`, `translate`, `scale`, `rotate`, `skewX/Y`),
-/// and inherited presentation/inline styles (`display`, `visibility`, CSS
-/// `style`, `class`, `data-kind`) are applied. Stylesheets support simple type,
-/// class and ID selectors (including compound, descendant and child selectors)
-/// with specificity-based cascade. SVG paths are flattened nowhere
-/// here: curves remain curves in the document. Each imported shape is assigned
-/// to cut or engrave according to inherited `data-kind`/`data-style` or class.
-/// Embedded stylesheets support type, class, ID and attribute selectors (`=`, `~=`,
-/// `^=`, `$=`, `*=`, `|=`), descendant/child/sibling combinators, `:not()`,
-/// `:first-child`, `:last-child`, `:root`, selector lists, and a bounded
-/// presentation-property cascade. Shapes with a stroke colour (any CSS Color 4 form,
-/// or `currentColor`) go on one layer per colour — `Line #rrggbb` (or
-/// `engrave #rrggbb`) with the layer colour set. `clip-path` references to
-/// `<clipPath>` elements clip the geometry.
-///
-/// This strict form refuses a file with anything [`import_with_warnings`] would only
-/// warn about (text, masks, filters, ignored CSS), so nothing is lost silently.
-///
-/// Physical root dimensions accept unitless SVG px, `px`, `mm`, `cm`, `in`,
-/// `pt`, and `pc`; a `viewBox` maps its user coordinates onto that physical
-/// viewport, following `preserveAspectRatio`. Without physical dimensions,
-/// `viewBox` units are interpreted as millimetres to preserve StencilCraft's
-/// 1-unit = 1-mm convention. A fragment without an SVG root uses that same
-/// convention. Local fragment-only `<use>` references can instantiate supported
-/// shapes, groups and `<symbol>` templates with viewBox sizing; external references,
-/// text, masks, filters and percentage lengths are not expanded. Unsupported drawable
-/// elements are reported rather than silently lost.
-pub fn import(svg: &str, path_name: &str) -> Result<Document, SvgError> {
-    let imported = import_with_warnings(svg, path_name)?;
-    if imported.warnings.is_empty() {
-        Ok(imported.document)
-    } else {
-        Err(svg_error(path_name, &imported.warnings.join("; ")))
-    }
+pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
+    import_with_warnings(svg, name).map(|got| got.document)
 }
-
-/// [`import`] that skips what it cannot represent and says so: `<text>` (no fonts
-/// here; convert text to paths first), masks and filters (the art is imported unmasked
-/// and unfiltered), ignored CSS at-rules and selectors, and clip paths it cannot apply.
-pub fn import_with_warnings(svg: &str, path_name: &str) -> Result<SvgImport, SvgError> {
-    if svg.len() > MAX_SVG_BYTES {
-        return Err(svg_error(path_name, "SVG exceeds the 16 MiB import limit"));
-    }
-    let xml = roxmltree::Document::parse(svg)
-        .map_err(|e| svg_error(path_name, &format!("invalid XML: {e}")))?;
-    let root = xml.root_element();
-    let (width_mm, height_mm, viewport) = viewport_transform(root, path_name)?;
-
-    let mut doc = Document::default();
-    doc.board.width_mm = width_mm;
-    doc.board.height_mm = height_mm;
-    let mut id_index = std::collections::HashMap::new();
-    let mut xml_node_count = 0usize;
-    for node in root.descendants() {
-        xml_node_count += 1;
-        if xml_node_count > MAX_SVG_NODES {
-            return Err(svg_error(
-                path_name,
-                "SVG exceeds the 100,000-node import limit",
-            ));
-        }
-        if let Some(id) = node.attribute("id")
-            && id_index.insert(id.to_string(), node).is_some()
-        {
-            return Err(svg_error(path_name, &format!("duplicate SVG id {id:?}")));
-        }
-    }
-    let mut warnings = Vec::new();
-    let css_rules = parse_stylesheets(root, path_name, &mut warnings)?;
-    let mut context = ImportContext {
-        visited: 0,
-        path_name,
-        id_index,
-        css_rules,
-        reference_stack: Vec::new(),
-        instance_count: 0,
-        doc: &mut doc,
-        layer_index: std::collections::HashMap::from([((false, None), 0)]),
-        warnings,
-        dropped_warnings: 0,
+pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
+    let imported =
+        craft_svg::paths::import::<Kind>(svg, name).map_err(|e| SvgError::Import(e.to_string()))?;
+    let mut doc = Document {
+        board: stencilcraft_doc::Board {
+            width_mm: imported.width_mm,
+            height_mm: imported.height_mm,
+        },
+        ..Document::default()
     };
-    let base = ImportState {
-        transform: viewport,
-        ..ImportState::default()
-    };
-    import_node(root, base, 0, &mut context)?;
-    let mut warnings = context.warnings;
-    if context.dropped_warnings > 0 {
-        warnings.push(format!("…and {} more warnings", context.dropped_warnings));
-    }
-
-    // SVG art may legitimately extend beyond its nominal viewport; do not clip
-    // cut geometry silently. Normalize negative coordinates onto the sheet.
-    let mut bounds: Option<kurbo::Rect> = None;
-    for layer in &doc.layers {
-        if let Some(b) = layer.bounds() {
-            bounds = Some(bounds.map_or(b, |prev| prev.union(b)));
-        }
-    }
-    if let Some(b) = bounds {
-        let shift_x = (-b.x0).max(0.0);
-        let shift_y = (-b.y0).max(0.0);
-        if shift_x != 0.0 || shift_y != 0.0 {
-            let shift = kurbo::Affine::translate((shift_x, shift_y));
-            for layer in &mut doc.layers {
-                for shape in &mut layer.shapes {
-                    shape.path = transform_path(&shape.path, shift);
-                }
+    let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
+    layers.insert(("cut".into(), false, None), 0);
+    let mut warnings = imported.warnings;
+    for shape in imported.shapes {
+        let mut path = shape.path;
+        for clip_index in shape.clips {
+            let Some(clip) = imported.clips.get(clip_index) else {
+                warnings.push(format!("{}: missing clip region {clip_index}", shape.label));
+                continue;
+            };
+            if clip.pieces.is_empty() {
+                path = BezPath::new();
+                break;
             }
+            let pieces: Vec<_> = clip
+                .pieces
+                .iter()
+                .map(|(p, _)| vectorcraft_geom::PathData::from_bezpath(p))
+                .collect();
+            let inputs: Vec<_> = clip
+                .pieces
+                .iter()
+                .zip(&pieces)
+                .map(|((_, r), p)| {
+                    (
+                        p,
+                        match r {
+                            craft_svg::paths::FillRule::EvenOdd => {
+                                vectorcraft_geom::FillRule::EvenOdd
+                            }
+                            craft_svg::paths::FillRule::NonZero => {
+                                vectorcraft_geom::FillRule::NonZero
+                            }
+                        },
+                    )
+                })
+                .collect();
+            let region = vectorcraft_pathops::try_boolean_n(&inputs, |inside: &[bool]| {
+                inside.iter().any(|v| *v)
+            })
+            .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?
+            .to_bezpath();
+            path = clip_to_region(&path, &region)
+                .map_err(|e| SvgError::Import(format!("{name}: clip-path: {e}")))?;
         }
-        doc.board.width_mm = doc.board.width_mm.max(b.x1 + shift_x).max(1.0);
-        doc.board.height_mm = doc.board.height_mm.max(b.y1 + shift_y).max(1.0);
+        if path.elements().is_empty() {
+            continue;
+        }
+        let style = shape.kind.0;
+        let layer_name = shape.layer.unwrap_or_else(|| match style {
+            CutStyle::Cut => "cut".into(),
+            CutStyle::Engrave => "engrave".into(),
+        });
+        let color = shape
+            .stroke
+            .as_deref()
+            .and_then(|s| craft_svg::color::parse_color(s).ok())
+            .map(|c| format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b));
+        let key = (
+            layer_name.clone(),
+            style == CutStyle::Engrave,
+            color.clone(),
+        );
+        let index = if let Some(index) = layers.get(&key) {
+            *index
+        } else {
+            let mut layer = Layer::new(layer_name, style);
+            layer.color = color;
+            doc.layers.push(layer);
+            let i = doc.layers.len() - 1;
+            layers.insert(key, i);
+            i
+        };
+        doc.push_shape(index, path, style)
+            .map_err(|e| SvgError::Model(e.to_string()))?;
     }
-    doc.validate()
-        .map_err(|e| svg_error(path_name, &format!("invalid imported document: {e}")))?;
+    if imported.dropped_warnings > 0 {
+        warnings.push(format!(
+            "{} additional SVG warnings omitted",
+            imported.dropped_warnings
+        ));
+    }
+    doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
     Ok(SvgImport {
         document: doc,
         warnings,
     })
 }
-
-struct ImportContext<'a, 'input, 'doc> {
-    visited: usize,
-    path_name: &'a str,
-    id_index: std::collections::HashMap<String, roxmltree::Node<'a, 'input>>,
-    css_rules: Vec<CssRule>,
-    reference_stack: Vec<String>,
-    instance_count: usize,
-    doc: &'doc mut Document,
-    /// (engrave?, stroke colour) → layer index; (cut, no colour) is layer 0.
-    layer_index: std::collections::HashMap<(bool, Option<String>), usize>,
-    warnings: Vec<String>,
-    dropped_warnings: usize,
-}
-
-/// Records a warning once (a CSS rule can warn before the import context exists).
-fn push_warning(warnings: &mut Vec<String>, dropped: &mut usize, message: String) {
-    if warnings.contains(&message) {
-        return;
-    }
-    if warnings.len() < MAX_SVG_WARNINGS {
-        warnings.push(message);
-    } else {
-        *dropped = dropped.saturating_add(1);
-    }
-}
-
-impl ImportContext<'_, '_, '_> {
-    fn warn(&mut self, message: String) {
-        push_warning(&mut self.warnings, &mut self.dropped_warnings, message);
-    }
-
-    /// The layer for a shape of `kind` stroked in `color`, created on first use.
-    fn layer_for(&mut self, kind: CutStyle, color: Option<String>) -> usize {
-        let key = (kind == CutStyle::Engrave, color);
-        if let Some(index) = self.layer_index.get(&key) {
-            return *index;
-        }
-        let name = match (&key.1, kind) {
-            (Some(hex), CutStyle::Cut) => format!("Line {hex}"),
-            (Some(hex), CutStyle::Engrave) => format!("engrave {hex}"),
-            (None, _) => "engrave".to_string(),
-        };
-        let mut layer = Layer::new(name, kind);
-        layer.color = key.1.clone();
-        let index = self.doc.layers.len();
-        self.doc.layers.push(layer);
-        self.layer_index.insert(key, index);
-        index
-    }
-}
-
-fn import_node<'a, 'input>(
-    node: roxmltree::Node<'a, 'input>,
-    inherited: ImportState,
-    depth: usize,
-    context: &mut ImportContext<'a, 'input, '_>,
-) -> Result<(), SvgError> {
-    context.visited = context
-        .visited
-        .checked_add(1)
-        .ok_or_else(|| svg_error(context.path_name, "SVG node counter overflow"))?;
-    if context.visited > MAX_SVG_NODES {
-        return Err(svg_error(
-            context.path_name,
-            "SVG exceeds the 100,000-node import limit",
-        ));
-    }
-    if depth > MAX_SVG_DEPTH {
-        return Err(svg_error(
-            context.path_name,
-            "SVG nesting exceeds 128 levels",
-        ));
-    }
-    let tag = node.tag_name().name();
-    // Definitions are not drawable content unless instantiated via `<use>`;
-    // references resolve directly into supported targets inside these containers.
-    if matches!(tag, "defs" | "symbol" | "clipPath" | "mask" | "pattern") {
-        return Ok(());
-    }
-    let mut state = inherited.clone();
-    // SVG presentation attributes and inline declarations inherit. `display`
-    // is different: a descendant cannot override an ancestor's display:none.
-    if node.attribute("display") == Some("none") {
-        state.display_none = true;
-    }
-    if let Some(transform) = node.attribute("transform") {
-        let local = parse_transform(transform)
-            .map_err(|e| svg_error(context.path_name, &format!("<{}> transform: {e}", tag)))?;
-        state.transform = compose(inherited.transform, local);
-    }
-    let style = computed_style(node, &state.inherited_style, &context.css_rules);
-    state.inherited_style = inheritable(&style);
-    if let Some(kind) = style_kind(&style, node) {
-        state.kind = kind;
-    }
-    if style.get("display").is_some_and(|v| v == "none") {
-        state.display_none = true;
-    }
-    if let Some(visibility) = style.get("visibility") {
-        state.visibility_hidden = visibility == "hidden" || visibility == "collapse";
-    }
-    let color_property = style.get("stroke").or_else(|| style.get("fill"));
-    if state.kind == CutStyle::Cut && color_property.is_some_and(|v| *v == "none") {
-        // A line with fill:none can still be a cut path; stroke:none plus
-        // fill:none is empty and can safely be ignored.
-        if style.get("stroke").is_some_and(|v| v == "none")
-            && style.get("fill").is_some_and(|v| v == "none")
-        {
-            state.display_none = true;
-        }
-    }
-    if !state.display_none && !state.visibility_hidden {
-        for (property, effect) in [
-            ("mask", "the art is imported unmasked"),
-            ("filter", "the art is imported unfiltered"),
-        ] {
-            if style.get(property).is_some_and(|v| v != "none") {
-                context.warn(format!("{}: {property} ignored; {effect}", label(node)));
-            }
-        }
-    }
-    if tag == "text" {
-        // Hidden text is skipped quietly; its <tspan>s never reach the geometry readers.
-        if !state.display_none && !state.visibility_hidden {
-            let content: String = node
-                .descendants()
-                .filter(|n| n.is_text())
-                .filter_map(|n| n.text())
-                .collect::<String>()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .chars()
-                .take(40)
-                .collect();
-            context.warn(format!(
-                "{} {content:?} skipped: SVG text needs fonts; convert text to paths before importing",
-                label(node)
-            ));
-        }
-        return Ok(());
-    }
-    if let Some(value) = style.get("clip-path").filter(|v| v.as_str() != "none")
-        && let Some(region) = clip_region(node, value, state.transform, context)?
-    {
-        if state.clips.len() >= MAX_SVG_CLIPS {
-            return Err(svg_error(
-                context.path_name,
-                "clip-path nesting exceeds 16 levels",
-            ));
-        }
-        state.clips.push(region);
-    }
-    if tag == "use" {
-        if !state.display_none {
-            let href = node
-                .attribute("href")
-                .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")))
-                .ok_or_else(|| svg_error(context.path_name, "<use> has no href reference"))?;
-            let id = href
-                .strip_prefix('#')
-                .filter(|id| !id.is_empty())
-                .ok_or_else(|| {
-                    svg_error(
-                        context.path_name,
-                        "<use> supports only local fragment references",
-                    )
-                })?;
-            if context.reference_stack.iter().any(|active| active == id) {
-                return Err(svg_error(
-                    context.path_name,
-                    &format!("cyclic <use> reference to #{id}"),
-                ));
-            }
-            let target = context.id_index.get(id).copied().ok_or_else(|| {
-                svg_error(
-                    context.path_name,
-                    &format!("<use> references missing id #{id}"),
-                )
-            })?;
-            if !matches!(
-                target.tag_name().name(),
-                "g" | "symbol"
-                    | "path"
-                    | "rect"
-                    | "circle"
-                    | "ellipse"
-                    | "line"
-                    | "polyline"
-                    | "polygon"
-            ) {
-                return Err(svg_error(
-                    context.path_name,
-                    &format!(
-                        "<use> reference #{id} targets unsupported <{}>",
-                        target.tag_name().name()
-                    ),
-                ));
-            }
-            let x = use_viewport_length(node, "x", 0.0, context.path_name)?;
-            let y = use_viewport_length(node, "y", 0.0, context.path_name)?;
-            if x > 1.0e9 || y > 1.0e9 {
-                return Err(svg_error(
-                    context.path_name,
-                    "<use> coordinates exceed ±1e9",
-                ));
-            }
-            context.instance_count = context
-                .instance_count
-                .checked_add(1)
-                .ok_or_else(|| svg_error(context.path_name, "SVG use-instance counter overflow"))?;
-            if context.instance_count > MAX_SVG_INSTANCES {
-                return Err(svg_error(
-                    context.path_name,
-                    "SVG exceeds the 10,000 use-instance limit",
-                ));
-            }
-            if target.tag_name().name() == "symbol" {
-                import_symbol(target, node, state, x, y, depth + 1, context)?;
-                return Ok(());
-            }
-            state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
-            context.reference_stack.push(id.to_string());
-            let result = import_node(target, state, depth + 1, context);
-            context.reference_stack.pop();
-            return result;
-        }
-        return Ok(());
-    }
-    if !state.display_none
-        && !state.visibility_hidden
-        && let Some(path) = geometry_for(node, context.path_name)?
-    {
-        let mut transformed = transform_path(&path, state.transform);
-        validate_import_path(&transformed, context.path_name)?;
-        for clip in &state.clips {
-            transformed = clip_to_region(&transformed, clip)
-                .map_err(|e| svg_error(context.path_name, &format!("clip-path: {e}")))?;
-        }
-        if !transformed.elements().is_empty() {
-            let color = stroke_color(node, &style, context);
-            let index = context.layer_for(state.kind, color);
-            context
-                .doc
-                .push_shape(index, transformed, state.kind)
-                .map_err(|e| svg_error(context.path_name, &e.to_string()))?;
-        }
-    }
-    for child in node.children().filter(|n| n.is_element()) {
-        import_node(child, state.clone(), depth + 1, context)?;
-    }
-    Ok(())
-}
-
-fn import_symbol<'a, 'input>(
-    symbol: roxmltree::Node<'a, 'input>,
-    use_node: roxmltree::Node<'a, 'input>,
-    mut state: ImportState,
-    x: f64,
-    y: f64,
-    depth: usize,
-    context: &mut ImportContext<'a, 'input, '_>,
-) -> Result<(), SvgError> {
-    if depth > MAX_SVG_DEPTH {
-        return Err(svg_error(
-            context.path_name,
-            "SVG nesting exceeds 128 levels",
-        ));
-    }
-    let id = symbol
-        .attribute("id")
-        .ok_or_else(|| svg_error(context.path_name, "<use> symbol target is missing its id"))?;
-    if symbol.attribute("display") == Some("none") {
-        return Ok(());
-    }
-    if let Some(transform) = symbol.attribute("transform") {
-        let local = parse_transform(transform)
-            .map_err(|e| svg_error(context.path_name, &format!("<symbol> transform: {e}")))?;
-        state.transform = compose(state.transform, local);
-    }
-    let style = computed_style(symbol, &state.inherited_style, &context.css_rules);
-    if style.get("display").is_some_and(|value| value == "none") {
-        return Ok(());
-    }
-    if let Some(visibility) = style.get("visibility") {
-        state.visibility_hidden = visibility == "hidden" || visibility == "collapse";
-    }
-    if let Some(kind) = style_kind(&style, symbol) {
-        state.kind = kind;
-    }
-    state.inherited_style = inheritable(&style);
-
-    if let Some(raw_view_box) = symbol.attribute("viewBox") {
-        let values = parse_number_list(raw_view_box)
-            .filter(|values| values.len() == 4)
-            .ok_or_else(|| {
-                svg_error(
-                    context.path_name,
-                    "<symbol> viewBox must contain four finite numbers",
-                )
-            })?;
-        let (min_x, min_y, vb_w, vb_h) = (values[0], values[1], values[2], values[3]);
-        if values.iter().any(|value| value.abs() > 1.0e9) {
-            return Err(svg_error(
-                context.path_name,
-                "<symbol> viewBox exceeds ±1e9",
-            ));
-        }
-        if vb_w <= 0.0 || vb_h <= 0.0 {
-            return Err(svg_error(
-                context.path_name,
-                "<symbol> viewBox dimensions must be positive",
-            ));
-        }
-        let width = use_viewport_length(use_node, "width", vb_w, context.path_name)?;
-        let height = use_viewport_length(use_node, "height", vb_h, context.path_name)?;
-        if width == 0.0 || height == 0.0 {
-            return Ok(());
-        }
-        let preserve = symbol
-            .attribute("preserveAspectRatio")
-            .unwrap_or("xMidYMid meet");
-        let viewport =
-            preserve_viewbox_transform(min_x, min_y, vb_w, vb_h, width, height, preserve)
-                .map_err(|message| svg_error(context.path_name, &format!("<symbol>: {message}")))?;
-        if !viewport.as_coeffs().iter().all(|value| value.is_finite()) {
-            return Err(svg_error(
-                context.path_name,
-                "<symbol> viewport transform is not finite",
-            ));
-        }
-        state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
-        state.transform = compose(state.transform, viewport);
-    } else {
-        state.transform = compose(state.transform, kurbo::Affine::translate((x, y)));
-    }
-
-    context.reference_stack.push(id.to_string());
-    let result = import_children(symbol, state, depth, context);
-    context.reference_stack.pop();
-    result
-}
-
-fn use_viewport_length(
-    use_node: roxmltree::Node<'_, '_>,
-    attribute: &str,
-    fallback: f64,
-    path_name: &str,
-) -> Result<f64, SvgError> {
-    let Some(raw) = use_node.attribute(attribute) else {
-        return Ok(fallback);
-    };
-    let value = parse_number(raw).ok_or_else(|| {
-        svg_error(
-            path_name,
-            &format!("<use> {attribute} must be a unitless finite SVG length"),
-        )
-    })?;
-    if value.abs() > 1.0e9 || (attribute != "x" && attribute != "y" && value < 0.0) {
-        return Err(svg_error(
-            path_name,
-            &format!("<use> {attribute} is outside its supported range"),
-        ));
-    }
-    Ok(value)
-}
-
-fn import_children<'a, 'input>(
-    parent: roxmltree::Node<'a, 'input>,
-    state: ImportState,
-    depth: usize,
-    context: &mut ImportContext<'a, 'input, '_>,
-) -> Result<(), SvgError> {
-    if depth > MAX_SVG_DEPTH {
-        return Err(svg_error(
-            context.path_name,
-            "SVG nesting exceeds 128 levels",
-        ));
-    }
-    for child in parent.children().filter(|node| node.is_element()) {
-        import_node(child, state.clone(), depth + 1, context)?;
-    }
-    Ok(())
-}
-
-/// The properties children inherit: `display`, `clip-path`, `mask` and `filter` are
-/// not inherited (SVG 1.1 property index; CSS Masking §5, Filter Effects §5).
-fn inheritable(style: &StyleMap) -> StyleMap {
-    style
-        .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "display" | "clip-path" | "mask" | "filter"))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
-}
-
-/// `<tag id="…">` for warnings, so a user can find the element in the file.
-fn label(node: roxmltree::Node<'_, '_>) -> String {
-    let tag = node.tag_name().name();
-    match node.attribute("id") {
-        Some(id) => format!("<{tag} id={:?}>", id.chars().take(64).collect::<String>()),
-        None => format!("<{tag}>"),
-    }
-}
-
-/// The shape's stroke as `#rrggbb`, or `None` for no stroke or a paint server without
-/// a colour fallback (SVG 2 §13.2 `<paint>`). An unreadable colour warns and is `None`.
-fn stroke_color(
-    node: roxmltree::Node<'_, '_>,
-    style: &StyleMap,
-    context: &mut ImportContext<'_, '_, '_>,
-) -> Option<String> {
-    let raw = style.get("stroke")?.trim();
-    // `url(#gradient) red`: the colour after the reference is the fallback.
-    let paint = match raw.strip_prefix("url(") {
-        Some(rest) => rest.split_once(')')?.1.trim(),
-        None => raw,
-    };
-    let paint = if paint.eq_ignore_ascii_case("currentcolor") {
-        // `color`'s initial value is the user agent's; black is what every browser uses.
-        style.get("color").map_or("black", String::as_str)
-    } else {
-        paint
-    };
-    if paint.is_empty() || paint == "none" || paint.eq_ignore_ascii_case("transparent") {
-        return None;
-    }
-    match stencilcraft_color::parse_color(paint) {
-        Ok(color) => Some(color.to_css()),
-        Err(_) => {
-            context.warn(format!(
-                "{}: stroke colour {:?} not understood; shape put on the uncoloured layer",
-                label(node),
-                paint.chars().take(64).collect::<String>()
-            ));
-            None
-        }
-    }
-}
-
-/// The document-space region of `clip-path: url(#id)` on `node` (CSS Masking §6), or
-/// `None` with a warning when it cannot be applied.
-fn clip_region(
-    node: roxmltree::Node<'_, '_>,
-    value: &str,
-    transform: kurbo::Affine,
-    context: &mut ImportContext<'_, '_, '_>,
-) -> Result<Option<BezPath>, SvgError> {
-    let id = value
-        .trim()
-        .strip_prefix("url(")
-        .and_then(|rest| rest.strip_suffix(')'))
-        .map(|inner| inner.trim().trim_matches(['"', '\'']))
-        .and_then(|inner| inner.strip_prefix('#'));
-    let Some(target) = id.and_then(|id| context.id_index.get(id).copied()) else {
-        context.warn(format!(
-            "{}: clip-path {:?} is not a local <clipPath> reference; imported unclipped",
-            label(node),
-            value.chars().take(64).collect::<String>()
-        ));
-        return Ok(None);
-    };
-    if target.tag_name().name() != "clipPath" {
-        context.warn(format!(
-            "{}: clip-path targets {}, not a <clipPath>; imported unclipped",
-            label(node),
-            label(target)
-        ));
-        return Ok(None);
-    }
-    if target.attribute("clipPathUnits") == Some("objectBoundingBox") {
-        context.warn(format!(
-            "{}: objectBoundingBox clip units are not supported; imported unclipped",
-            label(target)
-        ));
-        return Ok(None);
-    }
-    if target.attribute("clip-path").is_some() {
-        context.warn(format!(
-            "{}: a clip-path on a <clipPath> is not applied",
-            label(target)
-        ));
-    }
-    let mut space = transform;
-    if let Some(raw) = target.attribute("transform") {
-        let local = parse_transform(raw)
-            .map_err(|e| svg_error(context.path_name, &format!("<clipPath> transform: {e}")))?;
-        space = compose(space, local);
-    }
-    let mut pieces = Vec::new();
-    for child in target.children().filter(|n| n.is_element()) {
-        let tag = child.tag_name().name();
-        if child.attribute("display") == Some("none") {
-            continue;
-        }
-        if !matches!(
-            tag,
-            "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
-        ) {
-            if !matches!(tag, "title" | "desc" | "metadata") {
-                context.warn(format!(
-                    "{}: {} inside a clip path is not supported; it adds nothing to the clip",
-                    label(target),
-                    label(child)
-                ));
-            }
-            continue;
-        }
-        let Some(path) = geometry_for(child, context.path_name)? else {
-            continue;
-        };
-        let mut child_space = space;
-        if let Some(raw) = child.attribute("transform") {
-            let local = parse_transform(raw)
-                .map_err(|e| svg_error(context.path_name, &format!("<{tag}> transform: {e}")))?;
-            child_space = compose(child_space, local);
-        }
-        let path = transform_path(&path, child_space);
-        validate_import_path(&path, context.path_name)?;
-        let evenodd = child
-            .attribute("clip-rule")
-            .or(target.attribute("clip-rule"));
-        let rule = if evenodd == Some("evenodd") {
-            vectorcraft_geom::FillRule::EvenOdd
-        } else {
-            vectorcraft_geom::FillRule::NonZero
-        };
-        pieces.push((vectorcraft_geom::PathData::from_bezpath(&path), rule));
-    }
-    // An empty clip path clips everything away (CSS Masking §6.1).
-    if pieces.is_empty() {
-        return Ok(Some(BezPath::new()));
-    }
-    let inputs: Vec<_> = pieces.iter().map(|(p, rule)| (p, *rule)).collect();
-    let region =
-        vectorcraft_pathops::try_boolean_n(&inputs, |inside: &[bool]| inside.iter().any(|b| *b))
-            .map_err(|e| svg_error(context.path_name, &format!("clip-path: {e}")))?;
-    Ok(Some(region.to_bezpath()))
-}
-
-/// `path` cut down to `region`: closed contours by boolean intersection (curves kept),
-/// open contours flattened and clipped as polylines.
 fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     if region.elements().is_empty() {
         return Ok(BezPath::new());
@@ -1081,7 +532,7 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
         .elements()
         .iter()
         .copied()
-        .chain([kurbo::PathEl::MoveTo(kurbo::Point::ZERO)])
+        .chain([kurbo::PathEl::MoveTo(Point::ZERO)])
     {
         if matches!(el, kurbo::PathEl::MoveTo(_)) && !contour.is_empty() {
             let target = if matches!(contour.last(), Some(kurbo::PathEl::ClosePath)) {
@@ -1095,7 +546,6 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     }
     let mut out = BezPath::new();
     if !closed.elements().is_empty() {
-        // Cut contours follow the engine's even-odd convention, so holes stay holes.
         let kept = vectorcraft_pathops::try_boolean(
             &vectorcraft_geom::PathData::from_bezpath(&closed),
             vectorcraft_geom::FillRule::EvenOdd,
@@ -1108,7 +558,7 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
         out.extend(kept.to_bezpath());
     }
     if !open.elements().is_empty() {
-        let polygons: Vec<Vec<kurbo::Point>> = stencilcraft_generate::flatten(region)
+        let polygons: Vec<Vec<Point>> = stencilcraft_generate::flatten(region)
             .map_err(|e| e.to_string())?
             .into_iter()
             .filter(|c| c.closed && c.points.len() >= 3)
@@ -1121,1234 +571,8 @@ fn clip_to_region(path: &BezPath, region: &BezPath) -> Result<BezPath, String> {
     }
     Ok(out)
 }
-
-fn geometry_for(
-    node: roxmltree::Node<'_, '_>,
-    path_name: &str,
-) -> Result<Option<BezPath>, SvgError> {
-    let tag = node.tag_name().name();
-    let number = |name: &str, default: f64| -> Result<f64, SvgError> {
-        match node.attribute(name) {
-            Some(value) => parse_number(value).ok_or_else(|| {
-                svg_error(path_name, &format!("<{tag}> has invalid {name}={value:?}"))
-            }),
-            None => Ok(default),
-        }
-    };
-    let path = match tag {
-        "svg" | "g" | "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "title" | "desc"
-        | "metadata" | "style" | "stop" | "namedview" | "guide" | "perspective" => return Ok(None),
-        "path" => {
-            let d = node
-                .attribute("d")
-                .ok_or_else(|| svg_error(path_name, "<path> has no d attribute"))?;
-            BezPath::from_svg(d)
-                .map_err(|e| svg_error(path_name, &format!("bad path data: {e}")))?
-        }
-        "rect" => {
-            let x = number("x", 0.0)?;
-            let y = number("y", 0.0)?;
-            let w = number("width", 0.0)?;
-            let h = number("height", 0.0)?;
-            if w < 0.0 || h < 0.0 {
-                return Err(svg_error(
-                    path_name,
-                    "<rect> width/height cannot be negative",
-                ));
-            }
-            let mut rx = number("rx", number("ry", 0.0)?)?;
-            let mut ry = number("ry", rx)?;
-            if rx < 0.0 || ry < 0.0 {
-                return Err(svg_error(
-                    path_name,
-                    "<rect> corner radii cannot be negative",
-                ));
-            }
-            if rx == 0.0 {
-                rx = ry;
-            }
-            if ry == 0.0 {
-                ry = rx;
-            }
-            rounded_rect(x, y, w, h, rx.min(w / 2.0), ry.min(h / 2.0))
-        }
-        "circle" => {
-            let cx = number("cx", 0.0)?;
-            let cy = number("cy", 0.0)?;
-            let r = number("r", 0.0)?;
-            if r < 0.0 {
-                return Err(svg_error(path_name, "<circle> radius cannot be negative"));
-            }
-            ellipse_path(cx, cy, r, r)
-        }
-        "ellipse" => {
-            let cx = number("cx", 0.0)?;
-            let cy = number("cy", 0.0)?;
-            let rx = number("rx", 0.0)?;
-            let ry = number("ry", 0.0)?;
-            if rx < 0.0 || ry < 0.0 {
-                return Err(svg_error(path_name, "<ellipse> radii cannot be negative"));
-            }
-            ellipse_path(cx, cy, rx, ry)
-        }
-        "line" => {
-            let mut p = BezPath::new();
-            p.move_to(kurbo::Point::new(number("x1", 0.0)?, number("y1", 0.0)?));
-            p.line_to(kurbo::Point::new(number("x2", 0.0)?, number("y2", 0.0)?));
-            p
-        }
-        "polyline" | "polygon" => {
-            let points = node
-                .attribute("points")
-                .ok_or_else(|| svg_error(path_name, &format!("<{tag}> has no points attribute")))?;
-            points_path(points, tag == "polygon", path_name)?
-        }
-        "text" | "tspan" | "image" | "foreignObject" => {
-            return Err(svg_error(
-                path_name,
-                &format!("<{tag}> is not supported yet"),
-            ));
-        }
-        name if is_supported_non_drawable(name) => return Ok(None),
-        _ => {
-            return Err(svg_error(
-                path_name,
-                &format!(
-                    "unsupported SVG element <{tag}>; import stopped to avoid silently dropping art"
-                ),
-            ));
-        }
-    };
-    Ok(Some(path))
-}
-
-fn is_supported_non_drawable(tag: &str) -> bool {
-    matches!(
-        tag,
-        "a" | "switch"
-            | "marker"
-            | "linearGradient"
-            | "radialGradient"
-            | "filter"
-            | "feGaussianBlur"
-            | "feOffset"
-            | "feBlend"
-            | "feColorMatrix"
-            | "feComponentTransfer"
-            | "feComposite"
-            | "feConvolveMatrix"
-            | "feDiffuseLighting"
-            | "feDisplacementMap"
-            | "feDistantLight"
-            | "feDropShadow"
-            | "feFlood"
-            | "feFuncA"
-            | "feFuncB"
-            | "feFuncG"
-            | "feFuncR"
-            | "feImage"
-            | "feMerge"
-            | "feMergeNode"
-            | "feMorphology"
-            | "fePointLight"
-            | "feSpecularLighting"
-            | "feSpotLight"
-            | "feTile"
-            | "feTurbulence"
-            | "animate"
-            | "animateMotion"
-            | "animateTransform"
-            | "set"
-            | "view"
-            | "cursor"
-            | "color-profile"
-            | "font"
-            | "font-face"
-            | "glyph"
-            | "missing-glyph"
-    )
-}
-
-fn points_path(points: &str, closed: bool, path_name: &str) -> Result<BezPath, SvgError> {
-    let values =
-        parse_number_list(points).ok_or_else(|| svg_error(path_name, "invalid points list"))?;
-    if values.len() % 2 != 0 {
-        return Err(svg_error(
-            path_name,
-            "points list must contain coordinate pairs",
-        ));
-    }
-    if values.len() / 2 > 500_000 {
-        return Err(svg_error(
-            path_name,
-            "a polygon exceeds the 500,000-point limit",
-        ));
-    }
-    let mut path = BezPath::new();
-    let mut pairs = values.as_chunks::<2>().0.iter();
-    if let Some(first) = pairs.next() {
-        path.move_to(kurbo::Point::new(first[0], first[1]));
-        for pair in pairs {
-            path.line_to(kurbo::Point::new(pair[0], pair[1]));
-        }
-        if closed {
-            path.close_path();
-        }
-    }
-    Ok(path)
-}
-
-fn rounded_rect(x: f64, y: f64, w: f64, h: f64, rx: f64, ry: f64) -> BezPath {
-    if rx <= 0.0 || ry <= 0.0 {
-        let mut p = BezPath::new();
-        p.move_to(kurbo::Point::new(x, y));
-        p.line_to(kurbo::Point::new(x + w, y));
-        p.line_to(kurbo::Point::new(x + w, y + h));
-        p.line_to(kurbo::Point::new(x, y + h));
-        p.close_path();
-        return p;
-    }
-    let k = 0.552_284_749_830_793_6;
-    let mut p = BezPath::new();
-    p.move_to(kurbo::Point::new(x + rx, y));
-    p.line_to(kurbo::Point::new(x + w - rx, y));
-    p.curve_to(
-        kurbo::Point::new(x + w - rx + k * rx, y),
-        kurbo::Point::new(x + w, y + ry - k * ry),
-        kurbo::Point::new(x + w, y + ry),
-    );
-    p.line_to(kurbo::Point::new(x + w, y + h - ry));
-    p.curve_to(
-        kurbo::Point::new(x + w, y + h - ry + k * ry),
-        kurbo::Point::new(x + w - rx + k * rx, y + h),
-        kurbo::Point::new(x + w - rx, y + h),
-    );
-    p.line_to(kurbo::Point::new(x + rx, y + h));
-    p.curve_to(
-        kurbo::Point::new(x + rx - k * rx, y + h),
-        kurbo::Point::new(x, y + h - ry + k * ry),
-        kurbo::Point::new(x, y + h - ry),
-    );
-    p.line_to(kurbo::Point::new(x, y + ry));
-    p.curve_to(
-        kurbo::Point::new(x, y + ry - k * ry),
-        kurbo::Point::new(x + rx - k * rx, y),
-        kurbo::Point::new(x + rx, y),
-    );
-    p.close_path();
-    p
-}
-
-fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> BezPath {
-    let k = 0.552_284_749_830_793_6;
-    let mut p = BezPath::new();
-    p.move_to(kurbo::Point::new(cx + rx, cy));
-    p.curve_to(
-        kurbo::Point::new(cx + rx, cy + k * ry),
-        kurbo::Point::new(cx + k * rx, cy + ry),
-        kurbo::Point::new(cx, cy + ry),
-    );
-    p.curve_to(
-        kurbo::Point::new(cx - k * rx, cy + ry),
-        kurbo::Point::new(cx - rx, cy + k * ry),
-        kurbo::Point::new(cx - rx, cy),
-    );
-    p.curve_to(
-        kurbo::Point::new(cx - rx, cy - k * ry),
-        kurbo::Point::new(cx - k * rx, cy - ry),
-        kurbo::Point::new(cx, cy - ry),
-    );
-    p.curve_to(
-        kurbo::Point::new(cx + k * rx, cy - ry),
-        kurbo::Point::new(cx + rx, cy - k * ry),
-        kurbo::Point::new(cx + rx, cy),
-    );
-    p.close_path();
-    p
-}
-
-const MAX_CSS_BYTES: usize = 1024 * 1024;
-const MAX_CSS_RULES: usize = 10_000;
-const MAX_CSS_PROPERTIES: usize = 32;
-const SUPPORTED_STYLE_PROPERTIES: &[&str] = &[
-    "display",
-    "visibility",
-    "data-kind",
-    "data-style",
-    "fill",
-    "stroke",
-    "stroke-width",
-    "color",
-    "clip-path",
-    "mask",
-    "filter",
-];
-
-type StyleMap = std::collections::HashMap<String, String>;
-type CssPriority = (bool, u32, u32, u32, usize);
-type CascadeWinners = std::collections::HashMap<String, (CssPriority, String)>;
-
-#[derive(Clone)]
-struct CssRule {
-    selectors: Vec<SimpleSelector>,
-    declarations: StyleMap,
-    important: std::collections::HashSet<String>,
-    order: usize,
-}
-
-#[derive(Clone)]
-struct SimpleSelector {
-    compounds: Vec<CompoundSelector>,
-    /// Between consecutive compounds: ' ' descendant, '>' child, '+' next sibling,
-    /// '~' later sibling (Selectors Level 3 §8).
-    combinators: Vec<char>,
-    specificity: (u32, u32, u32),
-}
-
-/// `[name]` or `[name op value]`, op one of `=`, `~`, `^`, `$`, `*`, `|`.
-type AttributeSelector = (String, Option<(char, String)>);
-
-#[derive(Clone, Default)]
-struct CompoundSelector {
-    tag: Option<String>,
-    id: Option<String>,
-    classes: Vec<String>,
-    attributes: Vec<AttributeSelector>,
-    first_child: bool,
-    last_child: bool,
-    root: bool,
-    /// `:not(…)` arguments; each is a compound without its own `:not`.
-    nots: Vec<CompoundSelector>,
-}
-
-impl CompoundSelector {
-    fn matches(&self, node: roxmltree::Node<'_, '_>) -> bool {
-        if self
-            .tag
-            .as_deref()
-            .is_some_and(|tag| tag != "*" && tag != node.tag_name().name())
-        {
-            return false;
-        }
-        if self
-            .id
-            .as_deref()
-            .is_some_and(|id| node.attribute("id") != Some(id))
-        {
-            return false;
-        }
-        let classes: Vec<&str> = node
-            .attribute("class")
-            .unwrap_or("")
-            .split_ascii_whitespace()
-            .collect();
-        if self
-            .classes
-            .iter()
-            .any(|class| !classes.contains(&class.as_str()))
-        {
-            return false;
-        }
-        if (self.first_child && node.prev_sibling_element().is_some())
-            || (self.last_child && node.next_sibling_element().is_some())
-            || (self.root && node.parent_element().is_some())
-            || self.nots.iter().any(|not| not.matches(node))
-        {
-            return false;
-        }
-        self.attributes.iter().all(|(name, test)| {
-            let Some(actual) = node.attribute(name.as_str()) else {
-                return false;
-            };
-            let Some((op, value)) = test else {
-                return true;
-            };
-            let value = value.as_str();
-            match op {
-                '=' => actual == value,
-                '~' => actual.split_ascii_whitespace().any(|word| word == value),
-                '^' => !value.is_empty() && actual.starts_with(value),
-                '$' => !value.is_empty() && actual.ends_with(value),
-                '*' => !value.is_empty() && actual.contains(value),
-                '|' => {
-                    actual == value
-                        || actual
-                            .strip_prefix(value)
-                            .is_some_and(|rest| rest.starts_with('-'))
-                }
-                _ => false,
-            }
-        })
-    }
-
-    fn specificity(&self) -> (u32, u32, u32) {
-        let mut total = (
-            u32::from(self.id.is_some()),
-            (self.classes.len() + self.attributes.len()) as u32
-                + u32::from(self.first_child)
-                + u32::from(self.last_child)
-                + u32::from(self.root),
-            u32::from(self.tag.as_deref().is_some_and(|tag| tag != "*")),
-        );
-        // `:not()` counts as its argument (Selectors Level 3 §16).
-        for not in &self.nots {
-            let (a, b, c) = not.specificity();
-            total = (total.0 + a, total.1 + b, total.2 + c);
-        }
-        total
-    }
-}
-
-impl SimpleSelector {
-    fn matches(&self, node: roxmltree::Node<'_, '_>) -> bool {
-        let Some(last) = self.compounds.last() else {
-            return false;
-        };
-        if !last.matches(node) {
-            return false;
-        }
-        let mut current = node;
-        for index in (0..self.combinators.len()).rev() {
-            let (Some(previous), Some(combinator)) =
-                (self.compounds.get(index), self.combinators.get(index))
-            else {
-                return false;
-            };
-            // shortcut: descendant and later-sibling steps take the nearest match without
-            // backtracking, which misses a few long selector chains; fine for SVG styling.
-            let found = match combinator {
-                '>' => current.parent_element().filter(|n| previous.matches(*n)),
-                '+' => current
-                    .prev_sibling_element()
-                    .filter(|n| previous.matches(*n)),
-                ' ' => current
-                    .ancestors()
-                    .skip(1)
-                    .find(|n| n.is_element() && previous.matches(*n)),
-                '~' => {
-                    let mut sibling = current.prev_sibling_element();
-                    while let Some(candidate) = sibling {
-                        if previous.matches(candidate) {
-                            break;
-                        }
-                        sibling = candidate.prev_sibling_element();
-                    }
-                    sibling
-                }
-                _ => None,
-            };
-            let Some(next) = found else {
-                return false;
-            };
-            current = next;
-        }
-        true
-    }
-}
-
-/// CSS block at-rules whose content never styles geometry; skipped without a warning.
-const QUIET_AT_RULES: &[&str] = &[
-    "font-face",
-    "keyframes",
-    "-webkit-keyframes",
-    "page",
-    "counter-style",
-    "charset",
-    "namespace",
-];
-
-fn parse_stylesheets(
-    root: roxmltree::Node<'_, '_>,
-    path_name: &str,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<CssRule>, SvgError> {
-    let mut rules = Vec::new();
-    let mut dropped = 0usize;
-    let mut warn = |message: String| push_warning(warnings, &mut dropped, message);
-    for node in root
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "style")
-    {
-        if let Some(media) = node.attribute("media")
-            && !matches!(media.trim(), "" | "all" | "screen")
-        {
-            continue;
-        }
-        let stylesheet = node.text().unwrap_or("");
-        if stylesheet.len() > MAX_CSS_BYTES {
-            return Err(svg_error(
-                path_name,
-                "CSS stylesheet exceeds the 1 MiB limit",
-            ));
-        }
-        let stylesheet = strip_css_comments(stylesheet);
-        let mut rest = stylesheet.as_str();
-        loop {
-            rest = rest.trim_start();
-            if rest.is_empty() {
-                break;
-            }
-            if let Some(at_rule) = rest.strip_prefix('@') {
-                let name: String = at_rule
-                    .chars()
-                    .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
-                    .take(64)
-                    .collect::<String>()
-                    .to_ascii_lowercase();
-                let quiet = QUIET_AT_RULES.contains(&name.as_str());
-                match (rest.find('{'), rest.find(';')) {
-                    (Some(open), semi) if semi.is_none_or(|semi| open < semi) => {
-                        let close = matching_brace(rest, open)
-                            .ok_or_else(|| svg_error(path_name, "malformed CSS at-rule"))?;
-                        if !quiet {
-                            warn(format!(
-                                "CSS @{name} block ignored; its rules are not applied"
-                            ));
-                        }
-                        rest = rest.get(close + 1..).unwrap_or("");
-                    }
-                    (_, Some(semi)) => {
-                        if !quiet {
-                            warn(format!(
-                                "CSS @{name} ignored (external stylesheets are not loaded)"
-                            ));
-                        }
-                        rest = rest.get(semi + 1..).unwrap_or("");
-                    }
-                    _ => return Err(svg_error(path_name, "malformed CSS at-rule")),
-                }
-                continue;
-            }
-            let (Some(open), Some(close)) = (rest.find('{'), rest.find('}')) else {
-                return Err(svg_error(path_name, "malformed CSS rule"));
-            };
-            if close < open {
-                return Err(svg_error(path_name, "malformed CSS rule"));
-            }
-            let selector_text = rest.get(..open).unwrap_or("").trim();
-            let raw_declarations = rest.get(open + 1..close).unwrap_or("");
-            rest = rest.get(close + 1..).unwrap_or("");
-            if selector_text.is_empty() {
-                continue;
-            }
-            let (declarations, important) = parse_declarations(raw_declarations, path_name)?;
-            for selector in split_selector_list(selector_text) {
-                let Some(parsed) = parse_selector(selector.trim()) else {
-                    warn(format!(
-                        "unsupported CSS selector {:?}; its rule is not applied",
-                        selector.chars().take(64).collect::<String>()
-                    ));
-                    continue;
-                };
-                rules.push(CssRule {
-                    selectors: vec![parsed],
-                    declarations: declarations.clone(),
-                    important: important.clone(),
-                    order: rules.len(),
-                });
-                if rules.len() > MAX_CSS_RULES {
-                    return Err(svg_error(path_name, "CSS exceeds the 10,000-rule limit"));
-                }
-            }
-        }
-    }
-    if dropped > 0 {
-        warnings.push(format!("…and {dropped} more CSS warnings"));
-    }
-    Ok(rules)
-}
-
-/// Byte index of the `}` closing the `{` at `open`, counting nested blocks.
-fn matching_brace(text: &str, open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, byte) in text.bytes().enumerate().skip(open) {
-        match byte {
-            b'{' => depth += 1,
-            b'}' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(index);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn strip_css_comments(raw: &str) -> String {
-    let mut output = String::with_capacity(raw.len());
-    let mut rest = raw;
-    while let Some(start) = rest.find("/*") {
-        output.push_str(&rest[..start]);
-        let Some(end) = rest[start + 2..].find("*/") else {
-            return output;
-        };
-        rest = &rest[start + end + 4..];
-    }
-    output.push_str(rest);
-    output
-}
-
-fn split_selector_list(raw: &str) -> Vec<&str> {
-    let mut selectors = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-    for (index, ch) in raw.char_indices() {
-        match ch {
-            '[' | '(' => depth += 1,
-            ']' | ')' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                selectors.push(raw[start..index].trim());
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-    selectors.push(raw[start..].trim());
-    selectors
-}
-
-fn parse_selector(raw: &str) -> Option<SimpleSelector> {
-    let mut compounds = Vec::new();
-    let mut combinators = Vec::new();
-    let mut compound = String::new();
-    let mut depth = 0usize;
-    let mut pending_space = false;
-    for ch in raw.chars() {
-        if matches!(ch, '[' | '(') {
-            depth += 1;
-            compound.push(ch);
-        } else if matches!(ch, ']' | ')') {
-            depth = depth.saturating_sub(1);
-            compound.push(ch);
-        } else if depth == 0 && ch.is_ascii_whitespace() {
-            if !compound.is_empty() {
-                compounds.push(parse_compound(&compound)?);
-                compound.clear();
-                pending_space = true;
-            }
-        } else if depth == 0 && matches!(ch, '>' | '+' | '~') {
-            if !compound.is_empty() {
-                compounds.push(parse_compound(&compound)?);
-                compound.clear();
-            } else if compounds.is_empty() || combinators.len() == compounds.len() {
-                return None;
-            }
-            pending_space = false;
-            combinators.push(ch);
-        } else {
-            if pending_space {
-                combinators.push(' ');
-                pending_space = false;
-            }
-            compound.push(ch);
-        }
-    }
-    if !compound.is_empty() {
-        compounds.push(parse_compound(&compound)?);
-    }
-    if compounds.is_empty() || combinators.len() + 1 != compounds.len() {
-        return None;
-    }
-    let specificity = compounds.iter().fold((0, 0, 0), |total, part| {
-        let (a, b, c) = part.specificity();
-        (total.0 + a, total.1 + b, total.2 + c)
-    });
-    Some(SimpleSelector {
-        compounds,
-        combinators,
-        specificity,
-    })
-}
-
-fn parse_compound(raw: &str) -> Option<CompoundSelector> {
-    let mut selector = CompoundSelector::default();
-    let chars: Vec<char> = raw.chars().collect();
-    let mut index = 0usize;
-    let name_char = |ch: &char| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_');
-    if chars
-        .first()
-        .is_some_and(|ch| *ch == '*' || ch.is_ascii_alphabetic() || *ch == '_')
-    {
-        let start = index;
-        index += 1;
-        while chars
-            .get(index)
-            .is_some_and(|ch| name_char(ch) || *ch == '*')
-        {
-            index += 1;
-        }
-        selector.tag = Some(chars[start..index].iter().collect());
-    }
-    while let Some(&marker) = chars.get(index) {
-        match marker {
-            '#' | '.' => {
-                index += 1;
-                let start = index;
-                while chars.get(index).is_some_and(name_char) {
-                    index += 1;
-                }
-                if start == index {
-                    return None;
-                }
-                let value: String = chars[start..index].iter().collect();
-                if marker == '#' {
-                    if selector.id.replace(value).is_some() {
-                        return None;
-                    }
-                } else {
-                    selector.classes.push(value);
-                }
-            }
-            '[' => {
-                index += 1;
-                let start = index;
-                while chars.get(index).is_some_and(|ch| *ch != ']') {
-                    index += 1;
-                }
-                if index == chars.len() {
-                    return None;
-                }
-                let content: String = chars[start..index].iter().collect();
-                index += 1;
-                selector
-                    .attributes
-                    .push(parse_attribute_selector(&content)?);
-            }
-            ':' => {
-                index += 1;
-                let start = index;
-                while chars.get(index).is_some_and(name_char) {
-                    index += 1;
-                }
-                let name: String = chars[start..index]
-                    .iter()
-                    .collect::<String>()
-                    .to_ascii_lowercase();
-                match name.as_str() {
-                    "first-child" => selector.first_child = true,
-                    "last-child" => selector.last_child = true,
-                    "root" => selector.root = true,
-                    "not" => {
-                        if chars.get(index) != Some(&'(') {
-                            return None;
-                        }
-                        let start = index + 1;
-                        let end = start + chars.get(start..)?.iter().position(|ch| *ch == ')')?;
-                        let inner: String = chars.get(start..end)?.iter().collect();
-                        // One level only (Selectors Level 3): no recursion on hostile input.
-                        if inner.contains(':') && inner.to_ascii_lowercase().contains(":not") {
-                            return None;
-                        }
-                        selector.nots.push(parse_compound(inner.trim())?);
-                        index = end + 1;
-                    }
-                    _ => return None,
-                }
-            }
-            _ => return None,
-        }
-    }
-    let empty = selector.tag.is_none()
-        && selector.id.is_none()
-        && selector.classes.is_empty()
-        && selector.attributes.is_empty()
-        && !selector.first_child
-        && !selector.last_child
-        && !selector.root
-        && selector.nots.is_empty();
-    (!empty).then_some(selector)
-}
-
-/// The inside of `[…]`: `name`, or `name` `op=` `value` with optional quotes.
-fn parse_attribute_selector(content: &str) -> Option<AttributeSelector> {
-    let Some((left, value)) = content.split_once('=') else {
-        let name = content.trim();
-        return (!name.is_empty()).then(|| (name.to_string(), None));
-    };
-    let left = left.trim_end();
-    let (name, op) = match left.chars().last() {
-        Some(op @ ('~' | '^' | '$' | '*' | '|')) => (&left[..left.len() - 1], op),
-        _ => (left, '='),
-    };
-    let name = name.trim();
-    if name.is_empty() {
-        return None;
-    }
-    let value = value.trim().trim_matches(['"', '\'']);
-    Some((name.to_string(), Some((op, value.to_string()))))
-}
-
-fn parse_declarations(
-    raw: &str,
-    path_name: &str,
-) -> Result<(StyleMap, std::collections::HashSet<String>), SvgError> {
-    let mut declarations = StyleMap::new();
-    let mut important = std::collections::HashSet::new();
-    for declaration in strip_css_comments(raw).split(';') {
-        let Some((property, value)) = declaration.split_once(':') else {
-            if !declaration.trim().is_empty() {
-                return Err(svg_error(path_name, "malformed CSS declaration"));
-            }
-            continue;
-        };
-        let property = property.trim().to_ascii_lowercase();
-        if !SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
-            continue;
-        }
-        if declarations.len() >= MAX_CSS_PROPERTIES {
-            return Err(svg_error(path_name, "CSS rule has too many declarations"));
-        }
-        let (value, is_important) = strip_important(value.trim());
-        if is_important {
-            important.insert(property.clone());
-        }
-        declarations.insert(property, value.trim().to_string());
-    }
-    Ok((declarations, important))
-}
-
-fn computed_style(
-    node: roxmltree::Node<'_, '_>,
-    inherited: &StyleMap,
-    rules: &[CssRule],
-) -> StyleMap {
-    let mut result = inherited.clone();
-    result.remove("display");
-    let mut winners = CascadeWinners::new();
-    // SVG presentation attributes participate below every author stylesheet rule.
-    for (property, value) in style_properties(node) {
-        result.insert(property, value);
-    }
-    for rule in rules {
-        for selector in &rule.selectors {
-            if selector.matches(node) {
-                let (ids, classes, tags) = selector.specificity;
-                for (property, value) in &rule.declarations {
-                    let priority = (
-                        rule.important.contains(property),
-                        ids,
-                        classes,
-                        tags,
-                        rule.order,
-                    );
-                    if winners
-                        .get(property)
-                        .is_none_or(|(old_priority, _)| priority >= *old_priority)
-                    {
-                        winners.insert(property.clone(), (priority, value.clone()));
-                    }
-                }
-            }
-        }
-    }
-    let mut important_winners = std::collections::HashSet::new();
-    for (property, (priority, value)) in &winners {
-        result.insert(property.clone(), value.clone());
-        if priority.0 {
-            important_winners.insert(property.clone());
-        }
-    }
-    let mut inline_winners = std::collections::HashMap::<String, (bool, String)>::new();
-    if let Some(inline) = node.attribute("style") {
-        for declaration in inline.split(';') {
-            let Some((property, value)) = declaration.split_once(':') else {
-                continue;
-            };
-            let property = property.trim().to_ascii_lowercase();
-            if !SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
-                continue;
-            }
-            let (value, important) = strip_important(value.trim());
-            if inline_winners
-                .get(&property)
-                .is_none_or(|(old_important, _)| important || !old_important)
-            {
-                inline_winners.insert(property, (important, value.to_string()));
-            }
-        }
-    }
-    for (property, (important, value)) in inline_winners {
-        if important || !important_winners.contains(&property) {
-            result.insert(property, value);
-        }
-    }
-    result
-}
-
-fn strip_important(value: &str) -> (&str, bool) {
-    let trimmed = value.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.ends_with("!important") {
-        (&trimmed[..trimmed.len() - "!important".len()], true)
-    } else {
-        (trimmed, false)
-    }
-}
-
-fn style_properties(node: roxmltree::Node<'_, '_>) -> StyleMap {
-    let mut properties = StyleMap::new();
-    for key in SUPPORTED_STYLE_PROPERTIES {
-        if let Some(value) = node.attribute(*key) {
-            properties.insert((*key).to_string(), value.trim().to_string());
-        }
-    }
-    if let Some(inline) = node.attribute("style") {
-        for declaration in inline.split(';') {
-            if let Some((property, value)) = declaration.split_once(':') {
-                let property = property.trim().to_ascii_lowercase();
-                if SUPPORTED_STYLE_PROPERTIES.contains(&property.as_str()) {
-                    let (value, _) = strip_important(value.trim());
-                    properties.insert(property, value.trim().to_string());
-                }
-            }
-        }
-    }
-    properties
-}
-
-fn style_kind(style: &StyleMap, node: roxmltree::Node<'_, '_>) -> Option<CutStyle> {
-    let explicit = style.get("data-kind").or_else(|| style.get("data-style"));
-    if let Some(value) = explicit {
-        match value.as_str() {
-            "cut" => return Some(CutStyle::Cut),
-            "engrave" | "score" | "mark" => return Some(CutStyle::Engrave),
-            _ => {}
-        }
-    }
-    let class = node.attribute("class").unwrap_or("").to_ascii_lowercase();
-    if class
-        .split_ascii_whitespace()
-        .any(|c| c.contains("engrave") || c.contains("score"))
-    {
-        Some(CutStyle::Engrave)
-    } else if class.split_ascii_whitespace().any(|c| c.contains("cut")) {
-        Some(CutStyle::Cut)
-    } else {
-        None
-    }
-}
-
-fn viewport_transform(
-    root: roxmltree::Node<'_, '_>,
-    path_name: &str,
-) -> Result<(f64, f64, kurbo::Affine), SvgError> {
-    if root.tag_name().name() == "symbol" {
-        return Err(svg_error(
-            path_name,
-            "a standalone <symbol> cannot be an SVG root",
-        ));
-    }
-    let view_box = match root.attribute("viewBox") {
-        Some(raw) => {
-            let values = parse_number_list(raw)
-                .filter(|v| v.len() == 4)
-                .ok_or_else(|| svg_error(path_name, "viewBox must contain four finite numbers"))?;
-            if values[2] <= 0.0 || values[3] <= 0.0 {
-                return Err(svg_error(
-                    path_name,
-                    "viewBox width and height must be positive",
-                ));
-            }
-            Some((values[0], values[1], values[2], values[3]))
-        }
-        None => None,
-    };
-    let width_attr = root.attribute("width");
-    let height_attr = root.attribute("height");
-    let explicit_viewport = width_attr.is_some() || height_attr.is_some();
-    let fallback = view_box
-        .map(|(_, _, w, h)| (w, h))
-        .unwrap_or((100.0, 150.0));
-    let width = width_attr
-        .map(svg_length_mm)
-        .transpose()
-        .map_err(|e| svg_error(path_name, &format!("root width: {e}")))?
-        .unwrap_or(fallback.0);
-    let height = height_attr
-        .map(svg_length_mm)
-        .transpose()
-        .map_err(|e| svg_error(path_name, &format!("root height: {e}")))?
-        .unwrap_or(fallback.1);
-    if !width.is_finite()
-        || !height.is_finite()
-        || width <= 0.0
-        || height <= 0.0
-        || width > 1.0e9
-        || height > 1.0e9
-    {
-        return Err(svg_error(
-            path_name,
-            "viewport dimensions must be positive, finite, and no larger than 1e9 mm",
-        ));
-    }
-    let Some((min_x, min_y, vb_w, vb_h)) = view_box else {
-        // Without viewBox, physical SVG user units are CSS px (96/in). For a
-        // bare SVG fragment there is no viewport and paths remain mm-based.
-        let sx = if explicit_viewport { 25.4 / 96.0 } else { 1.0 };
-        let sy = sx;
-        return Ok((width, height, kurbo::Affine::scale_non_uniform(sx, sy)));
-    };
-    let preserve = root
-        .attribute("preserveAspectRatio")
-        .unwrap_or("xMidYMid meet");
-    let transform = preserve_viewbox_transform(min_x, min_y, vb_w, vb_h, width, height, preserve)
-        .map_err(|message| svg_error(path_name, &message))?;
-    if !transform.as_coeffs().iter().all(|value| value.is_finite()) {
-        return Err(svg_error(path_name, "viewBox transform is not finite"));
-    }
-    Ok((width, height, transform))
-}
-
-fn preserve_viewbox_transform(
-    min_x: f64,
-    min_y: f64,
-    vb_w: f64,
-    vb_h: f64,
-    width: f64,
-    height: f64,
-    preserve: &str,
-) -> Result<kurbo::Affine, String> {
-    let tokens: Vec<&str> = preserve.split_ascii_whitespace().collect();
-    let align = tokens.first().copied().unwrap_or("xMidYMid");
-    let mode = tokens.get(1).copied().unwrap_or("meet");
-    if tokens.len() > 2 {
-        return Err("preserveAspectRatio has unexpected trailing tokens".to_string());
-    }
-    if align == "none" {
-        if tokens.len() > 1 {
-            return Err("preserveAspectRatio `none` does not accept a meet/slice mode".to_string());
-        }
-        return Ok(kurbo::Affine::new([
-            width / vb_w,
-            0.0,
-            0.0,
-            height / vb_h,
-            -min_x * width / vb_w,
-            -min_y * height / vb_h,
-        ]));
-    }
-    if !matches!(mode, "meet" | "slice") {
-        return Err("preserveAspectRatio supports only meet, slice, or none".to_string());
-    }
-    let (x_align, y_align) = match align {
-        "xMinYMin" => (0.0, 0.0),
-        "xMidYMin" => (0.5, 0.0),
-        "xMaxYMin" => (1.0, 0.0),
-        "xMinYMid" => (0.0, 0.5),
-        "xMidYMid" => (0.5, 0.5),
-        "xMaxYMid" => (1.0, 0.5),
-        "xMinYMax" => (0.0, 1.0),
-        "xMidYMax" => (0.5, 1.0),
-        "xMaxYMax" => (1.0, 1.0),
-        _ => return Err("unsupported preserveAspectRatio alignment".to_string()),
-    };
-    let sx = width / vb_w;
-    let sy = height / vb_h;
-    let scale = if mode == "meet" {
-        sx.min(sy)
-    } else {
-        sx.max(sy)
-    };
-    let tx = (width - vb_w * scale) * x_align - min_x * scale;
-    let ty = (height - vb_h * scale) * y_align - min_y * scale;
-    let transform = kurbo::Affine::new([scale, 0.0, 0.0, scale, tx, ty]);
-    if !transform.as_coeffs().iter().all(|value| value.is_finite()) {
-        return Err("preserveAspectRatio produces a non-finite transform".to_string());
-    }
-    Ok(transform)
-}
-
-fn svg_length_mm(raw: &str) -> Result<f64, String> {
-    let raw = raw.trim();
-    let split = raw
-        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | 'e' | 'E')))
-        .unwrap_or(raw.len());
-    let value = raw[..split]
-        .parse::<f64>()
-        .map_err(|_| format!("invalid length {raw:?}"))?;
-    if !value.is_finite() || value <= 0.0 {
-        return Err(format!("length {raw:?} must be positive and finite"));
-    }
-    let unit = raw[split..].trim();
-    let scale = match unit {
-        "" | "px" => 25.4 / 96.0,
-        "mm" => 1.0,
-        "cm" => 10.0,
-        "in" => 25.4,
-        "pt" => 25.4 / 72.0,
-        "pc" => 25.4 / 6.0,
-        _ => return Err(format!("unsupported length unit {unit:?}")),
-    };
-    Ok(value * scale)
-}
-
-fn parse_number(raw: &str) -> Option<f64> {
-    let value = raw.trim().parse::<f64>().ok()?;
-    value.is_finite().then_some(value)
-}
-
-fn parse_number_list(raw: &str) -> Option<Vec<f64>> {
-    let mut values = Vec::new();
-    let mut token = String::new();
-    let mut comma_pending = false;
-    let mut saw_any = false;
-    for ch in raw.chars() {
-        if ch.is_ascii_whitespace() {
-            if !token.is_empty() {
-                values.push(parse_number(&token)?);
-                token.clear();
-                saw_any = true;
-            }
-        } else if ch == ',' {
-            if !token.is_empty() {
-                values.push(parse_number(&token)?);
-                token.clear();
-                saw_any = true;
-                comma_pending = true;
-            } else if !comma_pending && saw_any {
-                // Whitespace before a comma is valid; consecutive commas or
-                // a leading comma are not part of SVG's number-list grammar.
-                comma_pending = true;
-            } else {
-                return None;
-            }
-        } else if (ch == '+' || ch == '-')
-            && !token.is_empty()
-            && !token.ends_with('e')
-            && !token.ends_with('E')
-        {
-            values.push(parse_number(&token)?);
-            token.clear();
-            token.push(ch);
-            saw_any = true;
-            comma_pending = false;
-        } else if ch.is_ascii_digit() || matches!(ch, '+' | '-' | '.' | 'e' | 'E') {
-            token.push(ch);
-            comma_pending = false;
-        } else {
-            return None;
-        }
-        if values.len() > 200_000 {
-            return None;
-        }
-    }
-    if comma_pending {
-        return None;
-    }
-    if !token.is_empty() {
-        values.push(parse_number(&token)?);
-    }
-    Some(values)
-}
-
-fn parse_transform(raw: &str) -> Result<kurbo::Affine, String> {
-    let mut rest = raw.trim();
-    let mut result = kurbo::Affine::IDENTITY;
-    while !rest.is_empty() {
-        rest = rest.trim_start_matches(|c: char| c.is_ascii_whitespace() || c == ',');
-        if rest.is_empty() {
-            break;
-        }
-        let open = rest
-            .find('(')
-            .ok_or_else(|| "expected '(' after transform name".to_string())?;
-        let name = rest[..open].trim();
-        let close = rest[open + 1..]
-            .find(')')
-            .map(|i| i + open + 1)
-            .ok_or_else(|| "unterminated transform".to_string())?;
-        let values = parse_number_list(&rest[open + 1..close])
-            .ok_or_else(|| "transform has invalid numeric arguments".to_string())?;
-        let local = match (name, values.as_slice()) {
-            ("matrix", [a, b, c, d, e, f]) => kurbo::Affine::new([*a, *b, *c, *d, *e, *f]),
-            ("translate", [x]) => kurbo::Affine::translate((*x, 0.0)),
-            ("translate", [x, y]) => kurbo::Affine::translate((*x, *y)),
-            ("scale", [s]) => kurbo::Affine::scale(*s),
-            ("scale", [x, y]) => kurbo::Affine::scale_non_uniform(*x, *y),
-            ("rotate", [deg]) => kurbo::Affine::rotate(deg.to_radians()),
-            ("rotate", [deg, cx, cy]) => {
-                let to = kurbo::Affine::translate((*cx, *cy));
-                let rot = kurbo::Affine::rotate(deg.to_radians());
-                let from = kurbo::Affine::translate((-*cx, -*cy));
-                compose(compose(to, rot), from)
-            }
-            ("skewX", [deg]) => {
-                kurbo::Affine::new([1.0, 0.0, deg.to_radians().tan(), 1.0, 0.0, 0.0])
-            }
-            ("skewY", [deg]) => {
-                kurbo::Affine::new([1.0, deg.to_radians().tan(), 0.0, 1.0, 0.0, 0.0])
-            }
-            _ => return Err(format!("unsupported or malformed transform {name:?}")),
-        };
-        if !local.as_coeffs().iter().all(|v| v.is_finite()) {
-            return Err("transform contains non-finite values".to_string());
-        }
-        result = compose(result, local);
-        rest = &rest[close + 1..];
-    }
-    Ok(result)
-}
-
-/// Matrix composition `parent(local(point))` for kurbo's [a,b,c,d,e,f]
-/// affine coefficient order.
-fn compose(parent: kurbo::Affine, local: kurbo::Affine) -> kurbo::Affine {
-    let [a, b, c, d, e, f] = parent.as_coeffs();
-    let [g, h, i, j, k, l] = local.as_coeffs();
-    kurbo::Affine::new([
-        a * g + c * h,
-        b * g + d * h,
-        a * i + c * j,
-        b * i + d * j,
-        a * k + c * l + e,
-        b * k + d * l + f,
-    ])
-}
-
-fn transform_path(path: &BezPath, affine: kurbo::Affine) -> BezPath {
-    let mut out = BezPath::new();
-    for elem in path.elements() {
-        match *elem {
-            kurbo::PathEl::MoveTo(p) => out.move_to(affine * p),
-            kurbo::PathEl::LineTo(p) => out.line_to(affine * p),
-            kurbo::PathEl::QuadTo(c, p) => out.quad_to(affine * c, affine * p),
-            kurbo::PathEl::CurveTo(c1, c2, p) => out.curve_to(affine * c1, affine * c2, affine * p),
-            kurbo::PathEl::ClosePath => out.close_path(),
-        }
-    }
-    out
-}
-
-fn validate_import_path(path: &BezPath, path_name: &str) -> Result<(), SvgError> {
-    if path.elements().len() > 1_000_000 {
-        return Err(svg_error(
-            path_name,
-            "a shape exceeds the 1,000,000-segment limit",
-        ));
-    }
-    let valid = |p: kurbo::Point| {
-        p.x.is_finite() && p.y.is_finite() && p.x.abs() <= 1.0e9 && p.y.abs() <= 1.0e9
-    };
-    for element in path.elements() {
-        let safe = match *element {
-            kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) => valid(p),
-            kurbo::PathEl::QuadTo(c, p) => valid(c) && valid(p),
-            kurbo::PathEl::CurveTo(c1, c2, p) => valid(c1) && valid(c2) && valid(p),
-            kurbo::PathEl::ClosePath => true,
-        };
-        if !safe {
-            return Err(svg_error(
-                path_name,
-                "geometry coordinates must be finite and within ±1e9 mm",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn svg_error(path_name: &str, message: &str) -> SvgError {
-    SvgError::Import(format!("{path_name}: {message}"))
+pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
+    path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
 }
 
 #[cfg(test)]
@@ -2364,11 +588,6 @@ mod tests_group_walk {
         .unwrap();
         assert_eq!(doc.shape_count(), 1);
     }
-}
-
-/// Rebuilds into polylines for downstream code needing points instead of `d`.
-pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
-    path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
 }
 
 #[cfg(test)]

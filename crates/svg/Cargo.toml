@@ -8,11 +8,10 @@ description = "SVG import and export for StencilCraft documents"
 
 [dependencies]
 kurbo = { workspace = true }
-roxmltree = "0.21.2"
 thiserror = { workspace = true }
+craft-svg = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
-stencilcraft-color = { workspace = true }
 stencilcraft-generate = { workspace = true }
 vectorcraft-geom = { workspace = true }
 vectorcraft-pathops = { workspace = true }

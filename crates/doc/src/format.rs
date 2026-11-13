@@ -54,13 +54,14 @@ pub fn pick<'a>(
     path: &str,
     bytes: &[u8],
 ) -> Option<&'a dyn FormatHandler> {
-    if let Some(h) = handlers.iter().find(|h| h.sniff(bytes)) {
-        return Some(*h);
-    }
-    let ext = path.rsplit_once('.')?.1.to_ascii_lowercase();
+    let format = craft_file_formats::detect(path, bytes)?;
     handlers
         .iter()
-        .find(|h| h.extensions().contains(&ext.as_str()))
+        .find(|h| {
+            h.extensions()
+                .iter()
+                .any(|ext| craft_file_formats::from_extension(ext) == Some(format))
+        })
         .copied()
 }
 

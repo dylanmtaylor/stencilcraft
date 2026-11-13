@@ -23,9 +23,9 @@ pub enum RenderFormat {
 impl RenderFormat {
     /// From a file extension (`png`, `jpg`, `jpeg`, any case).
     pub fn from_extension(ext: &str) -> Option<Self> {
-        match ext.to_ascii_lowercase().as_str() {
-            "png" => Some(Self::Png),
-            "jpg" | "jpeg" => Some(Self::Jpeg),
+        match craft_file_formats::from_extension(ext)? {
+            craft_file_formats::Format::Png => Some(Self::Png),
+            craft_file_formats::Format::Jpeg => Some(Self::Jpeg),
             _ => None,
         }
     }

@@ -20,16 +20,15 @@ pub struct GcodeProtocol;
 
 /// Decode a Grbl status report (`<Idle|MPos:…>`).
 pub fn parse_grbl_status(reply: &str) -> MachineStatus {
-    let Some(body) = reply.trim().strip_prefix('<') else {
-        return MachineStatus::Unknown(reply.trim().to_string());
-    };
-    let state = body.split(['|', '>', ':']).next().unwrap_or("");
-    match state {
-        "Idle" => MachineStatus::Ready,
-        "Run" | "Jog" | "Home" => MachineStatus::Busy,
-        "Hold" | "Door" => MachineStatus::Paused,
-        "Alarm" => MachineStatus::Error("alarm".to_string()),
-        other => MachineStatus::Unknown(other.to_string()),
+    use craft_gcode::grbl::State;
+    match craft_gcode::grbl::parse_status(reply) {
+        Some(State::Idle) => MachineStatus::Ready,
+        Some(State::Run | State::Jog | State::Home) => MachineStatus::Busy,
+        Some(State::Hold | State::Door) => MachineStatus::Paused,
+        Some(State::Alarm) => MachineStatus::Error("alarm".to_string()),
+        Some(State::Other(state)) => MachineStatus::Unknown(state),
+        Some(State::Check | State::Sleep) => MachineStatus::Unknown(reply.trim().to_string()),
+        None => MachineStatus::Unknown(reply.trim().to_string()),
     }
 }
 
@@ -94,7 +93,7 @@ impl Protocol for GcodeProtocol {
     }
 
     fn status(&self, t: &mut dyn Transport) -> Result<MachineStatus, MachineError> {
-        t.write(b"?")?;
+        t.write(&[craft_gcode::grbl::STATUS_QUERY])?;
         let mut buf = [0u8; 128];
         let n = t.read(&mut buf)?;
         Ok(parse_grbl_status(&String::from_utf8_lossy(
@@ -103,15 +102,15 @@ impl Protocol for GcodeProtocol {
     }
 
     fn pause(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(b"!").map(|_| ())
+        t.write(&[craft_gcode::grbl::FEED_HOLD]).map(|_| ())
     }
 
     fn resume(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(b"~").map(|_| ())
+        t.write(&[craft_gcode::grbl::CYCLE_START]).map(|_| ())
     }
 
     fn cancel(&self, t: &mut dyn Transport) -> Result<(), MachineError> {
-        t.write(&[0x18]).map(|_| ())
+        t.write(&[craft_gcode::grbl::SOFT_RESET]).map(|_| ())
     }
 
     /// Send-response streaming: one line, wait for `ok`; an `error` reply
@@ -147,21 +146,21 @@ impl Protocol for GcodeProtocol {
                     continue;
                 }
                 reply.push_str(&String::from_utf8_lossy(buf.get(..n).unwrap_or_default()));
-                if reply.contains("error") || reply.contains("ALARM") {
-                    let _ = t.write(b"M5\n");
+                if craft_gcode::grbl::parse_ack(&reply) == Some(craft_gcode::grbl::Ack::Rejected) {
+                    let _ = t.write(format!("{}\n", craft_gcode::grbl::TOOL_OFF).as_bytes());
                     return Err(MachineError::Protocol(format!(
                         "controller rejected `{}`: {}",
                         cmd.to_ascii(),
                         reply.trim()
                     )));
                 }
-                if reply.contains("ok") {
+                if craft_gcode::grbl::parse_ack(&reply) == Some(craft_gcode::grbl::Ack::Ok) {
                     acked = true;
                     break;
                 }
             }
             if !acked {
-                let _ = t.write(b"M5\n");
+                let _ = t.write(format!("{}\n", craft_gcode::grbl::TOOL_OFF).as_bytes());
                 return Err(MachineError::Protocol(format!(
                     "no `ok` for `{}`; laser/spindle switched off",
                     cmd.to_ascii()

@@ -38,6 +38,7 @@ craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e83
 craft-plotter = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3", features = ["serde"] }
 craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3", features = ["write"] }
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
+craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs", rev = "e2cab3f651c953df96f7a35c97ed664da954b785" }
 craft-svg-paths = { git = "https://github.com/storytold/craft-libs", rev = "c6db9e834e7565f93906e6ff9c5d98c811e20ec3" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.

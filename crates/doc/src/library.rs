@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{DocError, Document, load_from, save_to};
 
-pub const DOCUMENT_EXTENSION: &str = "stencilcraft";
+pub const DOCUMENT_EXTENSION: &str = crate::FORMAT_EXTENSION;
 const INDEX_FILE: &str = ".library.json";
 const TRASH_DIR: &str = ".trash";
 /// Deepest folder nesting, and most files a listing or search visits.

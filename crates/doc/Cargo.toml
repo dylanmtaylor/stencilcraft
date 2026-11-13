@@ -4,10 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "StencilCraft document model and the .stencilcraft JSON format"
+description = "StencilCraft document model and mapping to the native JSON format"
 
 [dependencies]
 craft-atomic = { workspace = true }
+craft-stencilcraft-format = { workspace = true }
 craft-svg-paths = { workspace = true }
 kurbo = { workspace = true }
 serde = { workspace = true }

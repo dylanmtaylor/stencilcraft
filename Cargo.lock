@@ -1212,6 +1212,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-stencilcraft-format"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=e2cab3f651c953df96f7a35c97ed664da954b785#e2cab3f651c953df96f7a35c97ed664da954b785"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-svg"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=c6db9e834e7565f93906e6ff9c5d98c811e20ec3#c6db9e834e7565f93906e6ff9c5d98c811e20ec3"
@@ -5330,6 +5340,7 @@ name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
  "craft-atomic",
+ "craft-stencilcraft-format",
  "craft-svg-paths",
  "kurbo 0.13.1",
  "serde",

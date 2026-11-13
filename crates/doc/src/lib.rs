@@ -1,4 +1,4 @@
-//! StencilCraft document model and the `.stencilcraft` JSON format.
+//! StencilCraft document model and mapping to the `.stencilcraft` JSON format.
 //!
 //! A document holds an artboard in millimetres, kerf settings and layers of shapes.
 //! Every read path returns `Result` with a calm, printable error: a malformed file
@@ -22,11 +22,13 @@ use stencilcraft_geom::{GeomError, bounds_of_shape, check_finite_mm};
 mod production;
 pub use production::{CombineOp, GroupKind, Operation, SendAssign, ShapeProduction, SourceGroup};
 
+/// Native document filename extension without the dot.
+pub use craft_stencilcraft_format::EXTENSION as FORMAT_EXTENSION;
 /// Native format name, written into every saved file and checked on load.
-pub const FORMAT_NAME: &str = "stencilcraft";
+pub use craft_stencilcraft_format::FORMAT_NAME;
 /// Current format version; loaders accept exactly what they can read and say so
 /// otherwise.
-pub const FORMAT_VERSION: u64 = 1;
+pub use craft_stencilcraft_format::FORMAT_VERSION;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
@@ -581,148 +583,129 @@ impl Document {
         self.validate_canvas()
     }
 
-    /// Serialises with the format header. The header wraps the document so a reader
-    /// knows what it is before reading the rest. Canvas fields are written only when
-    /// set, so a plain document saves exactly as it did before they existed.
+    /// Maps this document to the shared wire schema. Canvas fields are omitted when they have
+    /// their defaults, preserving compact version 1 files.
     pub fn save_json(&self) -> Result<String, DocError> {
         self.validate()?;
-        let mut wrapper = serde_json::json!({
-            "stencilcraft": { "name": FORMAT_NAME, "version": FORMAT_VERSION },
-            "board": self.board,
-            "kerf": self.kerf,
-            "layers": self.layers,
-            "next-shape-id": self.next_shape_id,
-            "images": self.images,
-        });
         let groups = self.pruned_groups();
-        let optional = [
-            (
-                "board-setup",
-                !self.board_setup.is_empty(),
-                json(&self.board_setup),
-            ),
-            ("pages", !self.pages.is_empty(), json(&self.pages)),
-            ("guides", !self.guides.is_empty(), json(&self.guides)),
-            ("grid", self.grid != Grid::default(), json(&self.grid)),
-            (
-                "snap",
-                self.snap != SnapSettings::default(),
-                json(&self.snap),
-            ),
-            ("groups", !groups.is_empty(), json(&groups)),
-            ("meta", !self.meta.is_empty(), json(&self.meta)),
-        ];
-        if let Some(map) = wrapper.as_object_mut() {
-            for (key, present, value) in optional {
-                if present {
-                    map.insert(key.to_string(), value?);
-                }
-            }
-        }
-        serde_json::to_string_pretty(&wrapper).map_err(|e| DocError::Structure {
-            path: "output".to_string(),
-            message: e.to_string(),
-        })
+        let fields = craft_stencilcraft_format::DocumentFields {
+            board: json(&self.board)?,
+            kerf: json(&self.kerf)?,
+            layers: json(&self.layers)?,
+            next_shape_id: self.next_shape_id,
+            images: self
+                .images
+                .iter()
+                .map(json)
+                .collect::<Result<Vec<_>, _>>()?,
+            board_setup: (!self.board_setup.is_empty())
+                .then(|| json(&self.board_setup))
+                .transpose()?,
+            pages: (!self.pages.is_empty())
+                .then(|| json(&self.pages))
+                .transpose()?,
+            guides: (!self.guides.is_empty())
+                .then(|| json(&self.guides))
+                .transpose()?,
+            grid: (self.grid != Grid::default())
+                .then(|| json(&self.grid))
+                .transpose()?,
+            snap: (self.snap != SnapSettings::default())
+                .then(|| json(&self.snap))
+                .transpose()?,
+            groups: (!groups.is_empty()).then(|| json(&groups)).transpose()?,
+            meta: (!self.meta.is_empty())
+                .then(|| json(&self.meta))
+                .transpose()?,
+        };
+        craft_stencilcraft_format::File::new(fields)
+            .to_json_pretty()
+            .map_err(|e| DocError::Structure {
+                path: "output".to_string(),
+                message: e.to_string(),
+            })
     }
 
-    /// Parses a document from JSON with calm, positioned error messages.
+    /// Parses the shared format envelope, maps its fields to this document model, and reports
+    /// calm, positioned errors.
     pub fn load_json(json: &str) -> Result<Document, DocError> {
         load_json_named(json, "input")
     }
 }
 
 fn load_json_named(json: &str, path: &str) -> Result<Document, DocError> {
-    let value: serde_json::Value = serde_json::from_str(json).map_err(|e| DocError::Parse {
-        path: path.to_string(),
-        source: e,
-    })?;
-    let some_header = value.get("stencilcraft");
-    let Some(header) = some_header else {
-        return Err(DocError::NotAStencilcraftFile {
+    let file = craft_stencilcraft_format::File::read(json)
+        .map_err(|error| format_read_error(error, path))?;
+    load_document(file, path)
+}
+
+fn format_read_error(error: craft_stencilcraft_format::Error, path: &str) -> DocError {
+    match error {
+        craft_stencilcraft_format::Error::Json(source) => DocError::Parse {
             path: path.to_string(),
-        });
-    };
-    let name = header.get("name").and_then(serde_json::Value::as_str);
-    if name != Some(FORMAT_NAME) {
-        return Err(DocError::NotAStencilcraftFile {
+            source,
+        },
+        craft_stencilcraft_format::Error::NotStencilCraft => DocError::NotAStencilcraftFile {
             path: path.to_string(),
-        });
+        },
+        craft_stencilcraft_format::Error::Version { found, .. } => DocError::FormatVersion {
+            path: path.to_string(),
+            found,
+            expected: FORMAT_VERSION,
+        },
+        craft_stencilcraft_format::Error::Document { source } => structure_err(path, &source),
+        error => DocError::Structure {
+            path: path.to_string(),
+            message: error.to_string(),
+        },
     }
-    match header.get("version").and_then(serde_json::Value::as_u64) {
-        Some(v) if v == FORMAT_VERSION => {}
-        Some(found) => {
-            return Err(DocError::FormatVersion {
-                path: path.to_string(),
-                found,
-                expected: FORMAT_VERSION,
-            });
-        }
-        None => {
-            return Err(DocError::NotAStencilcraftFile {
-                path: path.to_string(),
-            });
-        }
-    }
-    // Read fields individually so one mistake is reported as its own structure
-    // error rather than an opaque serde error for the whole document.
-    let board: Board = field(&value, "board", path)?;
-    let kerf: KerfSettings = field(&value, "kerf", path)?;
-    let layers: Vec<Layer> = field(&value, "layers", path)?;
-    let next_shape_id: u64 = value
-        .get("next-shape-id")
-        .map(|v| serde_json::from_value::<u64>(v.clone()))
-        .transpose()
-        .map_err(|e| structure_err(path, &e))?
-        .unwrap_or(1);
-    let images: Vec<RasterImage> = match value.get("images") {
-        None => Vec::new(),
-        Some(v) => serde_json::from_value(v.clone()).map_err(|e| structure_err(path, &e))?,
-    };
+}
+
+fn load_document(file: craft_stencilcraft_format::File, path: &str) -> Result<Document, DocError> {
+    let fields = file.document;
+    let board: Board = decode(fields.board, path)?;
+    let kerf: KerfSettings = decode(fields.kerf, path)?;
+    let layers: Vec<Layer> = decode(fields.layers, path)?;
+    let images: Vec<RasterImage> = fields
+        .images
+        .into_iter()
+        .map(|value| decode(value, path))
+        .collect::<Result<_, _>>()?;
     let mut doc = Document {
         board,
         kerf,
         layers,
-        next_shape_id,
+        next_shape_id: fields.next_shape_id,
         images,
-        board_setup: optional_field(&value, "board-setup", path)?,
-        pages: optional_field(&value, "pages", path)?,
-        guides: optional_field(&value, "guides", path)?,
-        grid: optional_field(&value, "grid", path)?,
-        snap: optional_field(&value, "snap", path)?,
-        groups: optional_field(&value, "groups", path)?,
-        meta: optional_field(&value, "meta", path)?,
+        board_setup: decode_optional(fields.board_setup, path)?,
+        pages: decode_optional(fields.pages, path)?,
+        guides: decode_optional(fields.guides, path)?,
+        grid: decode_optional(fields.grid, path)?,
+        snap: decode_optional(fields.snap, path)?,
+        groups: decode_optional(fields.groups, path)?,
+        meta: decode_optional(fields.meta, path)?,
     };
     doc.validate()?;
     doc.groups = doc.pruned_groups();
     Ok(doc)
 }
 
-/// A key added after version 1: absent means its default (older files stay readable).
-fn optional_field<T: serde::de::DeserializeOwned + Default>(
-    value: &serde_json::Value,
-    key: &str,
-    path: &str,
-) -> Result<T, DocError> {
-    match value.get(key) {
-        None => Ok(T::default()),
-        Some(_) => field(value, key, path),
-    }
-}
-
 fn json<T: Serialize>(value: &T) -> Result<serde_json::Value, DocError> {
     serde_json::to_value(value).map_err(|e| structure_err("output", &e))
 }
 
-fn field<T: serde::de::DeserializeOwned>(
-    value: &serde_json::Value,
-    key: &str,
+fn decode<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
     path: &str,
 ) -> Result<T, DocError> {
-    let v = value.get(key).ok_or_else(|| DocError::Structure {
-        path: path.to_string(),
-        message: format!("missing `{key}`"),
-    })?;
-    serde_json::from_value(v.clone()).map_err(|e| structure_err(path, &e))
+    serde_json::from_value(value).map_err(|e| structure_err(path, &e))
+}
+
+fn decode_optional<T: serde::de::DeserializeOwned + Default>(
+    value: Option<serde_json::Value>,
+    path: &str,
+) -> Result<T, DocError> {
+    value.map_or_else(|| Ok(T::default()), |value| decode(value, path))
 }
 
 fn structure_err(path: &str, e: &serde_json::Error) -> DocError {
@@ -744,11 +727,13 @@ pub fn save_to(doc: &Document, path: &str) -> Result<(), DocError> {
 }
 
 pub fn load_from(path: &str) -> Result<Document, DocError> {
-    let json = std::fs::read_to_string(path).map_err(|source| DocError::Io {
+    let file = std::fs::File::open(path).map_err(|source| DocError::Io {
         path: path.to_string(),
         source,
     })?;
-    load_json_named(&json, path)
+    let document = craft_stencilcraft_format::File::read_from(file)
+        .map_err(|error| format_read_error(error, path))?;
+    load_document(document, path)
 }
 
 #[cfg(test)]
@@ -1006,6 +991,23 @@ mod tests {
             assert_eq!(doc.grid, Grid::default());
             assert!(doc.layers.iter().all(|l| !l.template && !l.locked));
         }
+    }
+
+    #[test]
+    fn load_from_streams_large_forward_compatible_documents() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&sample().save_json().unwrap()).unwrap();
+        value["future-field"] = serde_json::Value::String("x".repeat(8 * 1024 * 1024));
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "stencilcraft-stream-load-{}.stencilcraft",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).unwrap();
+
+        let loaded = load_from(&path.to_string_lossy());
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(loaded.unwrap(), sample());
     }
 
     #[test]

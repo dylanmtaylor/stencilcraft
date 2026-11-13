@@ -464,7 +464,10 @@ fn main() -> Result<(), String> {
             }
             "-h" | "--help" => {
                 println!("stencilcraft — desktop app");
-                println!("usage: stencilcraft [--control PORT] [FILE.stencilcraft]");
+                println!(
+                    "usage: stencilcraft [--control PORT] [FILE.{}]",
+                    stencilcraft_doc::FORMAT_EXTENSION
+                );
                 return Ok(());
             }
             other => open_path = Some(other.to_string()),
@@ -1809,7 +1812,7 @@ impl StencilApp {
             TopMenuAction::NewFromTemplate => self.open_new_document(2),
             TopMenuAction::OpenDoc => {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("StencilCraft", &["stencilcraft"])
+                    .add_filter("StencilCraft", &[stencilcraft_doc::FORMAT_EXTENSION])
                     .pick_file()
                 {
                     self.open_document(&path.to_string_lossy());
@@ -1824,8 +1827,12 @@ impl StencilApp {
                 let pick = match &self.open_path {
                     Some(p) => Some(std::path::PathBuf::from(p)),
                     None => rfd::FileDialog::new()
-                        .add_filter("StencilCraft", &["stencilcraft"])
-                        .set_file_name(format!("{}.stencilcraft", self.doc_title))
+                        .add_filter("StencilCraft", &[stencilcraft_doc::FORMAT_EXTENSION])
+                        .set_file_name(format!(
+                            "{}.{}",
+                            self.doc_title,
+                            stencilcraft_doc::FORMAT_EXTENSION
+                        ))
                         .save_file(),
                 };
                 if let Some(path) = pick {
@@ -1834,8 +1841,10 @@ impl StencilApp {
             }
             TopMenuAction::SaveAsDoc => {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("StencilCraft", &["stencilcraft"])
-                    .set_file_name(self.open_path.as_deref().unwrap_or("untitled.stencilcraft"))
+                    .add_filter("StencilCraft", &[stencilcraft_doc::FORMAT_EXTENSION])
+                    .set_file_name(self.open_path.clone().unwrap_or_else(|| {
+                        format!("untitled.{}", stencilcraft_doc::FORMAT_EXTENSION)
+                    }))
                     .save_file()
                 {
                     self.save_to(path.to_string_lossy().into_owned());
@@ -2225,7 +2234,9 @@ impl StencilApp {
             .as_deref()
             .and_then(|p| std::path::Path::new(p).file_name()?.to_str())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{}.stencilcraft", self.doc_title));
+            .unwrap_or_else(|| {
+                format!("{}.{}", self.doc_title, stencilcraft_doc::FORMAT_EXTENSION)
+            });
         let title_text = format!("StencilCraft — {doc_name}");
 
         let menus = self.build_menu_bar();

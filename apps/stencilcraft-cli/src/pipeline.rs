@@ -8,6 +8,7 @@ use stencilcraft_gcode::GcodeSettings;
 
 pub enum ExportKind {
     Svg,
+    Svgz,
     Dxf,
     Gcode,
     Pdf,
@@ -16,7 +17,7 @@ pub enum ExportKind {
 }
 
 impl ExportKind {
-    /// `.svg`, `.dxf`, `.gcode` by extension, defaulting to SVG — and honest about
+    /// `.svg`, `.svgz`, `.dxf`, `.gcode` by extension, defaulting to SVG — and honest about
     /// which one it picked, per the CLI's message contract.
     pub fn from_filename(name: &str) -> (Self, String) {
         let extension = std::path::Path::new(name)
@@ -31,6 +32,7 @@ impl ExportKind {
             Some(craft_file_formats::Format::Jpeg) => Self::Jpeg,
             Some(craft_file_formats::Format::Gcode) => Self::Gcode,
             Some(craft_file_formats::Format::Svg) => Self::Svg,
+            Some(craft_file_formats::Format::Svgz) => Self::Svgz,
             _ => return (Self::Svg, format!("{name}.svg")),
         };
         (output, name.to_string())
@@ -142,6 +144,10 @@ fn render(
         ExportKind::Svg => stencilcraft_svg::export(doc)
             .map_err(|e| user(&e))?
             .into_bytes(),
+        ExportKind::Svgz => {
+            let svg = stencilcraft_svg::export(doc).map_err(|e| user(&e))?;
+            craft_svg::svgz::compress(svg.as_bytes())
+        }
         ExportKind::Dxf => stencilcraft_dxf::export(doc)
             .map_err(|e| user(&e))?
             .into_bytes(),

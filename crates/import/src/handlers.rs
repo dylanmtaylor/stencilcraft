@@ -1,207 +1,40 @@
-//! One self-contained handler per file format: detect, read, write, capabilities.
-//!
-//! shortcut: this is a local trait shaped for the `FormatHandler` registry being defined
-//! on `feat/silhouette-formats` (docs/formats/README.md there); reconcile the two when
-//! both land, keeping these handlers as the registrations.
+//! Stencil document adapters for the shared format registry.
 
 use stencilcraft_doc::{CutStyle, Document};
 
-use crate::{Format, ImportError, ImportOptions, bad};
+use crate::{ImportError, bad};
 
-/// What a handler can do, and what the user should be told it loses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Capabilities {
-    pub read: bool,
-    pub write: bool,
-    /// Reading then writing keeps everything StencilCraft models.
-    pub lossless: bool,
-    /// User-facing notes about what does not survive.
-    pub warnings: &'static [&'static str],
-}
-
-/// Export settings a writer may use.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExportOptions {
-    /// Raster writers: pixels per inch.
-    pub dpi: f64,
-    /// The target file's extension, lower case (`png`, `jpg` …).
-    pub extension: String,
-}
-
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            dpi: 300.0,
-            extension: String::new(),
-        }
-    }
-}
-
-pub trait FormatHandler {
-    fn name(&self) -> &'static str;
-    /// Shared format identifiers accepted by this app handler.
-    fn formats(&self) -> &'static [craft_file_import::DetectedFormat];
-    fn detect(&self, bytes: &[u8], extension: &str) -> bool;
-    fn read(
-        &self,
-        bytes: &[u8],
-        name: &str,
-        options: &ImportOptions,
-    ) -> Result<Document, ImportError>;
-    fn write(&self, doc: &Document, options: &ExportOptions) -> Result<Vec<u8>, ImportError>;
-    fn capabilities(&self) -> Capabilities;
-}
-
-/// The handlers this crate provides, in detection order.
-pub fn handlers() -> Vec<Box<dyn FormatHandler>> {
-    craft_file_import::CAPABILITIES
-        .iter()
-        .map(|capability| Box::new(Handler(capability.format)) as Box<dyn FormatHandler>)
-        .collect()
-}
-
-/// The handler for a file to write, by extension.
-pub fn writer_for(extension: &str) -> Option<Box<dyn FormatHandler>> {
-    let format = craft_file_import::write::writer_family_for_extension(extension)?;
-    Some(Box::new(Handler(format)))
-}
+/// Shared capability records used by file dialogs and callers querying format support.
+pub use craft_file_import::{
+    CAPABILITIES as FORMAT_CAPABILITIES, Capability as FormatCapabilities,
+};
 
 /// Serialize a Stencil document through the shared writer registry.
 ///
 /// The adapter owns the product-specific document-to-scene mapping; format
 /// selection and codec behavior are delegated to craft-file-import.
 pub fn write_document(doc: &Document, extension: &str, dpi: f64) -> Result<Vec<u8>, ImportError> {
-    writer_for(extension)
-        .ok_or_else(|| {
-            bad(
-                &format!("output.{extension}"),
-                "unsupported output extension",
+    let name = format!("output.{extension}");
+    let extension = extension.to_ascii_lowercase();
+    let writer = craft_file_import::write::writer_format_for_extension(&extension)
+        .ok_or_else(|| bad(&name, "unsupported output extension"))?;
+    match writer {
+        craft_file_import::write::WriteFormat::Png
+        | craft_file_import::write::WriteFormat::Jpeg => {
+            let pixels = crate::render(doc, dpi).map_err(|e| bad(&name, e))?;
+            craft_file_import::write::write_raster(
+                &extension,
+                pixels.width(),
+                pixels.height(),
+                pixels.as_raw(),
+                90,
             )
-        })?
-        .write(
-            doc,
-            &ExportOptions {
-                dpi,
-                extension: extension.to_ascii_lowercase(),
-            },
-        )
-}
-
-struct Handler(Format);
-
-const PATHS_ONLY: &str = "only path geometry is read: fills, stroke styles, text, images and symbol instances are dropped";
-const VECTOR_READ: &[&str] = &[
-    PATHS_ONLY,
-    "every path comes in as a cut shape on one layer",
-];
-
-impl FormatHandler for Handler {
-    fn name(&self) -> &'static str {
-        match self.0 {
-            Format::Svg => "SVG",
-            Format::Svgz => "SVGZ",
-            Format::Dxf => "DXF",
-            Format::Pdf => "PDF",
-            Format::Eps => "EPS / PostScript / Illustrator",
-            Format::Raster => "Raster image",
+            .map_err(|e| bad(&name, e))
         }
-    }
-
-    fn formats(&self) -> &'static [craft_file_import::DetectedFormat] {
-        craft_file_import::supported_formats(self.0)
-    }
-
-    fn detect(&self, bytes: &[u8], extension: &str) -> bool {
-        craft_file_import::format_for(&format!("file.{extension}"), bytes) == Some(self.0)
-    }
-
-    fn read(
-        &self,
-        bytes: &[u8],
-        name: &str,
-        options: &ImportOptions,
-    ) -> Result<Document, ImportError> {
-        crate::read_format(self.0, bytes, name, options)
-    }
-
-    fn write(&self, doc: &Document, options: &ExportOptions) -> Result<Vec<u8>, ImportError> {
-        let name = format!("output.{}", options.extension);
-        let writer = craft_file_import::write::writer_format_for_extension(&options.extension)
-            .ok_or_else(|| bad(&name, "no shared writer supports this extension"))?;
-        match writer {
-            craft_file_import::write::WriteFormat::Png
-            | craft_file_import::write::WriteFormat::Jpeg => {
-                let pixels = crate::render(doc, options.dpi).map_err(|e| bad(&name, e))?;
-                craft_file_import::write::write_raster(
-                    &options.extension,
-                    pixels.width(),
-                    pixels.height(),
-                    pixels.as_raw(),
-                    90,
-                )
-                .map_err(|e| bad(&name, e))
-            }
-            _ => {
-                doc.validate().map_err(|e| bad(&name, e))?;
-                let scene = output_scene(doc, writer).map_err(|e| bad(&name, e))?;
-                craft_file_import::write::write_vector(&options.extension, &scene)
-                    .map_err(|e| bad(&name, e))
-            }
-        }
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        let write = craft_file_import::supports_writer(self.0);
-        match self.0 {
-            Format::Svg => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: &[
-                    "placed images are not written",
-                    "unsupported SVG features fail import explicitly",
-                ],
-            },
-            Format::Svgz => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: VECTOR_READ,
-            },
-            Format::Dxf => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: &[
-                    "export flattens curves into polylines and drops placed images",
-                    "import reads path geometry only; text, hatches and fills are dropped",
-                ],
-            },
-            Format::Pdf => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: &[
-                    "export draws strokes only and drops placed images",
-                    PATHS_ONLY,
-                ],
-            },
-            Format::Eps => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: VECTOR_READ,
-            },
-            Format::Raster => Capabilities {
-                read: true,
-                write,
-                lossless: false,
-                warnings: &[
-                    "import places the image to trace; it is not cut until traced",
-                    "export (PNG/JPEG only) is a picture at the chosen dpi, not editable geometry",
-                    "HEIC/HEIF and animated frames past the first are not read",
-                ],
-            },
+        _ => {
+            doc.validate().map_err(|e| bad(&name, e))?;
+            let scene = output_scene(doc, writer).map_err(|e| bad(&name, e))?;
+            craft_file_import::write::write_vector(&extension, &scene).map_err(|e| bad(&name, e))
         }
     }
 }
@@ -362,18 +195,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn registry_detects_reads_and_writes() {
-        let handlers = handlers();
-        assert!(
-            handlers
-                .iter()
-                .any(|h| h.detect(b"%PDF-1.4", "bin") && h.name() == "PDF")
-        );
-        assert!(
-            handlers
-                .iter()
-                .all(|h| !h.capabilities().warnings.is_empty())
-        );
+    fn shared_registry_writes_and_reads() {
+        assert!(FORMAT_CAPABILITIES.iter().any(|capability| {
+            capability.format == crate::Format::Pdf
+                && capability
+                    .detected_formats
+                    .contains(&craft_file_import::DetectedFormat::Pdf)
+        }));
         let mut doc = Document::default();
         let mut path = kurbo::BezPath::new();
         path.move_to((1.0, 1.0));
@@ -383,26 +211,15 @@ mod tests {
         doc.push_shape(0, path, stencilcraft_doc::CutStyle::Cut)
             .unwrap();
         for ext in ["svg", "dxf", "pdf", "png", "jpg"] {
-            let writer = writer_for(ext).unwrap();
-            let bytes = writer
-                .write(
-                    &doc,
-                    &ExportOptions {
-                        dpi: 72.0,
-                        extension: ext.to_string(),
-                    },
-                )
-                .unwrap();
-            let reader = handlers.iter().find(|h| h.detect(&bytes, ext)).unwrap();
-            let back = reader
-                .read(&bytes, &format!("x.{ext}"), &ImportOptions::default())
-                .unwrap();
+            let bytes = write_document(&doc, ext, 72.0).unwrap();
+            let back =
+                crate::import_bytes(&bytes, &format!("x.{ext}"), &Default::default()).unwrap();
             if ["svg", "dxf", "pdf"].contains(&ext) {
                 assert_eq!(back.shape_count(), 1, "{ext}");
             } else {
                 assert_eq!(back.images.len(), 1, "{ext}");
             }
         }
-        assert!(writer_for("eps").is_none());
+        assert!(craft_file_import::write::writer_format_for_extension("eps").is_none());
     }
 }

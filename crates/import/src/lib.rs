@@ -70,6 +70,7 @@ impl Format {
             | craft_file_formats::Format::Ase
             | craft_file_formats::Format::Idml
             | craft_file_formats::Format::DesignCraft
+            | craft_file_formats::Format::DesignCraftJson
             | craft_file_formats::Format::Indd
             | craft_file_formats::Format::Docx
             | craft_file_formats::Format::Rtf

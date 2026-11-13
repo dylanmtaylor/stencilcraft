@@ -35,7 +35,7 @@ craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
 craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa", features = ["write"] }
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
-craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3" }
+craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "c1a1b976d" }
 craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "f92a91afa" }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }

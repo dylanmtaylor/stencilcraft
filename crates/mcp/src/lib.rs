@@ -223,10 +223,12 @@ impl Session {
                 });
                 self.engine = Engine::new(doc);
                 // An imported foreign file is never a save target.
-                self.last_path = path
-                    .to_ascii_lowercase()
-                    .ends_with(".stencilcraft")
-                    .then(|| path.to_string());
+                let is_native = std::path::Path::new(&path)
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str)
+                    .and_then(craft_file_formats::from_extension)
+                    == Some(craft_file_formats::Format::StencilCraft);
+                self.last_path = is_native.then(|| path.to_string());
                 Ok(result)
             }
             "doc.save" => {

@@ -1061,12 +1061,12 @@ dependencies = [
 [[package]]
 name = "craft-eps"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3#79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3"
+source = "git+https://github.com/storytold/craft-libs.git?rev=c1a1b976d#c1a1b976d0decf496d132bf71eecaec0de198675"
 
 [[package]]
 name = "craft-file-formats"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3#79c2003ac9c665bfd6a0dbc00c256d42cc3ad1e3"
+source = "git+https://github.com/storytold/craft-libs.git?rev=c1a1b976d#c1a1b976d0decf496d132bf71eecaec0de198675"
 dependencies = [
  "craft-eps",
 ]
@@ -5321,6 +5321,7 @@ dependencies = [
 name = "stencilcraft-cli"
 version = "0.1.0"
 dependencies = [
+ "craft-file-formats",
  "craft-raster-codecs",
  "serde_json",
  "stencilcraft-doc",
@@ -5355,6 +5356,7 @@ name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
  "craft-atomic",
+ "craft-file-formats",
  "craft-stencilcraft-format",
  "kurbo 0.13.1",
  "serde",
@@ -5496,6 +5498,7 @@ dependencies = [
 name = "stencilcraft-mcp"
 version = "0.1.0"
 dependencies = [
+ "craft-file-formats",
  "craft-raster-codecs",
  "serde_json",
  "stencilcraft-doc",

@@ -155,7 +155,12 @@ fn import_svg_command(args: &[String]) -> Result<(), String> {
     }
     let input = input.ok_or("import-svg: --in FILE.svg is required")?;
     let output = output.ok_or("import-svg: --out FILE.stencilcraft is required")?;
-    let doc = if input.to_ascii_lowercase().ends_with(".svg") {
+    let is_svg = std::path::Path::new(&input)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::Svg);
+    let doc = if is_svg {
         let contents = std::fs::read_to_string(&input)
             .map_err(|e| format!("{input}: could not read SVG: {e}"))?;
         let imported =

@@ -49,8 +49,16 @@ impl Format {
             craft_file_formats::Format::Eps
             | craft_file_formats::Format::PostScript
             | craft_file_formats::Format::Illustrator => Some(Self::Eps),
-            craft_file_formats::Format::Raster => Some(Self::Raster),
-            craft_file_formats::Format::Studio | craft_file_formats::Format::StencilCraft => None,
+            craft_file_formats::Format::Png
+            | craft_file_formats::Format::Jpeg
+            | craft_file_formats::Format::Bmp
+            | craft_file_formats::Format::Gif
+            | craft_file_formats::Format::Tiff
+            | craft_file_formats::Format::WebP
+            | craft_file_formats::Format::Heif => Some(Self::Raster),
+            craft_file_formats::Format::Studio
+            | craft_file_formats::Format::StencilCraft
+            | craft_file_formats::Format::Gcode => None,
         }
     }
 }

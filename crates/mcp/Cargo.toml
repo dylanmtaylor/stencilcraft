@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "JSON-lines control protocol / MCP session core for StencilCraft"
 
 [dependencies]
+craft-file-formats = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }

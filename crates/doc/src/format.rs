@@ -70,7 +70,12 @@ pub fn read_path(
     handlers: &[&dyn FormatHandler],
     path: &str,
 ) -> Result<Option<Converted<Document>>, String> {
-    if path.to_ascii_lowercase().ends_with(".stencilcraft") {
+    if std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(craft_file_formats::from_extension)
+        == Some(craft_file_formats::Format::StencilCraft)
+    {
         return Ok(None);
     }
     let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;

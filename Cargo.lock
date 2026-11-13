@@ -5630,6 +5630,7 @@ dependencies = [
 name = "stencilcraft-studio"
 version = "0.1.0"
 dependencies = [
+ "craft-file-formats",
  "craft-silhouette-studio",
  "kurbo 0.13.1",
  "stencilcraft-doc",

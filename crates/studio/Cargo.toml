@@ -11,6 +11,7 @@ kurbo = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 craft-silhouette-studio = { workspace = true }
+craft-file-formats = { workspace = true }
 
 [lints]
 workspace = true

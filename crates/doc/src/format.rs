@@ -35,10 +35,8 @@ pub struct Converted<T> {
 pub trait FormatHandler: Sync {
     /// Short human name, e.g. "Silhouette Studio (.studio3)".
     fn name(&self) -> &'static str;
-    /// Lower-case extensions without the dot.
-    fn extensions(&self) -> &'static [&'static str];
-    /// True when the leading bytes are this format's (content beats extension).
-    fn sniff(&self, bytes: &[u8]) -> bool;
+    /// Shared format identifiers accepted by this app handler.
+    fn formats(&self) -> &'static [craft_file_formats::Format];
     fn capabilities(&self) -> Capabilities;
     /// Reads untrusted bytes. Must be bounded and never panic; `name` labels errors.
     fn read(&self, bytes: &[u8], name: &str) -> Result<Converted<Document>, String>;
@@ -57,11 +55,7 @@ pub fn pick<'a>(
     let format = craft_file_formats::detect(path, bytes)?;
     handlers
         .iter()
-        .find(|h| {
-            h.extensions()
-                .iter()
-                .any(|ext| craft_file_formats::from_extension(ext) == Some(format))
-        })
+        .find(|h| h.formats().contains(&format))
         .copied()
 }
 
@@ -90,16 +84,13 @@ pub fn read_path(
 mod tests {
     use super::*;
 
-    struct Fake(&'static str, &'static [u8]);
+    struct Fake(&'static str, &'static [craft_file_formats::Format]);
     impl FormatHandler for Fake {
         fn name(&self) -> &'static str {
             self.0
         }
-        fn extensions(&self) -> &'static [&'static str] {
-            if self.0 == "a" { &["aa"] } else { &["bb"] }
-        }
-        fn sniff(&self, bytes: &[u8]) -> bool {
-            bytes.starts_with(self.1)
+        fn formats(&self) -> &'static [craft_file_formats::Format] {
+            self.1
         }
         fn capabilities(&self) -> Capabilities {
             Capabilities {
@@ -115,10 +106,12 @@ mod tests {
 
     #[test]
     fn content_beats_extension_and_extension_is_the_fallback() {
-        let (a, b) = (Fake("a", b"AAA"), Fake("b", b"BBB"));
+        static PDF: &[craft_file_formats::Format] = &[craft_file_formats::Format::Pdf];
+        static SVG: &[craft_file_formats::Format] = &[craft_file_formats::Format::Svg];
+        let (a, b) = (Fake("a", PDF), Fake("b", SVG));
         let all: [&dyn FormatHandler; 2] = [&a, &b];
-        assert_eq!(pick(&all, "x.aa", b"BBB...").map(|h| h.name()), Some("b"));
-        assert_eq!(pick(&all, "x.AA", b"???").map(|h| h.name()), Some("a"));
+        assert_eq!(pick(&all, "x.pdf", b"<svg/>").map(|h| h.name()), Some("b"));
+        assert_eq!(pick(&all, "x.svg", b"???").map(|h| h.name()), Some("b"));
         assert!(pick(&all, "x.cc", b"???").is_none());
         assert!(b.write(&Document::default()).is_err());
     }

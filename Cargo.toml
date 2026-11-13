@@ -27,7 +27,7 @@ craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805
 craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
-craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "eeee3d08b622fe6dd8de898d2e984978ed67cb34" }
+craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "01452740b6d962c02ce0a7bc8c6aeaff1ab7c2c3" }
 craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "166d0d21274aba0b761cd312438b7f075b5b8e5d" }
 craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "166d0d21274aba0b761cd312438b7f075b5b8e5d" }
 craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }
@@ -35,7 +35,7 @@ craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb2
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }
 craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de", features = ["write", "paths"] }
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }
-craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "8abfa9d0f14bafbfc3449fc552ffeafb9ca6a551" }
+craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "686b5478eaadd68444e9690a8e6cc4b85d6a1f93" }
 craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "92afb23de" }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }

@@ -30,8 +30,8 @@ craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e848
 craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
-craft-jsonrpc = { git = "https://github.com/storytold/craft-libs.git", rev = "d6d4f2bd4cc3578754cb42951b296eef69e4afe1" }
-craft-mcp = { git = "https://github.com/storytold/craft-libs.git", rev = "d6d4f2bd4cc3578754cb42951b296eef69e4afe1" }
+craft-jsonrpc = { git = "https://github.com/storytold/craft-libs.git", rev = "8f9a719fb198c9fe3c0a72dfc030313dc8f5c62c" }
+craft-mcp = { git = "https://github.com/storytold/craft-libs.git", rev = "8f9a719fb198c9fe3c0a72dfc030313dc8f5c62c" }
 craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["paths"] }
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }

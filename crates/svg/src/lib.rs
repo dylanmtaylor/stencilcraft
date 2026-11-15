@@ -380,6 +380,13 @@ pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
     }
     Ok(result.document)
 }
+/// Decode SVG or SVGZ with the shared bounded reader and apply Stencil's vector policy.
+pub fn import_bytes_with_warnings(bytes: &[u8], name: &str) -> Result<SvgImport, SvgError> {
+    let text = craft_svg::svgz::text(bytes, craft_svg::paths::MAX_SVG_BYTES)
+        .map_err(|error| SvgError::Import(error.to_string()))?;
+    import_with_warnings(&text, name)
+}
+
 pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
     let imported = craft_svg::paths::import::<SvgKind>(svg, name)
         .map_err(|error| SvgError::Import(error.to_string()))?;

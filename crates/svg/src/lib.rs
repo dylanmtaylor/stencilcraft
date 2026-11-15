@@ -50,11 +50,30 @@ fn view_bounds(doc: &Document) -> kurbo::Rect {
             |bounds, layer| bounds.union(layer),
         )
 }
+// Groups are bounded before recursion to avoid exhausting the stack on hostile documents.
+fn append_grouped(destination: &mut Vec<SvgElement>, chain: &[u64], element: SvgElement) {
+    let Some((&id, rest)) = chain.split_first() else {
+        destination.push(element);
+        return;
+    };
+    let marker = SvgAttribute::text("data-group", id.to_string());
+    if !matches!(destination.last(), Some(SvgElement::Group { attributes, .. }) if attributes.contains(&marker))
+    {
+        destination.push(SvgElement::Group {
+            attributes: vec![SvgAttribute::text("class", "group"), marker],
+            children: Vec::new(),
+        });
+    }
+    if let Some(SvgElement::Group { children, .. }) = destination.last_mut() {
+        append_grouped(children, rest, element);
+    }
+}
+
 fn document_elements(
     doc: &Document,
     output_layers_only: bool,
     include_title: bool,
-) -> Vec<SvgElement> {
+) -> Result<Vec<SvgElement>, SvgError> {
     let mut elements = Vec::new();
     if include_title {
         elements.push(SvgElement::Title(format!(
@@ -79,20 +98,11 @@ fn document_elements(
                 &parents,
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
-            let mut element = SvgElement::Path {
+            let element = SvgElement::Path {
                 attributes: vec![SvgAttribute::text("class", class_for(shape.style))],
                 path: shape.cut_path().into_owned(),
             };
-            for id in chain.iter().rev() {
-                element = SvgElement::Group {
-                    attributes: vec![
-                        SvgAttribute::text("class", "group"),
-                        SvgAttribute::text("data-group", id.to_string()),
-                    ],
-                    children: vec![element],
-                };
-            }
-            children.push(element);
+            append_grouped(&mut children, &chain, element);
         }
         let mut attributes = Vec::new();
         if !output_layers_only {
@@ -120,7 +130,7 @@ fn document_elements(
             children,
         });
     }
-    elements
+    Ok(elements)
 }
 
 pub fn export(doc: &Document) -> Result<String, SvgError> {
@@ -129,7 +139,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
         width_mm: bounds.width(),
         height_mm: bounds.height(),
         view_box: [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
-        elements: document_elements(doc, false, true),
+        elements: document_elements(doc, false, true)?,
     }
     .write_fixed_view_box())
 }
@@ -229,7 +239,7 @@ pub fn export_tile_preview(
                     options.scale,
                     -options.scale,
                 )],
-                children: document_elements(piece, true, false),
+                children: document_elements(piece, true, false)?,
             },
         ];
         elements.push(SvgElement::Group {
@@ -289,7 +299,7 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     bottom.line_to((MARK, page_h - MARK));
     bottom.line_to((1.5, page_h - MARK));
     bottom.line_to((1.5, page_h - 1.5));
-    bottom.line_to((0.0, page_h - MARK));
+    bottom.line_to((0.0, page_h - 1.5));
     bottom.close_path();
     marks.push(SvgElement::Path {
         attributes: Vec::new(),
@@ -317,7 +327,7 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
                 SvgAttribute::view_box([0.0, 0.0, doc.board.width_mm, doc.board.height_mm]),
                 SvgAttribute::text("overflow", "hidden"),
             ],
-            children: document_elements(doc, false, true),
+            children: document_elements(doc, false, true)?,
         },
     ];
     Ok(SvgScene {
@@ -370,13 +380,6 @@ pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
     }
     Ok(result.document)
 }
-/// Decode SVG or SVGZ with the shared bounded reader and apply Stencil's vector policy.
-pub fn import_bytes_with_warnings(bytes: &[u8], name: &str) -> Result<SvgImport, SvgError> {
-    let text = craft_svg::svgz::text(bytes, craft_svg::paths::MAX_SVG_BYTES)
-        .map_err(|error| SvgError::Import(error.to_string()))?;
-    import_with_warnings(&text, name)
-}
-
 pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
     let imported = craft_svg::paths::import::<SvgKind>(svg, name)
         .map_err(|error| SvgError::Import(error.to_string()))?;

@@ -27,6 +27,10 @@ use run::RunRequest;
 fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
+        Some("--version" | "-V" | "version") => {
+            println!("stencilcraft-cli {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Some("run") => {
             let req = RunRequest::parse(&args[1..]).map_err(|e| e.to_string())?;
             run::execute(req)
@@ -284,6 +288,7 @@ fn print_cut_command(args: &[String]) -> Result<(), String> {
 
 fn print_help() {
     println!("stencilcraft-cli — StencilCraft headless tools");
+    println!("  --version, -V — print the package version");
     println!();
     println!("  run --in FILE [--apply-kerf MM] [--tile-sheet WxH] [--overlap MM]");
     println!("      [--tile-prefix PREFIX] [--tile-marks] --export OUT");

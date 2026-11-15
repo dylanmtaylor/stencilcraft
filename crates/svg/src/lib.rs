@@ -73,7 +73,7 @@ fn document_elements(
     doc: &Document,
     output_layers_only: bool,
     include_title: bool,
-) -> Result<Vec<SvgElement>, SvgError> {
+) -> Vec<SvgElement> {
     let mut elements = Vec::new();
     if include_title {
         elements.push(SvgElement::Title(format!(
@@ -130,7 +130,7 @@ fn document_elements(
             children,
         });
     }
-    Ok(elements)
+    elements
 }
 
 pub fn export(doc: &Document) -> Result<String, SvgError> {
@@ -139,7 +139,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
         width_mm: bounds.width(),
         height_mm: bounds.height(),
         view_box: [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
-        elements: document_elements(doc, false, true)?,
+        elements: document_elements(doc, false, true),
     }
     .write_fixed_view_box())
 }
@@ -239,7 +239,7 @@ pub fn export_tile_preview(
                     options.scale,
                     -options.scale,
                 )],
-                children: document_elements(piece, true, false)?,
+                children: document_elements(piece, true, false),
             },
         ];
         elements.push(SvgElement::Group {
@@ -327,7 +327,7 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
                 SvgAttribute::view_box([0.0, 0.0, doc.board.width_mm, doc.board.height_mm]),
                 SvgAttribute::text("overflow", "hidden"),
             ],
-            children: document_elements(doc, false, true)?,
+            children: document_elements(doc, false, true),
         },
     ];
     Ok(SvgScene {

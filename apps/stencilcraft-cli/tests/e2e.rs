@@ -826,3 +826,17 @@ fn import_trace_and_raster_pdf_exports() {
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("threshold"));
 }
+
+#[test]
+fn version_reports_package_version_without_opening_a_document() {
+    for arg in ["--version", "-V", "version"] {
+        let out = bin().arg(arg).output().expect("child spawns");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        expect_exit0(&out, &stdout);
+        assert_eq!(
+            stdout.trim(),
+            concat!("stencilcraft-cli ", env!("CARGO_PKG_VERSION"))
+        );
+        assert!(out.stderr.is_empty());
+    }
+}

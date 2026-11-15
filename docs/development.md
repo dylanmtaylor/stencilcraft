@@ -121,3 +121,5 @@ access to `org.bluez` on the system bus for planned Linux Bluetooth connections.
 This grants broader network access; it does not implement Bluetooth transport.
 Rebuild and reinstall the Flatpak to apply these permissions. See [Flatpak sandbox
 permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).
+
+The headless CLI supports `--version` (also `-V` and `version`) for installed-package smoke tests. This prints its package version without opening a document or device.

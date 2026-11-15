@@ -164,33 +164,11 @@ impl Session {
     /// Interpret one request line and produce the response line, if the request
     /// carried a parseable envelope. Returns `Ok(None)` on blank lines.
     pub fn handle_line(&mut self, line: &str) -> Result<Option<String>, ProtocolError> {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            return Ok(None);
-        }
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
-            Ok(v) => v,
-            Err(e) => {
-                // Malformed JSON cannot name an id reliably: respond with null.
-                return Ok(Some(error_response(
-                    None,
-                    &format!("bad request envelope: {e}"),
-                )));
-            }
-        };
-        let id = value.get("id").cloned();
-        let method = value.get("method").and_then(serde_json::Value::as_str);
-        let Some(method) = method else {
-            return Ok(Some(error_response(id, "missing `method`")));
-        };
-        let params = value
-            .get("params")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        match self.dispatch(method, &params) {
-            Ok(result) => Ok(Some(ok_response(id, result))),
-            Err(e) => Ok(Some(error_response(id, &e.to_string()))),
-        }
+        Ok(craft_jsonrpc::control::process_line(
+            line,
+            rpc_limits().max_message_bytes,
+            |method, params| self.dispatch(method, params),
+        ))
     }
 
     fn dispatch(
@@ -1906,14 +1884,6 @@ fn machine_dry_run(
         "transcript": transcript.iter().take(DRY_RUN_LINES).collect::<Vec<_>>(),
         "path": written,
     }))
-}
-
-fn ok_response(id: Option<serde_json::Value>, result: serde_json::Value) -> String {
-    serde_json::json!({ "id": id, "ok": true, "result": result }).to_string()
-}
-
-fn error_response(id: Option<serde_json::Value>, error: &str) -> String {
-    serde_json::json!({ "id": id, "ok": false, "error": error }).to_string()
 }
 
 #[cfg(test)]

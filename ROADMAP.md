@@ -360,3 +360,5 @@ Completed items should be marked here only when behavior is usable end-to-end.
   CLI end-to-end integration tests (9) and a malformed-input no-panic corpus (5) —
   110 workspace tests; fixed the SVG export `<svg>` unterminated-tag bug found by
   the preview renders.
+
+- 2026-11-15: advanced the shared format pin to consume craft-libs #1206 bounded DXF SPLINE paths. Existing full-entity and joined-line assertions remain unchanged; hosted validation pending.

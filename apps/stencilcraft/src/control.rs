@@ -12,7 +12,9 @@
 //! `app.screenshot` instead falls back to rendering the last document the window
 //! published ([`Jobs::publish`]), which needs no presented frame.
 
-use std::io::{BufRead, BufReader, Write};
+#[cfg(test)]
+use std::io::BufRead;
+use std::io::{BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -141,22 +143,40 @@ fn handle_connection(
             }
         });
         let mut out = stream;
-        let mut line = String::new();
         loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => return, // closed
-                Ok(_) => {}
+            let bytes = match craft_jsonrpc::read_line(
+                &mut reader,
+                craft_jsonrpc::Limits::default().max_message_bytes,
+            ) {
+                Ok(None) => return,
+                Ok(Some(bytes)) => bytes,
+                Err(craft_jsonrpc::LineError::TooLong) => {
+                    let error = craft_jsonrpc::error_response(
+                        serde_json::Value::Null,
+                        craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+                    );
+                    let _ = writeln!(out, "{error}");
+                    return;
+                }
                 Err(e) => {
                     eprintln!("control: read failed: {e}");
                     return;
                 }
-            }
+            };
+            let line = match String::from_utf8(bytes) {
+                Ok(line) => line,
+                Err(_) => {
+                    if writeln!(out, "{}", craft_jsonrpc::parse_error_response()).is_err() {
+                        return;
+                    }
+                    continue;
+                }
+            };
             if line.trim().is_empty() {
                 continue;
             }
             let (reply, answered) = mpsc::channel();
-            let request = std::mem::take(&mut line);
+            let request = line;
             let value = serde_json::from_str::<serde_json::Value>(&request).ok();
             if jobs
                 .send(Job {
@@ -176,6 +196,9 @@ fn handle_connection(
                 Err(mpsc::RecvTimeoutError::Timeout) => no_frame_answer(value.as_ref(), &snapshot),
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             };
+            if response.is_empty() {
+                continue;
+            }
             if let Err(e) = writeln!(out, "{response}") {
                 eprintln!("control: write failed: {e}");
                 return;
@@ -188,15 +211,43 @@ fn handle_connection(
 /// renders the last published document headlessly, everything else gets
 /// [`NO_FRAMES_ERROR`].
 fn no_frame_answer(request: Option<&serde_json::Value>, snapshot: &Mutex<Document>) -> String {
+    let screenshot = request
+        .filter(|v| v.get("method").and_then(|m| m.as_str()) == Some("app.screenshot"))
+        .filter(|v| {
+            v.get("jsonrpc").is_none()
+                || craft_jsonrpc::request(v, stencilcraft_mcp::rpc_limits()).is_some_and(
+                    |request| {
+                        request.id.is_some()
+                            && request.params.is_none_or(serde_json::Value::is_object)
+                    },
+                )
+        })
+        .and_then(|v| v.pointer("/params/path"))
+        .and_then(|p| p.as_str());
+    if let Some(value) = request
+        && (value.is_array() || value.get("jsonrpc").is_some())
+        && screenshot.is_none()
+    {
+        return craft_jsonrpc::process(
+            value,
+            stencilcraft_mcp::rpc_limits(),
+            |_| Err(craft_jsonrpc::RpcError::new(-32000, NO_FRAMES_ERROR)),
+            |_| {},
+        )
+        .unwrap_or_else(|_| {
+            Some(craft_jsonrpc::error_response(
+                serde_json::Value::Null,
+                craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+            ))
+        })
+        .map(|reply| reply.to_string())
+        .unwrap_or_default();
+    }
     let id = request
         .and_then(|v| v.get("id"))
         .cloned()
         .unwrap_or_default();
-    let path = request
-        .filter(|v| v.get("method").and_then(|m| m.as_str()) == Some("app.screenshot"))
-        .and_then(|v| v.pointer("/params/path"))
-        .and_then(|p| p.as_str());
-    let Some(path) = path else {
+    let Some(path) = screenshot else {
         return serde_json::json!({"id": id, "ok": false, "error": NO_FRAMES_ERROR}).to_string();
     };
     let doc = match snapshot.lock() {
@@ -252,6 +303,60 @@ mod tests {
         assert_eq!(value["error"], NO_FRAMES_ERROR);
         // The stale request is not handed to a UI thread that wakes up late.
         assert!(jobs.try_recv().is_none());
+    }
+
+    #[test]
+    fn timed_out_jsonrpc_batches_keep_ids_and_omit_notifications() {
+        let snapshot = Mutex::new(Document::default());
+        let batch = serde_json::json!([
+            {"jsonrpc":"2.0", "id":"a", "method":"ping"},
+            {"jsonrpc":"2.0", "method":"notifications/initialized"},
+            {"jsonrpc":"2.0", "id":2, "method":"ping"}
+        ]);
+        let reply: serde_json::Value =
+            serde_json::from_str(&no_frame_answer(Some(&batch), &snapshot)).unwrap();
+        assert_eq!(reply.as_array().unwrap().len(), 2);
+        assert_eq!(reply[0]["id"], "a");
+        assert_eq!(reply[1]["id"], 2);
+        assert_eq!(reply[0]["error"]["code"], -32000);
+        let notification =
+            serde_json::json!({"jsonrpc":"2.0", "method":"notifications/initialized"});
+        assert!(no_frame_answer(Some(&notification), &snapshot).is_empty());
+    }
+
+    #[test]
+    fn notification_does_not_add_a_blank_socket_response() {
+        let jobs = serve(0, || {}).unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", jobs.port())).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        writeln!(
+            stream,
+            r#"{{"jsonrpc":"2.0","method":"notifications/initialized"}}"#
+        )
+        .unwrap();
+        writeln!(stream, r#"{{"jsonrpc":"2.0","id":1,"method":"ping"}}"#).unwrap();
+        let next = || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if let Some(job) = jobs.try_recv() {
+                    break job;
+                }
+                assert!(Instant::now() < deadline, "control job was not queued");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        next().reply.send(String::new()).unwrap();
+        next()
+            .reply
+            .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
+            .unwrap();
+        let mut response = String::new();
+        BufReader::new(stream).read_line(&mut response).unwrap();
+        let reply: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(reply["id"], 1);
+        assert_eq!(reply["result"], serde_json::json!({}));
     }
 
     #[test]

@@ -15,6 +15,7 @@ tiny-skia = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-raster = { workspace = true }
+stencilcraft-svg = { workspace = true }
 
 [dev-dependencies]
 stencilcraft-dxf = { workspace = true }

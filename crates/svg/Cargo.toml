@@ -10,7 +10,6 @@ description = "SVG import and export for StencilCraft documents"
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 craft-svg = { workspace = true }
-craft-file-import = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 

@@ -49,13 +49,31 @@ mod tests {
         path.close_path();
         doc.push_shape(0, path, CutStyle::Cut).unwrap();
         let pdf = export(&doc).unwrap();
-        let text = String::from_utf8(pdf.clone()).unwrap();
-        assert!(text.starts_with("%PDF-1.4"));
-        assert!(text.ends_with("%%EOF\n"));
-        assert!(text.contains("/MediaBox [0 0 283.4646 425.1969]"), "{text}");
+        use kurbo::Shape as _;
+        assert!(pdf.starts_with(b"%PDF-1.4"));
+        assert!(pdf.trim_ascii_end().ends_with(b"%%EOF"));
         let read = craft_pdf::paths::import(&pdf, Default::default()).unwrap();
-        assert!(!read.pages.is_empty());
-        assert!(!read.pages[0].paths.is_empty());
+        assert_eq!(read.pages.len(), 1);
+        let page = &read.pages[0];
+        let pt_per_mm = 72.0 / 25.4;
+        assert!((page.crop_box.width() - doc.board.width_mm * pt_per_mm).abs() < 0.02);
+        assert!((page.crop_box.height() - doc.board.height_mm * pt_per_mm).abs() < 0.02);
+        let expected =
+            (kurbo::Affine::scale(pt_per_mm) * doc.layers[0].shapes[0].path.clone()).bounding_box();
+        assert!(
+            page.paths.iter().any(|path| {
+                let actual = path.bounding_box();
+                [
+                    actual.x0 - expected.x0,
+                    actual.y0 - expected.y0,
+                    actual.x1 - expected.x1,
+                    actual.y1 - expected.y1,
+                ]
+                .iter()
+                .all(|d| d.abs() < 0.02)
+            }),
+            "exported path geometry must survive PDF import"
+        );
         let mut bad = doc.clone();
         bad.board.width_mm = f64::NAN;
         assert!(export(&bad).is_err());

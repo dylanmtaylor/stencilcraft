@@ -50,6 +50,25 @@ fn view_bounds(doc: &Document) -> kurbo::Rect {
             |bounds, layer| bounds.union(layer),
         )
 }
+// Groups are bounded before recursion to avoid exhausting the stack on hostile documents.
+fn append_grouped(destination: &mut Vec<SvgElement>, chain: &[u64], element: SvgElement) {
+    let Some((&id, rest)) = chain.split_first() else {
+        destination.push(element);
+        return;
+    };
+    let marker = SvgAttribute::text("data-group", id.to_string());
+    if !matches!(destination.last(), Some(SvgElement::Group { attributes, .. }) if attributes.contains(&marker))
+    {
+        destination.push(SvgElement::Group {
+            attributes: vec![SvgAttribute::text("class", "group"), marker],
+            children: Vec::new(),
+        });
+    }
+    if let Some(SvgElement::Group { children, .. }) = destination.last_mut() {
+        append_grouped(children, rest, element);
+    }
+}
+
 fn document_elements(
     doc: &Document,
     output_layers_only: bool,
@@ -79,40 +98,35 @@ fn document_elements(
                 &parents,
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
-            let mut element = SvgElement::Path {
+            let element = SvgElement::Path {
                 attributes: vec![SvgAttribute::text("class", class_for(shape.style))],
                 path: shape.cut_path().into_owned(),
             };
-            for id in chain.iter().rev() {
-                element = SvgElement::Group {
-                    attributes: vec![
-                        SvgAttribute::text("class", "group"),
-                        SvgAttribute::text("data-group", id.to_string()),
-                    ],
-                    children: vec![element],
-                };
-            }
-            children.push(element);
+            append_grouped(&mut children, &chain, element);
         }
+        let mut attributes = Vec::new();
+        if !output_layers_only {
+            attributes.push(SvgAttribute::text("class", class_for(layer.kind)));
+        }
+        attributes.extend([
+            SvgAttribute::text(
+                "data-kind",
+                match layer.kind {
+                    CutStyle::Cut => "cut",
+                    CutStyle::Engrave => "engrave",
+                },
+            ),
+            SvgAttribute::text(
+                "style",
+                if layer.visible {
+                    "display:visible"
+                } else {
+                    "display:hidden"
+                },
+            ),
+        ]);
         elements.push(SvgElement::Group {
-            attributes: vec![
-                SvgAttribute::text("class", class_for(layer.kind)),
-                SvgAttribute::text(
-                    "data-kind",
-                    match layer.kind {
-                        CutStyle::Cut => "cut",
-                        CutStyle::Engrave => "engrave",
-                    },
-                ),
-                SvgAttribute::text(
-                    "style",
-                    if layer.visible {
-                        "display:visible"
-                    } else {
-                        "display:hidden"
-                    },
-                ),
-            ],
+            attributes,
             children,
         });
     }
@@ -127,7 +141,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
         view_box: [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
         elements: document_elements(doc, false, true),
     }
-    .write())
+    .write_fixed_view_box())
 }
 
 pub fn export_tile_preview(
@@ -219,22 +233,19 @@ pub fn export_tile_preview(
                 height: cell_height,
             },
             SvgElement::Group {
-                attributes: vec![SvgAttribute {
-                    name: "transform".into(),
-                    value: craft_svg::write::Value::TranslateScale {
-                        x,
-                        y: y + cell_height,
-                        scale_x: options.scale,
-                        scale_y: -options.scale,
-                    },
-                }],
+                attributes: vec![SvgAttribute::translate_scale_fixed(
+                    x,
+                    y + cell_height,
+                    options.scale,
+                    -options.scale,
+                )],
                 children: document_elements(piece, true, false),
             },
         ];
         elements.push(SvgElement::Group {
             attributes: vec![
                 SvgAttribute::text("class", "sheet"),
-                SvgAttribute::number("data-sheet", index as f64),
+                SvgAttribute::text("data-sheet", index.to_string()),
                 SvgAttribute::text(
                     "data-size",
                     format!("{:.1}x{:.1}", piece.board.width_mm, piece.board.height_mm),
@@ -249,7 +260,7 @@ pub fn export_tile_preview(
         view_box: [0.0, 0.0, page_w, page_h],
         elements,
     }
-    .write())
+    .write_fixed_view_box())
 }
 
 pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
@@ -288,7 +299,7 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     bottom.line_to((MARK, page_h - MARK));
     bottom.line_to((1.5, page_h - MARK));
     bottom.line_to((1.5, page_h - 1.5));
-    bottom.line_to((0.0, page_h - MARK));
+    bottom.line_to((0.0, page_h - 1.5));
     bottom.close_path();
     marks.push(SvgElement::Path {
         attributes: Vec::new(),
@@ -325,7 +336,36 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
         view_box: [0.0, 0.0, page_w, page_h],
         elements,
     }
-    .write())
+    .write_fixed_view_box())
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SvgKind(CutStyle);
+impl Default for SvgKind {
+    fn default() -> Self {
+        Self(CutStyle::Cut)
+    }
+}
+impl craft_svg::paths::Kind for SvgKind {
+    const PROPERTIES: &'static [&'static str] = &["data-kind"];
+    fn of(style: &craft_svg::paths::StyleMap, class: &str) -> Option<Self> {
+        let kind = style.get("data-kind").map(String::as_str);
+        if kind == Some("engrave")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-engrave")
+        {
+            Some(Self(CutStyle::Engrave))
+        } else if kind == Some("cut")
+            || class
+                .split_ascii_whitespace()
+                .any(|c| c == "stencilcraft-cut")
+        {
+            Some(Self(CutStyle::Cut))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -334,47 +374,76 @@ pub struct SvgImport {
     pub warnings: Vec<String>,
 }
 pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
-    import_with_warnings(svg, name).map(|got| got.document)
+    let result = import_with_warnings(svg, name)?;
+    if !result.warnings.is_empty() {
+        return Err(SvgError::Import(result.warnings.join("; ")));
+    }
+    Ok(result.document)
 }
-pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
-    let imported = craft_file_import::import(name, svg.as_bytes(), Default::default())
+/// Decode SVG or SVGZ with the shared bounded reader and apply Stencil's vector policy.
+pub fn import_bytes_with_warnings(bytes: &[u8], name: &str) -> Result<SvgImport, SvgError> {
+    let text = craft_svg::svgz::text(bytes, craft_svg::paths::MAX_SVG_BYTES)
         .map_err(|error| SvgError::Import(error.to_string()))?;
-    let craft_file_import::Imported::Vector(scene) = imported else {
-        return Err(SvgError::Import("SVG reader returned raster data".into()));
-    };
+    import_with_warnings(&text, name)
+}
+
+pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
+    let imported = craft_svg::paths::import::<SvgKind>(svg, name)
+        .map_err(|error| SvgError::Import(error.to_string()))?;
     let mut doc = Document {
         board: stencilcraft_doc::Board {
-            width_mm: scene.width_mm,
-            height_mm: scene.height_mm,
+            width_mm: imported.width_mm,
+            height_mm: imported.height_mm,
         },
         ..Document::default()
     };
     let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
     layers.insert(("cut".into(), false, None), 0);
-    let mut warnings = scene.warnings;
-    for shape in scene.shapes {
-        if shape.path.elements().is_empty() {
+    let mut warnings = imported.warnings.clone();
+    let mut dropped = imported.dropped_warnings;
+    for shape in &imported.shapes {
+        // Cutters retain open centerlines even when SVG's default fill would paint no area.
+        // Ask the shared clipper to treat an entirely open path as linework.
+        let mut cut_shape = shape.clone();
+        if !cut_shape
+            .path
+            .elements()
+            .iter()
+            .any(|e| matches!(e, kurbo::PathEl::ClosePath))
+        {
+            cut_shape.has_fill = false;
+            cut_shape.has_stroke = true;
+        }
+        let path = imported
+            .clipped_path(&cut_shape)
+            .map_err(|error| SvgError::Import(error.to_string()))?;
+        if path.elements().is_empty() {
             continue;
         }
-        let classes = shape
-            .class
-            .as_deref()
-            .unwrap_or("")
-            .split_ascii_whitespace();
-        let style = if shape.tag.as_deref() == Some("engrave")
-            || classes.clone().any(|class| class == "stencilcraft-engrave")
-        {
-            CutStyle::Engrave
-        } else {
-            CutStyle::Cut
-        };
-        let layer_name = shape.layer.unwrap_or_else(|| match style {
-            CutStyle::Cut => "cut".into(),
-            CutStyle::Engrave => "engrave".into(),
-        });
+        let style = shape.kind.0;
         let color = shape
-            .stroke_rgb
-            .map(|[red, green, blue]| format!("#{red:02x}{green:02x}{blue:02x}"));
+            .stroke
+            .as_deref()
+            .and_then(|stroke| match craft_svg::color::parse_color(stroke) {
+                Ok(c) => Some(format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)),
+                Err(_) => {
+                    craft_svg::paths::push_warning(
+                        &mut warnings,
+                        &mut dropped,
+                        format!("{}: unrecognised stroke colour", shape.label),
+                    );
+                    None
+                }
+            });
+        let layer_name = shape
+            .layer
+            .clone()
+            .unwrap_or_else(|| match (&color, style) {
+                (Some(color), CutStyle::Cut) => format!("Line {color}"),
+                (Some(color), CutStyle::Engrave) => format!("engrave {color}"),
+                (None, CutStyle::Cut) => "cut".into(),
+                (None, CutStyle::Engrave) => "engrave".into(),
+            });
         let key = (
             layer_name.clone(),
             style == CutStyle::Engrave,
@@ -390,14 +459,17 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
             layers.insert(key, i);
             i
         };
-        doc.push_shape(index, shape.path, style)
+        doc.push_shape(index, path, style)
             .map_err(|e| SvgError::Model(e.to_string()))?;
     }
-    if scene.dropped_warnings > 0 {
-        warnings.push(format!(
-            "{} additional SVG warnings omitted",
-            scene.dropped_warnings
-        ));
+    if dropped > 0 {
+        warnings.push(format!("{dropped} more SVG warnings omitted"));
+    }
+    for layer in &doc.layers {
+        if let Some(bounds) = layer.bounds() {
+            doc.board.width_mm = doc.board.width_mm.max(bounds.x1);
+            doc.board.height_mm = doc.board.height_mm.max(bounds.y1);
+        }
     }
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
     Ok(SvgImport {

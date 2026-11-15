@@ -27,18 +27,20 @@ craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805
 craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
-craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5", features = ["paths"] }
-craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-plotter = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5", features = ["serde"] }
-craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5", features = ["write", "paths"] }
-craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-file-import = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
-craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "8ebdc499a5e8f13f249178072e56ccd7b45bc5b5" }
+craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-jsonrpc = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
+craft-mcp = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
+craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["paths"] }
+craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-plotter = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["serde"] }
+craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["write", "paths"] }
+craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-file-import = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "25c7a8959cf70cf8c3f076d05baadb0990710569" }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its

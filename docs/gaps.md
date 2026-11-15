@@ -86,7 +86,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    visible canvas, so agents edit the open document (undoable, with the window
    repainting). Requests are handled between frames, one at a time. `stencilcraft-cli mcp
    --control PORT` bridges an MCP client to that socket, so the same tool names drive the
-   open window. The wider command set is not wrapped in dedicated tools, the JSON channel
+   open window. Both paths use shared bounded JSON-RPC validation, line reads and MCP session envelopes. The wider
+   command set is not wrapped in dedicated tools, the JSON channel
    has no fuzz corpus, and a request can only be answered while the window is alive. (The
    document reader does have a malformed-input no-panic corpus now.)
 9. **wasm**: no web build.

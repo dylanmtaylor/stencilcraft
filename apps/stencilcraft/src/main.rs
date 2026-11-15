@@ -4188,12 +4188,22 @@ fn align_command(action: AlignAction) -> Option<AlignCommand> {
     })
 }
 
+/// Legacy control calls are accepted without IDs; JSON-RPC calls must be valid requests.
+fn window_control_request(value: &serde_json::Value) -> bool {
+    if value.get("jsonrpc").is_none() {
+        return true;
+    }
+    craft_jsonrpc::request(value, stencilcraft_mcp::rpc_limits()).is_some_and(|request| {
+        request.id.is_some() && request.params.is_none_or(serde_json::Value::is_object)
+    })
+}
+
 /// The output path of an `app.screenshot` control request (`{"method":"app.screenshot",
 /// "params":{"path":…}}`), the one control method the window answers itself: the MCP session
 /// is headless and has no frame to capture.
 fn screenshot_request(line: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    if value.get("method")?.as_str()? != "app.screenshot" {
+    if !window_control_request(&value) || value.get("method")?.as_str()? != "app.screenshot" {
         return None;
     }
     Some(value.get("params")?.get("path")?.as_str()?.to_string())
@@ -4231,7 +4241,7 @@ fn document_path_request(line: &str, reply: &str) -> Option<(&'static str, Strin
 /// (`{"method":"app.select","params":{"ids":[1,2]}}`); at most 10 000 ids are read.
 fn select_request(line: &str) -> Option<(serde_json::Value, Vec<u64>)> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    if value.get("method")?.as_str()? != "app.select" {
+    if !window_control_request(&value) || value.get("method")?.as_str()? != "app.select" {
         return None;
     }
     let ids = value
@@ -4256,7 +4266,7 @@ fn view_request(
     Option<stencilcraft_ui_egui::ColorTheme>,
 )> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    if value.get("method")?.as_str()? != "app.view" {
+    if !window_control_request(&value) || value.get("method")?.as_str()? != "app.view" {
         return None;
     }
     let params = value.get("params");
@@ -4411,6 +4421,32 @@ mod tests {
             None
         );
         assert_eq!(screenshot_request("not json"), None);
+        assert_eq!(
+            screenshot_request(
+                r#"{"jsonrpc":"2.0","method":"app.screenshot","params":{"path":"/tmp/a.png"}}"#
+            ),
+            None
+        );
+        assert_eq!(
+            select_request(r#"{"jsonrpc":"2.0","method":"app.select","params":{"ids":[1]}}"#),
+            None
+        );
+        assert!(
+            view_request(r#"{"jsonrpc":"2.0","method":"app.view","params":{"theme":"dark"}}"#)
+                .is_none()
+        );
+        assert_eq!(
+            screenshot_request(
+                r#"{"jsonrpc":"2.0","id":false,"method":"app.screenshot","params":{"path":"/tmp/a.png"}}"#
+            ),
+            None
+        );
+        assert_eq!(
+            screenshot_request(
+                r#"{"jsonrpc":"2.0","id":1,"method":"app.screenshot","params":{"path":"/tmp/a.png"}}"#
+            ),
+            Some("/tmp/a.png".to_string())
+        );
         let (id, ids) =
             select_request(r#"{"id":7,"method":"app.select","params":{"ids":[1,"x",3]}}"#).unwrap();
         assert_eq!((id, ids), (serde_json::json!(7), vec![1, 3]));

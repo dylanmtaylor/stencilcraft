@@ -111,13 +111,13 @@ fn mcp_command(args: &[String]) -> Result<(), String> {
 }
 
 fn mcp_loop() -> Result<(), String> {
-    use std::io::{BufRead, Write as _};
+    use std::io::Write as _;
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
     let mut session = stencilcraft_mcp::Session::default();
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|e| format!("mcp: read: {e}"))?;
+    let mut input = stdin.lock();
+    while let Some(line) = read_mcp_line(&mut input, &mut out)? {
         match session.handle_stdio_line(&line) {
             Ok(None) => continue,
             Ok(Some(response)) => {
@@ -128,6 +128,44 @@ fn mcp_loop() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn read_mcp_line(
+    input: &mut impl std::io::BufRead,
+    out: &mut impl std::io::Write,
+) -> Result<Option<String>, String> {
+    loop {
+        let bytes = match craft_jsonrpc::read_line(
+            input,
+            craft_jsonrpc::Limits::default().max_message_bytes,
+        ) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return Ok(None),
+            Err(craft_jsonrpc::LineError::TooLong) => {
+                writeln!(
+                    out,
+                    "{}",
+                    craft_jsonrpc::error_response(
+                        serde_json::Value::Null,
+                        craft_jsonrpc::RpcError::new(-32600, "Invalid Request")
+                    )
+                )
+                .map_err(|e| format!("mcp: write: {e}"))?;
+                out.flush().map_err(|e| format!("mcp: flush: {e}"))?;
+                return Ok(None);
+            }
+            Err(e) => return Err(format!("mcp: read: {e}")),
+        };
+        match String::from_utf8(bytes) {
+            Ok(line) => return Ok(Some(line)),
+            Err(_) => {
+                writeln!(out, "{}", craft_jsonrpc::parse_error_response())
+                    .map_err(|e| format!("mcp: write: {e}"))?;
+                out.flush().map_err(|e| format!("mcp: flush: {e}"))?;
+                continue;
+            }
+        }
+    }
 }
 
 fn import_svg_command(args: &[String]) -> Result<(), String> {

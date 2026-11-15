@@ -444,13 +444,14 @@ fn registration_commands_and_session_wait() {
     let lines = p.transcript();
     let wait = p.registration_wait.expect("waits");
     assert_eq!(
-        lines[wait - 7..wait],
+        lines[wait - 8..wait],
         [
             "TB50,0",
             "TB99",
             "TB52,2",
             "TB51,400",
             "TB53,10",
+            "TB54,0,0",
             "TB55,1",
             "TB123,4600,3600,200,100"
         ]

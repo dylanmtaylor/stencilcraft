@@ -6,7 +6,7 @@
 //! document) and the reply comes back on stdout. Without it, `mcp` keeps its own
 //! headless session.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::net::TcpStream;
 
 /// Relay stdin/stdout to the desktop control socket on `127.0.0.1:port`.
@@ -15,8 +15,8 @@ pub fn run(port: u16) -> Result<(), String> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = BufWriter::new(stdout.lock());
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|e| format!("mcp: read: {e}"))?;
+    let mut input = stdin.lock();
+    while let Some(line) = crate::read_mcp_line(&mut input, &mut out)? {
         if line.trim().is_empty() {
             continue;
         }
@@ -64,10 +64,13 @@ fn forward(port: u16, line: &str, want_response: bool) -> Result<Option<String>,
     if !want_response {
         return Ok(None);
     }
-    let mut response = String::new();
-    BufReader::new(stream)
-        .read_line(&mut response)
-        .map_err(|e| format!("desktop control socket: {e}"))?;
+    let bytes = craft_jsonrpc::read_line(
+        &mut BufReader::new(stream),
+        craft_jsonrpc::Limits::default().max_message_bytes,
+    )
+    .map_err(|e| format!("desktop control socket: {e}"))?
+    .unwrap_or_default();
+    let response = String::from_utf8(bytes).map_err(|e| format!("desktop control socket: {e}"))?;
     if response.trim().is_empty() {
         return Err("the app closed the control connection without answering".to_string());
     }
@@ -77,32 +80,76 @@ fn forward(port: u16, line: &str, want_response: bool) -> Result<Option<String>,
 /// Does this line need a reply? JSON-RPC requests carry an `id`; notifications do
 /// not. Anything unparseable gets an answer so the client is never left waiting.
 fn expects_response(line: &str) -> bool {
-    match serde_json::from_str::<serde_json::Value>(line) {
-        Ok(serde_json::Value::Array(items)) => items.iter().any(|item| item.get("id").is_some()),
-        Ok(serde_json::Value::Object(map)) => map.contains_key("id"),
-        _ => true,
+    let limits = stencilcraft_mcp::rpc_limits();
+    let Ok(value) = craft_jsonrpc::parse_json(line.as_bytes(), limits) else {
+        return true;
+    };
+    if value.is_object() && value.get("jsonrpc").is_none() {
+        return true;
     }
+    craft_jsonrpc::process(&value, limits, |_| Ok(serde_json::Value::Null), |_| {})
+        .map_or(true, |response| response.is_some())
 }
 
 /// Build the protocol-appropriate error for a request that could not be forwarded.
 fn error_line(request: &str, message: &str) -> String {
-    let value: serde_json::Value = serde_json::from_str(request).unwrap_or(serde_json::Value::Null);
-    let id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
-    if value.get("jsonrpc").is_some() {
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": { "code": -32000, "message": message },
-        })
-        .to_string()
-    } else {
-        serde_json::json!({ "id": id, "ok": false, "error": message }).to_string()
+    let limits = stencilcraft_mcp::rpc_limits();
+    let value = match craft_jsonrpc::parse_json(request.as_bytes(), limits) {
+        Ok(value) => value,
+        Err(craft_jsonrpc::ParseError::InvalidJson) => {
+            return craft_jsonrpc::parse_error_response().to_string();
+        }
+        Err(_) => {
+            return craft_jsonrpc::error_response(
+                serde_json::Value::Null,
+                craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+            )
+            .to_string();
+        }
+    };
+    if value.is_object() && value.get("jsonrpc").is_none() {
+        let id = value.get("id").cloned().unwrap_or(serde_json::Value::Null);
+        return serde_json::json!({ "id": id, "ok": false, "error": message }).to_string();
     }
+    craft_jsonrpc::process(
+        &value,
+        limits,
+        |_| Err(craft_jsonrpc::RpcError::new(-32000, message)),
+        |_| {},
+    )
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| {
+        craft_jsonrpc::error_response(
+            serde_json::Value::Null,
+            craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+        )
+    })
+    .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_utf8_gets_parse_error_and_next_line_is_read() {
+        let mut input = BufReader::with_capacity(2, std::io::Cursor::new(b"\xff\n{}\n"));
+        let mut output = Vec::new();
+        assert_eq!(
+            crate::read_mcp_line(&mut input, &mut output)
+                .unwrap()
+                .as_deref(),
+            Some("{}")
+        );
+        let reply: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(reply["error"]["code"], -32700);
+        assert!(
+            crate::read_mcp_line(&mut input, &mut output)
+                .unwrap()
+                .is_none()
+        );
+    }
 
     #[test]
     fn requests_need_answers_and_notifications_do_not() {
@@ -123,6 +170,16 @@ mod tests {
         assert!(expects_response(
             r#"[{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":9,"method":"ping"}]"#
         ));
+        assert!(expects_response(
+            r#"[{"jsonrpc":"2.0","method":"notifications/initialized"},42]"#
+        ));
+        assert!(
+            expects_response(r#"{"method":"doc.summary"}"#),
+            "legacy calls always get a reply"
+        );
+        assert!(!expects_response(
+            r#"[{"jsonrpc":"2.0","method":"notifications/initialized"}]"#
+        ));
     }
 
     #[test]
@@ -138,5 +195,15 @@ mod tests {
         assert_eq!(value["id"], 7);
         assert_eq!(value["ok"], false);
         assert_eq!(value["error"], "down");
+
+        let batch = error_line(
+            r#"[{"jsonrpc":"2.0","id":"a","method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"ping"}]"#,
+            "down",
+        );
+        let value: serde_json::Value = serde_json::from_str(&batch).unwrap();
+        assert_eq!(value.as_array().unwrap().len(), 2);
+        assert_eq!(value[0]["id"], "a");
+        assert_eq!(value[1]["id"], 2);
+        assert_eq!(value[0]["error"]["code"], -32000);
     }
 }

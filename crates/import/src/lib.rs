@@ -99,6 +99,14 @@ pub(crate) fn read_format(
             "selected import handler does not match the detected file format",
         ));
     }
+    if matches!(format, Format::Svg | Format::Svgz) {
+        let imported = stencilcraft_svg::import_bytes_with_warnings(bytes, name)
+            .map_err(|error| bad(name, error))?;
+        for warning in &imported.warnings {
+            eprintln!("{name}: {warning}");
+        }
+        return apply_vector_options(imported.document, name, options);
+    }
     let imported =
         craft_file_import::import(name, bytes, Default::default()).map_err(|e| bad(name, e))?;
     imported_document(imported, name, options)
@@ -110,19 +118,8 @@ fn imported_document(
     name: &str,
     options: &ImportOptions,
 ) -> Result<Document, ImportError> {
-    let (fit_w, fit_h) = options.page_mm;
-    if options.fit_to_page
-        && !(fit_w.is_finite() && fit_h.is_finite() && fit_w > 0.0 && fit_h > 0.0)
-    {
-        return Err(bad(name, "the page to fit must be a positive size"));
-    }
-    if options.join
-        && !(options.join_tolerance_mm.is_finite()
-            && (0.0..=10.0).contains(&options.join_tolerance_mm))
-    {
-        return Err(bad(name, "join tolerance must be 0–10 mm"));
-    }
-    let mut doc = match imported {
+    validate_options(name, options)?;
+    let doc = match imported {
         craft_file_import::Imported::Raster(image) => {
             let pixels = craft_raster_codecs::common::Pixels::from_raw(
                 image.width,
@@ -161,6 +158,15 @@ fn imported_document(
             vector_document(scene, name)?
         }
     };
+    apply_vector_options(doc, name, options)
+}
+
+fn apply_vector_options(
+    mut doc: Document,
+    name: &str,
+    options: &ImportOptions,
+) -> Result<Document, ImportError> {
+    validate_options(name, options)?;
     if options.join {
         join_document(&mut doc, options.join_tolerance_mm);
     }
@@ -169,6 +175,22 @@ fn imported_document(
     }
     doc.validate().map_err(|e| bad(name, e))?;
     Ok(doc)
+}
+
+fn validate_options(name: &str, options: &ImportOptions) -> Result<(), ImportError> {
+    let (fit_w, fit_h) = options.page_mm;
+    if options.fit_to_page
+        && !(fit_w.is_finite() && fit_h.is_finite() && fit_w > 0.0 && fit_h > 0.0)
+    {
+        return Err(bad(name, "the page to fit must be a positive size"));
+    }
+    if options.join
+        && !(options.join_tolerance_mm.is_finite()
+            && (0.0..=10.0).contains(&options.join_tolerance_mm))
+    {
+        return Err(bad(name, "join tolerance must be 0–10 mm"));
+    }
+    Ok(())
 }
 
 /// Map generic shared paths and source labels into StencilCraft's layers and cut/engrave styles.

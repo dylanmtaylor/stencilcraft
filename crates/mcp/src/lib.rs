@@ -8,6 +8,14 @@
 use stencilcraft_doc::FORMAT_NAME;
 use stencilcraft_engine::{Command, Engine, EngineError};
 
+/// StencilCraft keeps its existing integer-or-string ID policy (and accepts explicit null IDs).
+pub fn rpc_limits() -> craft_jsonrpc::Limits {
+    craft_jsonrpc::Limits {
+        integer_ids_only: true,
+        ..craft_jsonrpc::Limits::default()
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProtocolError {
     #[error("mcp: {0}")]
@@ -21,6 +29,7 @@ pub struct Session {
     pub engine: Engine,
     /// Where the last `doc.open` loaded from, so Save can default there.
     last_path: Option<String>,
+    mcp: craft_mcp::Session,
 }
 
 impl Default for Session {
@@ -34,6 +43,11 @@ impl Session {
         Self {
             engine: Engine::default(),
             last_path: None,
+            mcp: craft_mcp::Session::new(
+                "stencilcraft",
+                env!("CARGO_PKG_VERSION"),
+                craft_mcp::Policy::Compatible,
+            ),
         }
     }
 
@@ -43,6 +57,11 @@ impl Session {
         Self {
             engine,
             last_path: None,
+            mcp: craft_mcp::Session::new(
+                "stencilcraft",
+                env!("CARGO_PKG_VERSION"),
+                craft_mcp::Policy::Compatible,
+            ),
         }
     }
 
@@ -53,103 +72,74 @@ impl Session {
 
     /// Handle an MCP stdio message, or a legacy control request for compatibility.
     pub fn handle_stdio_line(&mut self, line: &str) -> Result<Option<String>, ProtocolError> {
+        let limits = rpc_limits();
+        if line.len() > limits.max_message_bytes {
+            return Ok(Some(
+                craft_jsonrpc::error_response(
+                    serde_json::Value::Null,
+                    craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+                )
+                .to_string(),
+            ));
+        }
         let trimmed = line.trim();
         if trimmed.is_empty() {
             return Ok(None);
         }
-        let value: serde_json::Value = match serde_json::from_str(trimmed) {
+        let value = match craft_jsonrpc::parse_json(trimmed.as_bytes(), limits) {
             Ok(value) => value,
+            Err(craft_jsonrpc::ParseError::InvalidJson) => {
+                return Ok(Some(craft_jsonrpc::parse_error_response().to_string()));
+            }
             Err(_) => {
                 return Ok(Some(
-                    rpc_error(serde_json::Value::Null, -32700, "Parse error").to_string(),
+                    craft_jsonrpc::error_response(
+                        serde_json::Value::Null,
+                        craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+                    )
+                    .to_string(),
                 ));
             }
         };
         if value.is_object() && value.get("jsonrpc").is_none() {
             return self.handle_line(line);
         }
-        let response = if let Some(batch) = value.as_array() {
-            if batch.is_empty() {
-                Some(rpc_error(
-                    serde_json::Value::Null,
-                    -32600,
-                    "Invalid Request",
-                ))
-            } else {
-                let responses: Vec<_> = batch
-                    .iter()
-                    .filter_map(|request| self.handle_rpc(request))
-                    .collect();
-                if responses.is_empty() {
-                    None
-                } else {
-                    Some(serde_json::Value::Array(responses))
-                }
-            }
-        } else {
-            self.handle_rpc(&value)
-        };
+        let in_batch = value.is_array();
+        let session = std::cell::RefCell::new(&mut *self);
+        let response = craft_jsonrpc::process(
+            &value,
+            limits,
+            |request| session.borrow_mut().handle_rpc(request, in_batch),
+            |notification| session.borrow_mut().mcp.notification(notification),
+        )
+        .unwrap_or_else(|_| {
+            Some(craft_jsonrpc::error_response(
+                serde_json::Value::Null,
+                craft_jsonrpc::RpcError::new(-32600, "Invalid Request"),
+            ))
+        });
         Ok(response.map(|value| value.to_string()))
     }
 
-    fn handle_rpc(&mut self, request: &serde_json::Value) -> Option<serde_json::Value> {
-        let id = request.get("id").cloned();
-        let valid_id = id
-            .as_ref()
-            .is_none_or(|id| id.is_string() || id.is_i64() || id.is_u64() || id.is_null());
-        let method = request.get("method").and_then(serde_json::Value::as_str);
-        if !request.is_object()
-            || request.get("jsonrpc").and_then(serde_json::Value::as_str) != Some("2.0")
-            || method.is_none()
-            || !valid_id
-        {
-            return Some(rpc_error(
-                serde_json::Value::Null,
-                -32600,
-                "Invalid Request",
-            ));
-        }
-        // Notifications must not receive a response or invoke a tool.
-        let id = id?;
-        let method = method?;
+    fn handle_rpc(
+        &mut self,
+        request: craft_jsonrpc::Request<'_>,
+        in_batch: bool,
+    ) -> Result<serde_json::Value, craft_jsonrpc::RpcError> {
         let params = request
-            .get("params")
+            .params
             .cloned()
             .unwrap_or_else(|| serde_json::json!({}));
         if !params.is_object() {
-            return Some(rpc_error(id, -32602, "Invalid params"));
+            return Err(craft_jsonrpc::RpcError::new(-32602, "Invalid params"));
         }
-        let result = match method {
-            "initialize" => {
-                let version = params
-                    .get("protocolVersion")
-                    .and_then(serde_json::Value::as_str);
-                if version.is_none()
-                    || !params
-                        .get("capabilities")
-                        .is_some_and(serde_json::Value::is_object)
-                    || !params
-                        .get("clientInfo")
-                        .is_some_and(serde_json::Value::is_object)
-                {
-                    return Some(rpc_error(id, -32602, "Invalid initialize parameters"));
-                }
-                let version = "2025-03-26";
-                serde_json::json!({"protocolVersion": version, "capabilities": {"tools": {}}, "serverInfo": {"name": "stencilcraft", "version": env!("CARGO_PKG_VERSION")}})
-            }
-            "ping" => serde_json::json!({}),
-            "tools/list" => serde_json::json!({"tools": mcp_tools()}),
+        if let Some(result) = self.mcp.request(request, in_batch) {
+            return result;
+        }
+        let result = match request.method {
+            "tools/list" => craft_mcp::tool_list(serde_json::json!(mcp_tools())),
             "tools/call" => {
-                let Some(name) = params.get("name").and_then(serde_json::Value::as_str) else {
-                    return Some(rpc_error(id, -32602, "Missing tool name"));
-                };
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({}));
-                if !arguments.is_object() {
-                    return Some(rpc_error(id, -32602, "Tool arguments must be an object"));
-                }
+                let (name, arguments) = craft_mcp::tool_call(&params)?;
                 // Engine tools take the command's own params as their arguments.
                 let (method, arguments) = match ENGINE_TOOLS.iter().find(|t| t.0 == name) {
                     Some((_, command, _)) => (
@@ -158,21 +148,17 @@ impl Session {
                     ),
                     None => match tool_method(name) {
                         Some(method) => (method, arguments),
-                        None => return Some(rpc_error(id, -32602, "Unknown tool")),
+                        None => return Err(craft_jsonrpc::RpcError::new(-32602, "Unknown tool")),
                     },
                 };
                 match self.dispatch(method, &arguments) {
-                    Ok(value) => {
-                        serde_json::json!({"content": [{"type": "text", "text": value.to_string()}], "isError": false})
-                    }
-                    Err(error) => {
-                        serde_json::json!({"content": [{"type": "text", "text": error.to_string()}], "isError": true})
-                    }
+                    Ok(value) => craft_mcp::text_tool_result(&value.to_string(), false),
+                    Err(error) => craft_mcp::text_tool_result(&error.to_string(), true),
                 }
             }
-            _ => return Some(rpc_error(id, -32601, "Method not found")),
+            _ => return Err(craft_jsonrpc::RpcError::new(-32601, "Method not found")),
         };
-        Some(serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}))
+        Ok(result)
     }
 
     /// Interpret one request line and produce the response line, if the request
@@ -499,10 +485,6 @@ impl Session {
         }
         Ok(serde_json::json!({ "paths": written, "sheets": sheets.len() }))
     }
-}
-
-fn rpc_error(id: serde_json::Value, code: i32, message: &str) -> serde_json::Value {
-    serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
 fn tool_method(name: &str) -> Option<&'static str> {
@@ -1995,6 +1977,24 @@ mod tests {
     }
 
     #[test]
+    fn shared_mcp_session_keeps_compatible_initialization_and_tool_routing() {
+        let mut session = Session::default();
+        let batch = r#"[{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"old","capabilities":{},"clientInfo":{}}},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"tools/list"}]"#;
+        let response: serde_json::Value =
+            serde_json::from_str(&session.handle_stdio_line(batch).unwrap().unwrap()).unwrap();
+        assert_eq!(response.as_array().unwrap().len(), 2);
+        assert_eq!(response[0]["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!(response[0]["result"]["serverInfo"]["name"], "stencilcraft");
+        assert!(
+            !response[1]["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(session.mcp.state(), craft_mcp::State::Ready);
+    }
+
+    #[test]
     fn json_rpc_errors_notifications_and_batches() {
         let mut session = Session::default();
         let parse: serde_json::Value =
@@ -2014,6 +2014,54 @@ mod tests {
         assert_eq!(bad_tool["result"]["isError"], true);
         let bad_params: serde_json::Value = serde_json::from_str(&session.handle_stdio_line(r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"doc_summary","arguments":[]}}"#).unwrap().unwrap()).unwrap();
         assert_eq!(bad_params["error"]["code"], -32602);
+        let fractional: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","id":1.5,"method":"ping"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(fractional["error"]["code"], -32600);
+        let null_id: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#)
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(null_id["id"], serde_json::Value::Null);
+        assert_eq!(null_id["result"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn notifications_do_not_run_tools_and_oversized_batches_are_atomic() {
+        let mut session = Session::default();
+        let call = serde_json::json!({
+            "jsonrpc": "2.0", "method": "tools/call",
+            "params": {"name": "command_execute", "arguments": {
+                "command": "shape.add-rect", "params": {"x": 0, "y": 0, "width": 5, "height": 5}
+            }}
+        });
+        assert!(
+            session
+                .handle_stdio_line(&call.to_string())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(session.engine.doc.shape_count(), 0);
+
+        let mut batch = vec![call.clone(); craft_jsonrpc::Limits::default().max_batch_items];
+        batch[0]["id"] = serde_json::json!(1);
+        batch.push(serde_json::json!({"jsonrpc": "2.0", "id": null, "method": "ping"}));
+        let reply: serde_json::Value = serde_json::from_str(
+            &session
+                .handle_stdio_line(&serde_json::Value::Array(batch).to_string())
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reply["error"]["code"], -32600);
+        assert_eq!(session.engine.doc.shape_count(), 0);
     }
 
     #[test]

@@ -301,3 +301,44 @@ fn svg_and_unknown_inputs_never_panic() {
     exercise(b"random", "a.unknown");
     exercise(b"\0\0\0\x18ftypheic", "a.heic");
 }
+
+#[test]
+fn svg_registry_preserves_clipped_cut_lines_and_stroke_layers() {
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+      <defs><clipPath id="half"><rect width="10" height="20"/></clipPath></defs>
+      <line x1="-5" y1="5" x2="25" y2="5" stroke="red" clip-path="url(#half)"/>
+      <line x1="-5" y1="8" x2="25" y2="8" clip-path="url(#half)"/>
+    </svg>"##;
+    let options = ImportOptions {
+        join: false,
+        ..ImportOptions::default()
+    };
+    let doc = import_bytes(svg, "line.svg", &options).unwrap();
+    let layer = doc
+        .layers
+        .iter()
+        .find(|layer| layer.name == "Line #ff0000")
+        .unwrap();
+    assert_eq!(layer.color.as_deref(), Some("#ff0000"));
+    assert_eq!(layer.shapes.len(), 1);
+    let unpainted = doc.layers.iter().find(|layer| layer.name == "cut").unwrap();
+    assert_eq!(unpainted.shapes.len(), 1);
+    let unpainted_bounds = unpainted.shapes[0].bounds().unwrap();
+    assert!(
+        (unpainted_bounds.x0 - 0.0).abs() < 0.001 && (unpainted_bounds.x1 - 10.0).abs() < 0.001,
+        "{unpainted_bounds:?}"
+    );
+    assert!(
+        (unpainted_bounds.y0 - 8.0).abs() < 0.001 && (unpainted_bounds.y1 - 8.0).abs() < 0.001,
+        "{unpainted_bounds:?}"
+    );
+    let bounds = layer.shapes[0].bounds().unwrap();
+    assert!(
+        (bounds.x0 - 0.0).abs() < 0.001 && (bounds.x1 - 10.0).abs() < 0.001,
+        "{bounds:?}"
+    );
+    assert!(
+        (bounds.y0 - 5.0).abs() < 0.001 && (bounds.y1 - 5.0).abs() < 0.001,
+        "{bounds:?}"
+    );
+}

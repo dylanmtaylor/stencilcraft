@@ -30,6 +30,8 @@ craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e848
 craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-jsonrpc = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
+craft-mcp = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
 craft-dxf = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["paths"] }
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
@@ -38,7 +40,7 @@ craft-pdf = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70f
 craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-file-import = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
-craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
+craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "38c26217b1f160cc27ac7453d9ad8fb6739c9830" }
 craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its

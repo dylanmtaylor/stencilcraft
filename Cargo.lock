@@ -175,12 +175,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc7bb162ec39d46ab1ca8c77bf72e890535becd1751bb45f64c597edb4c8c6b3"
 
 [[package]]
+name = "alloc-no-stdlib"
+version = "3.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2fb6cfd47bf496ff64095c20eaba0c201404ee38714d4142fcfa1dc334fcc7a"
+
+[[package]]
 name = "alloc-stdlib"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e76a019e91224d279006ff972f1e984179a6e9feb050adba6ce8274aef23195"
 dependencies = [
- "alloc-no-stdlib",
+ "alloc-no-stdlib 2.0.4",
+]
+
+[[package]]
+name = "alloc-stdlib"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5c1865780388bfa186411ab5f247819487fc4864c6e9c3106611fa347586e1"
+dependencies = [
+ "alloc-no-stdlib 3.0.0",
 ]
 
 [[package]]
@@ -517,6 +532,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
 
 [[package]]
+name = "bit_field"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb2907cc03d08cdb1c6724ad0670ce67c4a71e1c45a6d7635224011714cfc4b1"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -612,9 +633,9 @@ version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5cc91aac060a7a1e25823bdccbfb6af1875b88f17c6daac97894eed8207166b3"
 dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
- "brotli-decompressor",
+ "alloc-no-stdlib 2.0.4",
+ "alloc-stdlib 0.2.4",
+ "brotli-decompressor 5.0.3",
 ]
 
 [[package]]
@@ -623,8 +644,18 @@ version = "5.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a32acac15fe1967bc3986b2a6347dffc965602354ea6f450ad07e8bfd253583"
 dependencies = [
- "alloc-no-stdlib",
- "alloc-stdlib",
+ "alloc-no-stdlib 2.0.4",
+ "alloc-stdlib 0.2.4",
+]
+
+[[package]]
+name = "brotli-decompressor"
+version = "6.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75c74c9c51b9140663e196b5fb88bc94c334d7a497c8311cb759d8557874747f"
+dependencies = [
+ "alloc-no-stdlib 3.0.0",
+ "alloc-stdlib 0.3.0",
 ]
 
 [[package]]
@@ -999,7 +1030,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1007,7 +1038,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1100,7 +1131,7 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb8
 dependencies = [
  "craft-eps",
  "craft-idml",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "craft-zip",
  "serde",
  "serde_json",
@@ -1116,7 +1147,7 @@ dependencies = [
  "craft-file-formats",
  "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "craft-raster-codecs",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "kurbo 0.13.1",
  "thiserror 2.0.21",
  "vectorcraft-geom",
@@ -1189,16 +1220,70 @@ name = "craft-idml"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
- "craft-xml",
+ "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "craft-zip",
  "thiserror 2.0.21",
 ]
 
 [[package]]
-name = "craft-pdf"
+name = "craft-image-codecs"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
 dependencies = [
+ "craft-jpeg",
+ "craft-metadata",
+ "crc32fast",
+ "exr",
+ "flate2",
+ "half",
+ "hayro-jpeg2000",
+ "image",
+ "image-webp",
+ "jpeg-encoder",
+ "png 0.18.1",
+ "rayon",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiff",
+ "zune-core",
+ "zune-jpeg",
+ "zune-jpegxl",
+]
+
+[[package]]
+name = "craft-jpeg"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-jsonrpc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=e78ede0aa9c8d23d4181d93b9acffe33d7cbe293#e78ede0aa9c8d23d4181d93b9acffe33d7cbe293"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "craft-mcp"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=e78ede0aa9c8d23d4181d93b9acffe33d7cbe293#e78ede0aa9c8d23d4181d93b9acffe33d7cbe293"
+dependencies = [
+ "craft-jsonrpc",
+ "serde_json",
+]
+
+[[package]]
+name = "craft-metadata"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
+dependencies = [
+ "brotli-decompressor 6.3.1",
+ "chrono",
+ "craft-tiff",
+ "quick-xml",
  "serde",
 ]
 
@@ -1212,6 +1297,14 @@ dependencies = [
  "krilla",
  "kurbo 0.13.1",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1306,7 +1399,7 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb8
 dependencies = [
  "craft-atomic 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "craft-stencilcraft-format",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -1326,9 +1419,24 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
+dependencies = [
+ "craft-image-codecs",
+ "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830)",
+ "flate2",
+ "kurbo 0.13.1",
+ "roxmltree 0.21.2",
+ "thiserror 2.0.21",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
+]
+
+[[package]]
+name = "craft-svg"
+version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
- "craft-xml",
+ "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "flate2",
  "kurbo 0.13.1",
  "roxmltree 0.21.2",
@@ -1346,6 +1454,15 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "craft-tiff"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1410,6 +1527,16 @@ dependencies = [
  "serde",
  "serde_json",
  "wayland-client",
+]
+
+[[package]]
+name = "craft-xml"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830#38c26217b1f160cc27ac7453d9ad8fb6739c9830"
+dependencies = [
+ "quick-xml",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2039,6 +2166,22 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "exr"
+version = "1.74.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb29d0be702adf92c645d9b2f93472906ba83d400e59f98adb3770ce5c18c2f6"
+dependencies = [
+ "bit_field",
+ "half",
+ "lebe",
+ "miniz_oxide 0.8.9",
+ "multiversion",
+ "rayon-core",
+ "smallvec",
+ "zune-inflate",
 ]
 
 [[package]]
@@ -3028,6 +3171,7 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png 0.18.1",
+ "qoi",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -3281,6 +3425,12 @@ name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
+name = "lebe"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "libc"
@@ -3543,6 +3693,28 @@ checksum = "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
 dependencies = [
  "num-traits",
  "pxfm",
+]
+
+[[package]]
+name = "multiversion"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb8a68be21d0755f83bfe47e79b896cc732687cf1903f0e50585e8d6ecc53076"
+dependencies = [
+ "multiversion-macros",
+ "target-features",
+]
+
+[[package]]
+name = "multiversion-macros"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a05e0c3c3e4edaa21d87c645852ed0b0c3663752bcc6ec43353bd6189dce35e1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "target-features",
 ]
 
 [[package]]
@@ -4677,6 +4849,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
+name = "qoi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5406,6 +5587,7 @@ version = "0.1.0"
 dependencies = [
  "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
  "craft-draw",
+ "craft-jsonrpc",
  "craft-raster-codecs",
  "craft-settings",
  "craft-theme",
@@ -5434,8 +5616,9 @@ name = "stencilcraft-cli"
 version = "0.1.0"
 dependencies = [
  "craft-file-formats",
+ "craft-jsonrpc",
  "craft-raster-codecs",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830)",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5484,7 +5667,7 @@ name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
  "craft-raster-codecs",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830)",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5546,6 +5729,7 @@ dependencies = [
  "stencilcraft-geom",
  "stencilcraft-pdf",
  "stencilcraft-raster",
+ "stencilcraft-svg",
  "thiserror 2.0.21",
  "tiny-skia",
 ]
@@ -5601,6 +5785,8 @@ name = "stencilcraft-mcp"
 version = "0.1.0"
 dependencies = [
  "craft-file-formats",
+ "craft-jsonrpc",
+ "craft-mcp",
  "craft-raster-codecs",
  "serde_json",
  "stencilcraft-doc",
@@ -5659,8 +5845,7 @@ dependencies = [
 name = "stencilcraft-svg"
 version = "0.1.0"
 dependencies = [
- "craft-file-import",
- "craft-svg",
+ "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=38c26217b1f160cc27ac7453d9ad8fb6739c9830)",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
@@ -5860,6 +6045,12 @@ dependencies = [
  "toml",
  "version-compare",
 ]
+
+[[package]]
+name = "target-features"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1bbb9f3c5c463a01705937a24fdabc5047929ac764b2d5b9cf681c1f5041ed5"
 
 [[package]]
 name = "target-lexicon"
@@ -7973,10 +8164,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
 
 [[package]]
+name = "zune-inflate"
+version = "0.2.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
 name = "zune-jpeg"
 version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
+]
+
+[[package]]
+name = "zune-jpegxl"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cba11ecd07cc23351500e840ae03841b7e4997923ec8e4832ee3ae199ea0b6b4"
 dependencies = [
  "zune-core",
 ]

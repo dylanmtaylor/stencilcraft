@@ -10,6 +10,13 @@ The MCP server supports protocol version `2025-03-26`, initialization, ping, too
 and tool calls. Add it to an MCP client with `stencilcraft-cli mcp` as the server command.
 Messages are newline-delimited JSON-RPC; notifications receive no response. Tool results
 are JSON encoded as text content, and operation errors are returned with `isError: true`.
+The session rejects messages over 64 MiB and batches over 4096 entries before dispatch; an
+oversized batch runs none of its requests. Stdio and control readers bound line allocation; an
+oversized line receives an invalid-request error and closes that input. The proxy also bounds
+control responses. JSON-RPC envelope validation is shared through `craft-jsonrpc`;
+MCP initialization, version negotiation and tool envelopes are shared through `craft-mcp`.
+Its compatibility policy retains calls before initialization and batched initialization for
+existing clients. StencilCraft retains its own tools and legacy control methods.
 The stdio server's session is headless. The desktop app's `--control` socket is different: it
 queues each request onto the UI thread and handles it against the engine behind the visible
 canvas, so `doc.summary` reports the open document, edits are undoable in the app, and the

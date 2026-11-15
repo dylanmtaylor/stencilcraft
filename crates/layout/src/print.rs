@@ -395,9 +395,39 @@ mod tests {
     fn pdf_and_png_export() {
         let sheets = print_sheets(&ptc_doc(), &PrintOptions::default()).unwrap();
         let pdf = sheets_to_pdf(&sheets).unwrap();
-        let text = String::from_utf8(pdf).unwrap();
-        assert!(text.starts_with("%PDF-1.4") && text.ends_with("%%EOF\n"));
-        assert!(text.contains("/MediaBox [0 0 612.000 792.000]"));
+        assert!(pdf.starts_with(b"%PDF-"));
+        assert!(pdf.trim_ascii_end().ends_with(b"%%EOF"));
+        let imported = craft_file_import::import("sheet.pdf", &pdf, Default::default()).unwrap();
+        let craft_file_import::Imported::Vector(page) = imported else {
+            panic!("PDF sheet should import as vector paths");
+        };
+        assert!((page.width_mm - 215.9).abs() < 0.01, "{}", page.width_mm);
+        assert!((page.height_mm - 279.4).abs() < 0.01, "{}", page.height_mm);
+        let bounds = |path: &BezPath| stencilcraft_geom::bounds_of_shape(path).unwrap();
+        let same_bounds = |a: Rect, b: Rect| {
+            [a.x0 - b.x0, a.y0 - b.y0, a.x1 - b.x1, a.y1 - b.y1]
+                .iter()
+                .all(|d| d.abs() < 0.02)
+        };
+        let actual: Vec<_> = page
+            .shapes
+            .iter()
+            .map(|shape| bounds(&shape.path))
+            .collect();
+        for item in &sheets[0].items {
+            let expected = bounds(&item.path);
+            assert!(
+                actual.iter().any(|&rect| same_bounds(rect, expected)),
+                "missing artwork {expected:?}; got {actual:?}"
+            );
+        }
+        for &[x, y, width, height] in &sheets[0].marks {
+            let expected = Rect::new(x, y, x + width, y + height);
+            assert!(
+                actual.iter().any(|&rect| same_bounds(rect, expected)),
+                "missing registration mark {expected:?}; got {actual:?}"
+            );
+        }
         let png = sheet_to_png(&sheets[0], 72.0).unwrap();
         assert_eq!(&png[1..4], b"PNG");
         assert!(sheet_to_png(&sheets[0], 5000.0).is_err());

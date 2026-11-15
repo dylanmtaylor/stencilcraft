@@ -15,7 +15,7 @@ edits shapes, previews kerf, saves/opens `.stencilcraft`.
 | Exports | working | SVG, DXF R14, G-code: structure renders in browsers/plotter tools (SVG `<svg>` tag bug fixed) |
 | Editing tools | working foundation | VectorCraft-backed ellipse, polygon, star, transforms, Pathfinder, alignment/distribution and journal-based undo/redo; StencilCraft retains its millimetre document metadata |
 | UI | working | Craft-suite desktop shell (`TitleBar`, `MenuBar`, `OptionsBar`, `ToolRail`, `Rulers`, `BezierOverlay`, `PenDraft`), canvas pan/zoom with Fit (F) and Center (C), layers & objects panel, click/box/lasso multi-select, Pathfinder, cached compensated kerf preview, persisted settings |
-| Agent surface | working | CLI `run`/MCP tools and legacy JSON-lines control; desktop `--control` drives the visible document |
+| Agent surface | working | CLI `run`/MCP tools and legacy JSON-lines control; desktop `--control` drives the visible document; shared bounded JSON-RPC and MCP session envelopes |
 | Machine control | preliminary | 32-model catalog (Silhouette/Graphtec, Graphtec CE, generic GP-GL/HP-GL/DMPL), limit-checked encoders, `nusb` USB and Linux Bluetooth LE/Classic; Cameo 4 BLE firmware/status and blade-up movement verified, cutting unverified (docs/machine.md) |
 | Craft-libs & parity | integrated | `craft-ui`, `craft-theme`, `craft-window`, `craft-settings`, `craft-atomic` integrated across desktop app; design aligns with VectorCraft and laser/vinyl prep suites |
 | Platforms | preliminary | desktop native OK; wasm planned |
@@ -99,6 +99,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
 
 ## Progress log
 
+- 2026-11-15 — Agent surface: JSON-RPC envelopes and bounded line reads use `craft-jsonrpc`;
+  initialization, version negotiation and tool envelopes use `craft-mcp`. StencilCraft retains
+  tool routing and legacy controls. Oversized batches are rejected before
+  dispatch, and desktop/proxy notifications do not trigger window controls or receive replies.
 - 2026-11-11 — M3: no file format is written or parsed by this workspace's own code any more.
   SVG export (document, tile preview, print-and-cut sheet, project thumbnails) goes through
   `craft_svg_paths::write` and CSS colours through `craft_svg_paths::color`; `crates/color`

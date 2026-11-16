@@ -18,8 +18,7 @@ documentation of consumer laser/vinyl ecosystem software, cited by URL — never
 
 `plan/` is gitignored (local session notes).
 
-- **Use craft-libs where they exist.** Before rebuilding common UI or domain facilities,
-  inspect this workspace's available craft-libs and reuse their public APIs. Do not claim
+- **Prefer shared Craft libraries.** Before adding or changing reusable file-format, codec, protocol or UI code, check [craft-libs](https://github.com/storytold/craft-libs) and existing contributor work; reuse its public APIs or extend the appropriate shared library instead of adding an app-local duplicate, keeping app-specific policy and model mapping local and preserving compatibility, security limits and regression coverage. Do not claim
   parity with sibling applications unless the relevant components are actually in this
   checkout and wired into the app.
 

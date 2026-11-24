@@ -47,6 +47,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 mod arc_draw;
 mod click_draw;
 mod control;
+mod freehand;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
@@ -181,6 +182,8 @@ pub enum ActiveTool {
     Polyline,
     Curve,
     Arc,
+    Freehand,
+    SmoothFreehand,
     Rect,
     RoundedRect,
     Ellipse,
@@ -205,6 +208,8 @@ impl ActiveTool {
             Self::Polyline => Icon::RouteElbow,
             Self::Curve => Icon::Spline,
             Self::Arc => Icon::RouteCurved,
+            Self::Freehand => Icon::Pencil,
+            Self::SmoothFreehand => Icon::Brush,
             Self::Rect => Icon::Square,
             Self::RoundedRect => Icon::FramePlaceholder,
             Self::Ellipse => Icon::Circle,
@@ -229,6 +234,8 @@ impl ActiveTool {
             Self::Polyline => "Polyline",
             Self::Curve => "Curve",
             Self::Arc => "Arc",
+            Self::Freehand => "Freehand",
+            Self::SmoothFreehand => "Smooth Freehand",
             Self::Rect => "Rectangle",
             Self::RoundedRect => "Rounded Rectangle",
             Self::Ellipse => "Ellipse",
@@ -313,6 +320,13 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
                 RailTool::new(ActiveTool::Ellipse, Icon::Circle, "Ellipse").shortcut("O"),
                 RailTool::new(ActiveTool::Polygon, Icon::Pentagon, "Polygon").shortcut("G"),
                 RailTool::new(ActiveTool::Star, Icon::Star, "Star").shortcut("S"),
+            ],
+        ),
+        ToolSlot::new(
+            7,
+            vec![
+                RailTool::new(ActiveTool::Freehand, Icon::Pencil, "Freehand").shortcut("N"),
+                RailTool::new(ActiveTool::SmoothFreehand, Icon::Brush, "Smooth Freehand"),
             ],
         ),
         ToolSlot::new(
@@ -751,6 +765,8 @@ pub struct StencilApp {
     pub click_draft: Option<click_draw::ClickDraft>,
     /// The Arc tool after its first drag: centre and radius are set, the sweep follows the pointer.
     pub arc_draft: Option<arc_draw::ArcDraft>,
+    /// The Freehand/Smooth Freehand stroke while the pointer is down.
+    pub freehand_stroke: Option<freehand::Stroke>,
     pub shape_drag_start: Option<stencilcraft_geom::Point>,
     pub shape_drag_current: Option<stencilcraft_geom::Point>,
     pub ruler_origin: stencilcraft_geom::Point,
@@ -953,6 +969,7 @@ impl StencilApp {
             pen_undo_requested: false,
             click_draft: None,
             arc_draft: None,
+            freehand_stroke: None,
             shape_drag_start: None,
             shape_drag_current: None,
             ruler_origin: stencilcraft_geom::Point::ZERO,
@@ -1403,6 +1420,24 @@ impl StencilApp {
         }
     }
 
+    /// Finish a freehand stroke as a cut path. `px_mm` is one screen pixel in millimetres, so
+    /// the simplification and the close radius feel the same at every zoom.
+    pub fn commit_freehand(&mut self, stroke: &freehand::Stroke, smooth: bool, px_mm: f64) {
+        if let Some(path) = stroke.finish(smooth, 0.75 * px_mm, 8.0 * px_mm) {
+            self.run_command(Command::ShapeAddPath {
+                path,
+                style: CutStyle::Cut,
+            });
+            self.select_latest_shape();
+            self.status = if smooth {
+                "created smooth freehand path"
+            } else {
+                "created freehand path"
+            }
+            .to_string();
+        }
+    }
+
     /// Place the arc being swept as an open cut path; the Arc tool stays active.
     pub fn commit_arc_draft(&mut self) {
         if let Some(path) = self.arc_draft.take().and_then(|draft| draft.path()) {
@@ -1642,6 +1677,8 @@ impl StencilApp {
             .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backslash))
         {
             self.active_tool = ActiveTool::Line;
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
+            self.active_tool = ActiveTool::Freehand;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R)) {
             self.active_tool = ActiveTool::Rect;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::U)) {
@@ -4134,6 +4171,50 @@ impl StencilApp {
             }
         }
 
+        // Freehand / Smooth Freehand: the stroke follows the pointer until release.
+        if matches!(
+            self.active_tool,
+            ActiveTool::Freehand | ActiveTool::SmoothFreehand
+        ) {
+            let px_mm = 1.0 / f64::from(view.zoom.max(f32::EPSILON));
+            if !overlay_claimed && response.drag_started() {
+                // Start at the press, not where the drag threshold was crossed.
+                let mut stroke = freehand::Stroke::default();
+                if let Some(press) = ui.input(|input| input.pointer.press_origin()) {
+                    stroke.push(self.view.screen_to_world(press.to_vec2()), 0.0);
+                }
+                self.freehand_stroke = Some(stroke);
+            }
+            if let (Some(stroke), Some(pointer)) = (
+                self.freehand_stroke.as_mut(),
+                response.interact_pointer_pos(),
+            ) && response.dragged()
+            {
+                stroke.push(self.view.screen_to_world(pointer.to_vec2()), px_mm);
+            }
+            if let Some(stroke) = &self.freehand_stroke {
+                stencilcraft_ui_egui::paint_preview_paths(
+                    &painter,
+                    &view,
+                    &[click_draw::polyline(&stroke.points, false)],
+                    stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+                );
+            }
+            if response.drag_stopped()
+                && let Some(mut stroke) = self.freehand_stroke.take()
+            {
+                // End where the button came up, so a loop can meet its start.
+                if let Some(pointer) = ui.input(|input| input.pointer.latest_pos()) {
+                    stroke.push(self.view.screen_to_world(pointer.to_vec2()), 0.0);
+                }
+                let smooth = self.active_tool == ActiveTool::SmoothFreehand;
+                self.commit_freehand(&stroke, smooth, px_mm);
+                ui.ctx().request_repaint();
+            }
+        } else {
+            self.freehand_stroke = None;
+        }
+
         // Live shape creation via drag
         if self.active_tool.is_shape_creator() && !overlay_claimed {
             if response.drag_started()
@@ -4224,7 +4305,10 @@ impl StencilApp {
         } else if !overlay_claimed
             && !self.active_tool.is_shape_creator()
             && self.active_tool.click_kind().is_none()
-            && self.active_tool != ActiveTool::Arc
+            && !matches!(
+                self.active_tool,
+                ActiveTool::Arc | ActiveTool::Freehand | ActiveTool::SmoothFreehand
+            )
         {
             if response.drag_started()
                 && let Some(pointer) = response.interact_pointer_pos()
@@ -5591,6 +5675,40 @@ mod tests {
             1,
             "Esc drops the unplaced arc"
         );
+    }
+
+    #[test]
+    fn freehand_strokes_become_cut_paths_and_close_on_their_start() {
+        use stencilcraft_geom::Point;
+        let mut app = StencilApp::new(None);
+        app.active_tool = ActiveTool::Freehand;
+        let mut stroke = freehand::Stroke::default();
+        for i in 0..=40 {
+            let angle = f64::from(i) / 40.0 * std::f64::consts::TAU;
+            stroke.push(
+                Point::new(50.0 + 20.0 * angle.cos(), 50.0 + 20.0 * angle.sin()),
+                0.1,
+            );
+        }
+        app.commit_freehand(&stroke, false, 0.1);
+        app.commit_freehand(&stroke, true, 0.1);
+        for id in [1, 2] {
+            let shape = app.engine.doc.get_shape(id).expect("freehand path");
+            assert!(
+                shape
+                    .path
+                    .elements()
+                    .last()
+                    .is_some_and(|e| e.end_point().is_none()),
+                "a stroke ending on its start is closed"
+            );
+        }
+        assert_eq!(app.selected_shapes, vec![2]);
+        // A dot (one sample) makes nothing.
+        let mut dot = freehand::Stroke::default();
+        dot.push(Point::new(1.0, 1.0), 0.1);
+        app.commit_freehand(&dot, false, 0.1);
+        assert_eq!(app.engine.doc.shape_count(), 2);
     }
 
     #[test]

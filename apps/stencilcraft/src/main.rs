@@ -122,6 +122,22 @@ impl From<egui::Modifiers> for DragMods {
     }
 }
 
+/// Where the Line tool's line ends: Shift (`mods.square`) snaps its angle to the nearest 45°
+/// step, keeping its length, as Silhouette Studio does.
+pub fn line_end(
+    start: stencilcraft_geom::Point,
+    end: stencilcraft_geom::Point,
+    mods: DragMods,
+) -> stencilcraft_geom::Point {
+    let run = end - start;
+    if !mods.square || run.hypot() == 0.0 {
+        return end;
+    }
+    let step = std::f64::consts::FRAC_PI_4;
+    let angle = (run.y.atan2(run.x) / step).round() * step;
+    start + stencilcraft_geom::Vec2::from_angle(angle) * run.hypot()
+}
+
 /// The box a shape tool draws from a press at `start` dragged to `end`.
 pub fn drag_box(
     start: stencilcraft_geom::Point,
@@ -159,6 +175,7 @@ pub enum ActiveTool {
     BoxSelect,
     LassoSelect,
     Pen,
+    Line,
     Rect,
     RoundedRect,
     Ellipse,
@@ -179,6 +196,7 @@ impl ActiveTool {
             Self::BoxSelect => Icon::MarqueeRect,
             Self::LassoSelect => Icon::Lasso,
             Self::Pen => Icon::PenTool,
+            Self::Line => Icon::Slash,
             Self::Rect => Icon::Square,
             Self::RoundedRect => Icon::FramePlaceholder,
             Self::Ellipse => Icon::Circle,
@@ -199,6 +217,7 @@ impl ActiveTool {
             Self::BoxSelect => "Box Select",
             Self::LassoSelect => "Lasso Select",
             Self::Pen => "Pen",
+            Self::Line => "Line",
             Self::Rect => "Rectangle",
             Self::RoundedRect => "Rounded Rectangle",
             Self::Ellipse => "Ellipse",
@@ -214,7 +233,12 @@ impl ActiveTool {
     pub fn is_shape_creator(self) -> bool {
         matches!(
             self,
-            Self::Rect | Self::RoundedRect | Self::Ellipse | Self::Polygon | Self::Star
+            Self::Line
+                | Self::Rect
+                | Self::RoundedRect
+                | Self::Ellipse
+                | Self::Polygon
+                | Self::Star
         )
     }
 }
@@ -248,7 +272,10 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
         ),
         ToolSlot::new(
             2,
-            vec![RailTool::new(ActiveTool::Pen, Icon::PenTool, "Pen (Draw Path)").shortcut("P")],
+            vec![
+                RailTool::new(ActiveTool::Pen, Icon::PenTool, "Pen (Draw Path)").shortcut("P"),
+                RailTool::new(ActiveTool::Line, Icon::Slash, "Line").shortcut("\\"),
+            ],
         ),
         ToolSlot::new(
             3,
@@ -1507,6 +1534,10 @@ impl StencilApp {
             self.canvas_lasso_mode = true;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::P)) {
             self.active_tool = ActiveTool::Pen;
+        } else if ctx
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backslash))
+        {
+            self.active_tool = ActiveTool::Line;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R)) {
             self.active_tool = ActiveTool::Rect;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::U)) {
@@ -1822,6 +1853,19 @@ impl StencilApp {
         end: stencilcraft_geom::Point,
         mods: DragMods,
     ) -> Option<Command> {
+        if self.active_tool == ActiveTool::Line {
+            let end = line_end(start, end, mods);
+            if (end - start).hypot() < 1.0 {
+                return None;
+            }
+            let mut path = stencilcraft_geom::BezPath::new();
+            path.move_to(start);
+            path.line_to(end);
+            return Some(Command::ShapeAddPath {
+                path,
+                style: CutStyle::Cut,
+            });
+        }
         let drag = drag_box(start, end, mods);
         let (x, y, w, h) = (drag.x0, drag.y0, drag.width(), drag.height());
         if w < 1.0 && h < 1.0 {
@@ -3894,12 +3938,23 @@ impl StencilApp {
                 let world_pt = self.view.screen_to_world(pointer.to_vec2());
                 self.shape_drag_current = Some(world_pt);
                 if let Some(start) = self.shape_drag_start {
-                    let drag = drag_box(start, world_pt, mods);
-                    let (w, h) = (drag.width(), drag.height());
-                    Readout::new("shape-readout")
-                        .row("W", format!("{w:.1} mm"))
-                        .row("H", format!("{h:.1} mm"))
-                        .show(ui.ctx(), pointer);
+                    if self.active_tool == ActiveTool::Line {
+                        let run = line_end(start, world_pt, mods) - start;
+                        // Screen y grows downward; report the angle the way it looks.
+                        // `+ 0.0` turns -0 into 0 so a level line reads 0°, not -0°.
+                        let angle = (-run.y).atan2(run.x).to_degrees() + 0.0;
+                        Readout::new("shape-readout")
+                            .row("L", format!("{:.1} mm", run.hypot()))
+                            .row("∠", format!("{angle:.0}°"))
+                            .show(ui.ctx(), pointer);
+                    } else {
+                        let drag = drag_box(start, world_pt, mods);
+                        let (w, h) = (drag.width(), drag.height());
+                        Readout::new("shape-readout")
+                            .row("W", format!("{w:.1} mm"))
+                            .row("H", format!("{h:.1} mm"))
+                            .show(ui.ctx(), pointer);
+                    }
                 }
             }
             if let (Some(start), Some(end)) = (self.shape_drag_start, self.shape_drag_current)
@@ -5095,6 +5150,53 @@ mod tests {
             drag_box(start, Point::new(15.0, 30.0), mods(true, true)),
             Rect::new(-10.0, -10.0, 30.0, 30.0)
         );
+    }
+
+    #[test]
+    fn line_tool_draws_an_open_two_point_line_and_shift_snaps_to_45_degrees() {
+        use stencilcraft_geom::Point;
+        let shift = DragMods {
+            square: true,
+            from_centre: false,
+        };
+        // Snapping keeps the length and picks the nearest 45° step.
+        let snapped = line_end(Point::new(0.0, 0.0), Point::new(10.0, 1.0), shift);
+        assert!(
+            (snapped - Point::new(10.0499, 0.0)).hypot() < 1e-3,
+            "{snapped:?}"
+        );
+        let diagonal = line_end(Point::new(0.0, 0.0), Point::new(10.0, 9.0), shift);
+        assert!((diagonal.x - diagonal.y).abs() < 1e-9, "{diagonal:?}");
+        assert_eq!(
+            line_end(
+                Point::new(0.0, 0.0),
+                Point::new(10.0, 1.0),
+                DragMods::default()
+            ),
+            Point::new(10.0, 1.0)
+        );
+
+        let mut app = StencilApp::new(None);
+        app.active_tool = ActiveTool::Line;
+        app.commit_dragged_shape(Point::new(5.0, 5.0), Point::new(45.0, 7.0), shift);
+        let shape = app.engine.doc.get_shape(1).expect("line created");
+        let elements = shape.path.elements();
+        assert_eq!(
+            elements.len(),
+            2,
+            "open: move + line, no close: {elements:?}"
+        );
+        assert_eq!(elements[0].end_point(), Some(Point::new(5.0, 5.0)));
+        let end = elements[1].end_point().expect("line end");
+        assert!(
+            (end.y - 5.0).abs() < 1e-9,
+            "Shift kept it horizontal: {end:?}"
+        );
+        assert_eq!(app.selected_shapes, vec![1], "the new line is selected");
+        assert_eq!(app.active_tool, ActiveTool::Line, "the tool stays active");
+        // A click without a drag draws nothing.
+        app.commit_dragged_shape(Point::new(5.0, 5.0), Point::new(5.2, 5.2), shift);
+        assert_eq!(app.engine.doc.shape_count(), 1);
     }
 
     #[test]

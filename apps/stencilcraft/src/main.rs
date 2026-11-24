@@ -44,6 +44,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
 /// connection (the same session core the CLI's `mcp` mode uses).
+mod arc_draw;
 mod click_draw;
 mod control;
 
@@ -179,6 +180,7 @@ pub enum ActiveTool {
     Line,
     Polyline,
     Curve,
+    Arc,
     Rect,
     RoundedRect,
     Ellipse,
@@ -202,6 +204,7 @@ impl ActiveTool {
             Self::Line => Icon::Slash,
             Self::Polyline => Icon::RouteElbow,
             Self::Curve => Icon::Spline,
+            Self::Arc => Icon::RouteCurved,
             Self::Rect => Icon::Square,
             Self::RoundedRect => Icon::FramePlaceholder,
             Self::Ellipse => Icon::Circle,
@@ -225,6 +228,7 @@ impl ActiveTool {
             Self::Line => "Line",
             Self::Polyline => "Polyline",
             Self::Curve => "Curve",
+            Self::Arc => "Arc",
             Self::Rect => "Rectangle",
             Self::RoundedRect => "Rounded Rectangle",
             Self::Ellipse => "Ellipse",
@@ -293,6 +297,7 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
                 RailTool::new(ActiveTool::Line, Icon::Slash, "Line").shortcut("\\"),
                 RailTool::new(ActiveTool::Polyline, Icon::RouteElbow, "Polyline"),
                 RailTool::new(ActiveTool::Curve, Icon::Spline, "Curve"),
+                RailTool::new(ActiveTool::Arc, Icon::RouteCurved, "Arc"),
             ],
         ),
         ToolSlot::new(
@@ -744,6 +749,8 @@ pub struct StencilApp {
     pub pen_undo_requested: bool,
     /// The Polyline/Curve tool's points while placing them.
     pub click_draft: Option<click_draw::ClickDraft>,
+    /// The Arc tool after its first drag: centre and radius are set, the sweep follows the pointer.
+    pub arc_draft: Option<arc_draw::ArcDraft>,
     pub shape_drag_start: Option<stencilcraft_geom::Point>,
     pub shape_drag_current: Option<stencilcraft_geom::Point>,
     pub ruler_origin: stencilcraft_geom::Point,
@@ -945,6 +952,7 @@ impl StencilApp {
             pen_draft: None,
             pen_undo_requested: false,
             click_draft: None,
+            arc_draft: None,
             shape_drag_start: None,
             shape_drag_current: None,
             ruler_origin: stencilcraft_geom::Point::ZERO,
@@ -1395,9 +1403,38 @@ impl StencilApp {
         }
     }
 
+    /// Place the arc being swept as an open cut path; the Arc tool stays active.
+    pub fn commit_arc_draft(&mut self) {
+        if let Some(path) = self.arc_draft.take().and_then(|draft| draft.path()) {
+            self.run_command(Command::ShapeAddPath {
+                path,
+                style: CutStyle::Cut,
+            });
+            self.select_latest_shape();
+            self.status = "created arc".to_string();
+        }
+    }
+
     /// Enter/Esc end a Polyline/Curve draft and keep it; Backspace, Delete and Cmd+Z take back
     /// its last point. Returns whether a key was used.
     fn handle_click_draft_keys(&mut self, ctx: &egui::Context) -> bool {
+        if self.arc_draft.is_some() && !ctx.text_edit_focused() {
+            // Enter places the arc as swept so far; Esc or Backspace drops it.
+            let (place, drop) = ctx.input_mut(|input| {
+                let place = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                let drop = input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    | input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
+                (place, drop)
+            });
+            if place {
+                self.commit_arc_draft();
+            } else if drop {
+                self.arc_draft = None;
+            }
+            if place || drop {
+                return true;
+            }
+        }
         if self.click_draft.is_none() || ctx.text_edit_focused() {
             return false;
         }
@@ -4032,6 +4069,71 @@ impl StencilApp {
             }
         }
 
+        // Arc: drag centre → start sets the radius, then the pointer sweeps the arc and a
+        // click places it (Silhouette Studio's Arc tool).
+        if self.active_tool != ActiveTool::Arc {
+            self.arc_draft = None;
+        } else {
+            let snap = ui.input(|input| input.modifiers.shift);
+            let preview_colour = stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line;
+            if let Some(mut draft) = self.arc_draft {
+                if let Some(pointer) = response.hover_pos() {
+                    draft.track(self.view.screen_to_world(pointer.to_vec2()), snap);
+                    Readout::new("arc-readout")
+                        .row("R", format!("{:.1} mm", draft.radius))
+                        .row("∠", format!("{:.0}°", draft.sweep_degrees()))
+                        .show(ui.ctx(), pointer);
+                }
+                self.arc_draft = Some(draft);
+                let end = draft.end();
+                let mut guides = stencilcraft_geom::BezPath::new();
+                guides.move_to(draft.start());
+                guides.line_to(draft.centre);
+                guides.line_to(end);
+                let mut paths = vec![guides];
+                paths.extend(draft.path());
+                stencilcraft_ui_egui::paint_preview_paths(&painter, &view, &paths, preview_colour);
+                ui.ctx().request_repaint();
+                if !overlay_claimed && response.clicked() {
+                    self.commit_arc_draft();
+                }
+            } else if !overlay_claimed {
+                if response.drag_started()
+                    && let Some(pointer) = response.interact_pointer_pos()
+                {
+                    let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                    self.shape_drag_start = Some(world_pt);
+                    self.shape_drag_current = Some(world_pt);
+                }
+                if response.dragged()
+                    && let (Some(start), Some(pointer)) =
+                        (self.shape_drag_start, response.interact_pointer_pos())
+                {
+                    let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                    self.shape_drag_current = Some(world_pt);
+                    let mut radius = stencilcraft_geom::BezPath::new();
+                    radius.move_to(start);
+                    radius.line_to(world_pt);
+                    stencilcraft_ui_egui::paint_preview_paths(
+                        &painter,
+                        &view,
+                        &[radius],
+                        preview_colour,
+                    );
+                    Readout::new("arc-readout")
+                        .row("R", format!("{:.1} mm", (world_pt - start).hypot()))
+                        .show(ui.ctx(), pointer);
+                }
+                if response.drag_stopped()
+                    && let (Some(centre), Some(start)) =
+                        (self.shape_drag_start.take(), self.shape_drag_current.take())
+                {
+                    self.arc_draft = arc_draw::ArcDraft::new(centre, start);
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+
         // Live shape creation via drag
         if self.active_tool.is_shape_creator() && !overlay_claimed {
             if response.drag_started()
@@ -4122,6 +4224,7 @@ impl StencilApp {
         } else if !overlay_claimed
             && !self.active_tool.is_shape_creator()
             && self.active_tool.click_kind().is_none()
+            && self.active_tool != ActiveTool::Arc
         {
             if response.drag_started()
                 && let Some(pointer) = response.interact_pointer_pos()
@@ -5462,6 +5565,32 @@ mod tests {
             "Esc keeps the curve, like the pen"
         );
         assert_eq!(app.selected_shapes, vec![1]);
+    }
+
+    #[test]
+    fn arc_tool_enter_places_the_swept_arc_and_esc_drops_it() {
+        use stencilcraft_geom::{Point, Shape};
+        let mut app = StencilApp::new(None);
+        app.active_tool = ActiveTool::Arc;
+        let mut draft =
+            arc_draw::ArcDraft::new(Point::new(50.0, 50.0), Point::new(70.0, 50.0)).expect("arc");
+        draft.track(Point::new(50.0, 70.0), false);
+        app.arc_draft = Some(draft);
+        press_key(&mut app, egui::Key::Enter, egui::Modifiers::NONE);
+        assert!(app.arc_draft.is_none());
+        let shape = app.engine.doc.get_shape(1).expect("quarter arc placed");
+        let bounds = shape.path.bounding_box();
+        assert!((bounds.width() - 20.0).abs() < 0.01 && (bounds.height() - 20.0).abs() < 0.01);
+        assert_eq!(app.active_tool, ActiveTool::Arc, "the tool stays active");
+
+        app.arc_draft = Some(draft);
+        press_key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(app.arc_draft.is_none());
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            1,
+            "Esc drops the unplaced arc"
+        );
     }
 
     #[test]

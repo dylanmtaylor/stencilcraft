@@ -1,7 +1,7 @@
-# Requirements: LaserCraft — StencilCraft Laser CAM & GRBL
+# Requirements: Document Organization — LaserCraft/StencilCraft
 
 **Defined:** 2026-11-24
-**Core Value:** A persisted laser job can express ordered operations per object/layer and execute reliably on GRBL-class hardware, identically from desktop, CLI, and MCP.
+**Core Value:** A persisted laser document can express ordered operations per object/layer and produce per-operation output identically from desktop, CLI, and MCP.
 
 ## v1 Requirements
 
@@ -39,25 +39,27 @@
 - [ ] **PLAN-02**: A travel-distance regression test measures the ordering improvement.
 - [ ] **PLAN-03**: Tabs, overcut, and focus/Z are represented and emitted for laser jobs.
 
+## v2 Requirements
+
+Deferred to a separate GSD milestone after the document-organization product ships.
+
 ### Streaming
 
-- [ ] **STREAM-01**: `craft-gcode` provides a byte-accurate in-flight window.
-- [ ] **STREAM-02**: `GcodeProtocol` uses the window instead of one-line-per-`ok`.
-- [ ] **STREAM-03**: A session state machine supports pause, resume, and abort with beam off.
-- [ ] **STREAM-04**: Mock-transport tests cover acknowledgement, errors, pause, resume, and abort.
+- **STREAM-01**: `craft-gcode` provides a byte-accurate in-flight window.
+- **STREAM-02**: `GcodeProtocol` uses the window instead of one-line-per-`ok`.
+- **STREAM-03**: A session state machine supports pause, resume, and abort with beam off.
+- **STREAM-04**: Mock-transport tests cover acknowledgement, errors, pause, resume, and abort.
 
 ### Recovery
 
-- [ ] **RECOVERY-01**: A job checkpoint records the completed line index.
-- [ ] **RECOVERY-02**: Reconnect resumes without re-cutting completed geometry and keeps the beam off until safe.
+- **RECOVERY-01**: A job checkpoint records the completed line index.
+- **RECOVERY-02**: Reconnect resumes without re-cutting completed geometry and keeps the beam off until safe.
 
 ### Raster
 
-- [ ] **RASTER-01**: Threshold, dither, DPI, overscan, and per-pixel power match the reference behaviour.
-- [ ] **RASTER-02**: `joinPixel` and bidirectional raster parity are covered by golden images.
-- [ ] **RASTER-03**: Raster jobs use the same persisted operation model as vector jobs.
-
-## v2 Requirements
+- **RASTER-01**: Threshold, dither, DPI, overscan, and per-pixel power match the reference behaviour.
+- **RASTER-02**: `joinPixel` and bidirectional raster parity are covered by golden images.
+- **RASTER-03**: Raster jobs use the same persisted operation model as vector jobs.
 
 ### Nesting (M2)
 
@@ -84,7 +86,7 @@
 | Writes into VectorCraft documents | StencilCraft consumes VectorCraft; it does not write back. |
 | General multi-firmware server | GRBL-class lasers first. |
 | Persisted "Unassigned" layer | It is a derived UI group, not a production layer; persisting it risks accidental export. |
-| Nesting, knife, and milling in M1 | Parked as M2–M4; they must not distort the laser operation model. |
+| Nesting, knife, and milling in this milestone | Parked as M2–M4; they must not distort the laser operation model. |
 
 ## Traceability
 
@@ -92,43 +94,34 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MODEL-01 | TBD | Pending |
-| MODEL-02 | TBD | Pending |
-| MODEL-03 | TBD | Pending |
-| MODEL-04 | TBD | Pending |
-| MODEL-05 | TBD | Pending |
-| MODEL-06 | TBD | Pending |
-| MODEL-07 | TBD | Pending |
-| UI-01 | TBD | Pending |
-| UI-02 | TBD | Pending |
-| UI-03 | TBD | Pending |
-| UI-04 | TBD | Pending |
-| UI-05 | TBD | Pending |
-| UI-06 | TBD | Pending |
-| UI-07 | TBD | Pending |
-| OUT-01 | TBD | Pending |
-| OUT-02 | TBD | Pending |
-| OUT-03 | TBD | Pending |
-| OUT-04 | TBD | Pending |
-| OUT-05 | TBD | Pending |
-| PLAN-01 | TBD | Pending |
-| PLAN-02 | TBD | Pending |
-| PLAN-03 | TBD | Pending |
-| STREAM-01 | TBD | Pending |
-| STREAM-02 | TBD | Pending |
-| STREAM-03 | TBD | Pending |
-| STREAM-04 | TBD | Pending |
-| RECOVERY-01 | TBD | Pending |
-| RECOVERY-02 | TBD | Pending |
-| RASTER-01 | TBD | Pending |
-| RASTER-02 | TBD | Pending |
-| RASTER-03 | TBD | Pending |
+| MODEL-01 | Phase 1 | Pending |
+| MODEL-02 | Phase 1 | Pending |
+| MODEL-03 | Phase 1 | Pending |
+| MODEL-04 | Phase 1 | Pending |
+| MODEL-05 | Phase 1 | Pending |
+| MODEL-06 | Phase 1 | Pending |
+| MODEL-07 | Phase 1 | Pending |
+| UI-01 | Phase 2 | Pending |
+| UI-02 | Phase 2 | Pending |
+| UI-03 | Phase 2 | Pending |
+| UI-04 | Phase 2 | Pending |
+| UI-05 | Phase 2 | Pending |
+| UI-06 | Phase 2 | Pending |
+| UI-07 | Phase 2 | Pending |
+| OUT-01 | Phase 3 | Pending |
+| OUT-02 | Phase 3 | Pending |
+| OUT-03 | Phase 3 | Pending |
+| OUT-04 | Phase 3 | Pending |
+| OUT-05 | Phase 3 | Pending |
+| PLAN-01 | Phase 4 | Pending |
+| PLAN-02 | Phase 4 | Pending |
+| PLAN-03 | Phase 4 | Pending |
 
 **Coverage:**
-- v1 requirements: 31 total
-- Mapped to phases: 0
-- Unmapped: 31 ⚠️
+- v1 requirements: 22 total
+- Mapped to phases: 22
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-11-24*
-*Last updated: 2026-11-24 after initialization*
+*Last updated: 2026-11-24 after narrowing the milestone to document organization*

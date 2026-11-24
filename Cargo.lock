@@ -1030,7 +1030,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1038,7 +1038,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1046,7 +1046,7 @@ dependencies = [
 [[package]]
 name = "craft-cms"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "rayon",
 ]
@@ -1059,7 +1059,7 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb8
 [[package]]
 name = "craft-color"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "craft-cms",
  "craft-host",
@@ -1075,7 +1075,7 @@ dependencies = [
 [[package]]
 name = "craft-docpath"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "serde",
 ]
@@ -1088,7 +1088,7 @@ source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13af
 [[package]]
 name = "craft-draw"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "craft-color",
  "craft-host",
@@ -1156,8 +1156,9 @@ dependencies = [
 [[package]]
 name = "craft-font-catalog"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
+ "fontique",
  "skrifa 0.47.0",
  "thiserror 2.0.21",
  "windows-registry",
@@ -1166,7 +1167,7 @@ dependencies = [
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 
 [[package]]
 name = "craft-gcode"
@@ -1179,7 +1180,7 @@ dependencies = [
 [[package]]
 name = "craft-host"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "craft-i18n",
  "egui",
@@ -1190,7 +1191,7 @@ dependencies = [
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "chrono",
  "fixed_decimal",
@@ -1290,6 +1291,14 @@ dependencies = [
 [[package]]
 name = "craft-pdf"
 version = "0.1.0"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
  "hayro-interpret",
@@ -1297,14 +1306,6 @@ dependencies = [
  "krilla",
  "kurbo 0.13.1",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "craft-pdf"
-version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -1321,12 +1322,12 @@ dependencies = [
 [[package]]
 name = "craft-platform"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "async-io",
  "core-graphics2",
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
- "craft-docpath 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
+ "craft-docpath 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-host",
  "craft-theme",
  "futures-lite",
@@ -1351,7 +1352,7 @@ dependencies = [
 [[package]]
 name = "craft-quit"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "dispatch2",
  "objc2 0.6.5",
@@ -1372,9 +1373,9 @@ dependencies = [
 [[package]]
 name = "craft-settings"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-host",
  "dirs",
  "serde",
@@ -1448,7 +1449,7 @@ dependencies = [
 [[package]]
 name = "craft-theme"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "ecolor",
  "log",
@@ -1468,13 +1469,13 @@ dependencies = [
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "craft-font-catalog",
  "craft-fonts-build",
  "craft-host",
  "craft-i18n",
- "craft-pdf 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-pdf 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-quit",
  "craft-settings",
  "craft-theme",
@@ -1506,7 +1507,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-macros"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1516,9 +1517,9 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+source = "git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4#53001237d31aa3a8c908e9abba51f37e7f8fc4f4"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-settings",
  "egui",
  "objc2 0.6.5",
@@ -5585,7 +5586,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stencilcraft"
 version = "0.1.0"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-draw",
  "craft-jsonrpc",
  "craft-raster-codecs",
@@ -5642,7 +5643,7 @@ dependencies = [
 name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0 (git+https://github.com/jorgerobles/craft-libs.git?rev=53001237d31aa3a8c908e9abba51f37e7f8fc4f4)",
  "craft-file-formats",
  "craft-stencilcraft-document",
  "craft-stencilcraft-format",

@@ -104,6 +104,51 @@ impl Settings for UserPrefs {
     const SCHEMA_VERSION: u32 = 1;
 }
 
+/// Modifier keys that shape a drag-drawn box, read at release as in Silhouette Studio.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DragMods {
+    /// Shift: equal width and height (square, circle, regular polygon).
+    pub square: bool,
+    /// Alt: the press point is the centre of the shape.
+    pub from_centre: bool,
+}
+
+impl From<egui::Modifiers> for DragMods {
+    fn from(modifiers: egui::Modifiers) -> Self {
+        Self {
+            square: modifiers.shift,
+            from_centre: modifiers.alt,
+        }
+    }
+}
+
+/// The box a shape tool draws from a press at `start` dragged to `end`.
+pub fn drag_box(
+    start: stencilcraft_geom::Point,
+    end: stencilcraft_geom::Point,
+    mods: DragMods,
+) -> stencilcraft_geom::Rect {
+    let (mut dx, mut dy) = (end.x - start.x, end.y - start.y);
+    if mods.square {
+        let side = dx.abs().max(dy.abs());
+        dx = side.copysign(dx);
+        dy = side.copysign(dy);
+    }
+    if mods.from_centre {
+        stencilcraft_geom::Rect::new(
+            start.x - dx.abs(),
+            start.y - dy.abs(),
+            start.x + dx.abs(),
+            start.y + dy.abs(),
+        )
+    } else {
+        stencilcraft_geom::Rect::from_points(
+            start,
+            stencilcraft_geom::Point::new(start.x + dx, start.y + dy),
+        )
+    }
+}
+
 /// Interactive canvas tools in the left `ToolRail`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ActiveTool {
@@ -1763,8 +1808,9 @@ impl StencilApp {
         &mut self,
         start: stencilcraft_geom::Point,
         end: stencilcraft_geom::Point,
+        mods: DragMods,
     ) {
-        if let Some(command) = self.dragged_shape_command(start, end) {
+        if let Some(command) = self.dragged_shape_command(start, end, mods) {
             self.run_command(command);
             self.select_latest_shape();
         }
@@ -1774,14 +1820,14 @@ impl StencilApp {
         &self,
         start: stencilcraft_geom::Point,
         end: stencilcraft_geom::Point,
+        mods: DragMods,
     ) -> Option<Command> {
-        let x = start.x.min(end.x);
-        let y = start.y.min(end.y);
-        let w = (start.x - end.x).abs();
-        let h = (start.y - end.y).abs();
+        let drag = drag_box(start, end, mods);
+        let (x, y, w, h) = (drag.x0, drag.y0, drag.width(), drag.height());
         if w < 1.0 && h < 1.0 {
             return None;
         }
+        let centre = drag.center();
         match self.active_tool {
             ActiveTool::Rect => Some(Command::ShapeAddRect {
                 x,
@@ -1803,15 +1849,15 @@ impl StencilApp {
                 height: h.max(2.0),
             }),
             ActiveTool::Polygon => Some(Command::ShapeAddPolygon {
-                cx: (start.x + end.x) / 2.0,
-                cy: (start.y + end.y) / 2.0,
+                cx: centre.x,
+                cy: centre.y,
                 radius: (w.max(h) / 2.0).max(2.0),
                 sides: 6,
                 rotation: 0.0,
             }),
             ActiveTool::Star => Some(Command::ShapeAddStar {
-                cx: (start.x + end.x) / 2.0,
-                cy: (start.y + end.y) / 2.0,
+                cx: centre.x,
+                cy: centre.y,
                 radius: (w.max(h) / 2.0).max(3.0),
                 inner_radius: (w.max(h) / 4.0).max(1.5),
                 points: 5,
@@ -3841,14 +3887,15 @@ impl StencilApp {
                 self.shape_drag_start = Some(world_pt);
                 self.shape_drag_current = Some(world_pt);
             }
+            let mods = DragMods::from(ui.input(|input| input.modifiers));
             if response.dragged()
                 && let Some(pointer) = response.interact_pointer_pos()
             {
                 let world_pt = self.view.screen_to_world(pointer.to_vec2());
                 self.shape_drag_current = Some(world_pt);
                 if let Some(start) = self.shape_drag_start {
-                    let w = (world_pt.x - start.x).abs();
-                    let h = (world_pt.y - start.y).abs();
+                    let drag = drag_box(start, world_pt, mods);
+                    let (w, h) = (drag.width(), drag.height());
                     Readout::new("shape-readout")
                         .row("W", format!("{w:.1} mm"))
                         .row("H", format!("{h:.1} mm"))
@@ -3856,7 +3903,7 @@ impl StencilApp {
                 }
             }
             if let (Some(start), Some(end)) = (self.shape_drag_start, self.shape_drag_current)
-                && let Some(command) = self.dragged_shape_command(start, end)
+                && let Some(command) = self.dragged_shape_command(start, end, mods)
             {
                 let mut preview =
                     stencilcraft_engine::Engine::new(stencilcraft_doc::Document::default());
@@ -3879,7 +3926,7 @@ impl StencilApp {
                 && let (Some(start), Some(end)) =
                     (self.shape_drag_start.take(), self.shape_drag_current.take())
             {
-                self.commit_dragged_shape(start, end);
+                self.commit_dragged_shape(start, end, mods);
                 ui.ctx().request_repaint();
             }
         }
@@ -5010,6 +5057,64 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert_eq!(app.recent_files.first(), Some(&recent_path));
+    }
+
+    #[test]
+    fn drag_box_follows_shift_and_alt_like_silhouette_studio() {
+        use stencilcraft_geom::{Point, Rect};
+        let start = Point::new(10.0, 10.0);
+        let mods = |square, from_centre| DragMods {
+            square,
+            from_centre,
+        };
+        // Plain: the box between press and release, in any drag direction.
+        assert_eq!(
+            drag_box(start, Point::new(40.0, 20.0), mods(false, false)),
+            Rect::new(10.0, 10.0, 40.0, 20.0)
+        );
+        assert_eq!(
+            drag_box(start, Point::new(0.0, 0.0), mods(false, false)),
+            Rect::new(0.0, 0.0, 10.0, 10.0)
+        );
+        // Shift: square, on the side the pointer is, sized by the longer drag.
+        assert_eq!(
+            drag_box(start, Point::new(40.0, 20.0), mods(true, false)),
+            Rect::new(10.0, 10.0, 40.0, 40.0)
+        );
+        assert_eq!(
+            drag_box(start, Point::new(-20.0, 15.0), mods(true, false)),
+            Rect::new(-20.0, 10.0, 10.0, 40.0)
+        );
+        // Alt: the press point is the centre.
+        assert_eq!(
+            drag_box(start, Point::new(40.0, 20.0), mods(false, true)),
+            Rect::new(-20.0, 0.0, 40.0, 20.0)
+        );
+        // Both: a square centred on the press point.
+        assert_eq!(
+            drag_box(start, Point::new(15.0, 30.0), mods(true, true)),
+            Rect::new(-10.0, -10.0, 30.0, 30.0)
+        );
+    }
+
+    #[test]
+    fn shift_dragged_ellipse_is_a_circle_and_alt_centres_it() {
+        use stencilcraft_geom::{Point, Shape};
+        let mut app = StencilApp::new(None);
+        app.active_tool = ActiveTool::Ellipse;
+        let both = DragMods {
+            square: true,
+            from_centre: true,
+        };
+        app.commit_dragged_shape(Point::new(50.0, 50.0), Point::new(70.0, 60.0), both);
+        let shape = app.engine.doc.get_shape(1).expect("ellipse created");
+        let bounds = shape.path.bounding_box();
+        assert!((bounds.width() - 40.0).abs() < 1e-6, "{bounds:?}");
+        assert!((bounds.height() - 40.0).abs() < 1e-6, "{bounds:?}");
+        assert!(
+            (bounds.center() - Point::new(50.0, 50.0)).hypot() < 1e-6,
+            "{bounds:?}"
+        );
     }
 
     #[test]

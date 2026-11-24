@@ -173,6 +173,52 @@ pub struct PanelState {
     pub spacing_mm: f64,
     /// The options bar's reference point for X/Y/W/H.
     pub pivot: Anchor9,
+    /// Regular polygon sides for new polygons (Silhouette's default is 5).
+    pub polygon_sides: f64,
+    /// Star points for new stars.
+    pub star_points: f64,
+    /// A new star's inner radius as a percentage of its outer radius.
+    pub star_inner_pct: f64,
+    /// A new rounded rectangle's corner radius, capped at half its shorter side.
+    pub corner_radius_mm: f64,
+}
+
+impl PanelState {
+    pub fn polygon_sides(&self) -> u32 {
+        whole_in(self.polygon_sides, 3, 64)
+    }
+
+    pub fn star_points(&self) -> u32 {
+        whole_in(self.star_points, 3, 64)
+    }
+
+    pub fn star_inner_ratio(&self) -> f64 {
+        let pct = if self.star_inner_pct.is_finite() {
+            self.star_inner_pct
+        } else {
+            50.0
+        };
+        pct.clamp(5.0, 95.0) / 100.0
+    }
+
+    /// The corner radius for a `width` × `height` rounded rectangle.
+    pub fn corner_radius(&self, width: f64, height: f64) -> f64 {
+        let wanted = if self.corner_radius_mm.is_finite() {
+            self.corner_radius_mm.max(0.0)
+        } else {
+            0.0
+        };
+        wanted.min(width.min(height) / 2.0).max(0.0)
+    }
+}
+
+/// `value` rounded into `min..=max`; non-finite values give `min`.
+fn whole_in(value: f64, min: u32, max: u32) -> u32 {
+    if !value.is_finite() {
+        return min;
+    }
+    // In range after the clamp, so the cast is exact.
+    value.round().clamp(f64::from(min), f64::from(max)) as u32
 }
 
 impl Default for PanelState {
@@ -194,6 +240,10 @@ impl Default for PanelState {
             each: false,
             spacing_mm: 5.0,
             pivot: Anchor9::TopLeft,
+            polygon_sides: 5.0,
+            star_points: 5.0,
+            star_inner_pct: 50.0,
+            corner_radius_mm: 5.0,
         }
     }
 }

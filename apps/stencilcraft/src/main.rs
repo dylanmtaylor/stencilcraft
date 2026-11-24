@@ -2025,7 +2025,7 @@ impl StencilApp {
                 y,
                 width: w.max(2.0),
                 height: h.max(2.0),
-                radius: (w.min(h) * 0.15).clamp(1.0, 15.0),
+                radius: self.panels.corner_radius(w.max(2.0), h.max(2.0)),
             }),
             ActiveTool::Ellipse => Some(Command::ShapeAddEllipse {
                 x,
@@ -2037,15 +2037,15 @@ impl StencilApp {
                 cx: centre.x,
                 cy: centre.y,
                 radius: (w.max(h) / 2.0).max(2.0),
-                sides: 6,
+                sides: self.panels.polygon_sides(),
                 rotation: 0.0,
             }),
             ActiveTool::Star => Some(Command::ShapeAddStar {
                 cx: centre.x,
                 cy: centre.y,
                 radius: (w.max(h) / 2.0).max(3.0),
-                inner_radius: (w.max(h) / 4.0).max(1.5),
-                points: 5,
+                inner_radius: (w.max(h) / 2.0).max(3.0) * self.panels.star_inner_ratio(),
+                points: self.panels.star_points(),
                 rotation: 0.0,
             }),
             _ => None,
@@ -2602,6 +2602,12 @@ impl StencilApp {
         let mut new_kerf = None;
         let mut do_unite = false;
         let mut do_minus = false;
+        let mut shape_options = (
+            self.panels.polygon_sides,
+            self.panels.star_points,
+            self.panels.star_inner_pct,
+            self.panels.corner_radius_mm,
+        );
 
         egui::Panel::top("options-bar")
             .frame(egui::Frame::NONE)
@@ -2612,6 +2618,43 @@ impl StencilApp {
                         OptionsBar::tool_icon(ui, active_tool.icon(), active_tool.label());
                     });
                     bar.body(|ui| {
+                        // The drawing tool's own settings come first, as in Silhouette Studio,
+                        // whether or not the shape just drawn is selected.
+                        let field = |ui: &mut egui::Ui,
+                                     id: &str,
+                                     label: &str,
+                                     value: &mut f64,
+                                     range: std::ops::RangeInclusive<f64>,
+                                     unit: &str| {
+                            ui.add(Text::new(label));
+                            let edit = NumberField::new(id, label, *value, &locale_numbers)
+                                .range(range)
+                                .unit(Unit::new(unit))
+                                .show(ui);
+                            if let Some(v) = edit.event.and_then(|e| e.value().copied()) {
+                                *value = v;
+                            }
+                        };
+                        let (sides, points, inner, corner) = &mut shape_options;
+                        let shown = match active_tool {
+                            ActiveTool::Polygon => {
+                                field(ui, "opt-sides", "Sides", sides, 3.0..=64.0, "{n}");
+                                true
+                            }
+                            ActiveTool::Star => {
+                                field(ui, "opt-points", "Points", points, 3.0..=64.0, "{n}");
+                                field(ui, "opt-inner", "Inner", inner, 5.0..=95.0, "{n} %");
+                                true
+                            }
+                            ActiveTool::RoundedRect => {
+                                field(ui, "opt-corner", "Corner", corner, 0.0..=500.0, "{n} mm");
+                                true
+                            }
+                            _ => false,
+                        };
+                        if shown {
+                            Divider::vertical().show(ui);
+                        }
                         if count == 0 {
                             ui.add(Text::new("No selection"));
                             Divider::vertical().show(ui);
@@ -2738,6 +2781,12 @@ impl StencilApp {
         self.prefs.show_rulers = show_rulers;
         self.prefs.show_grid = show_grid;
         self.send_mode = send_mode;
+        (
+            self.panels.polygon_sides,
+            self.panels.star_points,
+            self.panels.star_inner_pct,
+            self.panels.corner_radius_mm,
+        ) = shape_options;
         if let Some(k) = new_kerf {
             self.run_command(Command::KerfSet { width_mm: k });
         }
@@ -5497,6 +5546,69 @@ mod tests {
         // A click without a drag draws nothing.
         app.commit_dragged_shape(Point::new(5.0, 5.0), Point::new(5.2, 5.2), shift);
         assert_eq!(app.engine.doc.shape_count(), 1);
+    }
+
+    #[test]
+    fn shape_tool_options_shape_new_polygons_stars_and_rounded_rects() {
+        use stencilcraft_geom::{Point, Shape};
+        let knots = |app: &StencilApp, id| {
+            let shape = app.engine.doc.get_shape(id).expect("shape");
+            stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path)[0]
+                .knots
+                .len()
+        };
+        let mut app = StencilApp::new(None);
+        // Silhouette's regular polygon starts with five sides.
+        app.active_tool = ActiveTool::Polygon;
+        app.commit_dragged_shape(
+            Point::new(0.0, 0.0),
+            Point::new(40.0, 40.0),
+            DragMods::default(),
+        );
+        assert_eq!(knots(&app, 1), 5);
+        app.panels.polygon_sides = 8.0;
+        app.commit_dragged_shape(
+            Point::new(0.0, 0.0),
+            Point::new(40.0, 40.0),
+            DragMods::default(),
+        );
+        assert_eq!(knots(&app, 2), 8);
+
+        app.active_tool = ActiveTool::Star;
+        app.panels.star_points = 6.0;
+        app.panels.star_inner_pct = 30.0;
+        app.commit_dragged_shape(
+            Point::new(0.0, 0.0),
+            Point::new(40.0, 40.0),
+            DragMods::default(),
+        );
+        assert_eq!(knots(&app, 3), 12, "six points, six inner corners");
+
+        // Out-of-range or non-finite settings are clamped, never trusted.
+        app.panels.polygon_sides = f64::NAN;
+        assert_eq!(app.panels.polygon_sides(), 3);
+        app.panels.polygon_sides = 1e9;
+        assert_eq!(app.panels.polygon_sides(), 64);
+        app.panels.star_inner_pct = -4.0;
+        assert!((app.panels.star_inner_ratio() - 0.05).abs() < 1e-12);
+
+        // The corner radius is capped at half the shorter side.
+        app.active_tool = ActiveTool::RoundedRect;
+        app.panels.corner_radius_mm = 50.0;
+        assert_eq!(app.panels.corner_radius(30.0, 10.0), 5.0);
+        app.commit_dragged_shape(
+            Point::new(0.0, 0.0),
+            Point::new(30.0, 10.0),
+            DragMods::default(),
+        );
+        let pill = app
+            .engine
+            .doc
+            .get_shape(4)
+            .expect("rounded rect")
+            .path
+            .bounding_box();
+        assert!((pill.width() - 30.0).abs() < 1e-6 && (pill.height() - 10.0).abs() < 1e-6);
     }
 
     #[test]

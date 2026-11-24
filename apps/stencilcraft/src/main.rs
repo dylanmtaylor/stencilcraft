@@ -44,6 +44,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
 /// connection (the same session core the CLI's `mcp` mode uses).
+mod click_draw;
 mod control;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
@@ -176,6 +177,8 @@ pub enum ActiveTool {
     LassoSelect,
     Pen,
     Line,
+    Polyline,
+    Curve,
     Rect,
     RoundedRect,
     Ellipse,
@@ -197,6 +200,8 @@ impl ActiveTool {
             Self::LassoSelect => Icon::Lasso,
             Self::Pen => Icon::PenTool,
             Self::Line => Icon::Slash,
+            Self::Polyline => Icon::RouteElbow,
+            Self::Curve => Icon::Spline,
             Self::Rect => Icon::Square,
             Self::RoundedRect => Icon::FramePlaceholder,
             Self::Ellipse => Icon::Circle,
@@ -218,6 +223,8 @@ impl ActiveTool {
             Self::LassoSelect => "Lasso Select",
             Self::Pen => "Pen",
             Self::Line => "Line",
+            Self::Polyline => "Polyline",
+            Self::Curve => "Curve",
             Self::Rect => "Rectangle",
             Self::RoundedRect => "Rounded Rectangle",
             Self::Ellipse => "Ellipse",
@@ -227,6 +234,15 @@ impl ActiveTool {
             Self::TraceImage => "Trace Image",
             Self::Hand => "Hand",
             Self::Zoom => "Zoom",
+        }
+    }
+
+    /// The click-to-place tools (Silhouette's Polyline and Curved Shape tools).
+    pub fn click_kind(self) -> Option<click_draw::ClickKind> {
+        match self {
+            Self::Polyline => Some(click_draw::ClickKind::Polyline),
+            Self::Curve => Some(click_draw::ClickKind::Curve),
+            _ => None,
         }
     }
 
@@ -275,6 +291,8 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
             vec![
                 RailTool::new(ActiveTool::Pen, Icon::PenTool, "Pen (Draw Path)").shortcut("P"),
                 RailTool::new(ActiveTool::Line, Icon::Slash, "Line").shortcut("\\"),
+                RailTool::new(ActiveTool::Polyline, Icon::RouteElbow, "Polyline"),
+                RailTool::new(ActiveTool::Curve, Icon::Spline, "Curve"),
             ],
         ),
         ToolSlot::new(
@@ -724,6 +742,8 @@ pub struct StencilApp {
     /// Set by Cmd+Z while a pen path is being drawn: the pen drops its last anchor this frame
     /// instead of the document undoing its last command.
     pub pen_undo_requested: bool,
+    /// The Polyline/Curve tool's points while placing them.
+    pub click_draft: Option<click_draw::ClickDraft>,
     pub shape_drag_start: Option<stencilcraft_geom::Point>,
     pub shape_drag_current: Option<stencilcraft_geom::Point>,
     pub ruler_origin: stencilcraft_geom::Point,
@@ -924,6 +944,7 @@ impl StencilApp {
             handles_shown: HandlesShown::Selected,
             pen_draft: None,
             pen_undo_requested: false,
+            click_draft: None,
             shape_drag_start: None,
             shape_drag_current: None,
             ruler_origin: stencilcraft_geom::Point::ZERO,
@@ -1356,6 +1377,49 @@ impl StencilApp {
         }
     }
 
+    /// Finish the Polyline/Curve draft as a cut path (needs two points; fewer are dropped).
+    pub fn commit_click_draft(&mut self) {
+        if let Some(draft) = self.click_draft.take()
+            && let Some(path) = draft.finish()
+        {
+            self.run_command(Command::ShapeAddPath {
+                path,
+                style: CutStyle::Cut,
+            });
+            self.select_latest_shape();
+            self.status = match draft.kind {
+                click_draw::ClickKind::Polyline => "created polyline",
+                click_draw::ClickKind::Curve => "created curve",
+            }
+            .to_string();
+        }
+    }
+
+    /// Enter/Esc end a Polyline/Curve draft and keep it; Backspace, Delete and Cmd+Z take back
+    /// its last point. Returns whether a key was used.
+    fn handle_click_draft_keys(&mut self, ctx: &egui::Context) -> bool {
+        if self.click_draft.is_none() || ctx.text_edit_focused() {
+            return false;
+        }
+        let (end, back) = ctx.input_mut(|input| {
+            let end = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                | input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
+            let back = input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+                | input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                | input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
+            (end, back)
+        });
+        if end {
+            self.commit_click_draft();
+        } else if back
+            && let Some(draft) = self.click_draft.as_mut()
+            && !draft.undo()
+        {
+            self.click_draft = None;
+        }
+        end || back
+    }
+
     /// A pen path is being drawn: Delete, Backspace, Esc and undo belong to the pen.
     fn pen_drawing(&self) -> bool {
         self.active_tool == ActiveTool::Pen
@@ -1375,6 +1439,9 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.handle_click_draft_keys(ctx) {
+            return;
+        }
         // Buttons and other controls can retain keyboard focus after a click. Only
         // text edits should consume Delete as text rather than removing shapes.
         // The pen draft and the point overlay read their own Delete keys later this frame.
@@ -3922,6 +3989,49 @@ impl StencilApp {
             }
         }
 
+        // Polyline and Curve: click to place points (Silhouette Studio's tools). Switching to
+        // another tool keeps what was placed, like the pen.
+        if self
+            .click_draft
+            .as_ref()
+            .is_some_and(|draft| self.active_tool.click_kind() != Some(draft.kind))
+        {
+            self.commit_click_draft();
+        }
+        if let Some(kind) = self.active_tool.click_kind() {
+            let constrain = ui.input(|input| input.modifiers.shift);
+            // A click within 8 px of a point is on it, as for shape hit tests.
+            let snap = 8.0 / f64::from(view.zoom.max(f32::EPSILON));
+            if !overlay_claimed
+                && response.clicked()
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let at = self.view.screen_to_world(pointer.to_vec2());
+                // The first click of a double-click placed the point; the second ends the line.
+                let finish = response.double_clicked()
+                    || self
+                        .click_draft
+                        .get_or_insert_with(|| click_draw::ClickDraft::new(kind))
+                        .click(at, snap, constrain)
+                        == click_draw::ClickResult::Closed;
+                if finish {
+                    self.commit_click_draft();
+                }
+            }
+            if let Some(draft) = &self.click_draft {
+                let cursor = response
+                    .hover_pos()
+                    .map(|pointer| self.view.screen_to_world(pointer.to_vec2()));
+                stencilcraft_ui_egui::paint_preview_paths(
+                    &painter,
+                    &view,
+                    &[draft.preview(cursor, constrain)],
+                    stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+                );
+                ui.ctx().request_repaint();
+            }
+        }
+
         // Live shape creation via drag
         if self.active_tool.is_shape_creator() && !overlay_claimed {
             if response.drag_started()
@@ -4009,7 +4119,10 @@ impl StencilApp {
                 self.view.pan_mm -= pointer_delta / self.view.zoom;
             }
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if !overlay_claimed && !self.active_tool.is_shape_creator() {
+        } else if !overlay_claimed
+            && !self.active_tool.is_shape_creator()
+            && self.active_tool.click_kind().is_none()
+        {
             if response.drag_started()
                 && let Some(pointer) = response.interact_pointer_pos()
             {
@@ -5309,6 +5422,46 @@ mod tests {
         app.active_tool = ActiveTool::DirectSelect;
         press_key(&mut app, egui::Key::Delete, egui::Modifiers::NONE);
         assert_eq!(app.engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn polyline_draft_keys_take_back_points_and_enter_keeps_the_path() {
+        use click_draw::{ClickDraft, ClickKind};
+        use stencilcraft_geom::Point;
+        let mut app = StencilApp::new(None);
+        app.active_tool = ActiveTool::Polyline;
+        let mut draft = ClickDraft::new(ClickKind::Polyline);
+        for (x, y) in [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0)] {
+            draft.click(Point::new(x, y), 1.0, false);
+        }
+        app.click_draft = Some(draft);
+        press_key(&mut app, egui::Key::Backspace, egui::Modifiers::NONE);
+        assert_eq!(app.click_draft.as_ref().map(|d| d.points.len()), Some(2));
+        press_key(&mut app, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert_eq!(app.click_draft.as_ref().map(|d| d.points.len()), Some(1));
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            0,
+            "undo stayed inside the draft"
+        );
+        // Down to nothing: the draft goes away and no shape is made.
+        press_key(&mut app, egui::Key::Delete, egui::Modifiers::NONE);
+        assert!(app.click_draft.is_none());
+
+        let mut draft = ClickDraft::new(ClickKind::Curve);
+        for (x, y) in [(0.0, 0.0), (20.0, 10.0), (40.0, 0.0)] {
+            draft.click(Point::new(x, y), 1.0, false);
+        }
+        app.active_tool = ActiveTool::Curve;
+        app.click_draft = Some(draft);
+        press_key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(app.click_draft.is_none());
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            1,
+            "Esc keeps the curve, like the pen"
+        );
+        assert_eq!(app.selected_shapes, vec![1]);
     }
 
     #[test]

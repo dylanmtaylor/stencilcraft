@@ -156,7 +156,13 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     does after use, a node-count readout, and warp.
 24. **Trace**: engine/MCP support filtering, outer-edge and detach modes and background
     removal; the desktop trace workflow still needs these controls and a live preview.
-    Multi-colour tracing to layers remains missing.
+    Multi-colour tracing to layers remains missing. Observed in SS 5.0.556 (2026-11-23,
+    [observations](observations/silhouette-studio.md)): the preview is a resizable trace
+    box painted solid yellow (or outlined) and updated live with the threshold, and a
+    trace yields one compound path with the image kept. Raster placement also differs:
+    SS places PNGs at 300 dpi and ignores the file's own DPI, while `ImportOptions`
+    (`crates/import`) defaults to 96 dpi, so the same PNG lands about 3× larger in
+    StencilCraft. Decide whether to match 300 dpi or honour `pHYs`.
 25. **Print & Cut, beyond item 3**: missing printing from the app (resolution, preview),
     a printable-area border on the canvas, mark size and position options, bleed,
     printing cut lines, fill colour/gradient for printed artwork, Flatten, print size checks

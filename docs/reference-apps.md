@@ -117,8 +117,8 @@ set), `app` is `apps/stencilcraft/src/main.rs` (the desktop shell) and `cli` is
 
 | Feature | App | Description | Status | Posture | Observed |
 | --- | --- | --- | --- | --- | --- |
-| Rectangle, rounded rectangle | both | Drag to draw; the corner radius can be changed | have: `shape.add-rect`, `shape.add-rounded-rect` | replicate | 2026-11-02, SS 5.0.539: Shape flyout has rectangle and rounded rectangle; width and height callouts follow the drag. DS: docs only (sign-in required) |
-| Ellipse/circle | both | Drag to draw; hold a modifier for a circle | have: `shape.add-ellipse` | replicate | 2026-11-02, SS 5.0.539: ellipse in the Shape flyout. DS: docs only (sign-in required) |
+| Rectangle, rounded rectangle | both | Drag to draw; the corner radius can be changed | have: `shape.add-rect`, `shape.add-rounded-rect`; desktop drag: Shift = square/circle, Alt = from the centre | replicate | 2026-11-02, SS 5.0.539: Shape flyout has rectangle and rounded rectangle; width and height callouts follow the drag. DS: docs only (sign-in required) |
+| Ellipse/circle | both | Drag to draw; hold a modifier for a circle | have: `shape.add-ellipse`; desktop drag: Shift = square/circle, Alt = from the centre | replicate | 2026-11-02, SS 5.0.539: ellipse in the Shape flyout. DS: docs only (sign-in required) |
 | Polygon, star | both | Regular polygon or star; the number of sides or points can be changed | have: `shape.add-polygon`, `shape.add-star` | replicate | 2026-11-02, SS 5.0.539: polygon in the Shape flyout; no star tool was seen. DS: docs only (sign-in required) |
 | Basic shape palette (heart, triangle, score line, …) | DS | A panel of ready-made shapes | have (engine/MCP, no UI yet): `generate.shape` heart, triangle, arrow, banner and more; `generate.score-line` | reimagine with shapes generated in code; never copy their shape artwork | docs only (sign-in required) |
 | Line | SS | Straight line tool | partial: the pen draws open paths | replicate | 2026-11-02, SS 5.0.539: Line Tools flyout: line, polyline, curve, arc |

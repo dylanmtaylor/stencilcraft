@@ -22,11 +22,13 @@ tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
 egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
-# Shared UI components and docking, pinned to aiongg/craft-libs design-system.
-craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
-craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
-craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
-craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
+# Shared UI components and docking, pinned to the aiongg/craft-libs design-system.
+# 53001237 is 8504e848 with craft-ui's default-features overrides removed so the
+# workspace manifest resolves on stable Cargo.
+craft-ui = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4" }
+craft-theme = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4" }
+craft-atomic = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4" }
+craft-draw = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4", features = ["ui"] }
 craft-raster-codecs = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
@@ -41,8 +43,8 @@ craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs.git",
 craft-file-formats = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-file-import = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-svg = { git = "https://github.com/storytold/craft-libs.git", rev = "25c7a8959cf70cf8c3f076d05baadb0990710569" }
-craft-settings = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
-craft-window = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-settings = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4" }
+craft-window = { git = "https://github.com/jorgerobles/craft-libs.git", rev = "53001237d31aa3a8c908e9abba51f37e7f8fc4f4" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }

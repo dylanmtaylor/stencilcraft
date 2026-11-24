@@ -649,6 +649,9 @@ pub struct StencilApp {
     pub bezier_live_path: Option<(u64, stencilcraft_geom::BezPath)>,
     pub handles_shown: HandlesShown,
     pub pen_draft: Option<EditSubpath>,
+    /// Set by Cmd+Z while a pen path is being drawn: the pen drops its last anchor this frame
+    /// instead of the document undoing its last command.
+    pub pen_undo_requested: bool,
     pub shape_drag_start: Option<stencilcraft_geom::Point>,
     pub shape_drag_current: Option<stencilcraft_geom::Point>,
     pub ruler_origin: stencilcraft_geom::Point,
@@ -848,6 +851,7 @@ impl StencilApp {
             bezier_live_path: None,
             handles_shown: HandlesShown::Selected,
             pen_draft: None,
+            pen_undo_requested: false,
             shape_drag_start: None,
             shape_drag_current: None,
             ruler_origin: stencilcraft_geom::Point::ZERO,
@@ -1280,10 +1284,31 @@ impl StencilApp {
         }
     }
 
+    /// A pen path is being drawn: Delete, Backspace, Esc and undo belong to the pen.
+    fn pen_drawing(&self) -> bool {
+        self.active_tool == ActiveTool::Pen
+            && self
+                .pen_draft
+                .as_ref()
+                .is_some_and(|draft| !draft.knots.is_empty())
+    }
+
+    /// Points are selected in point editing: Delete and Backspace remove those points (the
+    /// neighbours rejoin) and Esc deselects them, instead of acting on whole shapes.
+    fn editing_points(&self) -> bool {
+        matches!(
+            self.active_tool,
+            ActiveTool::DirectSelect | ActiveTool::ConvertPoint
+        ) && !self.path_selection.anchors.is_empty()
+    }
+
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         // Buttons and other controls can retain keyboard focus after a click. Only
         // text edits should consume Delete as text rather than removing shapes.
+        // The pen draft and the point overlay read their own Delete keys later this frame.
         if !ctx.text_edit_focused()
+            && !self.pen_drawing()
+            && !self.editing_points()
             && ctx.input_mut(|input| {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
                     || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
@@ -1396,8 +1421,12 @@ impl StencilApp {
             let _ = self.engine.redo();
             self.retain_valid_selection();
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
-            let _ = self.engine.undo();
-            self.retain_valid_selection();
+            if self.pen_drawing() {
+                self.pen_undo_requested = true;
+            } else {
+                let _ = self.engine.undo();
+                self.retain_valid_selection();
+            }
         } else if ctx.input_mut(|input| {
             input.consume_key(
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
@@ -1411,7 +1440,9 @@ impl StencilApp {
         {
             self.prefs.show_grid = !self.prefs.show_grid;
             self.save_prefs();
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        } else if !self.pen_drawing()
+            && !self.editing_points()
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.set_selection([]);
             self.path_selection = PathSelection::default();
@@ -3777,6 +3808,7 @@ impl StencilApp {
                 PenNames::new("Cut path being drawn", |i, n| format!("Anchor {i} of {n}")),
             )
             .units(&mm_units, &mm_units)
+            .remove_last(std::mem::take(&mut self.pen_undo_requested))
             .show(ui, &response, &canvas_view);
 
             overlay_claimed = overlay_claimed || pen_resp.claimed;
@@ -5015,6 +5047,97 @@ mod tests {
             assert_eq!(app.engine.doc.shape_count(), 0);
             assert!(app.selected_shapes.is_empty());
         }
+    }
+
+    fn press_key(app: &mut StencilApp, key: egui::Key, modifiers: egui::Modifiers) {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key,
+                    physical_key: Some(key),
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                ..Default::default()
+            },
+            |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+        );
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn delete_in_point_editing_leaves_the_shape_to_the_point_overlay() {
+        // Regression: Delete/Backspace with points selected removed the whole shape.
+        for key in [egui::Key::Delete, egui::Key::Backspace] {
+            let mut app = StencilApp::new(None);
+            app.run_command(Command::ShapeAddRect {
+                x: 3.0,
+                y: 4.0,
+                width: 12.0,
+                height: 8.0,
+            });
+            app.set_selection([1]);
+            app.active_tool = ActiveTool::DirectSelect;
+            app.path_selection = PathSelection {
+                path: Some(1),
+                anchors: vec![craft_draw::ui::pen::KnotRef::new(0, 0)],
+                segment: None,
+            };
+            press_key(&mut app, key, egui::Modifiers::NONE);
+            assert_eq!(app.engine.doc.shape_count(), 1, "{key:?} kept the shape");
+            press_key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+            assert_eq!(app.selected_shapes, vec![1], "Esc left the shape selected");
+        }
+        // With no point selected, Delete still removes the selected shape.
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 3.0,
+            y: 4.0,
+            width: 12.0,
+            height: 8.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::DirectSelect;
+        press_key(&mut app, egui::Key::Delete, egui::Modifiers::NONE);
+        assert_eq!(app.engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn pen_keys_belong_to_the_draft_while_drawing() {
+        // Regression: Esc discarded an unfinished pen path, Delete removed selected shapes
+        // and Cmd+Z undid the previous document command instead of the last anchor.
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 3.0,
+            y: 4.0,
+            width: 12.0,
+            height: 8.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::Pen;
+        app.pen_draft = Some(EditSubpath {
+            knots: vec![
+                craft_draw::ui::pen::Knot::corner(stencilcraft_geom::Point::new(0.0, 0.0)),
+                craft_draw::ui::pen::Knot::corner(stencilcraft_geom::Point::new(10.0, 0.0)),
+            ],
+            closed: false,
+        });
+        press_key(&mut app, egui::Key::Delete, egui::Modifiers::NONE);
+        press_key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
+        assert_eq!(app.engine.doc.shape_count(), 1, "the rectangle survived");
+        assert!(
+            app.pen_draft.is_some(),
+            "Esc is left for the pen to end the path"
+        );
+        press_key(&mut app, egui::Key::Z, egui::Modifiers::COMMAND);
+        assert!(app.pen_undo_requested, "Cmd+Z goes to the draft");
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            1,
+            "the document was not undone"
+        );
     }
 
     #[test]

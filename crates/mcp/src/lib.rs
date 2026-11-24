@@ -1929,7 +1929,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, content).unwrap();
-        path.to_string_lossy().into_owned()
+        json_safe_path(&path)
+    }
+
+    /// Paths are spliced into hand-written JSON request lines below; Windows
+    /// backslashes would be invalid JSON escapes, and Windows accepts `/` too.
+    fn json_safe_path(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
     }
 
     #[test]
@@ -2302,11 +2308,11 @@ mod tests {
     #[test]
     fn export_roundtrip() {
         let src = write_tmp("start.stencilcraft", &doc_json());
-        let out = std::env::temp_dir()
-            .join("stencilcraft-mcp-tests")
-            .join("start.svg")
-            .to_string_lossy()
-            .into_owned();
+        let out = json_safe_path(
+            &std::env::temp_dir()
+                .join("stencilcraft-mcp-tests")
+                .join("start.svg"),
+        );
         let mut session = Session::default();
         session
             .handle_line(&format!(

@@ -153,6 +153,51 @@ impl StencilApp {
         }
     }
 
+    /// Send › Advanced: cut order, interior first, overcut, weld on cut, track enhancing.
+    pub fn send_advanced_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label("Advanced");
+        ui.scope(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Cut order");
+                egui::ComboBox::from_id_salt("send-order")
+                    .selected_text(match self.send.order.as_str() {
+                        "speed" => "Fastest path",
+                        "none" => "Document order",
+                        _ => "Least roller movement",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.send.order,
+                            "roller".to_string(),
+                            "Least roller movement",
+                        );
+                        ui.selectable_value(
+                            &mut self.send.order,
+                            "speed".to_string(),
+                            "Fastest path",
+                        );
+                        ui.selectable_value(
+                            &mut self.send.order,
+                            "none".to_string(),
+                            "Document order",
+                        );
+                    });
+            });
+            ui.checkbox(&mut self.send.interior_first, "Cut inner contours first");
+            ui.horizontal(|ui| {
+                ui.label("Overcut");
+                ui.add(
+                    egui::DragValue::new(&mut self.send.overcut_mm)
+                        .range(0.0..=10.0)
+                        .speed(0.05)
+                        .suffix(" mm"),
+                );
+            });
+            ui.checkbox(&mut self.send.weld, "Weld overlapping shapes when cutting");
+            ui.checkbox(&mut self.send.track_enhancing, "Track enhancing");
+        });
+    }
+
     /// The jobs a cut sends: the whole design in Standard mode, else one per enabled row.
     pub fn send_jobs(&self, send: bool) -> Vec<(Document, stencilcraft_engine::HardwareCommand)> {
         if self.send.mode == SendMode::Standard {

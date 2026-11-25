@@ -1038,6 +1038,13 @@ pub struct SendTab {
     /// layer.
     pub mode: send_modes::SendMode,
     pub rows: Vec<send_modes::SendRow>,
+    /// Advanced: path order (`roller`, `speed`, `none`), interior contours first, closed
+    /// overcut (mm), weld on cut and roller track enhancing.
+    pub order: String,
+    pub interior_first: bool,
+    pub overcut_mm: f64,
+    pub weld: bool,
+    pub track_enhancing: bool,
 }
 
 impl Default for SendTab {
@@ -1065,6 +1072,11 @@ impl Default for SendTab {
             busy: false,
             mode: send_modes::SendMode::Standard,
             rows: Vec::new(),
+            order: "roller".to_string(),
+            interior_first: true,
+            overcut_mm: 0.0,
+            weld: false,
+            track_enhancing: false,
         }
     }
 }
@@ -4513,6 +4525,11 @@ impl StencilApp {
                 }
             }),
             send,
+            order: Some(self.send.order.clone()),
+            interior_first: self.send.interior_first,
+            overcut_mm: self.send.overcut_mm,
+            weld: self.send.weld,
+            track_enhancing: self.send.track_enhancing,
         }
     }
 
@@ -4861,6 +4878,7 @@ impl StencilApp {
                 summary.push("Legacy preview: action, tool, holder, passes and mirror are not reflected. Use Validate USB cut for the selected settings.".into());
             }
         }
+        self.send_advanced_ui(ui);
     }
 
     /// Encode the visible flattened design through the machine crate and
@@ -6029,8 +6047,14 @@ impl StencilApp {
             stencilcraft_ui_egui::paint_snap_lines(&painter, &self.view, &self.snap_lines, color);
         }
 
-        // Zoom: scroll wheel around the pointer.
-        if response.hovered() {
+        // Zoom: scroll wheel around the pointer, only over the visible canvas (the panels
+        // beside it scroll their own content).
+        let over_canvas = response.hovered()
+            && ui
+                .ctx()
+                .pointer_hover_pos()
+                .is_some_and(|p| clip.contains(p));
+        if over_canvas {
             let scroll = ui.ctx().input(|input| input.smooth_scroll_delta.y);
             if scroll != 0.0 {
                 let pointer = response.hover_pos().unwrap_or(clip.center());

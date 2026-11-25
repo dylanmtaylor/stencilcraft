@@ -129,10 +129,16 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     subdivisions, tolerance, isometric grid, Smart Snap only within media); live
     width/height callouts beyond the move readout; display units other than mm. A move
     drag still records one undo step per frame.
-19. **Text**: the desktop Text dialog creates editable text using the built-in single-line
-    font or an installed font family, with a point-size control; Type › Edit Selected
-    Text updates it. Missing: font file and style selection, direct canvas insertion,
-    spacing and alignment controls, text on a path or arc, and a glyphs panel.
+19. **Text**: as in SS 5.0.556, the Text tool types on the canvas: click the page (the
+    first baseline starts there) and type; letters appear as you type, one undo step per
+    key; arrows, Home/End, Backspace/Delete, Enter and paste edit; a click inside moves
+    the caret; Esc or a click elsewhere ends it; double-click text to edit it again. New
+    text is 72 pt in Arial (or another installed outline font). The Text Style panel sets
+    font (with search), size, justification, line spacing, character spacing (SS's %
+    scale, measured: each 100 % adds 0.366 em) and kerning for the text being typed or
+    selected. Missing: selecting a range of letters and styling it, bold/italic/underline
+    and style choice, the frequently/recently used font lists, the wrap bar, dragging
+    text onto a path (engine-only today), vertical text in the UI, and a glyphs panel.
 20. **Replicate and nesting**: engine commands and desktop panels cover directional,
     mirrored, array, radial and fill-page copies. Production mat planning has nesting;
     an integrated desktop mat preview and hardware validation remain open.

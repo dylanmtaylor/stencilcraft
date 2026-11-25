@@ -175,3 +175,19 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 - Knife tool: options Solid | Outline (Outline default), cut line type ("Straight"), a gap-width slider (0.000), Auto Apply (on) and Apply. It acts on the selected shape(s) — with nothing selected the drag does nothing. While dragging it shows the cut line with its length/height callouts. Outline mode leaves separate **open** paths split where the cut crosses; Solid mode leaves separate **closed** pieces (two triangles from a diagonal cut of a rectangle).
 - Eraser tool: options Solid (default) | Outline, brush shape square | round (round default), Size slider (0.866). The cursor is a translucent blue disc of the brush size. A Solid stroke straight across a rectangle removed a band and left two closed rectangles.
 - Clicking inside an unfilled shape does not select it (only its outline does), so tools that act on the selection silently do nothing after such a click.
+
+## Text tool (2026-11-25, SS 5.0.556 Basic, Windows 11 Pro on hardware)
+
+- Text tool, click the page and type: the click point is the first line's baseline start (the
+  ⊕ text-to-path handle sits there). Letters appear as red cut outlines while typing, inside a
+  green text box with a blue wrap bar on its right. Default font Arial, style Default, 72 pt;
+  the options bar switches to font, style, size, B/I/U and alignment.
+- Esc ends editing, keeps the text, selects nothing and returns to the Select tool. Each typed
+  letter is its own undo step (Ctrl+Z after Esc first re-enters editing, then removes letters
+  one at a time).
+- Text Style panel: font search field and size, font lists (Frequently Used, Recently Used,
+  All fonts), a preview-text field, B/I/U and a style list, left/centre/right/justify,
+  horizontal/vertical, Line Spacing 100 %, Character Spacing 100 %, Kerning on.
+- Character Spacing is linear: with Arial at 72 pt the gap added between letter cells was
+  37 px at 200 % and 74 px at 300 % for an em of about 101 px, i.e. 0.366 em per 100 % above
+  normal.

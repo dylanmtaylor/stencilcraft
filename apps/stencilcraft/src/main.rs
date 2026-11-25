@@ -441,6 +441,14 @@ pub enum TopMenuAction {
     SetStyle(CutStyle),
     PlaceText,
     EditText,
+    /// Type › Create Outlines: selected text becomes plain paths.
+    TextToOutlines,
+    /// Type › Ungroup to Letters: each selected text splits into one text per letter.
+    TextUngroupLetters,
+    /// Select › Next Object Above/Below: step the selection through the stacking order.
+    SelectNextObject {
+        above: bool,
+    },
     SelectInverse,
     SelectSameStyle,
     SelectSameLayer,
@@ -1542,6 +1550,47 @@ impl StencilApp {
 
     /// Paste: Silhouette puts the copy 80 screen pixels down and to the right; Paste in Front
     /// puts it exactly on top of the original, Paste in Place at the same spot on top.
+    /// Selected shapes that are live text.
+    pub fn selected_text_ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.selected_shapes.iter().copied().filter(|id| {
+            self.engine
+                .doc
+                .get_shape(*id)
+                .is_some_and(|shape| shape.text.is_some())
+        })
+    }
+
+    /// Select the next selectable shape above (or below) the selection in stacking order,
+    /// across layers; at the end of the stack the selection stays.
+    pub fn select_next_object(&mut self, above: bool) {
+        let order: Vec<u64> = self
+            .engine
+            .doc
+            .layers
+            .iter()
+            .filter(|layer| layer.visible && !layer.locked)
+            .flat_map(|layer| layer.shapes.iter())
+            .filter(|shape| stencilcraft_ui_egui::is_selectable(shape))
+            .map(|shape| shape.id)
+            .collect();
+        let positions = order
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| self.selected_shapes.contains(id))
+            .map(|(i, _)| i);
+        let next = if above {
+            positions.max().and_then(|i| order.get(i.saturating_add(1)))
+        } else {
+            positions
+                .min()
+                .and_then(|i| i.checked_sub(1))
+                .and_then(|i| order.get(i))
+        };
+        if let Some(&id) = next {
+            self.set_selection([id]);
+        }
+    }
+
     pub fn clipboard_paste(&mut self, mode: stencilcraft_engine::document::PasteMode) {
         let offset_mm = 80.0 * self.screen_px_mm();
         self.select_added(Command::Document(DocumentCommand::ClipboardPaste {
@@ -1795,6 +1844,12 @@ impl StencilApp {
             "Paste in Front",
             true,
             TopMenuAction::Paste(PasteMode::InFront),
+        );
+        item(
+            ui,
+            "Paste in Back",
+            true,
+            TopMenuAction::Paste(PasteMode::InBack),
         );
         if !any {
             item(ui, "Select All", true, TopMenuAction::SelectAll);
@@ -2291,6 +2346,10 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::F))
         {
             self.clipboard_paste(stencilcraft_engine::document::PasteMode::InFront);
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::B))
+        {
+            self.clipboard_paste(stencilcraft_engine::document::PasteMode::InBack);
         } else if let Some((dx, dy)) = (!self.editing_points()).then(|| arrow_nudge(ctx)).flatten()
         {
             self.nudge_selection(dx, dy);
@@ -3121,6 +3180,31 @@ impl StencilApp {
                 self.open_text_dialog(false);
             }
             TopMenuAction::EditText => self.open_text_dialog(true),
+            TopMenuAction::TextToOutlines => {
+                let ids: Vec<u64> = self.selected_text_ids().collect();
+                if !ids.is_empty() {
+                    self.select_added(Command::TextToOutlines { ids });
+                }
+            }
+            TopMenuAction::TextUngroupLetters => {
+                let ids: Vec<u64> = self.selected_text_ids().collect();
+                let mut letters = Vec::new();
+                for id in ids {
+                    match self.engine.run(Command::TextUngroup {
+                        id,
+                        to: stencilcraft_engine::text::UngroupTo::Letters,
+                    }) {
+                        Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => letters.extend(ids),
+                        Ok(_) => {}
+                        Err(e) => self.status = e.to_string(),
+                    }
+                }
+                if !letters.is_empty() {
+                    self.set_selection(letters);
+                    self.status = "ungrouped to letters".to_string();
+                }
+            }
+            TopMenuAction::SelectNextObject { above } => self.select_next_object(above),
             TopMenuAction::SelectInverse => {
                 self.handle_edit_action(panels::EditAction::SelectInverse);
             }
@@ -7714,6 +7798,55 @@ mod tests {
             StencilApp::send_tab,
         );
         assert_eq!(app.send.pressure_override, 10);
+    }
+
+    #[test]
+    fn type_menu_outlines_and_letters_and_next_object_steps_the_stack() {
+        let mut app = StencilApp::new(None);
+        app.open_text_dialog(false);
+        app.text_value = "Hi".to_string();
+        app.add_text();
+        let text = app.selected_shape.expect("text");
+        app.handle_menu_action(TopMenuAction::TextUngroupLetters);
+        assert_eq!(app.selected_shapes.len(), 2, "one text per letter");
+        assert!(app.selected_text_ids().count() == 2);
+        app.handle_menu_action(TopMenuAction::TextToOutlines);
+        assert_eq!(app.selected_shapes.len(), 2);
+        assert_eq!(
+            app.selected_text_ids().count(),
+            0,
+            "outlines are plain paths"
+        );
+        assert!(
+            app.engine
+                .doc
+                .get_shape(text)
+                .is_none_or(|s| s.text.is_none())
+        );
+
+        // Three stacked rectangles: Next Object Above/Below walk the stack and stop at its ends.
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 5.0, 10.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            });
+        }
+        let ids: Vec<u64> = app.engine.doc.layers[0]
+            .shapes
+            .iter()
+            .map(|s| s.id)
+            .collect();
+        app.set_selection([ids[0]]);
+        app.handle_menu_action(TopMenuAction::SelectNextObject { above: true });
+        assert_eq!(app.selected_shapes, vec![ids[1]]);
+        app.handle_menu_action(TopMenuAction::SelectNextObject { above: true });
+        app.handle_menu_action(TopMenuAction::SelectNextObject { above: true });
+        assert_eq!(app.selected_shapes, vec![ids[2]], "stays at the top");
+        app.handle_menu_action(TopMenuAction::SelectNextObject { above: false });
+        assert_eq!(app.selected_shapes, vec![ids[1]]);
     }
 
     #[test]

@@ -84,7 +84,7 @@ pub fn build(app: &StencilApp) -> Vec<MenuItem<A>> {
         MenuItem::submenu("File", file(app)),
         MenuItem::submenu("Edit", edit_menu(app)),
         MenuItem::submenu("Object", object(app)),
-        MenuItem::submenu("Type", type_menu()),
+        MenuItem::submenu("Type", type_menu(app)),
         MenuItem::submenu("Select", select(app)),
         MenuItem::submenu("Effect", effect()),
         MenuItem::submenu("View", view(app)),
@@ -193,7 +193,9 @@ fn edit_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Paste in Front", A::Paste(PasteMode::InFront))
             .shortcut(kbd(CMD, Key::F))
             .into(),
-        todo_key("Paste in Back", CMD, Key::B),
+        item("Paste in Back", A::Paste(PasteMode::InBack))
+            .shortcut(kbd(CMD, Key::B))
+            .into(),
         item("Paste in Place", A::Paste(PasteMode::InPlace))
             .shortcut(kbd(cmd_shift(), Key::V))
             .into(),
@@ -445,7 +447,8 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
     ]
 }
 
-fn type_menu() -> Vec<MenuEntry<A>> {
+fn type_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
+    let text = app.selected_text_ids().next().is_some();
     vec![
         sub("Font", vec![todo("System Fonts")]),
         sub("Size", vec![todo("Custom…")]),
@@ -459,8 +462,8 @@ fn type_menu() -> Vec<MenuEntry<A>> {
         item("Edit Selected Text…", A::EditText).into(),
         todo("Type on a Path"),
         todo("Curve Text…"),
-        todo("Create Outlines"),
-        todo("Ungroup to Letters"),
+        when("Create Outlines", A::TextToOutlines, text),
+        when("Ungroup to Letters", A::TextUngroupLetters, text),
         SEP,
         todo("Find Font…"),
         todo_key("Spelling…", NONE, Key::F7),
@@ -488,8 +491,16 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 todo("Stroke Weight"),
             ],
         ),
-        todo("Next Object Above"),
-        todo("Next Object Below"),
+        when(
+            "Next Object Above",
+            A::SelectNextObject { above: true },
+            any,
+        ),
+        when(
+            "Next Object Below",
+            A::SelectNextObject { above: false },
+            any,
+        ),
         SEP,
         todo("Save Selection…"),
         todo("Edit Selection…"),
@@ -836,6 +847,11 @@ mod tests {
             "Make Guides",
             "Release Guides",
             "Clear Guides",
+            "Paste in Back",
+            "Create Outlines",
+            "Ungroup to Letters",
+            "Next Object Above",
+            "Next Object Below",
         ] {
             let found: Vec<_> = items.iter().filter(|(l, ..)| l == wired).collect();
             assert!(!found.is_empty(), "missing {wired}");
@@ -845,7 +861,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Paste in Back", "Detach Lines", "Outline View"] {
+        for planned in ["Detach Lines", "Outline View"] {
             assert!(
                 items
                     .iter()

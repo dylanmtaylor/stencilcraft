@@ -275,6 +275,8 @@ pub enum PasteMode {
     Offset,
     InPlace,
     InFront,
+    /// In place, each copy directly behind its original.
+    InBack,
 }
 
 /// Page size and labels for `page.add` / `page.set`.
@@ -1344,7 +1346,7 @@ fn paste(engine: &mut Engine, mode: PasteMode, offset_mm: f64) -> Result<Effect,
     };
     let offset = match mode {
         PasteMode::Offset => finite_distance(offset_mm, "clipboard.paste: offset_mm")?,
-        PasteMode::InPlace | PasteMode::InFront => 0.0,
+        PasteMode::InPlace | PasteMode::InFront | PasteMode::InBack => 0.0,
     };
     let shift = Affine::translate((offset, offset));
     let doc = &mut engine.doc;
@@ -1380,7 +1382,14 @@ fn paste(engine: &mut Engine, mode: PasteMode, offset_mm: f64) -> Result<Effect,
         let above = (mode == PasteMode::InFront)
             .then(|| l.shapes.iter().position(|s| s.id == shape.id))
             .flatten();
+        let behind = (mode == PasteMode::InBack)
+            .then(|| l.shapes.iter().position(|s| s.id == shape.id))
+            .flatten();
         match above {
+            _ if mode == PasteMode::InBack => {
+                // Directly behind the original; the bottom when it is gone.
+                l.shapes.insert(behind.unwrap_or(0), copy);
+            }
             // Directly above the original, after copies already placed there.
             Some(at) => {
                 let at = l.shapes[at + 1..]
@@ -2774,6 +2783,16 @@ mod tests {
         );
         assert_eq!(*order(&e).last().unwrap(), 9);
         assert_eq!(bounds(&e, 9), bounds(&e, 2));
+        // In back: directly behind each original.
+        run(
+            &mut e,
+            DocumentCommand::ClipboardPaste {
+                mode: PasteMode::InBack,
+                offset_mm: 5.0,
+            },
+        );
+        assert_eq!(order(&e), vec![10, 1, 6, 11, 2, 7, 3, 4, 5, 8, 9]);
+        assert_eq!(bounds(&e, 11), bounds(&e, 2));
         // Cut removes and is undoable.
         run(&mut e, DocumentCommand::ClipboardCut { ids: vec![3] });
         assert!(e.doc.get_shape(3).is_none());

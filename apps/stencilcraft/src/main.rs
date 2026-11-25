@@ -99,6 +99,12 @@ pub struct UserPrefs {
     pub starter_mode: bool,
     /// Send › My materials: saved cut settings.
     pub custom_materials: Vec<send_modes::CustomMaterial>,
+    /// The cutter model and material last used, restored at start (Silhouette remembers
+    /// them).
+    pub machine_model: Option<String>,
+    pub media_id: Option<u16>,
+    /// The cutting mat last used (`Mat::id`).
+    pub mat_id: Option<String>,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -122,6 +128,9 @@ impl Default for UserPrefs {
             mat_preview: true,
             starter_mode: false,
             custom_materials: Vec::new(),
+            machine_model: None,
+            media_id: None,
+            mat_id: None,
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -1362,6 +1371,12 @@ impl StencilApp {
             let (store, _report) = SettingsStore::<UserPrefs>::open(Location::Auto);
             self.prefs = store.get().clone();
             self.stores = library_panel::FileStores::open();
+            self.restore_machine_prefs();
+            // The New Document dialog shown at start was opened before the preferences loaded.
+            if self.new_doc.open {
+                self.new_doc.choice.model = self.send.model;
+                self.new_doc.choice.mat = self.mat;
+            }
             if self.prefs.starter_mode {
                 self.workspace = starter_workspace();
             }
@@ -1400,6 +1415,53 @@ impl StencilApp {
             let p = self.prefs.clone();
             store.update(|val| *val = p);
             let _ = store.flush();
+        }
+    }
+
+    /// Use the cutter model and material saved in the preferences.
+    pub fn restore_machine_prefs(&mut self) {
+        if let Some(model) = self
+            .prefs
+            .machine_model
+            .as_deref()
+            .and_then(stencilcraft_machine::Model::by_id)
+        {
+            self.send.model = model;
+        }
+        if let Some(mat) = self
+            .prefs
+            .mat_id
+            .as_deref()
+            .and_then(stencilcraft_machine::Mat::parse)
+        {
+            self.mat = mat;
+        }
+        if let Some(media) = self
+            .prefs
+            .media_id
+            .and_then(stencilcraft_machine::Media::by_id)
+        {
+            self.send.media_index = machine_index_of_media(media.id);
+            self.send.pressure_override = media.pressure.unwrap_or(10);
+            self.send.speed_override = media.speed.unwrap_or(5);
+        }
+    }
+
+    /// Save the cutter model and material when they change.
+    pub fn remember_machine_prefs(&mut self) {
+        let model = Some(self.send.model.id().to_string());
+        let media = stencilcraft_machine::MEDIA_PRESETS
+            .get(self.send.media_index)
+            .map(|m| m.id);
+        let mat = Some(self.mat.id().to_string());
+        if self.prefs.machine_model != model
+            || self.prefs.media_id != media
+            || self.prefs.mat_id != mat
+        {
+            self.prefs.machine_model = model;
+            self.prefs.media_id = media;
+            self.prefs.mat_id = mat;
+            self.save_prefs();
         }
     }
 
@@ -4585,6 +4647,7 @@ impl StencilApp {
 
     pub fn send_tab(&mut self, ui: &mut egui::Ui) {
         self.run_machine_action(ui.ctx());
+        self.remember_machine_prefs();
         let result = self
             .send
             .hardware_result
@@ -8111,6 +8174,25 @@ mod tests {
             StencilApp::send_tab,
         );
         assert_eq!(app.send.pressure_override, 10);
+    }
+
+    #[test]
+    fn the_cutter_and_material_are_remembered() {
+        let mut app = StencilApp::new(None);
+        app.send.model = stencilcraft_machine::Model::Cameo5;
+        app.send.media_index = 3;
+        app.mat = stencilcraft_machine::Mat::Cameo12x24;
+        app.remember_machine_prefs();
+        let saved = app.prefs.clone();
+        let mut next = StencilApp::new(None);
+        next.prefs = saved;
+        next.restore_machine_prefs();
+        assert_eq!(next.send.model, stencilcraft_machine::Model::Cameo5);
+        assert_eq!(next.send.media_index, 3);
+        assert_eq!(next.mat, stencilcraft_machine::Mat::Cameo12x24);
+        next.prefs.machine_model = Some("no-such-cutter".into());
+        next.restore_machine_prefs();
+        assert_eq!(next.send.model, stencilcraft_machine::Model::Cameo5);
     }
 
     #[test]

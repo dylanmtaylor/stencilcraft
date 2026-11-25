@@ -914,23 +914,34 @@ pub fn insert_path_knot(
 ) -> Option<craft_draw::ui::pen::KnotRef> {
     use craft_draw::ui::pen::{Knot, KnotRef};
     use kurbo::ParamCurve as _;
+    if !t.is_finite() {
+        return None;
+    }
+    let t = t.clamp(0.0, 1.0);
     let sub = subpaths.get_mut(seg.subpath)?;
     let (a, b) = sub.segment_ends(seg.knot)?;
     let c = sub.segment(seg.knot)?;
-    let left = c.subsegment(0.0..t);
-    let right = c.subsegment(t..1.0);
-    sub.knots[a].out_ctrl = left.p1;
-    sub.knots[b].in_ctrl = right.p2;
-    let at = a + 1;
-    sub.knots.insert(
-        at,
+    let straight = c.p1 == c.p0 && c.p2 == c.p3;
+    let knot = if straight {
+        // A point added to a straight line keeps it straight: a corner, no handles anywhere.
+        Knot::corner(c.eval(t))
+    } else {
+        let left = c.subsegment(0.0..t);
+        let right = c.subsegment(t..1.0);
+        sub.knots.get_mut(a)?.out_ctrl = left.p1;
+        sub.knots.get_mut(b)?.in_ctrl = right.p2;
         Knot {
             anchor: left.p3,
             in_ctrl: left.p2,
             out_ctrl: right.p1,
             smooth: true,
-        },
-    );
+        }
+    };
+    let at = a + 1;
+    if at > sub.knots.len() {
+        return None;
+    }
+    sub.knots.insert(at, knot);
     Some(KnotRef::new(seg.subpath, at))
 }
 
@@ -957,6 +968,109 @@ pub fn delete_path_knots(
         }
     }
     subpaths.retain(|s| !s.knots.is_empty());
+}
+
+/// The ends of every open subpath with at least two knots (Silhouette Studio rejoins a path
+/// when one of these is dragged onto another).
+pub fn open_path_ends(
+    subpaths: &[craft_draw::ui::pen::EditSubpath],
+) -> Vec<craft_draw::ui::pen::KnotRef> {
+    use craft_draw::ui::pen::KnotRef;
+    let mut ends = Vec::new();
+    for (si, sub) in subpaths.iter().enumerate() {
+        if !sub.closed && sub.knots.len() >= 2 {
+            ends.push(KnotRef::new(si, 0));
+            ends.push(KnotRef::new(si, sub.knots.len() - 1));
+        }
+    }
+    ends
+}
+
+/// The open end nearest `at` within `reach` (document units), other than `moved` itself.
+pub fn open_end_near(
+    subpaths: &[craft_draw::ui::pen::EditSubpath],
+    moved: craft_draw::ui::pen::KnotRef,
+    at: stencilcraft_geom::Point,
+    reach: f64,
+) -> Option<craft_draw::ui::pen::KnotRef> {
+    open_path_ends(subpaths)
+        .into_iter()
+        .filter(|end| *end != moved)
+        .filter_map(|end| {
+            let knot = subpaths.get(end.subpath)?.knots.get(end.knot)?;
+            let d = (knot.anchor - at).hypot();
+            (d <= reach).then_some((end, d))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(end, _)| end)
+}
+
+fn reverse_subpath(sub: &mut craft_draw::ui::pen::EditSubpath) {
+    sub.knots.reverse();
+    for knot in &mut sub.knots {
+        std::mem::swap(&mut knot.in_ctrl, &mut knot.out_ctrl);
+    }
+}
+
+/// Join the open end `moved` onto the open end `target`, the two becoming one knot at
+/// `target`'s anchor (keeping `moved`'s incoming handle, re-based). The ends of one subpath
+/// close it (it needs three knots or more); ends of two subpaths join them into one. Returns
+/// whether anything changed; anything else (not open ends, the same end) is left alone.
+pub fn join_path_ends(
+    subpaths: &mut Vec<craft_draw::ui::pen::EditSubpath>,
+    moved: craft_draw::ui::pen::KnotRef,
+    target: craft_draw::ui::pen::KnotRef,
+) -> bool {
+    let ends = open_path_ends(subpaths);
+    if moved == target || !ends.contains(&moved) || !ends.contains(&target) {
+        return false;
+    }
+    if moved.subpath == target.subpath {
+        let Some(sub) = subpaths.get_mut(moved.subpath) else {
+            return false;
+        };
+        if sub.knots.len() < 3 {
+            return false;
+        }
+        // Make the moved end the last knot, then fold it into the first.
+        if moved.knot == 0 {
+            reverse_subpath(sub);
+        }
+        let (Some(last), Some(first)) = (sub.knots.pop(), sub.knots.first_mut()) else {
+            return false;
+        };
+        first.in_ctrl = first.anchor + (last.in_ctrl - last.anchor);
+        sub.closed = true;
+        return true;
+    }
+    // Two subpaths: orient `moved`'s so it ends there and `target`'s so it starts there.
+    let (Some(mut a), Some(mut b)) = (
+        subpaths.get(moved.subpath).cloned(),
+        subpaths.get(target.subpath).cloned(),
+    ) else {
+        return false;
+    };
+    if moved.knot == 0 {
+        reverse_subpath(&mut a);
+    }
+    if target.knot != 0 {
+        reverse_subpath(&mut b);
+    }
+    let Some(last) = a.knots.pop() else {
+        return false;
+    };
+    if let Some(first) = b.knots.first_mut() {
+        first.in_ctrl = first.anchor + (last.in_ctrl - last.anchor);
+    }
+    a.knots.extend(b.knots);
+    let (keep, drop) = (moved.subpath, target.subpath);
+    if let Some(slot) = subpaths.get_mut(keep) {
+        *slot = a;
+    }
+    if drop < subpaths.len() {
+        subpaths.remove(drop);
+    }
+    true
 }
 
 /// Selection state painted over the canvas.
@@ -1365,6 +1479,105 @@ mod tests {
 
     use super::*;
     use stencilcraft_testkit::simple_square;
+
+    #[test]
+    fn adding_a_point_to_a_straight_line_keeps_it_straight() {
+        use craft_draw::ui::pen::{EditSubpath, Knot, KnotRef};
+        use stencilcraft_geom::Point;
+        let mut subs = vec![EditSubpath {
+            knots: vec![
+                Knot::corner(Point::new(0.0, 0.0)),
+                Knot::corner(Point::new(10.0, 0.0)),
+                Knot::corner(Point::new(10.0, 10.0)),
+            ],
+            closed: true,
+        }];
+        let new = insert_path_knot(&mut subs, KnotRef::new(0, 0), 0.5).expect("inserted");
+        assert_eq!(new, KnotRef::new(0, 1));
+        let knots = &subs[0].knots;
+        assert_eq!(knots.len(), 4);
+        assert_eq!(knots[1], Knot::corner(Point::new(5.0, 0.0)));
+        assert_eq!(
+            knots[0],
+            Knot::corner(Point::new(0.0, 0.0)),
+            "neighbours untouched"
+        );
+        assert_eq!(knots[2], Knot::corner(Point::new(10.0, 0.0)));
+        // The closing segment (last knot back to the first) also takes a point.
+        assert!(insert_path_knot(&mut subs, KnotRef::new(0, 3), 0.5).is_some());
+        assert_eq!(subs[0].knots.len(), 5);
+        assert!(insert_path_knot(&mut subs, KnotRef::new(0, 0), f64::NAN).is_none());
+        assert!(insert_path_knot(&mut subs, KnotRef::new(3, 0), 0.5).is_none());
+    }
+
+    #[test]
+    fn dragging_an_open_end_onto_the_other_closes_or_joins() {
+        use craft_draw::ui::pen::{EditSubpath, Knot, KnotRef};
+        use stencilcraft_geom::Point;
+        let open = |pts: &[(f64, f64)]| EditSubpath {
+            knots: pts
+                .iter()
+                .map(|&(x, y)| Knot::corner(Point::new(x, y)))
+                .collect(),
+            closed: false,
+        };
+        // One open subpath: its last end dropped on its first closes it.
+        let mut subs = vec![open(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.2, 0.1)])];
+        assert_eq!(
+            open_end_near(&subs, KnotRef::new(0, 3), Point::new(0.2, 0.1), 1.0),
+            Some(KnotRef::new(0, 0))
+        );
+        assert!(join_path_ends(
+            &mut subs,
+            KnotRef::new(0, 3),
+            KnotRef::new(0, 0)
+        ));
+        assert!(subs[0].closed);
+        assert_eq!(subs[0].knots.len(), 3);
+        assert_eq!(subs[0].knots[0].anchor, Point::new(0.0, 0.0));
+        // A closed subpath has no open ends left.
+        assert!(open_path_ends(&subs).is_empty());
+
+        // Two subpaths: start of one dropped on the start of the other joins them.
+        let mut subs = vec![
+            open(&[(0.0, 0.0), (10.0, 0.0)]),
+            open(&[(0.0, 5.0), (10.0, 5.0)]),
+        ];
+        assert!(join_path_ends(
+            &mut subs,
+            KnotRef::new(0, 0),
+            KnotRef::new(1, 0)
+        ));
+        assert_eq!(subs.len(), 1);
+        let anchors: Vec<Point> = subs[0].knots.iter().map(|k| k.anchor).collect();
+        assert_eq!(
+            anchors,
+            vec![
+                Point::new(10.0, 0.0),
+                Point::new(0.0, 5.0),
+                Point::new(10.0, 5.0)
+            ]
+        );
+
+        // Not ends, or a two-knot line onto itself: nothing changes.
+        let mut subs = vec![open(&[(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)])];
+        assert!(!join_path_ends(
+            &mut subs,
+            KnotRef::new(0, 1),
+            KnotRef::new(0, 0)
+        ));
+        let mut line = vec![open(&[(0.0, 0.0), (5.0, 0.0)])];
+        assert!(!join_path_ends(
+            &mut line,
+            KnotRef::new(0, 1),
+            KnotRef::new(0, 0)
+        ));
+        assert!(!join_path_ends(
+            &mut line,
+            KnotRef::new(7, 0),
+            KnotRef::new(0, 0)
+        ));
+    }
 
     #[test]
     fn bundled_theme_parses_and_resolves_in_both_modes() {

@@ -538,8 +538,15 @@ impl StencilApp {
                 self.path_selection.anchors.clear();
             }
             EditAction::DeleteNodes => {
-                self.node_command(|id, nodes| Command::PathDeleteNodes { id, nodes });
-                self.path_selection.anchors.clear();
+                // As the Delete key: neighbours join with a line, nothing is refitted.
+                match (self.node_shape(), self.path_selection.anchors.clone()) {
+                    (Some(id), anchors) if !anchors.is_empty() => {
+                        self.remove_path_points(id, &anchors);
+                    }
+                    _ => {
+                        self.status = "select nodes with Direct Select (A) first".to_string();
+                    }
+                }
             }
             EditAction::NodeType(kind) => {
                 self.node_command(|id, nodes| Command::PathSetNodeType { id, nodes, kind });

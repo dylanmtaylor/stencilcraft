@@ -52,6 +52,7 @@ mod control;
 mod distort_tool;
 mod effects;
 mod file_menu;
+mod framework;
 mod freehand;
 mod graphic_styles;
 
@@ -808,6 +809,7 @@ fn main() -> Result<(), String> {
     let viewport = craft_window::policy::apply(viewport, &decision.frame);
 
     let mut app = StencilApp::new(open_path.as_deref());
+    let install_frame = decision.clone();
     app.window_frame = decision.frame;
     app.control_port = control_port;
     if open_path.is_none() {
@@ -821,7 +823,10 @@ fn main() -> Result<(), String> {
     eframe::run_native(
         "stencilcraft",
         options,
-        Box::new(move |cc| Ok(Box::new(app.with_egui(cc)))),
+        Box::new(move |cc| {
+            framework::install(&cc.egui_ctx, install_frame)?;
+            Ok(Box::new(app.with_egui(cc)))
+        }),
     )
     .map_err(|e| format!("stencilcraft: {e}"))
 }
@@ -1085,8 +1090,6 @@ pub struct StencilApp {
     pub control_port: Option<u16>,
     /// Queued control requests, handled on the UI thread against `engine`.
     pub control_jobs: Option<control::Jobs>,
-    /// The design-system theme resolved for `theme`, rebuilt when the user switches mode.
-    pub installed_theme: Option<(stencilcraft_ui_egui::ColorTheme, craft_ui::theme::Base)>,
     /// Settings of the Transform, Replicate, Offset, Modify and Point Editing panels.
     pub panels: panels::PanelState,
 }
@@ -1372,7 +1375,6 @@ impl StencilApp {
             settings_store: None,
             control_port: None,
             control_jobs: None,
-            installed_theme: None,
             panels: panels::PanelState::default(),
         }
     }
@@ -6792,13 +6794,16 @@ impl eframe::App for StencilApp {
         eframe::set_value(storage, "recent_files", &self.recent_files);
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.installed_theme.as_ref().map(|(t, _)| *t) != Some(self.theme) {
-            self.installed_theme = Some((self.theme, stencilcraft_ui_egui::theme_base(self.theme)));
-        }
-        if let Some((_, base)) = &self.installed_theme {
-            craft_ui::theme::install(ui.ctx(), base);
-        }
+    fn raw_input_hook(&mut self, ctx: &egui::Context, _raw_input: &mut egui::RawInput) {
+        framework::before_input(ctx, self.theme);
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        framework::close_path(ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        framework::before_ui(ui.ctx(), frame);
         self.drain_control_requests(ui.ctx());
         self.handle_keyboard_shortcuts(ui.ctx());
         self.autosave_tick();
@@ -7189,7 +7194,7 @@ mod tests {
     #[test]
     fn resizing_the_canvas_refits_the_view() {
         let ctx = egui::Context::default();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         frame(&ctx, &mut app, vec![], |app, ui| app.canvas_body(ui));
         assert!(app.view_initialized);
@@ -8336,7 +8341,7 @@ mod tests {
     fn shared_kerf_slider_and_inspector_field_edit_the_document() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.engine
             .run(Command::ShapeAddRect {
@@ -8381,7 +8386,7 @@ mod tests {
     fn kerf_drag_cancel_preserves_history_and_commit_is_one_undo_step() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.engine.run(Command::KerfSet { width_mm: 0.2 }).unwrap();
         let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
@@ -8462,7 +8467,7 @@ mod tests {
     fn pressure_slider_drag_cancel_restores_value() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         let start = node_center(&out, "Pressure");
@@ -8732,7 +8737,7 @@ mod tests {
     fn text_style_changes_the_text_being_typed() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
         app.begin_text_at(stencilcraft_geom::Point::new(10.0, 40.0));
@@ -8770,7 +8775,7 @@ mod tests {
     fn shared_send_sliders_accept_input() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         click(
@@ -8794,7 +8799,7 @@ mod tests {
     fn shared_zoom_slider_changes_the_canvas_view() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         let old_zoom = app.view.zoom;
@@ -8815,7 +8820,7 @@ mod tests {
     fn material_selection_updates_overrides_and_cancel_restores_selection() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let initial = app.send.media_index;
         assert!(initial + 1 < stencilcraft_machine::MEDIA_PRESETS.len());
@@ -8872,7 +8877,7 @@ mod tests {
     fn material_selection_changes_encoded_dry_run_commands() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.engine
             .run(Command::ShapeAddRect {
@@ -8938,7 +8943,7 @@ mod tests {
     fn selected_model_and_mat_change_dry_run_setup() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.engine
             .run(Command::ShapeAddRect {
@@ -9027,7 +9032,7 @@ mod tests {
         use egui::accesskit::{Action, ActionRequest, Role, TreeId};
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.engine
             .run(Command::ShapeAddRect {
@@ -9102,7 +9107,7 @@ mod tests {
         use egui::accesskit::{Action, ActionRequest, HasPopup, Role, TreeId};
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let initial = app.send.media_index;
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
@@ -9212,7 +9217,7 @@ mod tests {
     fn custom_overrides_and_bounding_box_preview_reach_dry_run_program() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let mut path = stencilcraft_geom::BezPath::new();
         path.move_to(stencilcraft_geom::Point::new(2.0, 3.0));
@@ -9323,7 +9328,7 @@ mod tests {
     fn checkbox_interactions_change_preview_and_layer_visibility() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let layer_label = format!("{}  ·  0", app.engine.doc.layers[0].name);
         let out = frame(&ctx, &mut app, vec![], StencilApp::inspector);
@@ -9364,7 +9369,7 @@ mod tests {
     fn design_system_controls_dispatch_app_actions() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         {
             let mut frame = |events: Vec<egui::Event>| {

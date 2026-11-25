@@ -106,39 +106,39 @@ impl StencilApp {
         let _ = Panel::new("Actions")
             .id_salt("stencilcraft-actions-panel")
             .show(ui, |ui, _| {
-            match recording {
-                None => {
-                    start = button(ui, "Start Recording", true);
+                match recording {
+                    None => {
+                        start = button(ui, "Start Recording", true);
+                    }
+                    Some(steps) => {
+                        ui.label(format!("Recording… {steps} steps"));
+                        let _ = TextField::new("Action name", Bind::bound(&mut name))
+                            .id_salt("action-name")
+                            .show(ui);
+                        // An action's name is at most 80 characters.
+                        if name.chars().count() > 80 {
+                            name = name.chars().take(80).collect();
+                        }
+                        stop = button(ui, "Stop and Save", true);
+                    }
                 }
-                Some(steps) => {
-                    ui.label(format!("Recording… {steps} steps"));
-                    let _ = TextField::new("Action name", Bind::bound(&mut name))
-                        .id_salt("action-name")
-                        .show(ui);
-                    // An action's name is at most 80 characters.
-                    if name.chars().count() > 80 {
-                        name = name.chars().take(80).collect();
-                    }
-                    stop = button(ui, "Stop and Save", true);
+                for (i, a) in actions.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} ({} steps)", a.name, a.steps.len()));
+                        if button(ui, "Play", recording.is_none()) {
+                            play = Some(i);
+                        }
+                        if button(ui, "Delete", true) {
+                            remove = Some(i);
+                        }
+                    });
                 }
-            }
-            for (i, a) in actions.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{} ({} steps)", a.name, a.steps.len()));
-                    if button(ui, "Play", recording.is_none()) {
-                        play = Some(i);
-                    }
-                    if button(ui, "Delete", true) {
-                        remove = Some(i);
-                    }
-                });
-            }
-            hint(
-                ui,
-                "Record edits, then play them on another selection: the recorded shapes are \
+                hint(
+                    ui,
+                    "Record edits, then play them on another selection: the recorded shapes are \
                  replaced by what is selected.",
-            );
-        });
+                );
+            });
         self.action_name_draft = name.clone();
         if start {
             self.start_recording();

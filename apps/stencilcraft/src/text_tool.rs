@@ -682,106 +682,124 @@ impl StencilApp {
         if !matching.contains(&before_family) {
             family_entries.push(Entry::new(before_family.clone(), before_family.clone()));
         }
-        family_entries.extend(matching.iter().map(|name| Entry::new(name.clone(), name.clone())));
-        let style_entries: Vec<Entry<String>> =
-            styles.iter().map(|s| Entry::new(s.clone(), s.clone())).collect();
+        family_entries.extend(
+            matching
+                .iter()
+                .map(|name| Entry::new(name.clone(), name.clone())),
+        );
+        let style_entries: Vec<Entry<String>> = styles
+            .iter()
+            .map(|s| Entry::new(s.clone(), s.clone()))
+            .collect();
         let align_entries = [
             Entry::new(TextAlign::Left, "Left"),
             Entry::new(TextAlign::Centre, "Centre"),
             Entry::new(TextAlign::Right, "Right"),
             Entry::new(TextAlign::Justify, "Justify"),
         ];
-        let direction_entries = [Entry::new(false, "Horizontal"), Entry::new(true, "Vertical")];
+        let direction_entries = [
+            Entry::new(false, "Horizontal"),
+            Entry::new(true, "Vertical"),
+        ];
         let _ = Panel::new("Text Style")
             .id_salt("stencilcraft-text-style-panel")
             .show(ui, |ui, _| {
-            // The field writes the query as it is typed.
-            let _ = TextField::new("Find a font", Bind::bound(&mut style.query))
-                .id_salt("text-font-search")
-                .limit(200)
-                .show(ui);
-            if !recent.is_empty() {
-                ui.label("Recently used");
-                ui.horizontal_wrapped(|ui| {
-                    for name in &recent {
-                        if button(ui, name, true) {
-                            family = name.clone();
+                // The field writes the query as it is typed.
+                let _ = TextField::new("Find a font", Bind::bound(&mut style.query))
+                    .id_salt("text-font-search")
+                    .limit(200)
+                    .show(ui);
+                if !recent.is_empty() {
+                    ui.label("Recently used");
+                    ui.horizontal_wrapped(|ui| {
+                        for name in &recent {
+                            if button(ui, name, true) {
+                                family = name.clone();
+                            }
                         }
-                    }
+                    });
+                }
+                let _ = Select::new("Font", Bind::bound(&mut family), &family_entries)
+                    .id_salt("text-font")
+                    .show(ui);
+                if styles.len() > 1 {
+                    labelled(ui, "Style", |ui| {
+                        let _ =
+                            Select::new("Font style", Bind::bound(&mut font_style), &style_entries)
+                                .id_salt("text-font-style")
+                                .show(ui);
+                    });
+                }
+                labelled(ui, "Size", |ui| {
+                    number(
+                        ui,
+                        "text-size",
+                        "Text size",
+                        &mut size,
+                        1.0..=2000.0,
+                        "{n} pt",
+                        &numbers,
+                    );
                 });
-            }
-            let _ = Select::new("Font", Bind::bound(&mut family), &family_entries)
-                .id_salt("text-font")
-                .show(ui);
-            if styles.len() > 1 {
-                labelled(ui, "Style", |ui| {
-                    let _ = Select::new("Font style", Bind::bound(&mut font_style), &style_entries)
-                        .id_salt("text-font-style")
-                        .show(ui);
-                });
-            }
-            labelled(ui, "Size", |ui| {
-                number(
-                    ui,
-                    "text-size",
-                    "Text size",
-                    &mut size,
-                    1.0..=2000.0,
-                    "{n} pt",
-                    &numbers,
-                );
-            });
-            let _ = Segmented::new("Justification", Bind::bound(&mut style.align), &align_entries)
+                let _ = Segmented::new(
+                    "Justification",
+                    Bind::bound(&mut style.align),
+                    &align_entries,
+                )
                 .id_salt("text-align")
                 .size(ControlSize::Sm)
                 .show(ui);
-            let _ = Section::new("Spacing").id_salt("text-spacing").show(ui, |ui, _| {
-                labelled(ui, "Line Spacing", |ui| {
-                    number(
-                        ui,
-                        "text-line-spacing",
-                        "Line spacing",
-                        &mut style.line_pct,
-                        10.0..=1000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                });
-                labelled(ui, "Character Spacing", |ui| {
-                    number(
-                        ui,
-                        "text-char-spacing",
-                        "Character spacing",
-                        &mut style.char_pct,
-                        0.0..=1000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                });
-                let _ = Checkbox::new(Bind::bound(&mut style.kerning)).label("Kerning").show(ui);
-                let _ = Segmented::new(
-                    "Direction",
-                    Bind::bound(&mut style.vertical),
-                    &direction_entries,
-                )
-                .id_salt("text-direction")
-                .size(ControlSize::Sm)
-                .show(ui);
+                let _ = Section::new("Spacing")
+                    .id_salt("text-spacing")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Line Spacing", |ui| {
+                            number(
+                                ui,
+                                "text-line-spacing",
+                                "Line spacing",
+                                &mut style.line_pct,
+                                10.0..=1000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                        });
+                        labelled(ui, "Character Spacing", |ui| {
+                            number(
+                                ui,
+                                "text-char-spacing",
+                                "Character spacing",
+                                &mut style.char_pct,
+                                0.0..=1000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                        });
+                        let _ = Checkbox::new(Bind::bound(&mut style.kerning))
+                            .label("Kerning")
+                            .show(ui);
+                        let _ = Segmented::new(
+                            "Direction",
+                            Bind::bound(&mut style.vertical),
+                            &direction_entries,
+                        )
+                        .id_salt("text-direction")
+                        .size(ControlSize::Sm)
+                        .show(ui);
+                    });
+                if let Some(flow) = flow.as_mut() {
+                    let _ = Section::new("Flow").id_salt("text-flow").show(ui, |ui, _| {
+                        flow_controls(ui, flow, &numbers);
+                    });
+                }
+                hint(
+                    ui,
+                    if targets > 0 {
+                        "Changes apply to the text being typed or selected."
+                    } else {
+                        "Changes apply to new text: choose the Text tool and click the page."
+                    },
+                );
             });
-            if let Some(flow) = flow.as_mut() {
-                let _ = Section::new("Flow").id_salt("text-flow").show(ui, |ui, _| {
-                    flow_controls(ui, flow, &numbers);
-                });
-            }
-            hint(
-                ui,
-                if targets > 0 {
-                    "Changes apply to the text being typed or selected."
-                } else {
-                    "Changes apply to new text: choose the Text tool and click the page."
-                },
-            );
-        });
         let mut edit = TextEdit::default();
         let mut changed = false;
         if family != before_family {
@@ -924,26 +942,26 @@ impl StencilApp {
         let _ = Panel::new("Glyphs")
             .id_salt("stencilcraft-glyphs-panel")
             .show(ui, |ui, _| {
-            for (title, glyphs) in GLYPH_SETS {
-                ui.label(*title);
-                ui.horizontal_wrapped(|ui| {
-                    for glyph in glyphs.chars() {
-                        let s = glyph.to_string();
-                        if craft_ui::buttons::Button::new(s.clone())
-                            .size(ControlSize::Sm)
-                            .show(ui)
-                            .clicked()
-                        {
-                            picked = Some(s);
+                for (title, glyphs) in GLYPH_SETS {
+                    ui.label(*title);
+                    ui.horizontal_wrapped(|ui| {
+                        for glyph in glyphs.chars() {
+                            let s = glyph.to_string();
+                            if craft_ui::buttons::Button::new(s.clone())
+                                .size(ControlSize::Sm)
+                                .show(ui)
+                                .clicked()
+                            {
+                                picked = Some(s);
+                            }
                         }
-                    }
-                });
-            }
-            hint(
-                ui,
-                "A click inserts the character into the text being typed or selected.",
-            );
-        });
+                    });
+                }
+                hint(
+                    ui,
+                    "A click inserts the character into the text being typed or selected.",
+                );
+            });
         if let Some(glyph) = picked {
             self.insert_glyph(&glyph);
         }

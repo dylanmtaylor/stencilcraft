@@ -231,54 +231,54 @@ impl StencilApp {
         let _ = Panel::new("Library")
             .id_salt("stencilcraft-library-panel")
             .show(ui, |ui, _| {
-            if !recovered.is_empty() {
-                ui.label("Recovered files");
-                for (id, label) in &recovered {
+                if !recovered.is_empty() {
+                    ui.label("Recovered files");
+                    for (id, label) in &recovered {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            if button(ui, "Open", true) {
+                                open_recovered = Some(id.clone());
+                            }
+                            if button(ui, "Discard", true) {
+                                discard = Some(id.clone());
+                            }
+                        });
+                    }
+                    ui.separator();
+                }
+                ui.label("Library");
+                if !has_library {
+                    hint(ui, "No library folder on this system.");
+                    return;
+                }
+                // The field writes `query` as it is typed.
+                let _ = TextField::new("Search the library", Bind::bound(&mut query))
+                    .id_salt("library-search")
+                    .limit(200)
+                    .show(ui);
+                if items.is_empty() {
+                    hint(ui, "No designs yet: save one below.");
+                }
+                for item in &items {
                     ui.horizontal(|ui| {
-                        ui.label(label);
-                        if button(ui, "Open", true) {
-                            open_recovered = Some(id.clone());
-                        }
-                        if button(ui, "Discard", true) {
-                            discard = Some(id.clone());
+                        let title = if item.title.is_empty() {
+                            item.path.as_str()
+                        } else {
+                            item.title.as_str()
+                        };
+                        ui.label(title);
+                        if button(ui, "Open", !item.damaged) {
+                            open_item = Some(item.path.clone());
                         }
                     });
                 }
                 ui.separator();
-            }
-            ui.label("Library");
-            if !has_library {
-                hint(ui, "No library folder on this system.");
-                return;
-            }
-            // The field writes `query` as it is typed.
-            let _ = TextField::new("Search the library", Bind::bound(&mut query))
-                .id_salt("library-search")
-                .limit(200)
-                .show(ui);
-            if items.is_empty() {
-                hint(ui, "No designs yet: save one below.");
-            }
-            for item in &items {
-                ui.horizontal(|ui| {
-                    let title = if item.title.is_empty() {
-                        item.path.as_str()
-                    } else {
-                        item.title.as_str()
-                    };
-                    ui.label(title);
-                    if button(ui, "Open", !item.damaged) {
-                        open_item = Some(item.path.clone());
-                    }
-                });
-            }
-            ui.separator();
-            let _ = TextField::new("Design name", Bind::bound(&mut save_name))
-                .id_salt("library-save-name")
-                .limit(120)
-                .show(ui);
-            save = button(ui, "Save Design to Library", true);
-        });
+                let _ = TextField::new("Design name", Bind::bound(&mut save_name))
+                    .id_salt("library-save-name")
+                    .limit(120)
+                    .show(ui);
+                save = button(ui, "Save Design to Library", true);
+            });
         self.stores.query = query;
         self.stores.save_name = save_name;
         if let Some(id) = open_recovered {

@@ -7,8 +7,8 @@ use std::sync::{Arc, OnceLock};
 use eframe::egui;
 
 use craft_host::target::{Backend, ShellInfo};
-use craft_keymap::{Chord, Key, Mods};
 use craft_host::{AppInfo, Host};
+use craft_keymap::{Chord, Key, Mods};
 use craft_ui::fonts::{I18nScripts, UiFonts};
 use craft_ui::runtime::InstallSpec;
 use craft_ui::runtime::env::SystemReader;
@@ -84,7 +84,15 @@ pub fn close_path(ctx: &egui::Context) {
 
 /// ⌘/Ctrl+Alt with a key.
 const fn cmd_alt(key: Key) -> Chord {
-    Chord::new(Mods { cmd: true, ctrl: false, alt: true, shift: false }, key)
+    Chord::new(
+        Mods {
+            cmd: true,
+            ctrl: false,
+            alt: true,
+            shift: false,
+        },
+        key,
+    )
 }
 
 /// The app's ⌘/Ctrl+Alt+digit shortcuts (Unlock All, Show All, Zoom to Selection, Release
@@ -107,17 +115,6 @@ pub fn host_canvas(ctx: &egui::Context, id: egui::Id) {
             .with_edits(EditSet::ALL)
             .with_claims(CANVAS_CLAIMS),
     );
-}
-
-/// Whether this pass has an Escape no component took (the window's `Intent::Cancel`), without
-/// taking it.
-pub fn escape_pressed(ctx: &egui::Context) -> bool {
-    let mut pressed = false;
-    with_window_intents(ctx, false, |intents| {
-        pressed = intents.untaken(&Intent::Cancel);
-        false
-    });
-    pressed
 }
 
 /// Takes this pass's window Escape (`Intent::Cancel`); whether there was one.

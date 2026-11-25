@@ -741,7 +741,7 @@ impl NewDocState {
             .chain(CATEGORIES.iter().map(|c| c.title))
             .collect();
         let ids: Vec<Id> = (0..titles.len())
-            .map(|i| ui.id().with(("new-document-tab", i)))
+            .map(|i| ui.scope_id().with(("new-document-tab", i)))
             .collect();
         let pad = PAD_CONTROL;
         let mut picked = None;
@@ -765,9 +765,8 @@ impl NewDocState {
                     ui.allocate_space(vec2(galley.size().x, galley.size().y + 2.0 * pad));
                 let response = ui.interact(rect, *id, Sense::click());
                 let title = (*title).to_owned();
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::Role::Tab, true, on, &title)
-                });
+                response
+                    .widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, on, &title));
                 if ui.is_rect_visible(rect) {
                     ui.painter()
                         .galley(pos2(rect.left(), rect.top() + pad), galley, format.color);
@@ -816,7 +815,7 @@ impl NewDocState {
         let surface = ui.visuals().faint_bg_color;
         let hovered_surface = ui.visuals().widgets.hovered.weak_bg_fill;
         let ids: Vec<Id> = (0..cards.len())
-            .map(|i| ui.id().with(("new-document-card", self.tab, i)))
+            .map(|i| ui.scope_id().with(("new-document-card", self.tab, i)))
             .collect();
         let mut clicked = None;
         let mut double = false;
@@ -957,14 +956,17 @@ impl NewDocState {
         let mut orientation = choice.orientation();
         let was_orientation = orientation;
         let orientation_entries = [
-            Entry::new(Orientation::Portrait, "Portrait")
-                .icon(IconId::new("orientation_portrait")),
+            Entry::new(Orientation::Portrait, "Portrait").icon(IconId::new("orientation_portrait")),
             Entry::new(Orientation::Landscape, "Landscape")
                 .icon(IconId::new("orientation_landscape")),
         ];
-        let _ = Segmented::new("Orientation", Bind::bound(&mut orientation), &orientation_entries)
-            .id_salt("new-document-orientation")
-            .show(ui);
+        let _ = Segmented::new(
+            "Orientation",
+            Bind::bound(&mut orientation),
+            &orientation_entries,
+        )
+        .id_salt("new-document-orientation")
+        .show(ui);
         let turned = orientation != was_orientation;
         if turned {
             choice.set_orientation(orientation);
@@ -993,9 +995,13 @@ impl NewDocState {
             .iter()
             .map(|(starter, label)| Entry::new(*starter, *label))
             .collect();
-        let _ = Select::new("Starts with", Bind::bound(&mut choice.starter), &starter_entries)
-            .id_salt("new-document-starter")
-            .show(ui);
+        let _ = Select::new(
+            "Starts with",
+            Bind::bound(&mut choice.starter),
+            &starter_entries,
+        )
+        .id_salt("new-document-starter")
+        .show(ui);
 
         caption(ui, "Kerf");
         let (shown, range, unit, per) =

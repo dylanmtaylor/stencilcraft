@@ -84,8 +84,9 @@ impl StencilApp {
         if self.distort.is_none() || ctx.text_edit_focused() {
             return false;
         }
-        let apply =
-            ctx.input_mut(|input| crate::consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter));
+        let apply = ctx.input_mut(|input| {
+            crate::consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter)
+        });
         let cancel = crate::take_escape(ctx);
         if apply {
             self.apply_distort();

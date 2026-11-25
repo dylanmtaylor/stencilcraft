@@ -127,10 +127,10 @@ impl StencilApp {
         let _ = Panel::new("Print & Cut")
             .id_salt("stencilcraft-print-cut-panel")
             .show(ui, |ui, _| {
-            let _ = Checkbox::new(Bind::bound(&mut on))
-                .label("Show Registration Marks")
-                .show(ui);
-            ui.add_enabled_ui(on, |ui| {
+                let _ = Checkbox::new(Bind::bound(&mut on))
+                    .label("Show Registration Marks")
+                    .show(ui);
+                ui.add_enabled_ui(on, |ui| {
                 for (label, id, value, range) in [
                     ("Length", "marks-length", &mut marks.length_mm, 2.0..=100.0),
                     (
@@ -175,12 +175,12 @@ impl StencilApp {
                     );
                 });
             });
-            hint(
-                ui,
-                "Print the page at 100 % (no fit to page), load it with the marks at the top \
+                hint(
+                    ui,
+                    "Print the page at 100 % (no fit to page), load it with the marks at the top \
                  left, and send: the cutter reads the marks before cutting.",
-            );
-        });
+                );
+            });
         if defaults {
             marks = MarkSettings::default();
         }

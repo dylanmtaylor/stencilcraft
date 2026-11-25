@@ -647,108 +647,116 @@ impl StencilApp {
         let _ = Panel::new("Trace")
             .id_salt("stencilcraft-trace-panel")
             .show(ui, |ui, _| {
-            ui.horizontal(|ui| {
-                select_area = Button::new("Select Trace Area")
-                    .variant(if has_area {
-                        Variant::SECONDARY
-                    } else {
-                        Variant::PRIMARY
-                    })
-                    .size(ControlSize::Sm)
-                    .show(ui)
-                    .clicked();
-                clear_area = button(ui, "Clear Area", has_area || draft.picking);
-            });
-            if draft.picking {
-                hint(ui, "Drag a box over the image to trace.");
-            }
-            ui.add_enabled_ui(has_area, |ui| {
-                let _ = Section::new("Trace Preview").id_salt("trace-preview").show(ui, |ui, _| {
-                    let _ = Segmented::new(
-                        "Preview",
-                        Bind::bound(&mut draft.outline_preview),
-                        &display_entries,
-                    )
-                    .id_salt("trace-display")
-                    .size(ControlSize::Sm)
-                    .show(ui);
-                    labelled(ui, "Quality", |ui| {
-                        let _ = Segmented::new(
-                            "Trace quality",
-                            Bind::bound(&mut draft.quality),
-                            &quality_entries,
-                        )
-                        .id_salt("trace-quality")
+                ui.horizontal(|ui| {
+                    select_area = Button::new("Select Trace Area")
+                        .variant(if has_area {
+                            Variant::SECONDARY
+                        } else {
+                            Variant::PRIMARY
+                        })
                         .size(ControlSize::Sm)
-                        .show(ui);
-                    });
+                        .show(ui)
+                        .clicked();
+                    clear_area = button(ui, "Clear Area", has_area || draft.picking);
                 });
-                let _ = Section::new("Filters").id_salt("trace-filters").show(ui, |ui, _| {
-                    labelled(ui, "Threshold", |ui| {
-                        let text = format!("{:.1} %", draft.threshold);
-                        // The slider writes the threshold as it moves; the reset is its default.
-                        let _ = Slider::new(Bind::bound(&mut draft.threshold).reset(45.0), 0.0..=100.0)
-                            .label("Threshold")
-                            .id_salt("trace-threshold")
-                            .value_text(text)
-                            .show(ui);
-                    });
-                    labelled(ui, "Despeckle", |ui| {
-                        number(
-                            ui,
-                            "trace-despeckle",
-                            "Despeckle",
-                            &mut draft.despeckle,
-                            0.0..=10_000.0,
-                            "{n} px",
-                            &numbers,
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        let _ = Checkbox::new(Bind::bound(&mut draft.high_pass_on))
-                            .label("High Pass")
-                            .show(ui);
-                        number(
-                            ui,
-                            "trace-high-pass",
-                            "High pass radius",
-                            &mut draft.high_pass,
-                            0.0..=50.0,
-                            "{n} px",
-                            &numbers,
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        let _ = Checkbox::new(Bind::bound(&mut draft.low_pass_on))
-                            .label("Low Pass")
-                            .show(ui);
-                        number(
-                            ui,
-                            "trace-low-pass",
-                            "Low pass radius",
-                            &mut draft.low_pass,
-                            0.0..=50.0,
-                            "{n} px",
-                            &numbers,
-                        );
-                    });
-                });
-            });
-            if let Some(error) = &error {
-                hint(ui, error);
-            }
-            ui.horizontal_wrapped(|ui| {
-                for (label, mode) in [
-                    ("Trace", TraceMode::AllEdges),
-                    ("Trace Outer Edge", TraceMode::OuterEdge),
-                    ("Trace and Detach", TraceMode::Detach),
-                ] {
-                    if button(ui, label, has_image && error.is_none()) {
-                        action = Some(mode);
-                    }
+                if draft.picking {
+                    hint(ui, "Drag a box over the image to trace.");
                 }
-            });
-            ui.add_enabled_ui(has_image, |ui| {
+                ui.add_enabled_ui(has_area, |ui| {
+                    let _ =
+                        Section::new("Trace Preview")
+                            .id_salt("trace-preview")
+                            .show(ui, |ui, _| {
+                                let _ = Segmented::new(
+                                    "Preview",
+                                    Bind::bound(&mut draft.outline_preview),
+                                    &display_entries,
+                                )
+                                .id_salt("trace-display")
+                                .size(ControlSize::Sm)
+                                .show(ui);
+                                labelled(ui, "Quality", |ui| {
+                                    let _ = Segmented::new(
+                                        "Trace quality",
+                                        Bind::bound(&mut draft.quality),
+                                        &quality_entries,
+                                    )
+                                    .id_salt("trace-quality")
+                                    .size(ControlSize::Sm)
+                                    .show(ui);
+                                });
+                            });
+                    let _ = Section::new("Filters")
+                        .id_salt("trace-filters")
+                        .show(ui, |ui, _| {
+                            labelled(ui, "Threshold", |ui| {
+                                let text = format!("{:.1} %", draft.threshold);
+                                // The slider writes the threshold as it moves; the reset is its default.
+                                let _ = Slider::new(
+                                    Bind::bound(&mut draft.threshold).reset(45.0),
+                                    0.0..=100.0,
+                                )
+                                .label("Threshold")
+                                .id_salt("trace-threshold")
+                                .value_text(text)
+                                .show(ui);
+                            });
+                            labelled(ui, "Despeckle", |ui| {
+                                number(
+                                    ui,
+                                    "trace-despeckle",
+                                    "Despeckle",
+                                    &mut draft.despeckle,
+                                    0.0..=10_000.0,
+                                    "{n} px",
+                                    &numbers,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                let _ = Checkbox::new(Bind::bound(&mut draft.high_pass_on))
+                                    .label("High Pass")
+                                    .show(ui);
+                                number(
+                                    ui,
+                                    "trace-high-pass",
+                                    "High pass radius",
+                                    &mut draft.high_pass,
+                                    0.0..=50.0,
+                                    "{n} px",
+                                    &numbers,
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                let _ = Checkbox::new(Bind::bound(&mut draft.low_pass_on))
+                                    .label("Low Pass")
+                                    .show(ui);
+                                number(
+                                    ui,
+                                    "trace-low-pass",
+                                    "Low pass radius",
+                                    &mut draft.low_pass,
+                                    0.0..=50.0,
+                                    "{n} px",
+                                    &numbers,
+                                );
+                            });
+                        });
+                });
+                if let Some(error) = &error {
+                    hint(ui, error);
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for (label, mode) in [
+                        ("Trace", TraceMode::AllEdges),
+                        ("Trace Outer Edge", TraceMode::OuterEdge),
+                        ("Trace and Detach", TraceMode::Detach),
+                    ] {
+                        if button(ui, label, has_image && error.is_none()) {
+                            action = Some(mode);
+                        }
+                    }
+                });
+                ui.add_enabled_ui(has_image, |ui| {
                 let _ = Section::new("Trace by Colour").id_salt("trace-colours").show(ui, |ui, _| {
                     ui.horizontal(|ui| {
                         labelled(ui, "Colours", |ui| {
@@ -790,13 +798,13 @@ impl StencilApp {
                     );
                 });
             });
-            if !has_area && !draft.picking {
-                hint(
-                    ui,
-                    "Import an image, choose Select Trace Area and drag a box over it.",
-                );
-            }
-        });
+                if !has_area && !draft.picking {
+                    hint(
+                        ui,
+                        "Import an image, choose Select Trace Area and drag a box over it.",
+                    );
+                }
+            });
         if find_colours {
             self.find_trace_colours();
         }

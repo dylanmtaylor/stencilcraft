@@ -60,23 +60,23 @@ impl StencilApp {
         let _ = Panel::new("History")
             .id_salt("stencilcraft-history-panel")
             .show(ui, |ui, _| {
-            if ui.selectable_label(undo.is_empty(), "Start").clicked() {
-                go_to = Some(0);
-            }
-            for (i, label) in undo.iter().enumerate() {
-                let current = i + 1 == undo.len();
-                if ui.selectable_label(current, history_title(label)).clicked() {
-                    go_to = Some(i + 1);
+                if ui.selectable_label(undo.is_empty(), "Start").clicked() {
+                    go_to = Some(0);
                 }
-            }
-            for (i, label) in redo.iter().enumerate() {
-                let text = egui::RichText::new(history_title(label)).weak();
-                if ui.selectable_label(false, text).clicked() {
-                    go_to = Some(undo.len() + i + 1);
+                for (i, label) in undo.iter().enumerate() {
+                    let current = i + 1 == undo.len();
+                    if ui.selectable_label(current, history_title(label)).clicked() {
+                        go_to = Some(i + 1);
+                    }
                 }
-            }
-            hint(ui, "Click a step to go back (or forward) to it.");
-        });
+                for (i, label) in redo.iter().enumerate() {
+                    let text = egui::RichText::new(history_title(label)).weak();
+                    if ui.selectable_label(false, text).clicked() {
+                        go_to = Some(undo.len() + i + 1);
+                    }
+                }
+                hint(ui, "Click a step to go back (or forward) to it.");
+            });
         if let Some(done) = go_to {
             self.history_go_to(done);
         }
@@ -97,41 +97,41 @@ impl StencilApp {
         let _ = Panel::new("Preferences")
             .id_salt("stencilcraft-preferences-panel")
             .show(ui, |ui, _| {
-            ui.label("Appearance");
-            let _ = Segmented::new("Theme", Bind::bound(&mut theme), &theme_entries)
-                .id_salt("pref-theme")
-                .show(ui);
-            ui.separator();
-            ui.label("Canvas");
-            for (label, value) in [
-                ("Show rulers", &mut prefs.show_rulers),
-                ("Show grid", &mut prefs.show_grid),
-                ("Show guides", &mut prefs.show_guides),
-                ("Smart guides", &mut prefs.smart_guides),
-                ("Show dimensions", &mut prefs.show_dimensions),
-                ("Show cut border", &mut prefs.show_cut_border),
-                ("Show print border", &mut prefs.show_print_border),
-                ("Mat preview", &mut prefs.mat_preview),
-                ("Outline view", &mut prefs.outline_view),
-            ] {
-                let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
-            }
-            ui.separator();
-            ui.label("Units");
-            let _ = Segmented::new("Units", Bind::bound(&mut prefs.length_unit), &unit_entries)
-                .id_salt("pref-units")
-                .show(ui);
-            ui.separator();
-            ui.label("Tools");
-            let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))
-                .label("Return to the Select tool after drawing a shape")
-                .show(ui);
-            hint(
-                ui,
-                "Designs are always stored in millimetres; Units sets what you read and type. \
+                ui.label("Appearance");
+                let _ = Segmented::new("Theme", Bind::bound(&mut theme), &theme_entries)
+                    .id_salt("pref-theme")
+                    .show(ui);
+                ui.separator();
+                ui.label("Canvas");
+                for (label, value) in [
+                    ("Show rulers", &mut prefs.show_rulers),
+                    ("Show grid", &mut prefs.show_grid),
+                    ("Show guides", &mut prefs.show_guides),
+                    ("Smart guides", &mut prefs.smart_guides),
+                    ("Show dimensions", &mut prefs.show_dimensions),
+                    ("Show cut border", &mut prefs.show_cut_border),
+                    ("Show print border", &mut prefs.show_print_border),
+                    ("Mat preview", &mut prefs.mat_preview),
+                    ("Outline view", &mut prefs.outline_view),
+                ] {
+                    let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
+                }
+                ui.separator();
+                ui.label("Units");
+                let _ = Segmented::new("Units", Bind::bound(&mut prefs.length_unit), &unit_entries)
+                    .id_salt("pref-units")
+                    .show(ui);
+                ui.separator();
+                ui.label("Tools");
+                let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))
+                    .label("Return to the Select tool after drawing a shape")
+                    .show(ui);
+                hint(
+                    ui,
+                    "Designs are always stored in millimetres; Units sets what you read and type. \
                  Designs are snapshotted every 30 s while unsaved.",
-            );
-        });
+                );
+            });
         if theme != self.theme {
             self.handle_menu_action(TopMenuAction::SetTheme(theme));
         }
@@ -151,29 +151,29 @@ impl StencilApp {
         let _ = Panel::new("Selections")
             .id_salt("stencilcraft-selections-panel")
             .show(ui, |ui, _| {
-            let _ = TextField::new("Selection name", Bind::bound(&mut name))
-                .id_salt("selection-name")
-                .show(ui);
-            // A saved selection's name is at most 80 characters.
-            if name.chars().count() > 80 {
-                name = name.chars().take(80).collect();
-            }
-            save = button(ui, "Save Current Selection", any && !name.trim().is_empty());
-            for (i, s) in saved.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{} ({})", s.name, s.ids.len()));
-                    if button(ui, "Select", true) {
-                        pick = Some(i);
-                    }
-                    if button(ui, "Delete", true) {
-                        remove = Some(i);
-                    }
-                });
-            }
-            if saved.is_empty() {
-                hint(ui, "Save a selection to pick the same shapes again later.");
-            }
-        });
+                let _ = TextField::new("Selection name", Bind::bound(&mut name))
+                    .id_salt("selection-name")
+                    .show(ui);
+                // A saved selection's name is at most 80 characters.
+                if name.chars().count() > 80 {
+                    name = name.chars().take(80).collect();
+                }
+                save = button(ui, "Save Current Selection", any && !name.trim().is_empty());
+                for (i, s) in saved.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} ({})", s.name, s.ids.len()));
+                        if button(ui, "Select", true) {
+                            pick = Some(i);
+                        }
+                        if button(ui, "Delete", true) {
+                            remove = Some(i);
+                        }
+                    });
+                }
+                if saved.is_empty() {
+                    hint(ui, "Save a selection to pick the same shapes again later.");
+                }
+            });
         self.selection_name_draft = name.clone();
         if save {
             let name = name.trim().to_string();

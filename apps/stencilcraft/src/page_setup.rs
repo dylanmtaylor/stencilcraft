@@ -88,102 +88,109 @@ impl StencilApp {
         let _ = Panel::new("Page Setup")
             .id_salt("stencilcraft-page-setup-panel")
             .show(ui, |ui, _| {
-            let _ = Section::new("Page").id_salt("page-setup-page").show(ui, |ui, _| {
-                labelled(ui, "Cutting Mat", |ui| {
-                    let _ = Select::new("Cutting mat", Bind::bound(&mut mat), &mat_entries)
-                        .id_salt("page-mat")
-                        .show(ui);
-                });
-                labelled(ui, "Media Size", |ui| {
-                    let _ = Select::new("Media size", Bind::bound(&mut preset), &media_entries)
-                        .id_salt("page-media")
-                        .show(ui);
-                });
-                labelled(ui, "Width", |ui| {
-                    number(
-                        ui,
-                        "page-width",
-                        "Page width",
-                        &mut w,
-                        1.0..=10_000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                labelled(ui, "Height", |ui| {
-                    number(
-                        ui,
-                        "page-height",
-                        "Page height",
-                        &mut h,
-                        1.0..=100_000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                let _ = Segmented::new(
-                    "Orientation",
-                    Bind::bound(&mut landscape),
-                    &orientation_entries,
-                )
-                .id_salt("page-orientation")
-                .size(ControlSize::Sm)
-                .show(ui);
-                labelled(ui, "Rotate View", |ui| {
-                    let _ = Segmented::new("Rotate view", Bind::bound(&mut turns), &turn_entries)
-                        .id_salt("page-rotate-view")
+                let _ = Section::new("Page")
+                    .id_salt("page-setup-page")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Cutting Mat", |ui| {
+                            let _ = Select::new("Cutting mat", Bind::bound(&mut mat), &mat_entries)
+                                .id_salt("page-mat")
+                                .show(ui);
+                        });
+                        labelled(ui, "Media Size", |ui| {
+                            let _ =
+                                Select::new("Media size", Bind::bound(&mut preset), &media_entries)
+                                    .id_salt("page-media")
+                                    .show(ui);
+                        });
+                        labelled(ui, "Width", |ui| {
+                            number(
+                                ui,
+                                "page-width",
+                                "Page width",
+                                &mut w,
+                                1.0..=10_000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        labelled(ui, "Height", |ui| {
+                            number(
+                                ui,
+                                "page-height",
+                                "Page height",
+                                &mut h,
+                                1.0..=100_000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        let _ = Segmented::new(
+                            "Orientation",
+                            Bind::bound(&mut landscape),
+                            &orientation_entries,
+                        )
+                        .id_salt("page-orientation")
                         .size(ControlSize::Sm)
                         .show(ui);
-                });
+                        labelled(ui, "Rotate View", |ui| {
+                            let _ = Segmented::new(
+                                "Rotate view",
+                                Bind::bound(&mut turns),
+                                &turn_entries,
+                            )
+                            .id_salt("page-rotate-view")
+                            .size(ControlSize::Sm)
+                            .show(ui);
+                        });
+                    });
+                let _ = Section::new("Borders and Grid")
+                    .id_salt("page-setup-grid")
+                    .show(ui, |ui, _| {
+                        let check = |ui: &mut egui::Ui, label: &'static str, value: &mut bool| {
+                            let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
+                        };
+                        check(ui, "Show Print Border", &mut prefs.show_print_border);
+                        check(ui, "Show Cut Border", &mut prefs.show_cut_border);
+                        ui.horizontal(|ui| {
+                            check(ui, "Show Grid", &mut prefs.show_grid);
+                            check(ui, "Snap to Grid", &mut snap_grid);
+                        });
+                        check(ui, "Enable Smart Snapping", &mut smart);
+                        labelled(ui, "Tolerance", |ui| {
+                            number(
+                                ui,
+                                "page-snap-tolerance",
+                                "Snap tolerance",
+                                &mut tolerance,
+                                0.1..=50.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        labelled(ui, "Spacing", |ui| {
+                            number(
+                                ui,
+                                "page-grid-spacing",
+                                "Grid spacing",
+                                &mut spacing,
+                                0.5..=1000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        labelled(ui, "Divisions", |ui| {
+                            number(
+                                ui,
+                                "page-grid-divisions",
+                                "Grid divisions",
+                                &mut divisions,
+                                1.0..=64.0,
+                                "{n}",
+                                &numbers,
+                            );
+                        });
+                    });
             });
-            let _ = Section::new("Borders and Grid")
-                .id_salt("page-setup-grid")
-                .show(ui, |ui, _| {
-                let check = |ui: &mut egui::Ui, label: &'static str, value: &mut bool| {
-                    let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
-                };
-                check(ui, "Show Print Border", &mut prefs.show_print_border);
-                check(ui, "Show Cut Border", &mut prefs.show_cut_border);
-                ui.horizontal(|ui| {
-                    check(ui, "Show Grid", &mut prefs.show_grid);
-                    check(ui, "Snap to Grid", &mut snap_grid);
-                });
-                check(ui, "Enable Smart Snapping", &mut smart);
-                labelled(ui, "Tolerance", |ui| {
-                    number(
-                        ui,
-                        "page-snap-tolerance",
-                        "Snap tolerance",
-                        &mut tolerance,
-                        0.1..=50.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                labelled(ui, "Spacing", |ui| {
-                    number(
-                        ui,
-                        "page-grid-spacing",
-                        "Grid spacing",
-                        &mut spacing,
-                        0.5..=1000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                labelled(ui, "Divisions", |ui| {
-                    number(
-                        ui,
-                        "page-grid-divisions",
-                        "Grid divisions",
-                        &mut divisions,
-                        1.0..=64.0,
-                        "{n}",
-                        &numbers,
-                    );
-                });
-            });
-        });
 
         self.mat = mat;
         if preset != before_preset {

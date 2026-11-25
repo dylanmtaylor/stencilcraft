@@ -2,9 +2,9 @@
 //! Offset, Modify and Point Editing (`docs/reference-apps.md`), plus the menu actions behind them.
 //! Every button runs one engine command, so each is one undo step.
 
+use craft_behavior::{Anchor9, IconId};
 use craft_draw::ui::pen::PathSelection;
 use craft_theme::TypeRole;
-use craft_behavior::{Anchor9, IconId};
 use craft_theme::{ControlSize, Variant};
 use craft_ui::bars::AlignAction;
 use craft_ui::buttons::{Button, IconButton};
@@ -388,14 +388,46 @@ pub(crate) fn align_bar(
     enabled: impl Fn(AlignAction) -> bool,
 ) -> Option<AlignAction> {
     const BUTTONS: [(AlignAction, &str, &str); 8] = [
-        (AlignAction::AlignLeftEdges, "align_edge_left", "Align Left Edges"),
-        (AlignAction::AlignHorizontalCenters, "align_edge_hcenter", "Align Horizontal Centers"),
-        (AlignAction::AlignRightEdges, "align_edge_right", "Align Right Edges"),
-        (AlignAction::DistributeVertically, "distribute_vertical", "Distribute Vertically"),
-        (AlignAction::AlignTopEdges, "align_edge_top", "Align Top Edges"),
-        (AlignAction::AlignVerticalCenters, "align_edge_vcenter", "Align Vertical Centers"),
-        (AlignAction::AlignBottomEdges, "align_edge_bottom", "Align Bottom Edges"),
-        (AlignAction::DistributeHorizontally, "distribute_horizontal", "Distribute Horizontally"),
+        (
+            AlignAction::AlignLeftEdges,
+            "align_edge_left",
+            "Align Left Edges",
+        ),
+        (
+            AlignAction::AlignHorizontalCenters,
+            "align_edge_hcenter",
+            "Align Horizontal Centers",
+        ),
+        (
+            AlignAction::AlignRightEdges,
+            "align_edge_right",
+            "Align Right Edges",
+        ),
+        (
+            AlignAction::DistributeVertically,
+            "distribute_vertical",
+            "Distribute Vertically",
+        ),
+        (
+            AlignAction::AlignTopEdges,
+            "align_edge_top",
+            "Align Top Edges",
+        ),
+        (
+            AlignAction::AlignVerticalCenters,
+            "align_edge_vcenter",
+            "Align Vertical Centers",
+        ),
+        (
+            AlignAction::AlignBottomEdges,
+            "align_edge_bottom",
+            "Align Bottom Edges",
+        ),
+        (
+            AlignAction::DistributeHorizontally,
+            "distribute_horizontal",
+            "Distribute Horizontally",
+        ),
     ];
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
@@ -753,110 +785,114 @@ impl StencilApp {
         let _ = Panel::new("Replicate")
             .id_salt("stencilcraft-replicate-panel")
             .show(ui, |ui, _| {
-            labelled(ui, "Spacing", |ui| {
-                number(
-                    ui,
-                    "rep-gap",
-                    "Spacing",
-                    &mut state.gap_mm,
-                    0.0..=1000.0,
-                    "{n} mm",
-                    &numbers,
-                );
-            });
-            for (id, title, mirror) in [
-                ("rep-dup", "Duplicate", false),
-                ("rep-mirror", "Mirror", true),
-            ] {
-                let _ = Section::new(title).id_salt(id).show(ui, |ui, _| {
-                    ui.horizontal_wrapped(|ui| {
-                        for side in ScreenSide::ALL {
-                            let label = format!("{title} {}", side.label());
-                            let b = Button::new(side.label())
-                                .icon(if mirror {
-                                    IconId::new("symmetry_vertical")
-                                } else {
-                                    side.icon()
-                                })
-                                .id_salt((id, side.label()))
+                labelled(ui, "Spacing", |ui| {
+                    number(
+                        ui,
+                        "rep-gap",
+                        "Spacing",
+                        &mut state.gap_mm,
+                        0.0..=1000.0,
+                        "{n} mm",
+                        &numbers,
+                    );
+                });
+                for (id, title, mirror) in [
+                    ("rep-dup", "Duplicate", false),
+                    ("rep-mirror", "Mirror", true),
+                ] {
+                    let _ = Section::new(title).id_salt(id).show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for side in ScreenSide::ALL {
+                                let label = format!("{title} {}", side.label());
+                                let b = Button::new(side.label())
+                                    .icon(if mirror {
+                                        IconId::new("symmetry_vertical")
+                                    } else {
+                                        side.icon()
+                                    })
+                                    .id_salt((id, side.label()))
+                                    .size(ControlSize::Sm)
+                                    .enabled(any)
+                                    .tooltip(label);
+                                if b.show(ui).clicked() {
+                                    action = Some(if mirror {
+                                        EditAction::Mirror(side)
+                                    } else {
+                                        EditAction::Duplicate(side)
+                                    });
+                                }
+                            }
+                        });
+                    });
+                }
+                let _ = Section::new("Rows and columns")
+                    .id_salt("rep-array")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Copies", |ui| {
+                            number(
+                                ui,
+                                "rep-copies",
+                                "Copies",
+                                &mut state.copies,
+                                2.0..=1000.0,
+                                "{n}",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            if button(ui, "Row", any) {
+                                action = Some(EditAction::Array(DistributionAxis::Horizontal));
+                            }
+                            if button(ui, "Column", any) {
+                                action = Some(EditAction::Array(DistributionAxis::Vertical));
+                            }
+                            if Button::new("Fill Page")
+                                .icon(IconId::new("grid"))
                                 .size(ControlSize::Sm)
                                 .enabled(any)
-                                .tooltip(label);
-                            if b.show(ui).clicked() {
-                                action = Some(if mirror {
-                                    EditAction::Mirror(side)
-                                } else {
-                                    EditAction::Duplicate(side)
-                                });
+                                .show(ui)
+                                .clicked()
+                            {
+                                action = Some(EditAction::FillPage);
                             }
-                        }
+                        });
                     });
-                });
-            }
-            let _ = Section::new("Rows and columns").id_salt("rep-array").show(ui, |ui, _| {
-                labelled(ui, "Copies", |ui| {
-                    number(
-                        ui,
-                        "rep-copies",
-                        "Copies",
-                        &mut state.copies,
-                        2.0..=1000.0,
-                        "{n}",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    if button(ui, "Row", any) {
-                        action = Some(EditAction::Array(DistributionAxis::Horizontal));
-                    }
-                    if button(ui, "Column", any) {
-                        action = Some(EditAction::Array(DistributionAxis::Vertical));
-                    }
-                    if Button::new("Fill Page")
-                        .icon(IconId::new("grid"))
-                        .size(ControlSize::Sm)
-                        .enabled(any)
-                        .show(ui)
-                        .clicked()
-                    {
-                        action = Some(EditAction::FillPage);
-                    }
-                });
+                let _ = Section::new("Rotate copies")
+                    .id_salt("rep-rotate")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Count", |ui| {
+                            number(
+                                ui,
+                                "rep-rot",
+                                "Rotate count",
+                                &mut state.rotate_count,
+                                2.0..=1000.0,
+                                "{n}",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            for n in [2.0, 4.0, 6.0, 8.0] {
+                                if button(ui, &format!("{n:.0}"), any) {
+                                    state.rotate_count = n;
+                                    action = Some(EditAction::RotateCopies);
+                                }
+                            }
+                            if Button::new("Rotate")
+                                .icon(IconId::new("rotate_cw"))
+                                .size(ControlSize::Sm)
+                                .enabled(any)
+                                .show(ui)
+                                .clicked()
+                            {
+                                action = Some(EditAction::RotateCopies);
+                            }
+                        });
+                    });
+                if !any {
+                    hint(ui, "Select shapes to replicate.");
+                }
             });
-            let _ = Section::new("Rotate copies").id_salt("rep-rotate").show(ui, |ui, _| {
-                labelled(ui, "Count", |ui| {
-                    number(
-                        ui,
-                        "rep-rot",
-                        "Rotate count",
-                        &mut state.rotate_count,
-                        2.0..=1000.0,
-                        "{n}",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for n in [2.0, 4.0, 6.0, 8.0] {
-                        if button(ui, &format!("{n:.0}"), any) {
-                            state.rotate_count = n;
-                            action = Some(EditAction::RotateCopies);
-                        }
-                    }
-                    if Button::new("Rotate")
-                        .icon(IconId::new("rotate_cw"))
-                        .size(ControlSize::Sm)
-                        .enabled(any)
-                        .show(ui)
-                        .clicked()
-                    {
-                        action = Some(EditAction::RotateCopies);
-                    }
-                });
-            });
-            if !any {
-                hint(ui, "Select shapes to replicate.");
-            }
-        });
         if let Some(action) = action {
             self.handle_edit_action(action);
         }
@@ -922,7 +958,10 @@ impl StencilApp {
             .as_ref()
             .and_then(|p| p.result.as_ref().err().cloned());
         let draft = &mut self.panels.offset;
-        let kind_entries = [Entry::new(false, "Offset"), Entry::new(true, "Internal Offset")];
+        let kind_entries = [
+            Entry::new(false, "Offset"),
+            Entry::new(true, "Internal Offset"),
+        ];
         let join_entries = [
             Entry::new(JoinStyle::Miter, "Sharp").icon(IconId::new("stroke_join_miter")),
             Entry::new(JoinStyle::Round, "Round").icon(IconId::new("stroke_join_round")),
@@ -931,68 +970,72 @@ impl StencilApp {
         let _ = Panel::new("Offset")
             .id_salt("stencilcraft-offset-panel")
             .show(ui, |ui, _| {
-            let _ = Segmented::new("Offset direction", Bind::bound(&mut draft.internal), &kind_entries)
+                let _ = Segmented::new(
+                    "Offset direction",
+                    Bind::bound(&mut draft.internal),
+                    &kind_entries,
+                )
                 .id_salt("offset-kind")
                 .size(ControlSize::Sm)
                 .show(ui);
-            labelled(ui, "Distance", |ui| {
-                number(
-                    ui,
-                    "offset-distance",
-                    "Offset distance",
-                    &mut draft.distance_mm,
-                    0.01..=1000.0,
-                    "{n} mm",
-                    &numbers,
-                );
-            });
-            labelled(ui, "Corner", |ui| {
-                let _ = Segmented::new("Corner", Bind::bound(&mut draft.join), &join_entries)
-                    .id_salt("offset-join")
-                    .size(ControlSize::Sm)
-                    .show(ui);
-            });
-            if draft.join == JoinStyle::Miter {
-                labelled(ui, "Corner limit", |ui| {
+                labelled(ui, "Distance", |ui| {
                     number(
                         ui,
-                        "offset-limit",
-                        "Corner limit",
-                        &mut draft.limit,
-                        1.0..=100.0,
-                        "{n} ×",
+                        "offset-distance",
+                        "Offset distance",
+                        &mut draft.distance_mm,
+                        0.01..=1000.0,
+                        "{n} mm",
                         &numbers,
                     );
                 });
-            }
-            let _ = Checkbox::new(Bind::bound(&mut draft.weld))
-                .label("Weld overlapping offsets")
-                .show(ui);
-            if let Some(error) = &error {
-                let _ = Text::new(error.clone()).shade(Shade::Muted).show(ui);
-            }
-            ui.horizontal(|ui| {
-                cancel = Button::new("Cancel")
-                    .size(ControlSize::Sm)
-                    .enabled(draft.armed)
-                    .show(ui)
-                    .clicked();
-                apply = Button::new("Apply")
-                    .variant(Variant::PRIMARY)
-                    .size(ControlSize::Sm)
-                    .enabled(any && error.is_none())
-                    .show(ui)
-                    .clicked();
+                labelled(ui, "Corner", |ui| {
+                    let _ = Segmented::new("Corner", Bind::bound(&mut draft.join), &join_entries)
+                        .id_salt("offset-join")
+                        .size(ControlSize::Sm)
+                        .show(ui);
+                });
+                if draft.join == JoinStyle::Miter {
+                    labelled(ui, "Corner limit", |ui| {
+                        number(
+                            ui,
+                            "offset-limit",
+                            "Corner limit",
+                            &mut draft.limit,
+                            1.0..=100.0,
+                            "{n} ×",
+                            &numbers,
+                        );
+                    });
+                }
+                let _ = Checkbox::new(Bind::bound(&mut draft.weld))
+                    .label("Weld overlapping offsets")
+                    .show(ui);
+                if let Some(error) = &error {
+                    let _ = Text::new(error.clone()).shade(Shade::Muted).show(ui);
+                }
+                ui.horizontal(|ui| {
+                    cancel = Button::new("Cancel")
+                        .size(ControlSize::Sm)
+                        .enabled(draft.armed)
+                        .show(ui)
+                        .clicked();
+                    apply = Button::new("Apply")
+                        .variant(Variant::PRIMARY)
+                        .size(ControlSize::Sm)
+                        .enabled(any && error.is_none())
+                        .show(ui)
+                        .clicked();
+                });
+                hint(
+                    ui,
+                    if any {
+                        "The blue outline previews the offset; Apply adds it."
+                    } else {
+                        "Select shapes to offset."
+                    },
+                );
             });
-            hint(
-                ui,
-                if any {
-                    "The blue outline previews the offset; Apply adds it."
-                } else {
-                    "Select shapes to offset."
-                },
-            );
-        });
         if self.panels.offset != before {
             self.panels.offset.armed = true;
         }
@@ -1019,73 +1062,81 @@ impl StencilApp {
         let _ = Panel::new("Modify")
             .id_salt("stencilcraft-modify-panel")
             .show(ui, |ui, _| {
-            let _ = Section::new("Combine").id_salt("modify-weld").show(ui, |ui, _| {
-                ui.horizontal_wrapped(|ui| {
-                    for (label, o) in [
-                        ("Weld", BooleanOperation::Union),
-                        ("Subtract", BooleanOperation::Difference),
-                        ("Subtract All", BooleanOperation::SubtractAll),
-                        ("Intersect", BooleanOperation::Intersect),
-                        ("Crop", BooleanOperation::Crop),
-                        ("Divide", BooleanOperation::Divide),
-                        ("Exclude", BooleanOperation::Xor),
-                    ] {
-                        if button(ui, label, count >= 2) {
-                            op = Some(o);
+                let _ = Section::new("Combine")
+                    .id_salt("modify-weld")
+                    .show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, o) in [
+                                ("Weld", BooleanOperation::Union),
+                                ("Subtract", BooleanOperation::Difference),
+                                ("Subtract All", BooleanOperation::SubtractAll),
+                                ("Intersect", BooleanOperation::Intersect),
+                                ("Crop", BooleanOperation::Crop),
+                                ("Divide", BooleanOperation::Divide),
+                                ("Exclude", BooleanOperation::Xor),
+                            ] {
+                                if button(ui, label, count >= 2) {
+                                    op = Some(o);
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Pathfinder")
+                    .id_salt("modify-pathfinder")
+                    .show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, o) in [
+                                ("Trim", BooleanOperation::Trim),
+                                ("Merge", BooleanOperation::Merge),
+                                ("Outline", BooleanOperation::Outline),
+                                ("Minus Back", BooleanOperation::MinusBack),
+                            ] {
+                                if button(ui, label, count >= 2) {
+                                    op = Some(o);
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Compound paths")
+                    .id_salt("modify-compound")
+                    .show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, a, enabled) in [
+                                ("Make Compound", EditAction::MakeCompound, count >= 2),
+                                ("Release Compound", EditAction::ReleaseCompound, count >= 1),
+                                ("Convert to Path", EditAction::ToPath, count >= 1),
+                            ] {
+                                if button(ui, label, enabled) {
+                                    action = Some(a);
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Outline stroke")
+                    .id_salt("modify-stroke")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Width", |ui| {
+                            number(
+                                ui,
+                                "modify-stroke-w",
+                                "Stroke width",
+                                stroke,
+                                0.01..=1000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        if button(ui, "Outline Stroke", count >= 1) {
+                            action = Some(EditAction::OutlineStroke);
                         }
-                    }
-                });
-            });
-            let _ = Section::new("Pathfinder").id_salt("modify-pathfinder").show(ui, |ui, _| {
-                ui.horizontal_wrapped(|ui| {
-                    for (label, o) in [
-                        ("Trim", BooleanOperation::Trim),
-                        ("Merge", BooleanOperation::Merge),
-                        ("Outline", BooleanOperation::Outline),
-                        ("Minus Back", BooleanOperation::MinusBack),
-                    ] {
-                        if button(ui, label, count >= 2) {
-                            op = Some(o);
-                        }
-                    }
-                });
-            });
-            let _ = Section::new("Compound paths").id_salt("modify-compound").show(ui, |ui, _| {
-                ui.horizontal_wrapped(|ui| {
-                    for (label, a, enabled) in [
-                        ("Make Compound", EditAction::MakeCompound, count >= 2),
-                        ("Release Compound", EditAction::ReleaseCompound, count >= 1),
-                        ("Convert to Path", EditAction::ToPath, count >= 1),
-                    ] {
-                        if button(ui, label, enabled) {
-                            action = Some(a);
-                        }
-                    }
-                });
-            });
-            let _ = Section::new("Outline stroke").id_salt("modify-stroke").show(ui, |ui, _| {
-                labelled(ui, "Width", |ui| {
-                    number(
+                    });
+                if count < 2 {
+                    hint(
                         ui,
-                        "modify-stroke-w",
-                        "Stroke width",
-                        stroke,
-                        0.01..=1000.0,
-                        "{n} mm",
-                        &numbers,
+                        "Select two or more shapes to weld, subtract or intersect.",
                     );
-                });
-                if button(ui, "Outline Stroke", count >= 1) {
-                    action = Some(EditAction::OutlineStroke);
                 }
             });
-            if count < 2 {
-                hint(
-                    ui,
-                    "Select two or more shapes to weld, subtract or intersect.",
-                );
-            }
-        });
         if let Some(op) = op {
             self.run_pathfinder(op);
         }
@@ -1112,86 +1163,92 @@ impl StencilApp {
         let _ = Panel::new("Point Editing")
             .id_salt("stencilcraft-points-panel")
             .show(ui, |ui, _| {
-            let label = if editing {
-                "Stop Editing Points"
-            } else {
-                "Edit Points"
-            };
-            if Button::new(label)
-                .icon(IconId::new("direct_select"))
-                .size(ControlSize::Sm)
-                .enabled(!ids.is_empty() || editing)
-                .show(ui)
-                .clicked()
-            {
-                action = Some(EditAction::TogglePointEdit);
-            }
-            match &counts {
-                Some(Effect::NodeCount(c)) => {
-                    let _ = Text::new(format!(
-                        "{} nodes · {} contours ({} corner, {} curve)",
-                        c.nodes, c.contours, c.linear, c.bezier
-                    ))
-                    .show(ui);
+                let label = if editing {
+                    "Stop Editing Points"
+                } else {
+                    "Edit Points"
+                };
+                if Button::new(label)
+                    .icon(IconId::new("direct_select"))
+                    .size(ControlSize::Sm)
+                    .enabled(!ids.is_empty() || editing)
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(EditAction::TogglePointEdit);
                 }
-                _ => hint(ui, "Double-click a shape to edit its points."),
-            }
-            let _ = Section::new("Nodes").id_salt("points-nodes").show(ui, |ui, _| {
-                ui.horizontal_wrapped(|ui| {
-                    for (label, a, enabled) in [
-                        ("Delete", EditAction::DeleteNodes, nodes),
-                        ("Break", EditAction::Break, nodes),
-                        ("Corner", EditAction::NodeType(NodeType::Corner), nodes),
-                        ("Smooth", EditAction::NodeType(NodeType::Smooth), nodes),
-                        ("Merge", EditAction::MergeNodes, nodes),
-                        ("Average", EditAction::Average(NodeAxis::Both), nodes),
-                    ] {
-                        if button(ui, label, enabled) {
-                            action = Some(a);
-                        }
+                match &counts {
+                    Some(Effect::NodeCount(c)) => {
+                        let _ = Text::new(format!(
+                            "{} nodes · {} contours ({} corner, {} curve)",
+                            c.nodes, c.contours, c.linear, c.bezier
+                        ))
+                        .show(ui);
                     }
-                });
+                    _ => hint(ui, "Double-click a shape to edit its points."),
+                }
+                let _ = Section::new("Nodes")
+                    .id_salt("points-nodes")
+                    .show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, a, enabled) in [
+                                ("Delete", EditAction::DeleteNodes, nodes),
+                                ("Break", EditAction::Break, nodes),
+                                ("Corner", EditAction::NodeType(NodeType::Corner), nodes),
+                                ("Smooth", EditAction::NodeType(NodeType::Smooth), nodes),
+                                ("Merge", EditAction::MergeNodes, nodes),
+                                ("Average", EditAction::Average(NodeAxis::Both), nodes),
+                            ] {
+                                if button(ui, label, enabled) {
+                                    action = Some(a);
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Segments")
+                    .id_salt("points-segments")
+                    .show(ui, |ui, _| {
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, a, enabled) in [
+                                ("Make Flat", EditAction::Segment(SegmentType::Line), segment),
+                                (
+                                    "Make Curve",
+                                    EditAction::Segment(SegmentType::Curve),
+                                    segment,
+                                ),
+                                ("Close Path", EditAction::Close, !ids.is_empty()),
+                                ("Join", EditAction::Join, !ids.is_empty()),
+                            ] {
+                                if button(ui, label, enabled) {
+                                    action = Some(a);
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Path")
+                    .id_salt("points-path")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Tolerance", |ui| {
+                            number(
+                                ui,
+                                "points-tol",
+                                "Simplify tolerance",
+                                tolerance,
+                                0.001..=1000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            if button(ui, "Simplify", !ids.is_empty()) {
+                                action = Some(EditAction::Simplify);
+                            }
+                            if button(ui, "Convert to Path", !ids.is_empty()) {
+                                action = Some(EditAction::ToPath);
+                            }
+                        });
+                    });
             });
-            let _ = Section::new("Segments").id_salt("points-segments").show(ui, |ui, _| {
-                ui.horizontal_wrapped(|ui| {
-                    for (label, a, enabled) in [
-                        ("Make Flat", EditAction::Segment(SegmentType::Line), segment),
-                        (
-                            "Make Curve",
-                            EditAction::Segment(SegmentType::Curve),
-                            segment,
-                        ),
-                        ("Close Path", EditAction::Close, !ids.is_empty()),
-                        ("Join", EditAction::Join, !ids.is_empty()),
-                    ] {
-                        if button(ui, label, enabled) {
-                            action = Some(a);
-                        }
-                    }
-                });
-            });
-            let _ = Section::new("Path").id_salt("points-path").show(ui, |ui, _| {
-                labelled(ui, "Tolerance", |ui| {
-                    number(
-                        ui,
-                        "points-tol",
-                        "Simplify tolerance",
-                        tolerance,
-                        0.001..=1000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    if button(ui, "Simplify", !ids.is_empty()) {
-                        action = Some(EditAction::Simplify);
-                    }
-                    if button(ui, "Convert to Path", !ids.is_empty()) {
-                        action = Some(EditAction::ToPath);
-                    }
-                });
-            });
-        });
         if let Some(a) = action {
             self.handle_edit_action(a);
         }
@@ -1208,204 +1265,217 @@ impl StencilApp {
         let _ = Panel::new("Transform")
             .id_salt("stencilcraft-transform-panel")
             .show(ui, |ui, _| {
-            let _ = Section::new("Align").id_salt("transform-align").show(ui, |ui, _| {
-                let picked = align_bar(ui, "transform-align-bar", |a| {
-                    many && align_command(a).is_some()
-                });
-                command = match picked.and_then(align_command) {
-                    Some(AlignCommand::Align(alignment)) => Some(Command::ShapesAlign {
-                        ids: ids.clone(),
-                        alignment,
-                        to_board: false,
-                    }),
-                    Some(AlignCommand::Distribute(axis)) => Some(Command::ShapesDistribute {
-                        ids: ids.clone(),
-                        axis,
-                    }),
-                    None => None,
-                };
-                center = button(ui, "Center to Page", any);
-                labelled(ui, "Spacing", |ui| {
-                    number(
-                        ui,
-                        "transform-spacing",
-                        "Distribute spacing",
-                        &mut state.spacing_mm,
-                        0.0..=10_000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for (label, axis) in [
-                        ("Space Horizontally", DistributionAxis::Horizontal),
-                        ("Space Vertically", DistributionAxis::Vertical),
-                    ] {
-                        if button(ui, label, many) {
-                            command = Some(Command::Document(
-                                DocumentCommand::ShapesDistributeSpacing {
+                let _ = Section::new("Align")
+                    .id_salt("transform-align")
+                    .show(ui, |ui, _| {
+                        let picked = align_bar(ui, "transform-align-bar", |a| {
+                            many && align_command(a).is_some()
+                        });
+                        command = match picked.and_then(align_command) {
+                            Some(AlignCommand::Align(alignment)) => Some(Command::ShapesAlign {
+                                ids: ids.clone(),
+                                alignment,
+                                to_board: false,
+                            }),
+                            Some(AlignCommand::Distribute(axis)) => {
+                                Some(Command::ShapesDistribute {
                                     ids: ids.clone(),
                                     axis,
-                                    gap_mm: state.spacing_mm,
-                                },
-                            ));
-                        }
-                    }
-                });
-            });
-            let _ = Checkbox::new(Bind::bound(&mut state.each))
-                .label("Transform each object about its own centre")
-                .show(ui);
-            let each = state.each;
-            // `transform.each` is remembered, so Transform Again repeats any of these.
-            let request = |dx_mm: f64, dy_mm: f64, scale_x: f64, scale_y: f64, degrees: f64| {
-                TransformRequest {
-                    ids: ids.clone(),
-                    dx_mm,
-                    dy_mm,
-                    scale_x,
-                    scale_y,
-                    degrees,
-                    each,
-                    ..TransformRequest::default()
-                }
-            };
-            let transform = |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| {
-                Command::Document(DocumentCommand::TransformEach(request(dx, dy, sx, sy, deg)))
-            };
-            let _ = Section::new("Rotate").id_salt("transform-rotate").show(ui, |ui, _| {
-                labelled(ui, "Angle", |ui| {
-                    number(
-                        ui,
-                        "transform-deg",
-                        "Rotation angle",
-                        &mut state.rotate_deg,
-                        -360.0..=360.0,
-                        "{n}°",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for deg in [-90.0, -45.0, 45.0, 90.0, 180.0] {
-                        if button(ui, &format!("{deg:+.0}°"), any) {
-                            command = Some(transform(0.0, 0.0, 1.0, 1.0, deg));
-                        }
-                    }
-                    if button(ui, "Rotate", any) {
-                        command = Some(transform(0.0, 0.0, 1.0, 1.0, state.rotate_deg));
-                    }
-                });
-            });
-            let _ = Section::new("Scale").id_salt("transform-scale").show(ui, |ui, _| {
-                ui.horizontal(|ui| {
-                    let [mut w, mut h] = state.scale_pct;
-                    let wc = number(
-                        ui,
-                        "transform-sw",
-                        "Scale width",
-                        &mut w,
-                        1.0..=10_000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                    let _ = craft_ui::text::link_toggle(
-                        "Keep ratio",
-                        Bind::bound(&mut state.scale_linked),
-                    )
-                    .id_salt("transform-scale-link")
-                    .size(ControlSize::Sm)
+                                })
+                            }
+                            None => None,
+                        };
+                        center = button(ui, "Center to Page", any);
+                        labelled(ui, "Spacing", |ui| {
+                            number(
+                                ui,
+                                "transform-spacing",
+                                "Distribute spacing",
+                                &mut state.spacing_mm,
+                                0.0..=10_000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, axis) in [
+                                ("Space Horizontally", DistributionAxis::Horizontal),
+                                ("Space Vertically", DistributionAxis::Vertical),
+                            ] {
+                                if button(ui, label, many) {
+                                    command = Some(Command::Document(
+                                        DocumentCommand::ShapesDistributeSpacing {
+                                            ids: ids.clone(),
+                                            axis,
+                                            gap_mm: state.spacing_mm,
+                                        },
+                                    ));
+                                }
+                            }
+                        });
+                    });
+                let _ = Checkbox::new(Bind::bound(&mut state.each))
+                    .label("Transform each object about its own centre")
                     .show(ui);
-                    let hc = number(
-                        ui,
-                        "transform-sh",
-                        "Scale height",
-                        &mut h,
-                        1.0..=10_000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                    if state.scale_linked && wc {
-                        h = w;
-                    } else if state.scale_linked && hc {
-                        w = h;
+                let each = state.each;
+                // `transform.each` is remembered, so Transform Again repeats any of these.
+                let request = |dx_mm: f64, dy_mm: f64, scale_x: f64, scale_y: f64, degrees: f64| {
+                    TransformRequest {
+                        ids: ids.clone(),
+                        dx_mm,
+                        dy_mm,
+                        scale_x,
+                        scale_y,
+                        degrees,
+                        each,
+                        ..TransformRequest::default()
                     }
-                    state.scale_pct = [w, h];
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for pct in [33.0, 50.0, 100.0, 200.0, 300.0] {
-                        if button(ui, &format!("{pct:.0}%"), any) {
-                            command = Some(transform(0.0, 0.0, pct / 100.0, pct / 100.0, 0.0));
+                };
+                let transform = |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| {
+                    Command::Document(DocumentCommand::TransformEach(request(dx, dy, sx, sy, deg)))
+                };
+                let _ = Section::new("Rotate")
+                    .id_salt("transform-rotate")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Angle", |ui| {
+                            number(
+                                ui,
+                                "transform-deg",
+                                "Rotation angle",
+                                &mut state.rotate_deg,
+                                -360.0..=360.0,
+                                "{n}°",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            for deg in [-90.0, -45.0, 45.0, 90.0, 180.0] {
+                                if button(ui, &format!("{deg:+.0}°"), any) {
+                                    command = Some(transform(0.0, 0.0, 1.0, 1.0, deg));
+                                }
+                            }
+                            if button(ui, "Rotate", any) {
+                                command = Some(transform(0.0, 0.0, 1.0, 1.0, state.rotate_deg));
+                            }
+                        });
+                    });
+                let _ = Section::new("Scale")
+                    .id_salt("transform-scale")
+                    .show(ui, |ui, _| {
+                        ui.horizontal(|ui| {
+                            let [mut w, mut h] = state.scale_pct;
+                            let wc = number(
+                                ui,
+                                "transform-sw",
+                                "Scale width",
+                                &mut w,
+                                1.0..=10_000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                            let _ = craft_ui::text::link_toggle(
+                                "Keep ratio",
+                                Bind::bound(&mut state.scale_linked),
+                            )
+                            .id_salt("transform-scale-link")
+                            .size(ControlSize::Sm)
+                            .show(ui);
+                            let hc = number(
+                                ui,
+                                "transform-sh",
+                                "Scale height",
+                                &mut h,
+                                1.0..=10_000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                            if state.scale_linked && wc {
+                                h = w;
+                            } else if state.scale_linked && hc {
+                                w = h;
+                            }
+                            state.scale_pct = [w, h];
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            for pct in [33.0, 50.0, 100.0, 200.0, 300.0] {
+                                if button(ui, &format!("{pct:.0}%"), any) {
+                                    command =
+                                        Some(transform(0.0, 0.0, pct / 100.0, pct / 100.0, 0.0));
+                                }
+                            }
+                            if button(ui, "Scale", any) {
+                                let [w, h] = state.scale_pct;
+                                command = Some(transform(0.0, 0.0, w / 100.0, h / 100.0, 0.0));
+                            }
+                        });
+                    });
+                let _ = Section::new("Shear")
+                    .id_salt("transform-shear")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Angle", |ui| {
+                            number(
+                                ui,
+                                "transform-shear-deg",
+                                "Shear angle",
+                                &mut state.shear_deg,
+                                -89.0..=89.0,
+                                "{n}°",
+                                &numbers,
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, axis) in [
+                                ("Shear Horizontally", DistributionAxis::Horizontal),
+                                ("Shear Vertically", DistributionAxis::Vertical),
+                            ] {
+                                if button(ui, label, any) {
+                                    command = Some(Command::Document(
+                                        DocumentCommand::TransformEach(TransformRequest {
+                                            shear_degrees: state.shear_deg,
+                                            shear_axis: axis,
+                                            ..request(0.0, 0.0, 1.0, 1.0, 0.0)
+                                        }),
+                                    ));
+                                }
+                            }
+                        });
+                    });
+                let _ = Section::new("Move by")
+                    .id_salt("transform-move")
+                    .show(ui, |ui, _| {
+                        ui.horizontal(|ui| {
+                            let [mut dx, mut dy] = state.move_mm;
+                            let _ = Text::new("X").role(TypeRole::Label).show(ui);
+                            number(
+                                ui,
+                                "transform-dx",
+                                "Move horizontally",
+                                &mut dx,
+                                -10_000.0..=10_000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                            let _ = Text::new("Y").role(TypeRole::Label).show(ui);
+                            number(
+                                ui,
+                                "transform-dy",
+                                "Move vertically",
+                                &mut dy,
+                                -10_000.0..=10_000.0,
+                                "{n} mm",
+                                &numbers,
+                            );
+                            state.move_mm = [dx, dy];
+                        });
+                        if button(ui, "Move", any) {
+                            let [dx, dy] = state.move_mm;
+                            command = Some(transform(dx, dy, 1.0, 1.0, 0.0));
                         }
-                    }
-                    if button(ui, "Scale", any) {
-                        let [w, h] = state.scale_pct;
-                        command = Some(transform(0.0, 0.0, w / 100.0, h / 100.0, 0.0));
-                    }
-                });
-            });
-            let _ = Section::new("Shear").id_salt("transform-shear").show(ui, |ui, _| {
-                labelled(ui, "Angle", |ui| {
-                    number(
-                        ui,
-                        "transform-shear-deg",
-                        "Shear angle",
-                        &mut state.shear_deg,
-                        -89.0..=89.0,
-                        "{n}°",
-                        &numbers,
-                    );
-                });
-                ui.horizontal_wrapped(|ui| {
-                    for (label, axis) in [
-                        ("Shear Horizontally", DistributionAxis::Horizontal),
-                        ("Shear Vertically", DistributionAxis::Vertical),
-                    ] {
-                        if button(ui, label, any) {
-                            command = Some(Command::Document(DocumentCommand::TransformEach(
-                                TransformRequest {
-                                    shear_degrees: state.shear_deg,
-                                    shear_axis: axis,
-                                    ..request(0.0, 0.0, 1.0, 1.0, 0.0)
-                                },
-                            )));
-                        }
-                    }
-                });
-            });
-            let _ = Section::new("Move by").id_salt("transform-move").show(ui, |ui, _| {
-                ui.horizontal(|ui| {
-                    let [mut dx, mut dy] = state.move_mm;
-                    let _ = Text::new("X").role(TypeRole::Label).show(ui);
-                    number(
-                        ui,
-                        "transform-dx",
-                        "Move horizontally",
-                        &mut dx,
-                        -10_000.0..=10_000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                    let _ = Text::new("Y").role(TypeRole::Label).show(ui);
-                    number(
-                        ui,
-                        "transform-dy",
-                        "Move vertically",
-                        &mut dy,
-                        -10_000.0..=10_000.0,
-                        "{n} mm",
-                        &numbers,
-                    );
-                    state.move_mm = [dx, dy];
-                });
-                if button(ui, "Move", any) {
-                    let [dx, dy] = state.move_mm;
-                    command = Some(transform(dx, dy, 1.0, 1.0, 0.0));
+                    });
+                if !any {
+                    hint(ui, "Select shapes to transform.");
                 }
             });
-            if !any {
-                hint(ui, "Select shapes to transform.");
-            }
-        });
         if let Some(command) = command {
             self.run_command(command);
         }

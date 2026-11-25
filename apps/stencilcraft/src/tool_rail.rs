@@ -145,7 +145,7 @@ pub fn show<T: Clone + PartialEq>(
     let frame = egui::Frame::NONE
         .fill(ui.visuals().panel_fill)
         .inner_margin(egui::Margin::symmetric(PAD_X as i8, PAD_Y as i8));
-    let _ = egui::Panel::left(egui::Id::new((id_salt, "panel")))
+    let _ = egui::Panel::left((id_salt, "panel"))
         .exact_size(width)
         .resizable(false)
         .show_separator_line(false)
@@ -170,7 +170,8 @@ pub fn show<T: Clone + PartialEq>(
                     for row in slots.chunks(columns) {
                         ui.horizontal(|ui| {
                             for slot in row {
-                                if let Some(tool) = slot_button(ui, id_salt, slot, current, last_used)
+                                if let Some(tool) =
+                                    slot_button(ui, id_salt, slot, current, last_used)
                                 {
                                     out.select = Some(tool);
                                 }
@@ -206,7 +207,9 @@ fn slot_button<T: Clone + PartialEq>(
         button = button.description(key.clone());
     }
     if several {
-        button = button.popup(PopupKind::Menu).popup_mark(PopupMark::ToolGroup);
+        button = button
+            .popup(PopupKind::Menu)
+            .popup_mark(PopupMark::ToolGroup);
     }
     let output = button.show(ui);
     let mut select = output.clicked().then(|| shown.id.clone());

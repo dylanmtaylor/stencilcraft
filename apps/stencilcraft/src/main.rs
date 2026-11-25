@@ -48,6 +48,7 @@ mod arc_draw;
 mod click_draw;
 mod control;
 mod effects;
+mod file_menu;
 mod freehand;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
@@ -501,6 +502,13 @@ pub enum TopMenuAction {
     ReleaseGuides,
     ClearGuides,
     ToggleKerfPreview,
+    /// File › Import › DXF/PDF/AI-EPS.
+    ImportVector(file_menu::ImportKind),
+    /// File › Export › PDF/PNG/JPEG.
+    Export(file_menu::ExportKind),
+    SaveSelectionAs,
+    /// File › Close Tab: back to a new, empty document (asking before discarding changes).
+    CloseDoc,
     /// Object › Arrange › Send to Layer.
     SendToLayer(usize),
     /// Object › Attach / Detach.
@@ -2405,6 +2413,10 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::B))
         {
             self.clipboard_paste(stencilcraft_engine::document::PasteMode::InBack);
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::W))
+        {
+            self.handle_menu_action(TopMenuAction::CloseDoc);
         } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::P)) {
             self.handle_menu_action(TopMenuAction::TogglePrintBorder);
         } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::L)) {
@@ -3262,6 +3274,10 @@ impl StencilApp {
             TopMenuAction::ToggleKerfPreview => self.kerf_preview = !self.kerf_preview,
             TopMenuAction::OpenEffect(menu) => self.open_effect(menu),
             TopMenuAction::SendToLayer(index) => self.send_to_layer(index),
+            TopMenuAction::ImportVector(kind) => self.import_vector_dialog(kind),
+            TopMenuAction::Export(kind) => self.export_dialog(kind),
+            TopMenuAction::SaveSelectionAs => self.save_selection_dialog(),
+            TopMenuAction::CloseDoc => self.request_new_document(new_doc::Choice::default()),
             TopMenuAction::ToggleAttach => self.toggle_attach(),
             TopMenuAction::Flatten => self.flatten_selection(),
             TopMenuAction::ClipMake => self.make_clipping_mask(),

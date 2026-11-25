@@ -193,7 +193,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     with size/mat/laser presets and recent sizes, but presets add no starter geometry
     (card fold score, tag hole, print-and-cut marks) and there are no saved user presets.
     A local Library panel, Starter Mode (a short panel set) and a Preferences panel exist.
-    No Home screen, no default machine/material preferences and no UI language choice.
+    The cutter model, mat and material are remembered between sessions. No Home screen and no UI language choice.
     The browser/mobile client is item 9.
 28. **Line and fill styles for pens and specialty tools**: shapes are cut or engrave,
     with a line colour and a solid fill colour (Line Style and Fill Color panels, drawn on

@@ -7130,6 +7130,11 @@ mod tests {
     }
 }
 
+// Gherkin specs: `.feature` files under `specs/features/` are parsed and driven
+// through the same headless harness as `ui_e2e`. See `specs/README.md`.
+#[cfg(test)]
+mod specs;
+
 // End-to-end tests over the real geometry + operations panels: the "Playwright for
 // StencilCraft" harness.
 //
@@ -7147,11 +7152,11 @@ mod ui_e2e {
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
     use stencilcraft_ui_egui::layers::UNASSIGNED_GROUP;
 
-    type App = Harness<'static, StencilApp>;
+    pub(crate) type App = Harness<'static, StencilApp>;
 
     /// Boot the app with the layers panel (geometry + operations) mounted as the
     /// only surface. Tall enough that both lists are inside the viewport.
-    fn boot() -> App {
+    pub(crate) fn boot() -> App {
         let app = StencilApp::new(None);
         let mut h = Harness::builder()
             .with_size([680.0, 800.0])
@@ -7173,14 +7178,90 @@ mod ui_e2e {
         h
     }
 
-    fn click(h: &mut App, label: &str) {
+    /// Boot the app with the inspector panel mounted as the only surface.
+    pub(crate) fn boot_inspector() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([680.0, 800.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    egui::ScrollArea::vertical().show(ui, |ui| app.inspector_panel(ui));
+                },
+                app,
+            );
+        h.run();
+        h
+    }
+
+    /// Boot the app with the geometry/operations list beside the inspector, so a
+    /// scenario can click a row on one side and assert the other.
+    pub(crate) fn boot_workspace() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([980.0, 800.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui(egui::vec2(360.0, ui.available_height()), |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| app.layers_panel(ui));
+                        });
+                        ui.separator();
+                        egui::ScrollArea::vertical().show(ui, |ui| app.inspector_panel(ui));
+                    });
+                },
+                app,
+            );
+        h.run();
+        h
+    }
+
+    /// Boot the app with the menu bar mounted, for menu reachability scenarios.
+    pub(crate) fn boot_menu() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([980.0, 700.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    app.top_panel(ui);
+                },
+                app,
+            );
+        h.run();
+        h
+    }
+
+    pub(crate) fn click(h: &mut App, label: &str) {
         h.get_by_label(label).click();
         h.run();
     }
 
     /// Menu entries expose both the host `MenuItem` node and its inner button;
     /// click the `MenuItem` so a label shared with a row button is unambiguous.
-    fn click_menu(h: &mut App, label: &str) {
+    pub(crate) fn click_menu(h: &mut App, label: &str) {
         h.get_by_role_and_label(egui::accesskit::Role::MenuItem, label)
             .click();
         h.run();
@@ -7188,7 +7269,7 @@ mod ui_e2e {
 
     /// A raw pointer click at `pos` — list rows and toggle cells only sense real
     /// pointer press/release frames, which `Node::click` does not produce.
-    fn raw_click(h: &mut App, pos: egui::Pos2) {
+    pub(crate) fn raw_click(h: &mut App, pos: egui::Pos2) {
         h.event(egui::Event::PointerMoved(pos));
         h.event(egui::Event::PointerButton {
             pos,
@@ -7207,14 +7288,24 @@ mod ui_e2e {
     }
 
     /// Click a list row or toggle cell by its accessible label.
-    fn raw_click_label(h: &mut App, label: &str) {
+    pub(crate) fn raw_click_label(h: &mut App, label: &str) {
         let pos = h.get_by_label(label).rect().center();
+        raw_click(h, pos);
+    }
+
+    /// Click the first list row whose accessible name contains `needle`.
+    pub(crate) fn raw_click_row_containing(h: &mut App, needle: &str) {
+        let pos = h
+            .query_all_by_label_contains(needle)
+            .find(|n| is_row(n, |l| l.contains(needle)))
+            .map(|n| n.rect().center())
+            .unwrap_or_else(|| panic!("no row containing {needle:?}"));
         raw_click(h, pos);
     }
 
     /// `query_by_label` panics on multiple matches, so presence checks go through
     /// `query_all`.
-    fn has(h: &App, label: &str) -> bool {
+    pub(crate) fn has(h: &App, label: &str) -> bool {
         h.query_all_by_label(label).next().is_some()
     }
 
@@ -7224,7 +7315,7 @@ mod ui_e2e {
         node.role() == egui::accesskit::Role::TreeItem && node.label().is_some_and(|l| matches(&l))
     }
 
-    fn has_row_containing(h: &App, needle: &str) -> bool {
+    pub(crate) fn has_row_containing(h: &App, needle: &str) -> bool {
         h.query_all_by_label_contains(needle)
             .any(|n| is_row(&n, |l| l.contains(needle)))
     }
@@ -7232,7 +7323,7 @@ mod ui_e2e {
     /// A nested fixture through the public command surface: three rects (the
     /// engine's `shape.add-rect` also ensures one Cut operation over them), an
     /// "inner" group over shapes 1-2, an "outer" group over inner + shape 3.
-    fn add_nested_fixture(app: &mut StencilApp) {
+    pub(crate) fn add_nested_fixture(app: &mut StencilApp) {
         for (x, y) in [(5.0, 5.0), (20.0, 5.0), (40.0, 5.0)] {
             app.run_command(Command::ShapeAddRect {
                 x,
@@ -7266,7 +7357,7 @@ mod ui_e2e {
     }
 
     /// Expand every group so the nested rows are on screen.
-    fn expand_all(app: &mut StencilApp) {
+    pub(crate) fn expand_all(app: &mut StencilApp) {
         app.open_geo_groups = app
             .engine
             .doc

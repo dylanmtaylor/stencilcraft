@@ -42,6 +42,21 @@ pub enum HardwareCommand {
         bluetooth: Option<BluetoothTarget>,
         #[serde(default)]
         send: bool,
+        /// Path order: `roller` (default), `speed` or `none` (document order).
+        #[serde(default)]
+        order: Option<String>,
+        /// Cut contours inside a closed path before it (default on).
+        #[serde(default = "yes")]
+        interior_first: bool,
+        /// Extend each closed contour past its start (mm; 0 = off).
+        #[serde(default)]
+        overcut_mm: f64,
+        /// Unite overlapping closed contours before cutting.
+        #[serde(default)]
+        weld: bool,
+        /// Roller track enhancing.
+        #[serde(default)]
+        track_enhancing: bool,
     },
 }
 
@@ -58,6 +73,10 @@ pub struct BluetoothTarget {
 
 fn one() -> u8 {
     1
+}
+
+fn yes() -> bool {
+    true
 }
 
 pub fn run(
@@ -90,10 +109,25 @@ fn execute(
         mirror,
         bluetooth,
         send,
+        order,
+        interior_first,
+        overcut_mm,
+        weld,
+        track_enhancing,
     } = command
     else {
         return devices();
     };
+    let order = match order.as_deref() {
+        None => machine::CutOrder::default(),
+        Some(name) => machine::CutOrder::parse(name)
+            .ok_or_else(|| machine::MachineError::Config(format!("Unknown cut order {name}")))?,
+    };
+    if !(overcut_mm.is_finite() && (0.0..=10.0).contains(overcut_mm)) {
+        return Err(machine::MachineError::Config(
+            "Overcut must be 0 to 10 mm".into(),
+        ));
+    }
     let caps = machine::DeviceRegistry::builtin()
         .by_id(model)
         .ok_or_else(|| machine::MachineError::Config(format!("Unknown cutter {model}")))?;
@@ -161,6 +195,11 @@ fn execute(
             },
             ..Default::default()
         }],
+        order,
+        interior_first: *interior_first,
+        closed_overcut_mm: *overcut_mm,
+        weld: *weld,
+        track_enhancing: *track_enhancing,
         ..Default::default()
     };
     let program = machine::dry_run(caps, &job)?;
@@ -297,6 +336,11 @@ mod tests {
             mirror: false,
             bluetooth: None,
             send: true,
+            order: None,
+            interior_first: true,
+            overcut_mm: 0.0,
+            weld: false,
+            track_enhancing: false,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
     }
@@ -323,10 +367,42 @@ mod tests {
             mirror: false,
             bluetooth: None,
             send: false,
+            order: None,
+            interior_first: true,
+            overcut_mm: 0.0,
+            weld: false,
+            track_enhancing: false,
         };
         assert!(run(&engine.doc, &command).is_ok());
         if let HardwareCommand::Cut { force, .. } = &mut command {
             *force = 1000;
+        }
+        assert!(run(&engine.doc, &command).is_err());
+        // The advanced job settings reach the job, and bad values are refused.
+        if let HardwareCommand::Cut {
+            force,
+            order,
+            overcut_mm,
+            weld,
+            ..
+        } = &mut command
+        {
+            *force = 10;
+            *order = Some("speed".into());
+            *overcut_mm = 0.5;
+            *weld = true;
+        }
+        assert!(run(&engine.doc, &command).is_ok());
+        if let HardwareCommand::Cut { order, .. } = &mut command {
+            *order = Some("sideways".into());
+        }
+        assert!(run(&engine.doc, &command).is_err());
+        if let HardwareCommand::Cut {
+            order, overcut_mm, ..
+        } = &mut command
+        {
+            *order = None;
+            *overcut_mm = 20.0;
         }
         assert!(run(&engine.doc, &command).is_err());
         Ok(())
@@ -358,6 +434,11 @@ mod tests {
             mirror: false,
             bluetooth: None,
             send: false,
+            order: None,
+            interior_first: true,
+            overcut_mm: 0.0,
+            weld: false,
+            track_enhancing: false,
         };
         assert!(run(&engine.doc, &command).is_err());
         engine.run(crate::Command::DocumentSetBoard {
@@ -398,6 +479,11 @@ mod tests {
             mirror: false,
             bluetooth: None,
             send: false,
+            order: None,
+            interior_first: true,
+            overcut_mm: 0.0,
+            weld: false,
+            track_enhancing: false,
         };
         let first = execute(&engine.doc, &command)?;
         if let HardwareCommand::Cut { passes, .. } = &mut command {

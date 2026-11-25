@@ -205,3 +205,20 @@ mod tests {
         assert_eq!(app.engine.doc.shapes().count(), 0);
     }
 }
+
+#[cfg(test)]
+mod starter_tests {
+    use crate::{StencilApp, TopMenuAction, WorkspacePanel};
+
+    #[test]
+    fn starter_mode_shows_the_everyday_panels() {
+        let mut app = StencilApp::new(None);
+        app.prefs.starter_mode = false;
+        app.handle_menu_action(TopMenuAction::ToggleStarterMode);
+        assert!(app.prefs.starter_mode);
+        assert!(app.workspace.contains(&WorkspacePanel::TextStyle));
+        assert!(!app.workspace.contains(&WorkspacePanel::Glyphs));
+        app.handle_menu_action(TopMenuAction::ToggleStarterMode);
+        assert!(app.workspace.contains(&WorkspacePanel::Glyphs));
+    }
+}

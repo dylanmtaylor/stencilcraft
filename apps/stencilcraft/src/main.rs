@@ -123,6 +123,8 @@ pub struct UserPrefs {
     pub recent_files: Vec<String>,
     /// Sizes created from New Document, newest first (its Recent tab).
     pub recent_new: Vec<new_doc::RecentDoc>,
+    /// File › New: presets the person saved (Save as Preset).
+    pub saved_new: Vec<new_doc::RecentDoc>,
 }
 
 impl Default for UserPrefs {
@@ -153,6 +155,7 @@ impl Default for UserPrefs {
             link_aspect: false,
             recent_files: Vec::new(),
             recent_new: Vec::new(),
+            saved_new: Vec::new(),
         }
     }
 }
@@ -3101,10 +3104,26 @@ impl StencilApp {
     pub fn open_new_document(&mut self, tab: usize) {
         let kerf = self.engine.doc.kerf.width_mm;
         self.new_doc.open(tab, kerf, self.mat, self.send.model);
+        self.new_doc.saved.clone_from(&self.prefs.saved_new);
     }
 
     pub fn new_document_dialog(&mut self, parent: &mut egui::Ui) {
-        if let Some(choice) = self.new_doc.show(parent.ctx(), &self.prefs.recent_new) {
+        let created = self.new_doc.show(parent.ctx(), &self.prefs.recent_new);
+        if std::mem::take(&mut self.new_doc.save_requested) {
+            let preset = self.new_doc.choice.recent();
+            self.prefs.saved_new.retain(|p| p.name != preset.name);
+            self.prefs.saved_new.insert(0, preset);
+            self.prefs.saved_new.truncate(new_doc::MAX_SAVED);
+            self.new_doc.saved.clone_from(&self.prefs.saved_new);
+            self.save_prefs();
+        }
+        if let Some(name) = self.new_doc.delete_saved.take() {
+            self.prefs.saved_new.retain(|p| p.name != name);
+            self.new_doc.saved.clone_from(&self.prefs.saved_new);
+            self.new_doc.selected = None;
+            self.save_prefs();
+        }
+        if let Some(choice) = created {
             self.request_new_document(choice);
         }
         if self.pending_new_document.is_some() {
@@ -3145,6 +3164,9 @@ impl StencilApp {
             }
         }
         self.saved_document = self.engine.doc.clone();
+        if choice.starter == new_doc::Starter::PrintMarks {
+            self.prefs.print_cut_marks = true;
+        }
         self.mat = choice.mat;
         self.send.model = choice.model;
         self.doc_title = choice.name.trim().to_string();

@@ -191,8 +191,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     30 s and offers earlier sessions' snapshots (File › Open Recovered…).
 27. **Documents and preferences**: one board per document and one document per window,
     with no tabs (Close Tab starts a new document). File › New opens a New Document dialog
-    with size/mat/laser presets and recent sizes, but presets add no starter geometry
-    (card fold score, tag hole, print-and-cut marks) and there are no saved user presets.
+    with size/mat/laser presets, recent sizes and saved presets (Save as Preset); a preset
+    can start with a card fold score, a tag hole or Print & Cut marks.
     A local Library panel, Starter Mode (a short panel set) and a Preferences panel exist.
     The cutter model, mat and material are remembered between sessions. No Home screen and no UI language choice.
     The browser/mobile client is item 9.

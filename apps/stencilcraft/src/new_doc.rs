@@ -28,6 +28,8 @@ use stencilcraft_machine::{Mat, Model};
 pub const MAX_SIDE_MM: f64 = 10_000.0;
 /// Recent sizes remembered across runs.
 pub const MAX_RECENT: usize = 8;
+/// Saved presets kept.
+pub const MAX_SAVED: usize = 40;
 /// Greatest kerf the dialog sets, millimetres (the options bar's range).
 const MAX_KERF_MM: f64 = 2.0;
 
@@ -51,6 +53,74 @@ pub enum Thumb {
     Stencil,
     /// Laser sheet: a crosshair.
     Laser,
+}
+
+/// What a new document starts with besides the page (Silhouette's project starters).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Starter {
+    #[default]
+    Nothing,
+    /// A folding card: a score line across the middle of the longer side.
+    FoldScore,
+    /// A gift tag: a punched hole near the top.
+    TagHole,
+    /// A Print & Cut sheet: registration marks on.
+    PrintMarks,
+}
+
+/// Starters offered in the details, with their labels.
+pub const STARTERS: &[(Starter, &str)] = &[
+    (Starter::Nothing, "Blank"),
+    (Starter::FoldScore, "Fold score line"),
+    (Starter::TagHole, "Tag hole"),
+    (Starter::PrintMarks, "Print & Cut marks"),
+];
+
+/// A tag's hole, millimetres (a quarter inch).
+const TAG_HOLE_MM: f64 = 6.35;
+
+impl Starter {
+    /// The starter a card's kind implies.
+    pub fn for_thumb(thumb: Thumb) -> Self {
+        match thumb {
+            Thumb::Card => Starter::FoldScore,
+            Thumb::Tag => Starter::TagHole,
+            Thumb::PrintCut => Starter::PrintMarks,
+            _ => Starter::Nothing,
+        }
+    }
+
+    /// The shapes it adds to a `width` × `height` page (Print & Cut marks are a view setting,
+    /// so none).
+    pub fn commands(self, width: f64, height: f64) -> Vec<Command> {
+        match self {
+            Starter::FoldScore => {
+                let mut path = stencilcraft_geom::BezPath::new();
+                if width >= height {
+                    path.move_to((width / 2.0, 0.0));
+                    path.line_to((width / 2.0, height));
+                } else {
+                    path.move_to((0.0, height / 2.0));
+                    path.line_to((width, height / 2.0));
+                }
+                vec![Command::ShapeAddPath {
+                    path,
+                    style: stencilcraft_doc::CutStyle::Engrave,
+                }]
+            }
+            Starter::TagHole => {
+                let d = TAG_HOLE_MM.min(width / 4.0).min(height / 4.0);
+                let cy = (d + 4.0).min(height / 2.0);
+                vec![Command::ShapeAddEllipse {
+                    x: width / 2.0 - d / 2.0,
+                    y: cy - d / 2.0,
+                    width: d,
+                    height: d,
+                }]
+            }
+            Starter::Nothing | Starter::PrintMarks => Vec::new(),
+        }
+    }
 }
 
 /// One built-in card.
@@ -325,6 +395,10 @@ pub struct RecentDoc {
     pub width_mm: f64,
     pub height_mm: f64,
     pub mat: Mat,
+    #[serde(default)]
+    pub starter: Starter,
+    #[serde(default)]
+    pub kerf_mm: Option<f64>,
 }
 
 /// The unit Width and Height show; the document is always millimetres.
@@ -377,6 +451,7 @@ pub struct Card {
     pub mat: Mat,
     pub thumb: Thumb,
     pub kerf_mm: Option<f64>,
+    pub starter: Starter,
 }
 
 impl From<&Preset> for Card {
@@ -388,6 +463,27 @@ impl From<&Preset> for Card {
             mat: p.mat,
             thumb: p.thumb,
             kerf_mm: p.kerf_mm,
+            starter: Starter::for_thumb(p.thumb),
+        }
+    }
+}
+
+impl From<&RecentDoc> for Card {
+    fn from(r: &RecentDoc) -> Self {
+        Card {
+            title: r.name.clone(),
+            width_mm: r.width_mm,
+            height_mm: r.height_mm,
+            mat: r.mat,
+            thumb: match r.starter {
+                Starter::FoldScore => Thumb::Card,
+                Starter::TagHole => Thumb::Tag,
+                Starter::PrintMarks => Thumb::PrintCut,
+                Starter::Nothing if r.mat == Mat::None => Thumb::Blank,
+                Starter::Nothing => Thumb::Mat,
+            },
+            kerf_mm: r.kerf_mm,
+            starter: r.starter,
         }
     }
 }
@@ -402,6 +498,7 @@ pub struct Choice {
     pub mat: Mat,
     pub model: Model,
     pub kerf_mm: f64,
+    pub starter: Starter,
 }
 
 impl Default for Choice {
@@ -414,6 +511,7 @@ impl Default for Choice {
             mat: Mat::CameoPro24x24,
             model: Model::Cameo4Pro,
             kerf_mm: 0.0,
+            starter: Starter::Nothing,
         }
     }
 }
@@ -449,7 +547,7 @@ impl Choice {
 
     /// The engine commands Create runs, in order.
     pub fn commands(&self) -> Vec<Command> {
-        vec![
+        let mut commands = vec![
             Command::DocumentNew {
                 width_mm: self.width_mm,
                 height_mm: self.height_mm,
@@ -457,7 +555,9 @@ impl Choice {
             Command::KerfSet {
                 width_mm: self.kerf_mm,
             },
-        ]
+        ];
+        commands.extend(self.starter.commands(self.width_mm, self.height_mm));
+        commands
     }
 
     pub fn recent(&self) -> RecentDoc {
@@ -466,6 +566,8 @@ impl Choice {
             width_mm: self.width_mm,
             height_mm: self.height_mm,
             mat: self.mat,
+            starter: self.starter,
+            kerf_mm: Some(self.kerf_mm),
         }
     }
 }
@@ -488,6 +590,12 @@ pub struct NewDocState {
     pub choice: Choice,
     /// A double-click on a card asked for Create.
     create_now: bool,
+    /// The person's saved presets (from the preferences), listed first under Recent.
+    pub saved: Vec<RecentDoc>,
+    /// Save as Preset was pressed: the app stores the details as a saved preset.
+    pub save_requested: bool,
+    /// A saved preset's Delete was pressed: the app removes the preset with this name.
+    pub delete_saved: Option<String>,
 }
 
 impl NewDocState {
@@ -510,22 +618,13 @@ impl NewDocState {
         if let Some(category) = self.tab.checked_sub(1).and_then(|i| CATEGORIES.get(i)) {
             return category.presets.iter().map(Card::from).collect();
         }
-        let mut cards: Vec<Card> = recent
-            .iter()
-            .filter(|r| Choice::side_ok(r.width_mm) && Choice::side_ok(r.height_mm))
-            .map(|r| Card {
-                title: r.name.clone(),
-                width_mm: r.width_mm,
-                height_mm: r.height_mm,
-                mat: r.mat,
-                thumb: if r.mat == Mat::None {
-                    Thumb::Blank
-                } else {
-                    Thumb::Mat
-                },
-                kerf_mm: None,
-            })
-            .collect();
+        let ok = |r: &&RecentDoc| Choice::side_ok(r.width_mm) && Choice::side_ok(r.height_mm);
+        let mut cards: Vec<Card> = self.saved.iter().filter(ok).map(Card::from).collect();
+        cards.extend(recent.iter().filter(ok).map(|r| Card {
+            // Recent sizes keep the current kerf.
+            kerf_mm: None,
+            ..Card::from(r)
+        }));
         cards.extend(RECENT_DEFAULTS.iter().map(Card::from));
         cards
     }
@@ -536,8 +635,9 @@ impl NewDocState {
         self.choice.width_mm = card.width_mm;
         self.choice.height_mm = card.height_mm;
         self.choice.mat = card.mat;
-        if let Some(kerf) = card.kerf_mm {
-            self.choice.kerf_mm = kerf;
+        self.choice.starter = card.starter;
+        if let Some(kerf) = card.kerf_mm.filter(|k| k.is_finite()) {
+            self.choice.kerf_mm = kerf.clamp(0.0, MAX_KERF_MM);
         }
     }
 
@@ -767,6 +867,8 @@ impl NewDocState {
     fn details(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui);
         let numbers = LocaleNumbers::of_ctx(ui.ctx());
+        let saved_names: Vec<String> = self.saved.iter().map(|s| s.name.clone()).collect();
+        let (mut save, mut delete) = (false, None);
         let choice = &mut self.choice;
         let before = (choice.width_mm, choice.height_mm, choice.mat);
         SectionLabel::new("Preset Details").show(ui);
@@ -834,6 +936,14 @@ impl NewDocState {
         }
         let _ = model_select.show(ui);
 
+        caption(ui, "Starts with");
+        let mut starter_select =
+            Select::new("new-document-starter", "Starts with", &mut choice.starter);
+        for (starter, label) in STARTERS {
+            starter_select = starter_select.option(*starter, *label);
+        }
+        let _ = starter_select.show(ui);
+
         caption(ui, "Kerf");
         let (shown, range, unit, per) =
             crate::panels::in_display(choice.kerf_mm, 0.0..=MAX_KERF_MM, "{n} mm");
@@ -848,6 +958,19 @@ impl NewDocState {
             choice.kerf_mm = (value / per).clamp(0.0, MAX_KERF_MM);
         }
 
+        ui.add_space(Gap::Row.points(&tokens));
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(choice.is_valid(), egui::Button::new("Save as Preset"))
+                .clicked()
+            {
+                save = true;
+            }
+            let name = choice.name.trim();
+            if saved_names.iter().any(|s| s == name) && ui.button("Delete Preset").clicked() {
+                delete = Some(name.to_string());
+            }
+        });
         if !choice.is_valid() {
             ui.add_space(Gap::Row.points(&tokens));
             ui.add(
@@ -862,6 +985,10 @@ impl NewDocState {
             && !turned.changed()
         {
             self.selected = None;
+        }
+        self.save_requested |= save;
+        if delete.is_some() {
+            self.delete_saved = delete;
         }
     }
 }
@@ -1109,6 +1236,8 @@ mod tests {
             width_mm: w,
             height_mm: 10.0,
             mat: Mat::None,
+            starter: Starter::Nothing,
+            kerf_mm: None,
         };
         for w in [1.0, 2.0, 1.0] {
             push_recent(&mut recent, doc(w), 2);
@@ -1119,6 +1248,51 @@ mod tests {
         let cards = state.cards(&recent);
         assert_eq!(cards.len(), 2 + RECENT_DEFAULTS.len());
         assert_eq!(cards[0].title, "d1");
+    }
+
+    #[test]
+    fn starters_add_their_shapes_and_saved_presets_come_first() {
+        let card = Choice {
+            width_mm: 254.0,
+            height_mm: 177.8,
+            starter: Starter::FoldScore,
+            ..Choice::default()
+        };
+        let commands = card.commands();
+        assert_eq!(commands.len(), 3, "new, kerf, score line");
+        let Some(Command::ShapeAddPath { path, style }) = commands.last() else {
+            panic!("score line");
+        };
+        assert_eq!(*style, stencilcraft_doc::CutStyle::Engrave);
+        let b = stencilcraft_geom::Shape::bounding_box(path);
+        assert!((b.x0 - 127.0).abs() < 1e-9 && (b.height() - 177.8).abs() < 1e-9);
+        let tag = Choice {
+            width_mm: 63.5,
+            height_mm: 101.6,
+            starter: Starter::TagHole,
+            ..Choice::default()
+        };
+        assert!(matches!(
+            tag.commands().last(),
+            Some(Command::ShapeAddEllipse { width, .. }) if (*width - 6.35).abs() < 1e-9
+        ));
+        // Every starter's shapes land on the page through the engine.
+        for (starter, _) in STARTERS {
+            let choice = Choice {
+                starter: *starter,
+                ..Choice::default()
+            };
+            let mut engine = stencilcraft_engine::Engine::default();
+            for command in choice.commands() {
+                engine.run(command).expect("starter command");
+            }
+        }
+        // Saved presets list first under Recent and carry their starter.
+        let mut state = NewDocState::default();
+        state.saved.push(tag.recent());
+        let cards = state.cards(&[]);
+        assert_eq!(cards.first().map(|c| c.starter), Some(Starter::TagHole));
+        assert_eq!(Starter::for_thumb(Thumb::PrintCut), Starter::PrintMarks);
     }
 
     #[test]

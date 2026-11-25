@@ -695,6 +695,33 @@ pub fn paint_document(
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
+            if !options.kerf_preview
+                && let Some(line) = shape
+                    .production
+                    .line_color
+                    .as_deref()
+                    .and_then(parse_hex_colour)
+            {
+                color = line;
+            }
+            if !options.outline_view
+                && let Some(fill) = shape
+                    .production
+                    .fill_color
+                    .as_deref()
+                    .and_then(parse_hex_colour)
+            {
+                let polygons: Vec<Vec<egui::Pos2>> = stencilcraft_geom::path_to_polylines(
+                    &shape.path,
+                    stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
+                )
+                .into_iter()
+                .enumerate()
+                .filter(|(i, pl)| pl.closed && !shape.production.hidden_contours.contains(i))
+                .map(|(_, pl)| pl.points.iter().map(|p| view.world_to_screen(*p)).collect())
+                .collect();
+                painter.add(egui::Shape::mesh(even_odd_fill(&polygons, clip, fill)));
+            }
             if options.outline_view {
                 width = 1.0;
             }
@@ -1271,6 +1298,72 @@ pub fn paint_texture_quad(
     painter.add(egui::Shape::mesh(mesh));
 }
 
+/// A `#rrggbb` colour, if well formed.
+pub fn parse_hex_colour(hex: &str) -> Option<egui::Color32> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let byte = |i: usize| {
+        hex.get(i..i + 2)
+            .and_then(|h| u8::from_str_radix(h, 16).ok())
+    };
+    Some(egui::Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?))
+}
+
+/// Most pixel rows one fill paints (a huge zoomed shape is filled over its visible part only).
+const MAX_FILL_ROWS: usize = 4096;
+
+/// Fill closed screen polygons by the even-odd rule, one pixel row at a time, clipped to
+/// `clip`: concave shapes and holes fill correctly, which egui's convex fill cannot do.
+pub fn even_odd_fill(
+    polygons: &[Vec<egui::Pos2>],
+    clip: egui::Rect,
+    colour: egui::Color32,
+) -> egui::Mesh {
+    let mut mesh = egui::Mesh::default();
+    let (mut y0, mut y1) = (f32::INFINITY, f32::NEG_INFINITY);
+    for p in polygons.iter().flatten() {
+        y0 = y0.min(p.y);
+        y1 = y1.max(p.y);
+    }
+    let (y0, y1) = (y0.max(clip.min.y), y1.min(clip.max.y));
+    if !(y0.is_finite() && y1.is_finite()) || y1 <= y0 {
+        return mesh;
+    }
+    let mut crossings: Vec<f32> = Vec::new();
+    let mut y = y0.floor() + 0.5;
+    let mut rows = 0;
+    while y < y1 && rows < MAX_FILL_ROWS {
+        crossings.clear();
+        for poly in polygons {
+            let n = poly.len();
+            for i in 0..n {
+                let (Some(a), Some(b)) = (poly.get(i), poly.get((i + 1) % n)) else {
+                    continue;
+                };
+                if (a.y <= y) != (b.y <= y) {
+                    let t = (y - a.y) / (b.y - a.y);
+                    crossings.push(a.x + t * (b.x - a.x));
+                }
+            }
+        }
+        crossings.sort_by(f32::total_cmp);
+        for [a, b] in crossings.as_chunks::<2>().0 {
+            let (x0, x1) = (a.max(clip.min.x), b.min(clip.max.x));
+            if x1 > x0 {
+                mesh.add_colored_rect(
+                    egui::Rect::from_min_max(egui::pos2(x0, y - 0.5), egui::pos2(x1, y + 0.5)),
+                    colour,
+                );
+            }
+        }
+        y += 1.0;
+        rows += 1;
+    }
+    mesh
+}
+
 /// What the canvas paints under the design: the cutting mat and placed images' textures.
 #[derive(Clone, Copy, Debug)]
 pub struct CanvasLayers<'a> {
@@ -1661,6 +1754,43 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
         ((point - start).dot(segment) / length_sq).clamp(0.0, 1.0)
     };
     point.distance_sq(start + fraction * segment)
+}
+
+#[cfg(test)]
+mod fill_tests {
+    use super::*;
+
+    #[test]
+    fn even_odd_fill_leaves_holes_and_respects_clip() {
+        let square = |a: f32, b: f32| {
+            vec![
+                egui::pos2(a, a),
+                egui::pos2(b, a),
+                egui::pos2(b, b),
+                egui::pos2(a, b),
+            ]
+        };
+        let clip = egui::Rect::from_min_max(egui::pos2(-100.0, -100.0), egui::pos2(100.0, 100.0));
+        let mesh = even_odd_fill(
+            &[square(0.0, 10.0), square(3.0, 7.0)],
+            clip,
+            egui::Color32::RED,
+        );
+        // Rows through the hole have two spans; the others one: 10 rows, 4 with a hole.
+        assert_eq!(mesh.vertices.len() / 4, 6 + 4 * 2);
+        let tiny = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(5.0, 2.0));
+        let clipped = even_odd_fill(&[square(0.0, 10.0)], tiny, egui::Color32::RED);
+        assert_eq!(clipped.vertices.len() / 4, 2);
+        assert!(clipped.vertices.iter().all(|v| v.pos.x <= 5.0));
+        assert!(even_odd_fill(&[], clip, egui::Color32::RED).is_empty());
+        assert_eq!(
+            parse_hex_colour("#ff8000"),
+            Some(egui::Color32::from_rgb(255, 128, 0))
+        );
+        assert_eq!(parse_hex_colour("ff8000"), None);
+        assert_eq!(parse_hex_colour("#ff80"), None);
+        assert_eq!(parse_hex_colour("#éé8000"), None);
+    }
 }
 
 #[cfg(test)]

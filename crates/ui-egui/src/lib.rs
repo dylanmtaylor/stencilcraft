@@ -61,6 +61,103 @@ pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
+/// The unit lengths are shown in (Preferences › Units). The document is always millimetres;
+/// only what the person reads and types changes.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum LengthUnit {
+    #[default]
+    Millimetres,
+    Centimetres,
+    Inches,
+}
+
+impl LengthUnit {
+    pub const ALL: [LengthUnit; 3] = [
+        LengthUnit::Millimetres,
+        LengthUnit::Centimetres,
+        LengthUnit::Inches,
+    ];
+
+    /// Units per millimetre.
+    pub fn per_mm(self) -> f64 {
+        match self {
+            LengthUnit::Millimetres => 1.0,
+            LengthUnit::Centimetres => 0.1,
+            LengthUnit::Inches => 1.0 / 25.4,
+        }
+    }
+
+    pub fn symbol(self) -> &'static str {
+        match self {
+            LengthUnit::Millimetres => "mm",
+            LengthUnit::Centimetres => "cm",
+            LengthUnit::Inches => "in",
+        }
+    }
+
+    /// The unit around a number, for craft-ui fields (`{n} mm`).
+    pub fn template(self) -> &'static str {
+        match self {
+            LengthUnit::Millimetres => "{n} mm",
+            LengthUnit::Centimetres => "{n} cm",
+            LengthUnit::Inches => "{n} in",
+        }
+    }
+
+    /// Decimals shown for a length (Silhouette shows inches to three places).
+    pub fn decimals(self) -> usize {
+        match self {
+            LengthUnit::Millimetres => 1,
+            LengthUnit::Centimetres => 2,
+            LengthUnit::Inches => 3,
+        }
+    }
+
+    pub fn from_mm(self, mm: f64) -> f64 {
+        mm * self.per_mm()
+    }
+
+    pub fn to_mm(self, value: f64) -> f64 {
+        value / self.per_mm()
+    }
+
+    /// `mm` written in this unit with its symbol, `extra` decimals past the usual.
+    pub fn format(self, mm: f64, extra: usize) -> String {
+        format!(
+            "{:.*} {}",
+            self.decimals().saturating_add(extra),
+            self.from_mm(mm),
+            self.symbol()
+        )
+    }
+
+    fn index(self) -> u8 {
+        match self {
+            LengthUnit::Millimetres => 0,
+            LengthUnit::Centimetres => 1,
+            LengthUnit::Inches => 2,
+        }
+    }
+}
+
+static LENGTH_UNIT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The unit lengths are shown in now.
+pub fn length_unit() -> LengthUnit {
+    match LENGTH_UNIT.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => LengthUnit::Centimetres,
+        2 => LengthUnit::Inches,
+        _ => LengthUnit::Millimetres,
+    }
+}
+
+/// Set the unit lengths are shown in (the app does this from its preferences each frame).
+pub fn set_length_unit(unit: LengthUnit) {
+    LENGTH_UNIT.store(unit.index(), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Semantic canvas colours and overlay flags for a specific workspace theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasOptions {
@@ -797,6 +894,14 @@ pub fn paint_document(
     }
 }
 
+/// A dimension callout's length: two decimals of a millimetre, else the unit's usual places
+/// (Silhouette writes 1.250 in).
+fn dimension(mm: f64) -> String {
+    let unit = length_unit();
+    let extra = usize::from(unit == LengthUnit::Millimetres);
+    unit.format(mm, extra)
+}
+
 /// Silhouette's dimension callouts: the selection's width below it and its height to its left,
 /// each with a measuring line.
 fn paint_dimensions(
@@ -819,7 +924,7 @@ fn paint_dimensions(
     painter.text(
         egui::pos2(bounds.center().x, y + 3.0),
         egui::Align2::CENTER_TOP,
-        format!("{:.2} mm", world.width()),
+        dimension(world.width()),
         font.clone(),
         palette.selection,
     );
@@ -834,7 +939,7 @@ fn paint_dimensions(
     painter.text(
         egui::pos2(x - 3.0, bounds.center().y),
         egui::Align2::RIGHT_CENTER,
-        format!("{:.2} mm", world.height()),
+        dimension(world.height()),
         font,
         palette.selection,
     );
@@ -1795,6 +1900,17 @@ mod fill_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn length_units_convert_and_format() {
+        use super::LengthUnit;
+        assert_eq!(LengthUnit::Inches.format(25.4, 0), "1.000 in");
+        assert_eq!(LengthUnit::Centimetres.format(12.0, 0), "1.20 cm");
+        assert_eq!(LengthUnit::Millimetres.format(12.04, 1), "12.04 mm");
+        for unit in LengthUnit::ALL {
+            assert!((unit.to_mm(unit.from_mm(33.3)) - 33.3).abs() < 1e-9);
+        }
+    }
+
     #[test]
     fn a_marquee_touches_an_outline_only_where_the_outline_is() {
         let view = View {

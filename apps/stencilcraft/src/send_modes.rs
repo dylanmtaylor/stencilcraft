@@ -200,12 +200,7 @@ impl StencilApp {
             ui.checkbox(&mut self.send.interior_first, "Cut inner contours first");
             ui.horizontal(|ui| {
                 ui.label("Overcut");
-                ui.add(
-                    egui::DragValue::new(&mut self.send.overcut_mm)
-                        .range(0.0..=10.0)
-                        .speed(0.05)
-                        .suffix(" mm"),
-                );
+                crate::panels::length_drag(ui, &mut self.send.overcut_mm, 0.0..=10.0, 0.05);
             });
             ui.checkbox(&mut self.send.weld, "Weld overlapping shapes when cutting");
             ui.checkbox(&mut self.send.track_enhancing, "Track enhancing");

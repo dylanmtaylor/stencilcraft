@@ -186,6 +186,28 @@ pub struct IdsArgs {
     pub ids: Vec<u64>,
 }
 
+/// The generators work y up but the document is y down (canvas, SVG and cutter draw y
+/// downwards): mirror about the horizontal line `y = cy` so their shapes and bends stand the
+/// right way up on the page.
+fn upright_about(cy: f64) -> Affine {
+    Affine::translate((0.0, cy))
+        * Affine::scale_non_uniform(1.0, -1.0)
+        * Affine::translate((0.0, -cy))
+}
+
+/// Run a y-up path effect on a y-down path: mirror, apply, mirror back.
+fn upright<E>(
+    path: &BezPath,
+    effect: impl FnOnce(&BezPath) -> Result<BezPath, E>,
+) -> Result<BezPath, E> {
+    let flip = upright_about(path.bounding_box().center().y);
+    let mut mirrored = path.clone();
+    mirrored.apply_affine(flip);
+    let mut out = effect(&mirrored)?;
+    out.apply_affine(flip);
+    Ok(out)
+}
+
 /// Most copies one replicate/object-on-path command adds.
 const MAX_COPIES: usize = 10_000;
 
@@ -193,8 +215,9 @@ impl Engine {
     pub(crate) fn generate(&mut self, command: Command) -> Result<Effect, EngineError> {
         match command {
             Command::GenerateShape(a) => {
-                let path = generate::shapes::shape(&a.shape, a.x, a.y, a.width, a.height)
+                let mut path = generate::shapes::shape(&a.shape, a.x, a.y, a.width, a.height)
                     .map_err(|e| invalid("generate.shape", e))?;
+                path.apply_affine(upright_about(a.y + a.height / 2.0));
                 match a.replace {
                     Some(id) => {
                         self.sources(&[id], "generate.shape")?;
@@ -299,7 +322,10 @@ impl Engine {
             }
             Command::GeneratePopup(params) => {
                 const NAME: &str = "generate.popup";
-                let card = generate::popup::popup(&params).map_err(|e| invalid(NAME, e))?;
+                let mut card = generate::popup::popup(&params).map_err(|e| invalid(NAME, e))?;
+                let flip = upright_about(params.y + params.height / 2.0);
+                card.cuts.apply_affine(flip);
+                card.scores.apply_affine(flip);
                 let tool = ToolOp::Score {
                     tip: Tip::Fine,
                     passes: 1,
@@ -342,7 +368,7 @@ impl Engine {
                 self.add_tagged(vec![(marks, a.style, None)], NAME)
             }
             Command::GenerateWarp(a) => self.edit_in_place(&a.ids, "generate.warp", |p| {
-                generate::warp::warp(p, &a.params)
+                upright(p, |p| generate::warp::warp(p, &a.params))
             }),
             Command::GeneratePerforate(a) => {
                 self.edit_in_place(&a.ids, "generate.perforate", |p| {

@@ -126,11 +126,11 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
     and draws smart guides. Drawing shapes, lines, arcs and knife cuts snaps too.
-    Resizing the selection box snaps its moving edges, and holding Ctrl (Cmd) suspends
-    snapping. Missing: snapping while dragging nodes and the pen; isometric grid and Smart Snap only
-    within media (spacing, divisions, tolerance and the toggles are in Page Setup); live
-    width/height callouts while drawing; display units other than mm. A move
-    drag still records one undo step per frame.
+    Resizing the selection box and dragging nodes snap, and holding Ctrl (Cmd) suspends
+    snapping; drawing shows a live W/H (or length and angle) callout, and a move drag is one
+    undo step. Missing: snapping for the pen (craft-draw's PenDraft has no snap hook); isometric grid and Smart Snap only
+    within media (spacing, divisions, tolerance and the toggles are in Page Setup); display
+    units other than mm.
 19. **Text**: as in SS 5.0.556, the Text tool types on the canvas: click the page (the
     first baseline starts there) and type; letters appear as you type, one undo step per
     key; arrows, Home/End, Backspace/Delete, Enter and paste edit; a click inside moves

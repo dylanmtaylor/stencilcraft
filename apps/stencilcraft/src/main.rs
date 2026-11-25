@@ -207,6 +207,31 @@ pub struct DragMods {
     pub from_centre: bool,
 }
 
+/// `p` snapped by the document's snap settings, ignoring shapes `exclude` (a dragged node
+/// must not snap to its own shape's bounds). `p` itself when nothing is in reach.
+pub fn snap_point_in(
+    doc: &stencilcraft_doc::Document,
+    p: stencilcraft_geom::Point,
+    exclude: &[u64],
+) -> stencilcraft_geom::Point {
+    let snap = &doc.snap;
+    if !(snap.grid || snap.guides || snap.objects || snap.points) {
+        return p;
+    }
+    let query = stencilcraft_engine::document::SnapQuery {
+        x: p.x,
+        y: p.y,
+        width: 0.0,
+        height: 0.0,
+        exclude: exclude.to_vec(),
+        tolerance_mm: None,
+    };
+    match stencilcraft_engine::document::snap(doc, &query) {
+        Ok(r) if r.x.is_finite() && r.y.is_finite() => stencilcraft_geom::Point::new(r.x, r.y),
+        _ => p,
+    }
+}
+
 impl From<egui::Modifiers> for DragMods {
     fn from(modifiers: egui::Modifiers) -> Self {
         Self {
@@ -5519,6 +5544,11 @@ impl StencilApp {
 
             // Within 8 px an open end is "on" another (as for shape hit tests).
             let join_reach = 8.0 / f64::from(view.zoom.max(f32::EPSILON));
+            let (snap_doc, snap_off, snap_exclude) = (
+                &self.engine.doc,
+                self.snap_suspended,
+                self.selected_shapes.clone(),
+            );
             let b_resp = BezierOverlay::new(
                 "stencil-bezier-overlay",
                 &edit_paths,
@@ -5537,7 +5567,7 @@ impl StencilApp {
             .handles(self.handles_shown)
             // Silhouette: an open end dragged onto another open end snaps to it (and joins on
             // release, below).
-            .snap(|hit, at, _mods| {
+            .snap(|hit, at, mods| {
                 if let BezierHit::Anchor { path, knot } = hit
                     && let Some(edit) = edit_paths.iter().find(|e| e.key == *path)
                     && stencilcraft_ui_egui::open_path_ends(&edit.subpaths).contains(knot)
@@ -5550,7 +5580,12 @@ impl StencilApp {
                 {
                     return target.anchor;
                 }
-                at
+                // Dragged points snap like everything else (grid, guides, other shapes);
+                // Ctrl (Cmd) suspends it.
+                if snap_off || mods.command {
+                    return at;
+                }
+                snap_point_in(snap_doc, at, &snap_exclude)
             })
             .show(ui, &response, &canvas_view);
 
@@ -8483,6 +8518,29 @@ mod tests {
         assert!((free.x1 - 29.7).abs() < 1e-9, "{free:?}");
         let off = stencilcraft_geom::Point::new(10.4, 19.7);
         assert_eq!(app.snap_world_point(off), off);
+    }
+
+    #[test]
+    fn dragged_nodes_snap_but_not_to_their_own_shape() {
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 20.0,
+        });
+        let off = stencilcraft_geom::Point::new(40.4, 39.6);
+        assert_eq!(
+            snap_point_in(&app.engine.doc, off, &[]),
+            off,
+            "snapping off"
+        );
+        app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
+        let snapped = snap_point_in(&app.engine.doc, off, &[1]);
+        assert!(
+            (snapped.x - 40.0).abs() < 1e-9 && (snapped.y - 40.0).abs() < 1e-9,
+            "{snapped:?}"
+        );
     }
 
     #[test]

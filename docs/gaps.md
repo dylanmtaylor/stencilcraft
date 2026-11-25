@@ -228,7 +228,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     shape into its bounds' edge lines, not a guide of its own outline (guides are
     straight lines only).
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.
-    Missing: Select Same operation, next object above/below, and saved selections.
+    Missing: Select Same operation and saved selections (Next Object Above/Below are in the Select menu).
 38. **Rhinestone, lattice and other generators**: engine/MCP include rhinestone, puzzle
     and other geometric generators. Complete desktop controls, lattice, Flexishapes,
     cross-stitch and a font creator remain open.

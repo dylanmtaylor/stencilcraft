@@ -69,10 +69,17 @@ fn append_grouped(destination: &mut Vec<SvgElement>, chain: &[u64], element: Svg
     }
 }
 
+/// A `#rrggbb` colour, if well formed (shapes' production colours are free text).
+fn css_colour(colour: &str) -> Option<&str> {
+    let hex = colour.strip_prefix('#')?;
+    (hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit())).then_some(colour)
+}
+
 fn document_elements(
     doc: &Document,
     output_layers_only: bool,
     include_title: bool,
+    print_colours: bool,
 ) -> Vec<SvgElement> {
     let mut elements = Vec::new();
     if include_title {
@@ -98,8 +105,25 @@ fn document_elements(
                 &parents,
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
+            let mut attributes = vec![SvgAttribute::text("class", class_for(shape.style))];
+            if print_colours {
+                // Printed artwork shows the shape's fill and line colours (inline, so they win
+                // over the cut/engrave classes).
+                let fill = shape.production.fill_color.as_deref().and_then(css_colour);
+                let line = shape.production.line_color.as_deref().and_then(css_colour);
+                let mut style = String::new();
+                if let Some(fill) = fill {
+                    style.push_str(&format!("fill:{fill};fill-rule:evenodd;"));
+                }
+                if let Some(line) = line {
+                    style.push_str(&format!("stroke:{line};"));
+                }
+                if !style.is_empty() {
+                    attributes.push(SvgAttribute::text("style", style));
+                }
+            }
             let element = SvgElement::Path {
-                attributes: vec![SvgAttribute::text("class", class_for(shape.style))],
+                attributes,
                 path: shape.cut_path().into_owned(),
             };
             append_grouped(&mut children, &chain, element);
@@ -139,7 +163,7 @@ pub fn export(doc: &Document) -> Result<String, SvgError> {
         width_mm: bounds.width(),
         height_mm: bounds.height(),
         view_box: [bounds.x0, bounds.y0, bounds.width(), bounds.height()],
-        elements: document_elements(doc, false, true),
+        elements: document_elements(doc, false, true, false),
     }
     .write_fixed_view_box())
 }
@@ -239,7 +263,7 @@ pub fn export_tile_preview(
                     options.scale,
                     -options.scale,
                 )],
-                children: document_elements(piece, true, false),
+                children: document_elements(piece, true, false, false),
             },
         ];
         elements.push(SvgElement::Group {
@@ -327,7 +351,7 @@ pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
                 SvgAttribute::view_box([0.0, 0.0, doc.board.width_mm, doc.board.height_mm]),
                 SvgAttribute::text("overflow", "hidden"),
             ],
-            children: document_elements(doc, false, true),
+            children: document_elements(doc, false, true, true),
         },
     ];
     Ok(SvgScene {
@@ -493,6 +517,35 @@ mod tests_group_walk {
         )
         .unwrap();
         assert_eq!(doc.shape_count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod print_tests {
+    use super::*;
+
+    #[test]
+    fn print_and_cut_sheet_prints_fill_and_line_colours() {
+        let mut doc = Document::default();
+        let mut path = BezPath::new();
+        path.move_to((1.0, 1.0));
+        path.line_to((9.0, 1.0));
+        path.line_to((9.0, 9.0));
+        path.close_path();
+        let shape = doc.push_shape(0, path, CutStyle::Cut).expect("shape");
+        let id = shape.id;
+        if let Some(shape) = doc.get_shape_mut(id) {
+            shape.production.fill_color = Some("#ff0000".into());
+            shape.production.line_color = Some("not a colour".into());
+        }
+        let sheet = export_print_and_cut(&doc).expect("sheet");
+        assert!(sheet.contains("fill:#ff0000;fill-rule:evenodd;"), "{sheet}");
+        assert!(!sheet.contains("not a colour"));
+        let plain = export(&doc).expect("svg");
+        assert!(
+            !plain.contains("fill:#ff0000"),
+            "plain export stays outlines"
+        );
     }
 }
 

@@ -105,6 +105,16 @@ fn area_handles(area: [f64; 4], view: &stencilcraft_ui_egui::View) -> Vec<(AreaG
     ]
 }
 
+/// Where the trace box's × button sits: just outside its top-right corner, on screen.
+pub fn area_close_button(area: [f64; 4], view: &stencilcraft_ui_egui::View) -> egui::Pos2 {
+    let [x, y, w, _] = area;
+    view.world_to_screen(Point::new(x + w, y)) + egui::vec2(CLOSE_OFFSET_PX, -CLOSE_OFFSET_PX)
+}
+
+/// The × button's distance from the box corner and its radius, in screen pixels.
+const CLOSE_OFFSET_PX: f32 = 14.0;
+const CLOSE_RADIUS_PX: f32 = 8.0;
+
 impl Default for TraceDraft {
     fn default() -> Self {
         Self {
@@ -401,6 +411,18 @@ impl StencilApp {
         let Some(mut area) = self.panels.trace.area.filter(|_| shown) else {
             return claimed;
         };
+        // The × button clears the area, as in Silhouette.
+        if !self.panels.trace.picking
+            && response.clicked()
+            && let Some(at) = response.interact_pointer_pos()
+            && at.distance(area_close_button(area, &view)) <= CLOSE_RADIUS_PX
+        {
+            self.panels.trace.area = None;
+            self.trace_area_grab = None;
+            self.trace_preview = None;
+            self.status = "trace area cleared".to_string();
+            return true;
+        }
         // Silhouette's trace box resizes from its handles and moves when dragged inside.
         if !self.panels.trace.picking {
             if response.drag_started()
@@ -476,6 +498,20 @@ impl StencilApp {
                 egui::Rect::from_center_size(at, egui::vec2(7.0, 7.0)),
                 1.0,
                 colour,
+            );
+        }
+        if !self.panels.trace.picking {
+            let at = area_close_button(area, &view);
+            painter.circle_filled(at, CLOSE_RADIUS_PX, colour);
+            let arm = CLOSE_RADIUS_PX * 0.45;
+            let stroke = egui::Stroke::new(1.6, egui::Color32::WHITE);
+            painter.line_segment(
+                [at + egui::vec2(-arm, -arm), at + egui::vec2(arm, arm)],
+                stroke,
+            );
+            painter.line_segment(
+                [at + egui::vec2(-arm, arm), at + egui::vec2(arm, -arm)],
+                stroke,
             );
         }
         claimed
@@ -658,6 +694,15 @@ impl StencilApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_button_sits_off_the_top_right_corner() {
+        let view = stencilcraft_ui_egui::View::default();
+        let area = [10.0, 20.0, 30.0, 40.0];
+        let corner = view.world_to_screen(Point::new(40.0, 20.0));
+        let at = area_close_button(area, &view);
+        assert!(at.x > corner.x && at.y < corner.y, "{at:?} vs {corner:?}");
+    }
 
     #[test]
     fn options_follow_the_panel_and_stay_in_range() {

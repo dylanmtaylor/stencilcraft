@@ -191,3 +191,10 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 - Character Spacing is linear: with Arial at 72 pt the gap added between letter cells was
   37 px at 200 % and 74 px at 300 % for an em of about 101 px, i.e. 0.366 em per 100 % above
   normal.
+
+## Detach Lines (2026-11-25, SS 5.0.556)
+
+- Object › Modify › Detach Lines is enabled with one closed rectangle selected. Running it on
+  the rectangle (with or without a stroke weight) leaves one object: dragging its top edge
+  afterwards moves the whole rectangle. Its effect on other kinds of shapes is still to be
+  observed, so StencilCraft keeps the item as a placeholder.

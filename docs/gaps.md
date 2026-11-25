@@ -121,7 +121,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     object and layer locks. The Layers panel shows, locks, renames, reorders and
     deletes layers and makes guide layers (shown, never cut); Object › Arrange › Send to
     Layer moves objects between layers, and Attach/Detach and Contour have desktop
-    controls. Still missing: renaming groups.
+    controls. Still missing: renaming groups (the craft-libs document has no group or shape names).
 18. **Snapping and guides**: guides, grid and snap settings, snapping and measuring are
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
@@ -174,8 +174,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     compound path (`image.trace` with `area` and `compound`), keep the image and clear the
     area. The trace box resizes from eight handles and moves when dragged inside;
     Trace Quality (Low…Max) sets how closely outlines follow the pixels; Effect › Remove
-    Background clears an image's background. Still missing: the box's × button (Clear Area
-    instead), SS's Scale setting, and multi-colour tracing to layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
+    Background clears an image's background; the box's × button clears the area. Still
+    missing: SS's Scale setting, and multi-colour tracing to layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
     at SS's 300 dpi, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to
     96 dpi.
 25. **Print & Cut, beyond item 3**: File › Print opens the Print & Cut sheet (marks,

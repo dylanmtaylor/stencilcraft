@@ -7,6 +7,7 @@ use std::sync::{Arc, OnceLock};
 use eframe::egui;
 
 use craft_host::target::{Backend, ShellInfo};
+use craft_keymap::{Chord, Key, Mods};
 use craft_host::{AppInfo, Host};
 use craft_ui::fonts::{I18nScripts, UiFonts};
 use craft_ui::runtime::InstallSpec;
@@ -81,11 +82,31 @@ pub fn close_path(ctx: &egui::Context) {
     embed::logic(ctx, || CloseDecision::Close);
 }
 
+/// ⌘/Ctrl+Alt with a key.
+const fn cmd_alt(key: Key) -> Chord {
+    Chord::new(Mods { cmd: true, ctrl: false, alt: true, shift: false }, key)
+}
+
+/// The app's ⌘/Ctrl+Alt+digit shortcuts (Unlock All, Show All, Zoom to Selection, Release
+/// Guides). Claimed, so Alt+numpad code entry on Windows and Linux leaves them to the app.
+const CANVAS_CLAIMS: &[Chord] = &[
+    cmd_alt(Key::Num0),
+    cmd_alt(Key::Num2),
+    cmd_alt(Key::Num3),
+    cmd_alt(Key::Num5),
+];
+
 /// Declares the app's own canvas widget `id` the window's document canvas for this pass. The
-/// edit chords and egui's clipboard events stay in egui's input for it, where the app's own
-/// shortcut table reads them.
+/// edit chords, egui's clipboard events and the claimed chords stay in egui's input for it,
+/// where the app's own shortcut table reads them.
 pub fn host_canvas(ctx: &egui::Context, id: egui::Id) {
-    craft_ui::runtime::focus::host_canvas(ctx, id, KeyUse::CANVAS.with_edits(EditSet::ALL));
+    craft_ui::runtime::focus::host_canvas(
+        ctx,
+        id,
+        KeyUse::CANVAS
+            .with_edits(EditSet::ALL)
+            .with_claims(CANVAS_CLAIMS),
+    );
 }
 
 /// Whether this pass has an Escape no component took (the window's `Intent::Cancel`), without

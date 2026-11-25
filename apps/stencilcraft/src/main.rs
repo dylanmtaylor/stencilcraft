@@ -199,6 +199,14 @@ fn arrow_nudge(ctx: &egui::Context) -> Option<(f64, f64)> {
     })
 }
 
+/// Takes this pass's Escape: from egui's input while one of the app's own widgets has focus,
+/// else the window's Cancel, which the runtime routes Escape to.
+pub(crate) fn take_escape(ctx: &egui::Context) -> bool {
+    let egui_escape =
+        ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape));
+    egui_escape || framework::take_window_cancel(ctx)
+}
+
 /// Consume `key` only when it was pressed with exactly `modifiers`. egui's `consume_key`
 /// ignores extra Shift and Alt, so Shift+G would pick the Polygon tool and Cmd+Shift+L would
 /// run Cmd+L; shortcuts here want the combination as written.
@@ -2644,12 +2652,13 @@ impl StencilApp {
     fn handle_click_draft_keys(&mut self, ctx: &egui::Context) -> bool {
         if self.arc_draft.is_some() && !ctx.text_edit_focused() {
             // Enter places the arc as swept so far; Esc or Backspace drops it.
-            let (place, drop) = ctx.input_mut(|input| {
-                let place = consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter);
-                let drop = consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape)
-                    | consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace);
-                (place, drop)
+            let (place, back) = ctx.input_mut(|input| {
+                (
+                    consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter),
+                    consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace),
+                )
             });
+            let drop = take_escape(ctx) | back;
             if place {
                 self.commit_arc_draft();
             } else if drop {
@@ -2662,9 +2671,9 @@ impl StencilApp {
         if self.click_draft.is_none() || ctx.text_edit_focused() {
             return false;
         }
+        let escape = take_escape(ctx);
         let (end, back) = ctx.input_mut(|input| {
-            let end = consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter)
-                | consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape);
+            let end = consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter) | escape;
             let back = consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace)
                 | consume_exact(input, egui::Modifiers::NONE, egui::Key::Delete)
                 | consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Z);
@@ -2970,7 +2979,7 @@ impl StencilApp {
             self.save_prefs();
         } else if !self.pen_drawing()
             && !self.editing_points()
-            && ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape))
+            && take_escape(ctx)
         {
             self.set_selection([]);
             self.path_selection = PathSelection::default();

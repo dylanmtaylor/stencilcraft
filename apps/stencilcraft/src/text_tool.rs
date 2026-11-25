@@ -485,17 +485,25 @@ impl StencilApp {
                     egui::Key::Home => self.move_caret(line_start),
                     egui::Key::End => self.move_caret(line_end),
                     egui::Key::Enter => self.text_insert("\n"),
-                    egui::Key::Escape => {
-                        self.end_text_session();
-                        self.active_tool = ActiveTool::Select;
-                        self.status = "text done".to_string();
-                    }
+                    egui::Key::Escape => self.finish_typing(),
                     _ => {}
                 },
                 _ => {}
             }
         }
+        // The canvas holds no egui focus while typing, so Escape arrives as the window's Cancel.
+        if self.text_session.is_some() && crate::framework::take_window_cancel(ctx) {
+            self.finish_typing();
+            return true;
+        }
         used
+    }
+
+    /// Esc while typing: ends the session and returns to the Select tool.
+    fn finish_typing(&mut self) {
+        self.end_text_session();
+        self.active_tool = ActiveTool::Select;
+        self.status = "text done".to_string();
     }
 
     /// The topmost live text under `p` (millimetres) and the caret nearest the click.

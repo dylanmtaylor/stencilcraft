@@ -19,6 +19,7 @@ craft-theme = { workspace = true }
 craft-ui = { workspace = true, features = ["app"] }
 craft-behavior = { workspace = true }
 craft-host = { workspace = true }
+craft-keymap = { workspace = true }
 craft-window = { workspace = true, features = ["ui"] }
 eframe = { workspace = true }
 rfd = { workspace = true }

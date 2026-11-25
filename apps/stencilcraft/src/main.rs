@@ -5506,7 +5506,7 @@ mod tests {
         app.workspace
             .apply_all(
                 [Action::Move {
-                    panel: WorkspacePanel::Operations,
+                    panel: WorkspacePanel::Transform,
                     anchor: WorkspacePanel::Inspector,
                     placement: Placement::Group {
                         below: true,

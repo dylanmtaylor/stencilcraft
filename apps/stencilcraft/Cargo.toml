@@ -16,7 +16,10 @@ craft-atomic = { workspace = true }
 craft-draw = { workspace = true }
 craft-settings = { workspace = true }
 craft-theme = { workspace = true }
-craft-ui = { workspace = true, features = ["window-frame"] }
+craft-ui = { workspace = true, features = ["app"] }
+craft-behavior = { workspace = true }
+craft-host = { workspace = true }
+craft-keymap = { workspace = true }
 craft-window = { workspace = true, features = ["ui"] }
 eframe = { workspace = true }
 rfd = { workspace = true }
@@ -37,6 +40,10 @@ stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
 craft-raster-codecs = { workspace = true }
+
+[dev-dependencies]
+# The menu-label test reads labels with the pin's own mnemonic reader, which takes a Folder.
+craft-i18n = { workspace = true }
 
 [features]
 default = ["usb", "bluetooth"]

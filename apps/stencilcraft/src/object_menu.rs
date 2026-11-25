@@ -2,8 +2,9 @@
 //! Detach, Flatten, Clipping Mask, and the Contour panel, which hides contours of a shape so
 //! they are kept but not cut.
 
-use craft_ui::controls::Checkbox;
-use craft_ui::patterns::Panel;
+use craft_ui::choice::Checkbox;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_engine::document::DocumentCommand;
 use stencilcraft_engine::{Command, ProductionCommand};
@@ -15,7 +16,7 @@ use crate::panels::{button, hint};
 pub fn contour_count(path: &stencilcraft_geom::BezPath) -> usize {
     path.elements()
         .iter()
-        .filter(|el| matches!(el, craft_ui::canvas::kurbo::PathEl::MoveTo(_)))
+        .filter(|el| matches!(el, craft_behavior::kurbo::PathEl::MoveTo(_)))
         .count()
 }
 
@@ -113,34 +114,39 @@ impl StencilApp {
             _ => None,
         };
         let mut change: Option<(Vec<usize>, bool)> = None;
-        let _ = Panel::new("stencilcraft-contour-panel").show(ui, |ui| {
-            let Some((_, count, hidden)) = &target else {
-                hint(ui, "Select one shape to hide or show its contours.");
-                return;
-            };
-            for i in 0..*count {
-                let mut shown = !hidden.contains(&i);
-                let label = if i == 0 {
-                    "Contour 1 (outline)".to_string()
-                } else {
-                    format!("Contour {}", i + 1)
+        let _ = Panel::new("Contour")
+            .id_salt("stencilcraft-contour-panel")
+            .show(ui, |ui, _| {
+                let Some((_, count, hidden)) = &target else {
+                    hint(ui, "Select one shape to hide or show its contours.");
+                    return;
                 };
-                let was = shown;
-                let _ = Checkbox::bool(&label, &mut shown).show(ui);
-                if shown != was {
-                    change = Some((vec![i], !shown));
+                for i in 0..*count {
+                    let mut shown = !hidden.contains(&i);
+                    let label = if i == 0 {
+                        "Contour 1 (outline)".to_string()
+                    } else {
+                        format!("Contour {}", i + 1)
+                    };
+                    let was = shown;
+                    let _ = Checkbox::new(Bind::bound(&mut shown))
+                        .label(label)
+                        .id_salt(("contour", i))
+                        .show(ui);
+                    if shown != was {
+                        change = Some((vec![i], !shown));
+                    }
                 }
-            }
-            ui.horizontal(|ui| {
-                if button(ui, "Hide All Contours", *count > 1) {
-                    change = Some(((1..*count).collect(), true));
-                }
-                if button(ui, "Show All", !hidden.is_empty()) {
-                    change = Some(((0..*count).collect(), false));
-                }
+                ui.horizontal(|ui| {
+                    if button(ui, "Hide All Contours", *count > 1) {
+                        change = Some(((1..*count).collect(), true));
+                    }
+                    if button(ui, "Show All", !hidden.is_empty()) {
+                        change = Some(((0..*count).collect(), false));
+                    }
+                });
+                hint(ui, "Hidden contours stay in the shape but are not cut.");
             });
-            hint(ui, "Hidden contours stay in the shape but are not cut.");
-        });
         if let (Some((id, ..)), Some((contours, hidden))) = (target, change) {
             self.run_command(Command::Production(ProductionCommand::Contour {
                 id,

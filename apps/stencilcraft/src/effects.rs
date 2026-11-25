@@ -5,8 +5,12 @@
 //! Apply runs it for real as one undo step. Effect › Apply Last Effect repeats the last one on
 //! the current selection.
 
-use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, Select};
-use craft_ui::patterns::Panel;
+use craft_theme::{ControlSize, Variant};
+use craft_ui::buttons::Button;
+use craft_ui::choice::Checkbox;
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::pickers::Select;
+use craft_ui::sections::Panel;
 use eframe::egui;
 use serde_json::{Map, Value, json};
 use stencilcraft_engine::{Command, Engine};
@@ -643,87 +647,91 @@ impl StencilApp {
             .and_then(|p| p.result.as_ref().err().cloned());
         let params = self.effects.params(kind);
         let mut changed: Vec<(&'static str, Value)> = Vec::new();
-        let _ = Panel::new("stencilcraft-effects-panel").show(ui, |ui| {
-            let mut select = Select::new("effect-kind", "Effect", &mut kind);
-            for d in EFFECTS {
-                select = select.option(d.kind, d.title);
-            }
-            let _ = select.show(ui);
-            if let Some(d) = def(before) {
-                for field in d.fields {
-                    let current = get(params, field.key).cloned().unwrap_or(Value::Null);
-                    match field.kind {
-                        Kind::Num { min, max, .. } | Kind::Int { min, max } => {
-                            let mut value = current.as_f64().unwrap_or(min);
-                            let format = match field.kind {
-                                Kind::Num { unit, .. } if !unit.is_empty() => {
-                                    format!("{{n}} {unit}")
+        let kind_entries: Vec<Entry<EffectKind>> = EFFECTS
+            .iter()
+            .map(|d| Entry::new(d.kind, d.title))
+            .collect();
+        let _ = Panel::new("Effects")
+            .id_salt("stencilcraft-effects-panel")
+            .show(ui, |ui, _| {
+                let _ = Select::new("Effect", Bind::bound(&mut kind), &kind_entries)
+                    .id_salt("effect-kind")
+                    .show(ui);
+                if let Some(d) = def(before) {
+                    for field in d.fields {
+                        let current = get(params, field.key).cloned().unwrap_or(Value::Null);
+                        match field.kind {
+                            Kind::Num { min, max, .. } | Kind::Int { min, max } => {
+                                let mut value = current.as_f64().unwrap_or(min);
+                                let format = match field.kind {
+                                    Kind::Num { unit, .. } if !unit.is_empty() => {
+                                        format!("{{n}} {unit}")
+                                    }
+                                    _ => "{n}".to_string(),
+                                };
+                                labelled(ui, field.label, |ui| {
+                                    number(
+                                        ui,
+                                        &format!("effect-{}", field.key),
+                                        field.label,
+                                        &mut value,
+                                        min..=max,
+                                        &format,
+                                        &numbers,
+                                    );
+                                });
+                                let value = value.clamp(min, max);
+                                let new = if matches!(field.kind, Kind::Int { .. }) {
+                                    // Clamped to the field's range, so the cast is exact.
+                                    json!(value.round() as i64)
+                                } else {
+                                    json!(value)
+                                };
+                                if current.as_f64() != new.as_f64() && value.is_finite() {
+                                    changed.push((field.key, new));
                                 }
-                                _ => "{n}".to_string(),
-                            };
-                            labelled(ui, field.label, |ui| {
-                                number(
-                                    ui,
-                                    &format!("effect-{}", field.key),
-                                    field.label,
-                                    &mut value,
-                                    min..=max,
-                                    &format,
-                                    &numbers,
-                                );
-                            });
-                            let value = value.clamp(min, max);
-                            let new = if matches!(field.kind, Kind::Int { .. }) {
-                                // Clamped to the field's range, so the cast is exact.
-                                json!(value.round() as i64)
-                            } else {
-                                json!(value)
-                            };
-                            if current.as_f64() != new.as_f64() && value.is_finite() {
-                                changed.push((field.key, new));
                             }
-                        }
-                        Kind::Bool => {
-                            let mut on = current.as_bool().unwrap_or(false);
-                            let _ = Checkbox::bool(field.label, &mut on).show(ui);
-                            if Some(on) != current.as_bool() {
-                                changed.push((field.key, json!(on)));
-                            }
-                        }
-                        Kind::Choice(options) => {
-                            let mut value = current.as_str().unwrap_or("").to_string();
-                            labelled(ui, field.label, |ui| {
-                                let mut select = Select::new(
-                                    format!("effect-{}", field.key),
-                                    field.label,
-                                    &mut value,
-                                );
-                                for (v, label) in options {
-                                    select = select.option((*v).to_string(), *label);
+                            Kind::Bool => {
+                                let mut on = current.as_bool().unwrap_or(false);
+                                let _ = Checkbox::new(Bind::bound(&mut on))
+                                    .label(field.label)
+                                    .id_salt(("effect", field.key))
+                                    .show(ui);
+                                if Some(on) != current.as_bool() {
+                                    changed.push((field.key, json!(on)));
                                 }
-                                let _ = select.show(ui);
-                            });
-                            if Some(value.as_str()) != current.as_str() && !value.is_empty() {
-                                changed.push((field.key, json!(value)));
+                            }
+                            Kind::Choice(options) => {
+                                let mut value = current.as_str().unwrap_or("").to_string();
+                                labelled(ui, field.label, |ui| {
+                                    let entries: Vec<Entry<String>> = options
+                                        .iter()
+                                        .map(|(v, label)| Entry::new((*v).to_string(), *label))
+                                        .collect();
+                                    let _ =
+                                        Select::new(field.label, Bind::bound(&mut value), &entries)
+                                            .id_salt(format!("effect-{}", field.key))
+                                            .show(ui);
+                                });
+                                if Some(value.as_str()) != current.as_str() && !value.is_empty() {
+                                    changed.push((field.key, json!(value)));
+                                }
                             }
                         }
                     }
                 }
-            }
-            if let Some(error) = &error {
-                hint(ui, error);
-            } else {
-                hint(ui, "The blue lines preview the effect; Apply adds it.");
-            }
-            apply = ui
-                .add(
-                    Button::new("Apply")
-                        .variant(ButtonVariant::Primary)
-                        .size(ControlSize::Sm)
-                        .enabled(error.is_none()),
-                )
-                .clicked();
-        });
+                if let Some(error) = &error {
+                    hint(ui, error);
+                } else {
+                    hint(ui, "The blue lines preview the effect; Apply adds it.");
+                }
+                apply = Button::new("Apply")
+                    .variant(Variant::PRIMARY)
+                    .size(ControlSize::Sm)
+                    .enabled(error.is_none())
+                    .show(ui)
+                    .clicked();
+            });
         for (key, value) in changed {
             set(params, key, value);
         }

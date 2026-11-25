@@ -2,9 +2,9 @@
 //! saved from a shape and applied to the selection; Match Style is the eyedropper: the other
 //! selected shapes take the first one's style.
 
-use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_doc::CutStyle;
 use stencilcraft_engine::{Command, ProductionCommand, ProductionField};
@@ -116,62 +116,60 @@ impl StencilApp {
         let (mut save, mut matching) = (false, false);
         let mut apply = None;
         let mut remove = None;
-        let _ = Panel::new("stencilcraft-graphic-styles-panel").show(ui, |ui| {
-            for (i, s) in styles.iter().enumerate() {
+        let _ = Panel::new("Graphic Styles")
+            .id_salt("stencilcraft-graphic-styles-panel")
+            .show(ui, |ui, _| {
+                for (i, s) in styles.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if let Some(c) = s
+                            .fill_color
+                            .as_deref()
+                            .or(s.line_color.as_deref())
+                            .and_then(stencilcraft_ui_egui::parse_hex_colour)
+                        {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                            ui.painter().rect_filled(rect, 2.0, c);
+                        }
+                        ui.label(format!(
+                            "{} ({})",
+                            s.name,
+                            if s.engrave { "engrave" } else { "cut" }
+                        ));
+                        if button(ui, "Apply", any) {
+                            apply = Some(i);
+                        }
+                        if button(ui, "Delete", true) {
+                            remove = Some(i);
+                        }
+                    });
+                }
+                if styles.is_empty() {
+                    hint(
+                        ui,
+                        "Save a shape's colours and operation as a style to reuse them.",
+                    );
+                }
+                let _ = TextField::new("Style name", Bind::bound(&mut name))
+                    .id_salt("graphic-style-name")
+                    .show(ui);
+                // A style's name is at most 80 characters.
+                if name.chars().count() > 80 {
+                    name = name.chars().take(80).collect();
+                }
                 ui.horizontal(|ui| {
-                    if let Some(c) = s
-                        .fill_color
-                        .as_deref()
-                        .or(s.line_color.as_deref())
-                        .and_then(stencilcraft_ui_egui::parse_hex_colour)
-                    {
-                        let (rect, _) =
-                            ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-                        ui.painter().rect_filled(rect, 2.0, c);
-                    }
-                    ui.label(format!(
-                        "{} ({})",
-                        s.name,
-                        if s.engrave { "engrave" } else { "cut" }
-                    ));
-                    if button(ui, "Apply", any) {
-                        apply = Some(i);
-                    }
-                    if button(ui, "Delete", true) {
-                        remove = Some(i);
-                    }
+                    save = button(
+                        ui,
+                        "Save Style from Selection",
+                        any && !name.trim().is_empty(),
+                    );
+                    matching = button(ui, "Match Style", self.selected_shapes.len() >= 2);
                 });
-            }
-            if styles.is_empty() {
                 hint(
                     ui,
-                    "Save a shape's colours and operation as a style to reuse them.",
+                    "Match Style gives the other selected shapes the first one's style.",
                 );
-            }
-            let edit = TextField::new("graphic-style-name", "Style name", name.as_str())
-                .char_limit(80)
-                .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                name = value;
-            }
-            ui.horizontal(|ui| {
-                save = button(
-                    ui,
-                    "Save Style from Selection",
-                    any && !name.trim().is_empty(),
-                );
-                matching = button(ui, "Match Style", self.selected_shapes.len() >= 2);
             });
-            hint(
-                ui,
-                "Match Style gives the other selected shapes the first one's style.",
-            );
-        });
         self.style_name_draft = name.clone();
         if save {
             self.save_graphic_style(&name);

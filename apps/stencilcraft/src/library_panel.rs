@@ -4,9 +4,9 @@
 //! of designs (Silhouette's Library, without an account): list, search, open, and save the
 //! current design into it. File › Print opens the page as a PDF in the system viewer.
 
-use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_doc::library::{Library, LibraryItem};
 use stencilcraft_doc::recovery::{Recovery, RecoveryEntry};
@@ -228,68 +228,57 @@ impl StencilApp {
         let mut save = false;
         let mut query = self.stores.query.clone();
         let mut save_name = self.stores.save_name.clone();
-        let _ = Panel::new("stencilcraft-library-panel").show(ui, |ui| {
-            if !recovered.is_empty() {
-                ui.label("Recovered files");
-                for (id, label) in &recovered {
+        let _ = Panel::new("Library")
+            .id_salt("stencilcraft-library-panel")
+            .show(ui, |ui, _| {
+                if !recovered.is_empty() {
+                    ui.label("Recovered files");
+                    for (id, label) in &recovered {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            if button(ui, "Open", true) {
+                                open_recovered = Some(id.clone());
+                            }
+                            if button(ui, "Discard", true) {
+                                discard = Some(id.clone());
+                            }
+                        });
+                    }
+                    ui.separator();
+                }
+                ui.label("Library");
+                if !has_library {
+                    hint(ui, "No library folder on this system.");
+                    return;
+                }
+                // The field writes `query` as it is typed.
+                let _ = TextField::new("Search the library", Bind::bound(&mut query))
+                    .id_salt("library-search")
+                    .limit(200)
+                    .show(ui);
+                if items.is_empty() {
+                    hint(ui, "No designs yet: save one below.");
+                }
+                for item in &items {
                     ui.horizontal(|ui| {
-                        ui.label(label);
-                        if button(ui, "Open", true) {
-                            open_recovered = Some(id.clone());
-                        }
-                        if button(ui, "Discard", true) {
-                            discard = Some(id.clone());
+                        let title = if item.title.is_empty() {
+                            item.path.as_str()
+                        } else {
+                            item.title.as_str()
+                        };
+                        ui.label(title);
+                        if button(ui, "Open", !item.damaged) {
+                            open_item = Some(item.path.clone());
                         }
                     });
                 }
                 ui.separator();
-            }
-            ui.label("Library");
-            if !has_library {
-                hint(ui, "No library folder on this system.");
-                return;
-            }
-            let edit = TextField::new("library-search", "Search the library", query.as_str())
-                .char_limit(200)
-                .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                query = value;
-            }
-            if items.is_empty() {
-                hint(ui, "No designs yet: save one below.");
-            }
-            for item in &items {
-                ui.horizontal(|ui| {
-                    let title = if item.title.is_empty() {
-                        item.path.as_str()
-                    } else {
-                        item.title.as_str()
-                    };
-                    ui.label(title);
-                    if button(ui, "Open", !item.damaged) {
-                        open_item = Some(item.path.clone());
-                    }
-                });
-            }
-            ui.separator();
-            let edit = TextField::new("library-save-name", "Design name", save_name.as_str())
-                .char_limit(120)
-                .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                save_name = value;
-            }
-            save = button(ui, "Save Design to Library", true);
-        });
+                let _ = TextField::new("Design name", Bind::bound(&mut save_name))
+                    .id_salt("library-save-name")
+                    .limit(120)
+                    .show(ui);
+                save = button(ui, "Save Design to Library", true);
+            });
         self.stores.query = query;
         self.stores.save_name = save_name;
         if let Some(id) = open_recovered {

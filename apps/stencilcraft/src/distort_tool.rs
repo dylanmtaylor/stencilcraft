@@ -2,8 +2,10 @@
 //! Distort, more for a lattice). Dragging a handle bends the shapes with it, previewed live;
 //! Apply (or Enter) runs `shapes.distort` as one undo step, Cancel (or Esc) drops it.
 
-use craft_ui::controls::{Button, ButtonVariant, ControlSize};
-use craft_ui::patterns::Panel;
+use craft_theme::{ControlSize, Variant};
+use craft_ui::buttons::Button;
+use craft_ui::contract::{Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_engine::Command;
 use stencilcraft_engine::generate::{DistortArgs, MAX_LATTICE, distort_path, lattice_points};
@@ -82,12 +84,10 @@ impl StencilApp {
         if self.distort.is_none() || ctx.text_edit_focused() {
             return false;
         }
-        let (apply, cancel) = ctx.input_mut(|input| {
-            (
-                crate::consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter),
-                crate::consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape),
-            )
+        let apply = ctx.input_mut(|input| {
+            crate::consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter)
         });
+        let cancel = crate::take_escape(ctx);
         if apply {
             self.apply_distort();
         } else if cancel {
@@ -191,8 +191,9 @@ impl StencilApp {
         let mut apply = false;
         let mut cancel = false;
         let mut start = None;
-        let _ =
-            Panel::new("stencilcraft-distort-panel").show(ui, |ui| match self.distort.as_mut() {
+        let _ = Panel::new("Distort")
+            .id_salt("stencilcraft-distort-panel")
+            .show(ui, |ui, _| match self.distort.as_mut() {
                 None => {
                     hint(
                         ui,
@@ -246,12 +247,10 @@ impl StencilApp {
                             draft.reset();
                         }
                         cancel = button(ui, "Cancel", true);
-                        apply = ui
-                            .add(
-                                Button::new("Apply")
-                                    .variant(ButtonVariant::Primary)
-                                    .size(ControlSize::Sm),
-                            )
+                        apply = Button::new("Apply")
+                            .variant(Variant::PRIMARY)
+                            .size(ControlSize::Sm)
+                            .show(ui)
                             .clicked();
                     });
                     hint(

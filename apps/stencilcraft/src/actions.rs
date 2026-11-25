@@ -3,9 +3,9 @@
 //! playing runs them again with the current selection in place of the recorded shapes, each
 //! step's new shapes becoming the selection for the next.
 
-use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use serde_json::{Value, json};
 use stencilcraft_engine::{Command, Effect};
@@ -103,44 +103,42 @@ impl StencilApp {
         let (mut start, mut stop) = (false, false);
         let mut play = None;
         let mut remove = None;
-        let _ = Panel::new("stencilcraft-actions-panel").show(ui, |ui| {
-            match recording {
-                None => {
-                    start = button(ui, "Start Recording", true);
+        let _ = Panel::new("Actions")
+            .id_salt("stencilcraft-actions-panel")
+            .show(ui, |ui, _| {
+                match recording {
+                    None => {
+                        start = button(ui, "Start Recording", true);
+                    }
+                    Some(steps) => {
+                        ui.label(format!("Recording… {steps} steps"));
+                        let _ = TextField::new("Action name", Bind::bound(&mut name))
+                            .id_salt("action-name")
+                            .show(ui);
+                        // An action's name is at most 80 characters.
+                        if name.chars().count() > 80 {
+                            name = name.chars().take(80).collect();
+                        }
+                        stop = button(ui, "Stop and Save", true);
+                    }
                 }
-                Some(steps) => {
-                    ui.label(format!("Recording… {steps} steps"));
-                    let edit = TextField::new("action-name", "Action name", name.as_str())
-                        .char_limit(80)
-                        .show(ui);
-                    if let Some(
-                        EditEvent::Update { value, .. }
-                        | EditEvent::Commit { value, .. }
-                        | EditEvent::Set { value, .. },
-                    ) = edit.event
-                    {
-                        name = value;
-                    }
-                    stop = button(ui, "Stop and Save", true);
+                for (i, a) in actions.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} ({} steps)", a.name, a.steps.len()));
+                        if button(ui, "Play", recording.is_none()) {
+                            play = Some(i);
+                        }
+                        if button(ui, "Delete", true) {
+                            remove = Some(i);
+                        }
+                    });
                 }
-            }
-            for (i, a) in actions.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(format!("{} ({} steps)", a.name, a.steps.len()));
-                    if button(ui, "Play", recording.is_none()) {
-                        play = Some(i);
-                    }
-                    if button(ui, "Delete", true) {
-                        remove = Some(i);
-                    }
-                });
-            }
-            hint(
-                ui,
-                "Record edits, then play them on another selection: the recorded shapes are \
+                hint(
+                    ui,
+                    "Record edits, then play them on another selection: the recorded shapes are \
                  replaced by what is selected.",
-            );
-        });
+                );
+            });
         self.action_name_draft = name.clone();
         if start {
             self.start_recording();

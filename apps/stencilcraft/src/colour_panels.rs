@@ -2,9 +2,11 @@
 //! on each shape (`production.fill_color` / `line_color`, `#rrggbb`) and drawn on the canvas;
 //! they label the design (cut by colour, print) without changing what is cut.
 
-use craft_ui::controls::{ControlSize, Swatch, TextField};
-use craft_ui::edit::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_theme::{ControlSize, Srgba};
+use craft_ui::choice::Swatch;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_doc::CutStyle;
 use stencilcraft_engine::{Command, ProductionCommand, ProductionField};
@@ -94,69 +96,74 @@ impl StencilApp {
             ColourTarget::Fill => ("fill", "No Fill"),
             ColourTarget::Line => ("line", "Default Line"),
         };
-        let _ = Panel::new(format!("stencilcraft-{id}-colour-panel")).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for (i, colour) in PALETTE.iter().enumerate() {
-                    let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) else {
-                        continue;
-                    };
-                    let response = ui.add(
-                        Swatch::new(format!("{id}-swatch-{i}"), *colour, c)
+        let title = match target {
+            ColourTarget::Fill => "Fill Color",
+            ColourTarget::Line => "Line Style",
+        };
+        let _ = Panel::new(title)
+            .id_salt(format!("stencilcraft-{id}-colour-panel"))
+            .show(ui, |ui, _| {
+                ui.horizontal_wrapped(|ui| {
+                    for (i, colour) in PALETTE.iter().enumerate() {
+                        let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) else {
+                            continue;
+                        };
+                        let clicked = Swatch::new(*colour, Srgba::from(c))
+                            .id_salt(format!("{id}-swatch-{i}"))
                             .size(ControlSize::Sm)
                             .selected(current.as_deref() == Some(*colour))
-                            .enabled(any),
-                    );
-                    if response.clicked() {
-                        picked = Some(Some((*colour).to_string()));
+                            .enabled(any)
+                            .show(ui)
+                            .clicked;
+                        if clicked {
+                            picked = Some(Some((*colour).to_string()));
+                        }
                     }
-                }
-            });
-            let edit = TextField::new(format!("{id}-hex"), "Colour (#rrggbb)", hex.as_str())
-                .char_limit(9)
-                .show(ui);
-            if let Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) = edit.event
-            {
-                hex = value.clone();
-                if let Some(h) = normalise_hex(&value) {
+                });
+                // The field writes `hex` as it is typed; a committed value applies the colour.
+                let edit = TextField::new("Colour (#rrggbb)", Bind::bound(&mut hex))
+                    .id_salt(format!("{id}-hex"))
+                    .limit(9)
+                    .show(ui);
+                if let Some(value) = edit.events.committed()
+                    && let Some(h) = normalise_hex(value)
+                {
                     picked = Some(Some(h));
                 }
-            } else if let Some(EditEvent::Update { value, .. }) = edit.event {
-                hex = value;
-            }
-            if button(ui, clear_label, any) {
-                picked = Some(None);
-            }
-            if target == ColourTarget::Line {
-                ui.horizontal(|ui| {
-                    if button(ui, "Cut", any) {
-                        self.pending_style = Some(CutStyle::Cut);
-                    }
-                    if button(ui, "Engrave / Score", any) {
-                        self.pending_style = Some(CutStyle::Engrave);
-                    }
-                });
-                // Silhouette's perforated line style: the lines become dashes that cut.
-                let (mut cut, mut gap) = self.perforate;
-                ui.horizontal(|ui| {
-                    ui.label("Perforate: cut");
-                    crate::panels::length_drag(ui, &mut cut, 0.2..=100.0, 0.1);
-                    ui.label("gap");
-                    crate::panels::length_drag(ui, &mut gap, 0.2..=100.0, 0.1);
-                });
-                self.perforate = (cut, gap);
-                if button(ui, "Perforate Lines", any) {
-                    self.pending_perforate = true;
+                if button(ui, clear_label, any) {
+                    picked = Some(None);
                 }
-            }
-            hint(
-                ui,
-                if any {
-                    "Colours label the design; what is cut depends on the line style."
-                } else {
-                    "Select shapes to colour."
-                },
-            );
-        });
+                if target == ColourTarget::Line {
+                    ui.horizontal(|ui| {
+                        if button(ui, "Cut", any) {
+                            self.pending_style = Some(CutStyle::Cut);
+                        }
+                        if button(ui, "Engrave / Score", any) {
+                            self.pending_style = Some(CutStyle::Engrave);
+                        }
+                    });
+                    // Silhouette's perforated line style: the lines become dashes that cut.
+                    let (mut cut, mut gap) = self.perforate;
+                    ui.horizontal(|ui| {
+                        ui.label("Perforate: cut");
+                        crate::panels::length_drag(ui, &mut cut, 0.2..=100.0, 0.1);
+                        ui.label("gap");
+                        crate::panels::length_drag(ui, &mut gap, 0.2..=100.0, 0.1);
+                    });
+                    self.perforate = (cut, gap);
+                    if button(ui, "Perforate Lines", any) {
+                        self.pending_perforate = true;
+                    }
+                }
+                hint(
+                    ui,
+                    if any {
+                        "Colours label the design; what is cut depends on the line style."
+                    } else {
+                        "Select shapes to colour."
+                    },
+                );
+            });
         self.colour_hex_draft = hex;
         if let Some(colour) = picked {
             self.set_selection_colour(target, colour);
@@ -221,50 +228,51 @@ impl StencilApp {
         let mut select = None;
         let mut recolor_row = self.recolor_row;
         let mut recolor_to: Option<(usize, String)> = None;
-        let _ = Panel::new("stencilcraft-select-by-colour-panel").show(ui, |ui| {
-            if colours.is_empty() {
-                hint(ui, "No shape has a line or fill colour yet.");
-            }
-            for (i, (target, colour, ids)) in colours.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    if let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) {
-                        ui.add(
-                            Swatch::new(format!("select-colour-{i}"), colour, c)
-                                .size(ControlSize::Sm),
-                        );
-                    }
-                    let what = match target {
-                        ColourTarget::Line => "line",
-                        ColourTarget::Fill => "fill",
-                    };
-                    ui.label(format!("{colour} {what} ({})", ids.len()));
-                    if button(ui, "Select", true) {
-                        select = Some(ids.clone());
-                    }
-                    if button(ui, "Recolor", true) {
-                        recolor_row = (recolor_row != Some(i)).then_some(i);
-                    }
-                });
-                if recolor_row == Some(i) {
-                    ui.horizontal_wrapped(|ui| {
-                        for (k, swatch) in PALETTE.iter().enumerate() {
-                            let Some(c) = stencilcraft_ui_egui::parse_hex_colour(swatch) else {
-                                continue;
-                            };
-                            if ui
-                                .add(
-                                    Swatch::new(format!("recolor-{i}-{k}"), *swatch, c)
-                                        .size(ControlSize::Sm),
-                                )
-                                .clicked()
-                            {
-                                recolor_to = Some((i, (*swatch).to_string()));
-                            }
+        let _ = Panel::new("Select by Color")
+            .id_salt("stencilcraft-select-by-colour-panel")
+            .show(ui, |ui, _| {
+                if colours.is_empty() {
+                    hint(ui, "No shape has a line or fill colour yet.");
+                }
+                for (i, (target, colour, ids)) in colours.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) {
+                            let _ = Swatch::new(colour.clone(), Srgba::from(c))
+                                .id_salt(format!("select-colour-{i}"))
+                                .size(ControlSize::Sm)
+                                .show(ui);
+                        }
+                        let what = match target {
+                            ColourTarget::Line => "line",
+                            ColourTarget::Fill => "fill",
+                        };
+                        ui.label(format!("{colour} {what} ({})", ids.len()));
+                        if button(ui, "Select", true) {
+                            select = Some(ids.clone());
+                        }
+                        if button(ui, "Recolor", true) {
+                            recolor_row = (recolor_row != Some(i)).then_some(i);
                         }
                     });
+                    if recolor_row == Some(i) {
+                        ui.horizontal_wrapped(|ui| {
+                            for (k, swatch) in PALETTE.iter().enumerate() {
+                                let Some(c) = stencilcraft_ui_egui::parse_hex_colour(swatch) else {
+                                    continue;
+                                };
+                                if Swatch::new(*swatch, Srgba::from(c))
+                                    .id_salt(format!("recolor-{i}-{k}"))
+                                    .size(ControlSize::Sm)
+                                    .show(ui)
+                                    .clicked
+                                {
+                                    recolor_to = Some((i, (*swatch).to_string()));
+                                }
+                            }
+                        });
+                    }
                 }
-            }
-        });
+            });
         self.recolor_row = recolor_row;
         if let Some(ids) = select {
             self.set_selection(ids);
@@ -345,7 +353,7 @@ mod perforate_tests {
         let pieces = path
             .elements()
             .iter()
-            .filter(|el| matches!(el, craft_ui::canvas::kurbo::PathEl::MoveTo(_)))
+            .filter(|el| matches!(el, craft_behavior::kurbo::PathEl::MoveTo(_)))
             .count();
         assert!(pieces > 20, "{pieces} dashes along 120 mm at 4 mm pitch");
         assert!(app.engine.undo());

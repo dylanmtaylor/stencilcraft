@@ -6,10 +6,12 @@
 //! sets the font, size, alignment, line and character spacing and kerning of the text being
 //! typed or the selected text, and of new text.
 
-use craft_ui::composites::SectionHeader;
-use craft_ui::controls::{Checkbox, ControlSize, Segmented, Select, TextField};
-use craft_ui::edit::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_theme::ControlSize;
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::pickers::Select;
+use craft_ui::sections::{Panel, Section};
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_doc::{FontSpec, TextAlign, TextSpec};
 use stencilcraft_engine::text::{TextAdd, TextEdit};
@@ -485,17 +487,25 @@ impl StencilApp {
                     egui::Key::Home => self.move_caret(line_start),
                     egui::Key::End => self.move_caret(line_end),
                     egui::Key::Enter => self.text_insert("\n"),
-                    egui::Key::Escape => {
-                        self.end_text_session();
-                        self.active_tool = ActiveTool::Select;
-                        self.status = "text done".to_string();
-                    }
+                    egui::Key::Escape => self.finish_typing(),
                     _ => {}
                 },
                 _ => {}
             }
         }
+        // The canvas holds no egui focus while typing, so Escape arrives as the window's Cancel.
+        if self.text_session.is_some() && crate::framework::take_window_cancel(ctx) {
+            self.finish_typing();
+            return true;
+        }
         used
+    }
+
+    /// Esc while typing: ends the session and returns to the Select tool.
+    fn finish_typing(&mut self) {
+        self.end_text_session();
+        self.active_tool = ActiveTool::Select;
+        self.status = "text done".to_string();
     }
 
     /// The topmost live text under `p` (millimetres) and the caret nearest the click.
@@ -668,107 +678,132 @@ impl StencilApp {
             .and_then(|id| self.text_spec_of(*id))
             .map(|spec| spec.flow);
         let mut flow = before_flow.clone();
-        let _ = Panel::new("stencilcraft-text-style-panel").show(ui, |ui| {
-            let edit = TextField::new("text-font-search", "Find a font", style.query.as_str())
-                .char_limit(200)
-                .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                style.query = value;
-            }
-            if !recent.is_empty() {
-                ui.label("Recently used");
-                ui.horizontal_wrapped(|ui| {
-                    for name in &recent {
-                        if button(ui, name, true) {
-                            family = name.clone();
+        let mut family_entries: Vec<Entry<String>> = Vec::new();
+        if !matching.contains(&before_family) {
+            family_entries.push(Entry::new(before_family.clone(), before_family.clone()));
+        }
+        family_entries.extend(
+            matching
+                .iter()
+                .map(|name| Entry::new(name.clone(), name.clone())),
+        );
+        let style_entries: Vec<Entry<String>> = styles
+            .iter()
+            .map(|s| Entry::new(s.clone(), s.clone()))
+            .collect();
+        let align_entries = [
+            Entry::new(TextAlign::Left, "Left"),
+            Entry::new(TextAlign::Centre, "Centre"),
+            Entry::new(TextAlign::Right, "Right"),
+            Entry::new(TextAlign::Justify, "Justify"),
+        ];
+        let direction_entries = [
+            Entry::new(false, "Horizontal"),
+            Entry::new(true, "Vertical"),
+        ];
+        let _ = Panel::new("Text Style")
+            .id_salt("stencilcraft-text-style-panel")
+            .show(ui, |ui, _| {
+                // The field writes the query as it is typed.
+                let _ = TextField::new("Find a font", Bind::bound(&mut style.query))
+                    .id_salt("text-font-search")
+                    .limit(200)
+                    .show(ui);
+                if !recent.is_empty() {
+                    ui.label("Recently used");
+                    ui.horizontal_wrapped(|ui| {
+                        for name in &recent {
+                            if button(ui, name, true) {
+                                family = name.clone();
+                            }
                         }
-                    }
+                    });
+                }
+                let _ = Select::new("Font", Bind::bound(&mut family), &family_entries)
+                    .id_salt("text-font")
+                    .show(ui);
+                if styles.len() > 1 {
+                    labelled(ui, "Style", |ui| {
+                        let _ =
+                            Select::new("Font style", Bind::bound(&mut font_style), &style_entries)
+                                .id_salt("text-font-style")
+                                .show(ui);
+                    });
+                }
+                labelled(ui, "Size", |ui| {
+                    number(
+                        ui,
+                        "text-size",
+                        "Text size",
+                        &mut size,
+                        1.0..=2000.0,
+                        "{n} pt",
+                        &numbers,
+                    );
                 });
-            }
-            let mut select = Select::new("text-font", "Font", &mut family);
-            if !matching.contains(&before_family) {
-                select = select.option(before_family.clone(), &before_family);
-            }
-            for name in &matching {
-                select = select.option(name.clone(), name);
-            }
-            let _ = select.show(ui);
-            if styles.len() > 1 {
-                labelled(ui, "Style", |ui| {
-                    let mut select = Select::new("text-font-style", "Font style", &mut font_style);
-                    for s in &styles {
-                        select = select.option(s.clone(), s);
-                    }
-                    let _ = select.show(ui);
+                // A picker, not a segmented strip: the pin elides a strip's segments in the
+                // panel's width ("Ce…"), where a picker shows the whole word.
+                crate::panels::captioned(ui, "Justification", |ui| {
+                    let _ = Select::new(
+                        "Justification",
+                        Bind::bound(&mut style.align),
+                        &align_entries,
+                    )
+                    .id_salt("text-align")
+                    .show(ui);
                 });
-            }
-            labelled(ui, "Size", |ui| {
-                number(
+                let _ = Section::new("Spacing")
+                    .id_salt("text-spacing")
+                    .show(ui, |ui, _| {
+                        labelled(ui, "Line Spacing", |ui| {
+                            number(
+                                ui,
+                                "text-line-spacing",
+                                "Line spacing",
+                                &mut style.line_pct,
+                                10.0..=1000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                        });
+                        labelled(ui, "Character Spacing", |ui| {
+                            number(
+                                ui,
+                                "text-char-spacing",
+                                "Character spacing",
+                                &mut style.char_pct,
+                                0.0..=1000.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                        });
+                        let _ = Checkbox::new(Bind::bound(&mut style.kerning))
+                            .label("Kerning")
+                            .show(ui);
+                        crate::panels::captioned(ui, "Direction", |ui| {
+                            let _ = Select::new(
+                                "Direction",
+                                Bind::bound(&mut style.vertical),
+                                &direction_entries,
+                            )
+                            .id_salt("text-direction")
+                            .show(ui);
+                        });
+                    });
+                if let Some(flow) = flow.as_mut() {
+                    let _ = Section::new("Flow").id_salt("text-flow").show(ui, |ui, _| {
+                        flow_controls(ui, flow, &numbers);
+                    });
+                }
+                hint(
                     ui,
-                    "text-size",
-                    "Text size",
-                    &mut size,
-                    1.0..=2000.0,
-                    "{n} pt",
-                    &numbers,
+                    if targets > 0 {
+                        "Changes apply to the text being typed or selected."
+                    } else {
+                        "Changes apply to new text: choose the Text tool and click the page."
+                    },
                 );
             });
-            let _ = Segmented::new("text-align", "Justification", &mut style.align)
-                .item(TextAlign::Left, "Left")
-                .item(TextAlign::Centre, "Centre")
-                .item(TextAlign::Right, "Right")
-                .item(TextAlign::Justify, "Justify")
-                .size(ControlSize::Sm)
-                .show(ui);
-            let _ = SectionHeader::new("text-spacing", "Spacing").show(ui, |ui| {
-                labelled(ui, "Line Spacing", |ui| {
-                    number(
-                        ui,
-                        "text-line-spacing",
-                        "Line spacing",
-                        &mut style.line_pct,
-                        10.0..=1000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                });
-                labelled(ui, "Character Spacing", |ui| {
-                    number(
-                        ui,
-                        "text-char-spacing",
-                        "Character spacing",
-                        &mut style.char_pct,
-                        0.0..=1000.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                });
-                let _ = Checkbox::bool("Kerning", &mut style.kerning).show(ui);
-                let _ = Segmented::new("text-direction", "Direction", &mut style.vertical)
-                    .item(false, "Horizontal")
-                    .item(true, "Vertical")
-                    .size(ControlSize::Sm)
-                    .show(ui);
-            });
-            if let Some(flow) = flow.as_mut() {
-                let _ = SectionHeader::new("text-flow", "Flow").show(ui, |ui| {
-                    flow_controls(ui, flow, &numbers);
-                });
-            }
-            hint(
-                ui,
-                if targets > 0 {
-                    "Changes apply to the text being typed or selected."
-                } else {
-                    "Changes apply to new text: choose the Text tool and click the page."
-                },
-            );
-        });
         let mut edit = TextEdit::default();
         let mut changed = false;
         if family != before_family {
@@ -908,26 +943,29 @@ impl StencilApp {
     /// The Glyphs panel: characters that are hard to type, a click inserts one.
     pub fn glyphs_panel(&mut self, ui: &mut egui::Ui) {
         let mut picked = None;
-        let _ = Panel::new("stencilcraft-glyphs-panel").show(ui, |ui| {
-            for (title, glyphs) in GLYPH_SETS {
-                ui.label(*title);
-                ui.horizontal_wrapped(|ui| {
-                    for glyph in glyphs.chars() {
-                        let s = glyph.to_string();
-                        if ui
-                            .add(craft_ui::controls::Button::new(&s).size(ControlSize::Sm))
-                            .clicked()
-                        {
-                            picked = Some(s);
+        let _ = Panel::new("Glyphs")
+            .id_salt("stencilcraft-glyphs-panel")
+            .show(ui, |ui, _| {
+                for (title, glyphs) in GLYPH_SETS {
+                    ui.label(*title);
+                    ui.horizontal_wrapped(|ui| {
+                        for glyph in glyphs.chars() {
+                            let s = glyph.to_string();
+                            if craft_ui::buttons::Button::new(s.clone())
+                                .size(ControlSize::Sm)
+                                .show(ui)
+                                .clicked()
+                            {
+                                picked = Some(s);
+                            }
                         }
-                    }
-                });
-            }
-            hint(
-                ui,
-                "A click inserts the character into the text being typed or selected.",
-            );
-        });
+                    });
+                }
+                hint(
+                    ui,
+                    "A click inserts the character into the text being typed or selected.",
+                );
+            });
         if let Some(glyph) = picked {
             self.insert_glyph(&glyph);
         }
@@ -971,7 +1009,7 @@ const GLYPH_SETS: &[(&str, &str)] = &[
 fn flow_controls(
     ui: &mut egui::Ui,
     flow: &mut stencilcraft_doc::TextFlow,
-    numbers: &craft_ui::localized::LocaleNumbers,
+    numbers: &crate::panels::LocaleNumbers,
 ) {
     use stencilcraft_doc::TextFlow;
     let mut kind = match flow {
@@ -980,13 +1018,14 @@ fn flow_controls(
         TextFlow::OnPath { .. } => 2,
     };
     let was = kind;
-    let mut segmented = Segmented::new("text-flow-kind", "Flow", &mut kind)
-        .item(0, "Straight")
-        .item(1, "Curve");
+    let mut entries = vec![Entry::new(0u8, "Straight"), Entry::new(1u8, "Curve")];
     if was == 2 {
-        segmented = segmented.item(2, "On Path");
+        entries.push(Entry::new(2u8, "On Path"));
     }
-    let _ = segmented.size(ControlSize::Sm).show(ui);
+    let _ = Segmented::new("Flow", Bind::bound(&mut kind), &entries)
+        .id_salt("text-flow-kind")
+        .size(ControlSize::Sm)
+        .show(ui);
     if kind != was {
         *flow = match kind {
             1 => TextFlow::Curve { diameter_mm: 100.0 },
@@ -1039,7 +1078,9 @@ fn flow_controls(
                     numbers,
                 );
             });
-            let _ = Checkbox::bool("Flip to the other side", flip).show(ui);
+            let _ = Checkbox::new(Bind::bound(flip))
+                .label("Flip to the other side")
+                .show(ui);
         }
     }
 }

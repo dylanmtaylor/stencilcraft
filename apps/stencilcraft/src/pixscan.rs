@@ -3,8 +3,10 @@
 //! (perspective) to the page at true size, so a design drawn or traced over it lines up with
 //! the real material.
 
-use craft_ui::controls::{Button, ButtonVariant, ControlSize};
-use craft_ui::patterns::Panel;
+use craft_theme::{ControlSize, Variant};
+use craft_ui::buttons::Button;
+use craft_ui::contract::{Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_engine::Command;
 use stencilcraft_geom::Point;
@@ -111,7 +113,9 @@ impl StencilApp {
         let picked = self.pixscan.corners.len();
         let picking = self.pixscan.picking;
         let (mut pick, mut reset, mut straighten) = (false, false, false);
-        let _ = Panel::new("stencilcraft-pixscan-panel").show(ui, |ui| {
+        let _ = Panel::new("PixScan")
+            .id_salt("stencilcraft-pixscan-panel")
+            .show(ui, |ui, _| {
             hint(
                 ui,
                 "Import a photo of the page or mat (File › Import › Image), pick it, then click \
@@ -125,13 +129,11 @@ impl StencilApp {
                 let next = CORNER_NAMES.get(picked).copied().unwrap_or("corner");
                 ui.label(format!("Click the page's {next} corner ({picked} of 4)."));
             }
-            straighten = ui
-                .add(
-                    Button::new("Straighten to Page")
-                        .variant(ButtonVariant::Primary)
-                        .size(ControlSize::Sm)
-                        .enabled(has_image && picked == 4),
-                )
+            straighten = Button::new("Straighten to Page")
+                .variant(Variant::PRIMARY)
+                .size(ControlSize::Sm)
+                .enabled(has_image && picked == 4)
+                .show(ui)
                 .clicked();
         });
         if pick {

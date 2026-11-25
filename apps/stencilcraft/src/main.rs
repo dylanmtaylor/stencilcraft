@@ -1260,6 +1260,9 @@ pub struct StencilApp {
     pub snap_lines: Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
     /// Holding Ctrl (Cmd on macOS) suspends snapping for this frame.
     pub snap_suspended: bool,
+    /// This pass the app's canvas widget only hovers: the pointer is over a framework canvas
+    /// control's part (the node overlay, the selection box, a guide).
+    pub canvas_hover_only: bool,
     pub status: String,
     pub open_path: Option<String>,
     pub send_mode: bool,
@@ -1580,6 +1583,7 @@ impl StencilApp {
             drag_origin: None,
             snap_lines: Vec::new(),
             snap_suspended: false,
+            canvas_hover_only: false,
             status,
             open_path: open_path.clone(),
             send_mode: false,
@@ -5948,6 +5952,7 @@ impl StencilApp {
             } else {
                 egui::Sense::click_and_drag()
             };
+            self.canvas_hover_only = over_node_part;
             let response = ui.allocate_rect(clip, sense);
             framework::host_canvas(ui.ctx(), response.id);
             let preview_updated = self.kerf_preview && self.update_kerf_preview_cache(&doc);
@@ -6866,9 +6871,23 @@ impl StencilApp {
             }
             // Silhouette's point editing: double-click a shape to edit its points, double-click
             // empty canvas to leave.
-            if response.double_clicked()
-                && let Some(pointer) = response.interact_pointer_pos()
-            {
+            // Over the selection box's or the overlay's parts the canvas widget only hovers, so a
+            // double click there is read from the input (the parts take drags, not double clicks).
+            let double_click_at = if response.double_clicked() {
+                response.interact_pointer_pos()
+            } else if self.canvas_hover_only {
+                ui.input(|input| {
+                    input
+                        .pointer
+                        .button_double_clicked(egui::PointerButton::Primary)
+                        .then(|| input.pointer.interact_pos())
+                        .flatten()
+                })
+                .filter(|at| clip.contains(*at))
+            } else {
+                None
+            };
+            if let Some(pointer) = double_click_at {
                 let hit = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
                 let text_hit = hit.filter(|id| {
                     self.engine
@@ -8608,6 +8627,44 @@ mod tests {
     }
 
     #[test]
+    fn double_clicking_a_selected_shape_by_a_box_handle_edits_its_points() {
+        // Regression: next to a box handle the canvas widget only hovers, and the double click
+        // that enters point editing was lost.
+        let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 20.0,
+            y: 20.0,
+            width: 40.0,
+            height: 30.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::Select;
+        let canvas: fn(&mut StencilApp, &mut egui::Ui) = |app, ui| app.canvas_body(ui);
+        frame(&ctx, &mut app, vec![], canvas);
+        frame(&ctx, &mut app, vec![], canvas);
+        // On the left edge, at its handle.
+        let at = app
+            .view
+            .world_to_screen(stencilcraft_geom::Point::new(20.0, 35.0));
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], canvas);
+        // A double click: the runtime hands one press a pass, so the passes are 50 ms apart
+        // (the harness's usual half second is longer than a double click).
+        for pressed in [true, false, true, false] {
+            frame_after(&ctx, &mut app, vec![button(pressed)], canvas, 0.05);
+        }
+        frame(&ctx, &mut app, vec![], canvas);
+        assert_eq!(app.active_tool, ActiveTool::DirectSelect);
+    }
+
+    #[test]
     fn dragging_a_selection_box_handle_resizes_in_one_step() {
         // Regression: a press on the box's handle went to the app's canvas widget, which
         // cleared the selection instead of resizing.
@@ -9092,6 +9149,30 @@ mod tests {
             output.textures_delta.clear();
             assert_eq!(app.engine.doc.shape_count(), usize::from(text_focus));
         }
+    }
+
+    /// One pass `step` seconds after the last (`frame` steps half a second).
+    fn frame_after(
+        ctx: &egui::Context,
+        app: &mut StencilApp,
+        events: Vec<egui::Event>,
+        panel: fn(&mut StencilApp, &mut egui::Ui),
+        step: f64,
+    ) -> egui::FullOutput {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 800.0),
+                )),
+                events,
+                time: Some(ctx.input(|input| input.time) + step),
+                ..Default::default()
+            },
+            |ui| panel(app, ui),
+        );
+        output.textures_delta.clear();
+        output
     }
 
     fn frame(

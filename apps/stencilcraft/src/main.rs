@@ -774,7 +774,10 @@ pub struct StencilApp {
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
-    pub canvas_lasso_mode: bool,
+    /// The selection before a Shift marquee started, so the marquee can shrink back.
+    pub canvas_selection_base: Vec<u64>,
+    /// Moves applied while dragging the selection, folded into one undo step on release.
+    pub drag_steps: usize,
     pub canvas_selection_points: Vec<egui::Pos2>,
     pub canvas_panning: bool,
     pub last_drag_delta: egui::Vec2,
@@ -982,7 +985,8 @@ impl StencilApp {
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,
-            canvas_lasso_mode: false,
+            canvas_selection_base: Vec::new(),
+            drag_steps: 0,
             canvas_selection_points: Vec::new(),
             canvas_panning: false,
             last_drag_delta: egui::Vec2::ZERO,
@@ -1347,18 +1351,63 @@ impl StencilApp {
         if dx_mm.abs() < 1e-9 && dy_mm.abs() < 1e-9 {
             return;
         }
-        if self.selected_shapes.len() > 1 {
-            self.run_command(Command::ShapesTransform {
+        let command = if self.selected_shapes.len() > 1 {
+            Command::ShapesTransform {
                 ids: self.selected_shapes.clone(),
                 dx_mm,
                 dy_mm,
                 scale_x: 1.0,
                 scale_y: 1.0,
                 degrees: 0.0,
-            });
+            }
         } else {
-            self.run_command(Command::ShapeMove { id, dx_mm, dy_mm });
+            Command::ShapeMove { id, dx_mm, dy_mm }
+        };
+        match self.engine.run(command) {
+            Ok(_) => self.drag_steps = self.drag_steps.saturating_add(1),
+            Err(error) => self.status = error.to_string(),
         }
+    }
+
+    /// A drag moves the selection a little every frame; on release those moves become one
+    /// undo step: undo them and apply the total move once.
+    pub fn fold_drag_into_one_step(&mut self) {
+        let steps = std::mem::take(&mut self.drag_steps);
+        if steps < 2 {
+            return;
+        }
+        let Some(end) =
+            stencilcraft_ui_egui::selected_world_bounds(&self.engine.doc, &self.selected_shapes)
+        else {
+            return;
+        };
+        let mut undone = 0;
+        while undone < steps && self.engine.undo() {
+            undone += 1;
+        }
+        let Some(start) =
+            stencilcraft_ui_egui::selected_world_bounds(&self.engine.doc, &self.selected_shapes)
+        else {
+            return;
+        };
+        let (dx_mm, dy_mm) = (end.x0 - start.x0, end.y0 - start.y0);
+        let ids = self.selected_shapes.clone();
+        let command = match ids.as_slice() {
+            [id] => Command::ShapeMove {
+                id: *id,
+                dx_mm,
+                dy_mm,
+            },
+            _ => Command::ShapesTransform {
+                ids,
+                dx_mm,
+                dy_mm,
+                scale_x: 1.0,
+                scale_y: 1.0,
+                degrees: 0.0,
+            },
+        };
+        self.run_command(command);
     }
 
     /// Turn a canvas guide edit into `guide.*` commands: a drag shows as a preview and
@@ -1840,10 +1889,8 @@ impl StencilApp {
             self.active_tool = ActiveTool::ConvertPoint;
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::M)) {
             self.active_tool = ActiveTool::BoxSelect;
-            self.canvas_lasso_mode = false;
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::L)) {
             self.active_tool = ActiveTool::LassoSelect;
-            self.canvas_lasso_mode = true;
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::P)) {
             self.active_tool = ActiveTool::Pen;
         } else if ctx
@@ -3021,7 +3068,8 @@ impl StencilApp {
 
     pub fn tools_panel(&mut self, ui: &mut egui::Ui) {
         let has_selection = !self.selected_shapes.is_empty();
-        let mut lasso = self.canvas_lasso_mode;
+        let mut lasso = self.active_tool == ActiveTool::LassoSelect;
+        let was_lasso = lasso;
         let mut clicked = None;
         let _ = Panel::new("stencilcraft-tools-panel").show(ui, |ui| {
             let _ = SectionHeader::new("tools-select", "Select")
@@ -3075,7 +3123,13 @@ impl StencilApp {
                     });
                 });
         });
-        self.canvas_lasso_mode = lasso;
+        if lasso != was_lasso {
+            self.active_tool = if lasso {
+                ActiveTool::LassoSelect
+            } else {
+                ActiveTool::Select
+            };
+        }
         match clicked {
             Some(ToolsAction::Deselect) => self.set_selection([]),
             Some(ToolsAction::Duplicate) => self.duplicate_selection(),
@@ -4072,7 +4126,7 @@ impl StencilApp {
                 .canvas_selection_start
                 .zip(ui.ctx().pointer_interact_pos())
                 .map(|(start, end)| {
-                    if self.canvas_lasso_mode {
+                    if self.active_tool == ActiveTool::LassoSelect {
                         let mut points = self.canvas_selection_points.clone();
                         if points.last().is_none_or(|last| *last != end) {
                             points.push(end);
@@ -4562,6 +4616,20 @@ impl StencilApp {
             self.freehand_stroke = None;
         }
 
+        // Zoom: a click zooms in around the pointer, Alt+click zooms out.
+        if self.active_tool == ActiveTool::Zoom
+            && !overlay_claimed
+            && response.clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let factor = if ui.input(|input| input.modifiers.alt) {
+                1.0 / 1.5
+            } else {
+                1.5
+            };
+            self.view.zoom_at(factor, pointer);
+        }
+
         // Knife: drag the cut line across the selection (Shift snaps to 45°).
         if self.active_tool == ActiveTool::Knife && !overlay_claimed {
             let mods = DragMods::from(ui.input(|input| input.modifiers));
@@ -4760,6 +4828,7 @@ impl StencilApp {
                     | ActiveTool::SmoothFreehand
                     | ActiveTool::Knife
                     | ActiveTool::Eraser
+                    | ActiveTool::Zoom
             )
         {
             if response.drag_started()
@@ -4767,29 +4836,28 @@ impl StencilApp {
             {
                 let hit = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
                 self.canvas_selection_additive = ui.ctx().input(|input| input.modifiers.shift);
-                self.canvas_drag_shape = if self.canvas_lasso_mode || self.canvas_selection_additive
-                {
+                let lasso = self.active_tool == ActiveTool::LassoSelect;
+                self.canvas_selection_base = if self.canvas_selection_additive {
+                    self.selected_shapes.clone()
+                } else {
+                    Vec::new()
+                };
+                self.canvas_drag_shape = if lasso || self.canvas_selection_additive {
                     None
                 } else {
                     hit.filter(|id| self.selected_shapes.contains(id))
                 };
-                if self.canvas_lasso_mode {
+                if lasso {
                     self.canvas_selection_start = Some(pointer);
                     self.canvas_selection_points.clear();
                     self.canvas_selection_points.push(pointer);
                     if !self.canvas_selection_additive {
                         self.set_selection([]);
                     }
-                } else if let Some(id) = hit {
-                    if self.canvas_selection_additive {
-                        let mut ids = self.selected_shapes.clone();
-                        if let Some(index) = ids.iter().position(|selected| *selected == id) {
-                            ids.remove(index);
-                        } else {
-                            ids.push(id);
-                        }
-                        self.set_selection(ids);
-                    } else if !self.selected_shapes.contains(&id) {
+                } else if let Some(id) = hit
+                    && !self.canvas_selection_additive
+                {
+                    if !self.selected_shapes.contains(&id) {
                         self.set_selection([id]);
                         self.canvas_drag_shape = Some(id);
                     }
@@ -4840,6 +4908,7 @@ impl StencilApp {
             }
 
             if response.drag_started() {
+                self.drag_steps = 0;
                 self.drag_origin = self.canvas_drag_shape.and_then(|_| {
                     stencilcraft_ui_egui::selected_world_bounds(
                         &self.engine.doc,
@@ -4875,7 +4944,7 @@ impl StencilApp {
                 && let Some(start) = self.canvas_selection_start
                 && let Some(end) = response.interact_pointer_pos()
             {
-                let found = if self.canvas_lasso_mode {
+                let found = if self.active_tool == ActiveTool::LassoSelect {
                     if self
                         .canvas_selection_points
                         .last()
@@ -4890,24 +4959,30 @@ impl StencilApp {
                         stencilcraft_ui_egui::SelectionMode::Intersect,
                     )
                 } else {
+                    // Silhouette's default: shapes the box touches, whichever way it is drawn.
                     let rect = egui::Rect::from_two_pos(start, end);
-                    let mode = if end.x < start.x {
-                        stencilcraft_ui_egui::SelectionMode::Intersect
-                    } else {
-                        stencilcraft_ui_egui::SelectionMode::Contain
-                    };
-                    stencilcraft_ui_egui::select_shapes_in_rect(&doc, &view, rect, mode)
+                    stencilcraft_ui_egui::select_shapes_in_rect(
+                        &doc,
+                        &view,
+                        rect,
+                        stencilcraft_ui_egui::SelectionMode::Intersect,
+                    )
                 };
-                let mut ids = if self.canvas_selection_additive {
-                    self.selected_shapes.clone()
-                } else {
-                    Vec::new()
-                };
-                ids.extend(found);
+                // From the selection before the drag, so sweeping back drops shapes again.
+                let mut ids = self.canvas_selection_base.clone();
+                ids.extend(
+                    found
+                        .into_iter()
+                        .filter(|id| !self.canvas_selection_base.contains(id)),
+                );
                 self.set_selection(ids);
             }
             if response.drag_stopped() {
+                if self.canvas_drag_shape.is_some() {
+                    self.fold_drag_into_one_step();
+                }
                 self.canvas_drag_shape = None;
+                self.canvas_selection_base.clear();
                 self.canvas_selection_start = None;
                 self.canvas_selection_points.clear();
                 self.last_drag_delta = egui::Vec2::ZERO;
@@ -6304,6 +6379,67 @@ mod tests {
         assert!(!app.send_mode, "Cmd+Shift+L is not Cmd+L");
         press_key(&mut app, egui::Key::L, egui::Modifiers::COMMAND);
         assert!(app.send_mode);
+    }
+
+    #[test]
+    fn folding_a_snapped_drag_keeps_earlier_history() {
+        // The fold undoes exactly the drag's moves: shapes created before it survive.
+        let mut app = StencilApp::new(None);
+        for x in [10.0, 60.0, 110.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 10.0,
+                width: 20.0,
+                height: 10.0,
+            });
+        }
+        app.set_selection([1]);
+        app.drag_origin =
+            stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &app.selected_shapes);
+        for step in 1..=8 {
+            app.drag_selection_to(1, egui::vec2(9.0 * step as f32, -5.0 * step as f32));
+        }
+        app.fold_drag_into_one_step();
+        assert_eq!(app.engine.doc.shape_count(), 3);
+        assert!(app.engine.undo(), "undo the drag");
+        assert_eq!(app.engine.doc.shape_count(), 3, "only the move was undone");
+    }
+
+    #[test]
+    fn dragging_a_shape_is_one_undo_step() {
+        // Regression: every frame of a drag was its own undo step.
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 20.0,
+            height: 10.0,
+        });
+        app.set_selection([1]);
+        app.engine.doc.snap = Default::default();
+        app.drag_origin =
+            stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &app.selected_shapes);
+        let start = app.drag_origin.expect("bounds");
+        for step in 1..=5 {
+            app.drag_selection_to(1, egui::vec2(10.0 * step as f32, 0.0));
+        }
+        assert!(app.drag_steps >= 2, "several moves were applied live");
+        app.fold_drag_into_one_step();
+        let moved =
+            stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &[1]).expect("moved");
+        assert!(moved.x0 > start.x0 + 1.0);
+        assert!(app.engine.undo());
+        let back =
+            stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &[1]).expect("back");
+        assert!(
+            (back.x0 - start.x0).abs() < 1e-9,
+            "one undo returns it: {back:?} vs {start:?}"
+        );
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            1,
+            "and the shape itself is still there"
+        );
     }
 
     #[test]

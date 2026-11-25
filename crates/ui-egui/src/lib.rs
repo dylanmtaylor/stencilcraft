@@ -1119,11 +1119,63 @@ pub fn select_shapes_in_rect(
             );
             match mode {
                 SelectionMode::Contain => rect.contains_rect(bounds),
-                SelectionMode::Intersect => rect.intersects(bounds),
+                // Touching means the outline itself crosses or lies in the box, not just its
+                // bounding box (a marquee in the empty corner of a diagonal line misses it).
+                SelectionMode::Intersect => {
+                    rect.intersects(bounds) && outline_touches_rect(&shape.path, view, rect)
+                }
             }
         })
         .map(|shape| shape.id)
         .collect()
+}
+
+/// Whether any part of `path`'s outline, drawn with `view`, lies in or crosses the screen `rect`.
+pub fn outline_touches_rect(path: &kurbo::BezPath, view: &View, rect: egui::Rect) -> bool {
+    stencilcraft_geom::path_to_polylines(path, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
+        .iter()
+        .any(|pl| {
+            let pts: Vec<egui::Pos2> = pl.points.iter().map(|p| view.world_to_screen(*p)).collect();
+            let closing = pl
+                .closed
+                .then(|| pts.last().copied().zip(pts.first().copied()))
+                .flatten();
+            pts.iter().any(|p| rect.contains(*p))
+                || pts
+                    .windows(2)
+                    .filter_map(|w| w.first().copied().zip(w.get(1).copied()))
+                    .chain(closing)
+                    .any(|(a, b)| segment_crosses_rect(a, b, rect))
+        })
+}
+
+/// Liang–Barsky: whether the segment `a`→`b` passes through `rect`.
+fn segment_crosses_rect(a: egui::Pos2, b: egui::Pos2, rect: egui::Rect) -> bool {
+    let d = b - a;
+    let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+    for (p, q) in [
+        (-d.x, a.x - rect.min.x),
+        (d.x, rect.max.x - a.x),
+        (-d.y, a.y - rect.min.y),
+        (d.y, rect.max.y - a.y),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                t0 = t0.max(r);
+            } else {
+                t1 = t1.min(r);
+            }
+            if t0 > t1 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// The even-odd point-in-lasso test in screen coordinates.
@@ -1409,6 +1461,26 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_marquee_touches_an_outline_only_where_the_outline_is() {
+        let view = View {
+            zoom: 1.0,
+            ..View::default()
+        };
+        let mut diagonal = kurbo::BezPath::new();
+        diagonal.move_to((0.0, 0.0));
+        diagonal.line_to((100.0, 100.0));
+        // The empty corner of its bounding box: the box overlaps, the line does not.
+        let corner = egui::Rect::from_min_max(egui::pos2(70.0, 0.0), egui::pos2(100.0, 20.0));
+        assert!(!outline_touches_rect(&diagonal, &view, corner));
+        // Across the middle of the line, with no vertex inside the box.
+        let across = egui::Rect::from_min_max(egui::pos2(40.0, 45.0), egui::pos2(60.0, 55.0));
+        assert!(outline_touches_rect(&diagonal, &view, across));
+    }
+
+    use super::*;
+    use stencilcraft_testkit::simple_square;
+
+    #[test]
     fn adding_a_point_to_a_straight_line_keeps_it_straight() {
         use craft_draw::ui::pen::{EditSubpath, Knot, KnotRef};
         use stencilcraft_geom::Point;
@@ -1506,9 +1578,6 @@ mod tests {
             KnotRef::new(0, 0)
         ));
     }
-
-    use super::*;
-    use stencilcraft_testkit::simple_square;
 
     #[test]
     fn bundled_theme_parses_and_resolves_in_both_modes() {

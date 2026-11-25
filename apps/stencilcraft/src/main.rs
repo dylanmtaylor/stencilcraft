@@ -364,6 +364,63 @@ pub fn guide_drag(
     })
 }
 
+/// How near (screen points) the pointer must be to a selection box handle or a guide to be on it.
+const CONTROL_REACH_PX: f32 = 10.0;
+/// How far outside a selection box corner its rotate band reaches, in screen points.
+const ROTATE_BAND_PX: f32 = 24.0;
+
+/// Whether `at` (screen) is on the selection box of `bounds` (millimetres): one of its eight
+/// handles, or the rotate band just outside a corner. The app's canvas widget leaves those
+/// presses to the framework's transform box.
+fn over_selection_box_part(
+    view: &stencilcraft_ui_egui::View,
+    bounds: stencilcraft_geom::Rect,
+    at: egui::Pos2,
+) -> bool {
+    let corners = [
+        (bounds.x0, bounds.y0),
+        (bounds.x1, bounds.y0),
+        (bounds.x1, bounds.y1),
+        (bounds.x0, bounds.y1),
+    ]
+    .map(|(x, y)| view.world_to_screen(stencilcraft_geom::Point::new(x, y)));
+    let mids = [(0, 1), (1, 2), (2, 3), (3, 0)].map(|(a, b)| corners[a].lerp(corners[b], 0.5));
+    if corners
+        .iter()
+        .chain(&mids)
+        .any(|p| p.distance(at) <= CONTROL_REACH_PX)
+    {
+        return true;
+    }
+    let screen = egui::Rect::from_points(&corners);
+    !screen.contains(at) && corners.iter().any(|c| c.distance(at) <= ROTATE_BAND_PX)
+}
+
+/// Whether `at` (screen) is on one of `guides`.
+fn over_guide_line(
+    view: &stencilcraft_ui_egui::View,
+    guides: &[stencilcraft_doc::Guide],
+    at: egui::Pos2,
+) -> bool {
+    guides.iter().any(|guide| {
+        let (a, b) = match guide.axis {
+            stencilcraft_doc::GuideAxis::Vertical => (
+                stencilcraft_geom::Point::new(guide.position_mm, 0.0),
+                stencilcraft_geom::Point::new(guide.position_mm, 1.0),
+            ),
+            stencilcraft_doc::GuideAxis::Horizontal => (
+                stencilcraft_geom::Point::new(0.0, guide.position_mm),
+                stencilcraft_geom::Point::new(1.0, guide.position_mm),
+            ),
+        };
+        let (a, b) = (view.world_to_screen(a), view.world_to_screen(b));
+        let dir = b - a;
+        let len = dir.length();
+        len > f32::EPSILON
+            && ((at - a).x * dir.y - (at - a).y * dir.x).abs() / len <= CONTROL_REACH_PX / 2.0
+    })
+}
+
 /// `p` snapped by the document's snap settings, ignoring shapes `exclude` (a dragged node
 /// must not snap to its own shape's bounds). `p` itself when nothing is in reach.
 pub fn snap_point_in(
@@ -5867,6 +5924,25 @@ impl StencilApp {
                 })
                 .is_some()
             };
+            // The same for the selection box's handles and rotate band, and the guides.
+            let press_or_hover = ui.input(|input| {
+                input
+                    .pointer
+                    .press_origin()
+                    .filter(|_| input.pointer.any_down())
+                    .or(input.pointer.hover_pos())
+            });
+            let over_box_part = self.active_tool == ActiveTool::Select
+                && press_or_hover.is_some_and(|at| {
+                    stencilcraft_ui_egui::selected_world_bounds(
+                        &self.engine.doc,
+                        &self.selected_shapes,
+                    )
+                    .is_some_and(|bounds| over_selection_box_part(&view, bounds, at))
+                });
+            let over_guide = self.prefs.show_guides
+                && press_or_hover.is_some_and(|at| over_guide_line(&view, &doc.guides, at));
+            let over_node_part = over_node_part || over_box_part || over_guide;
             let sense = if over_node_part {
                 egui::Sense::hover()
             } else {
@@ -8498,6 +8574,87 @@ mod tests {
             1,
             "Cut removes the pasted copy"
         );
+    }
+
+    #[test]
+    fn box_handles_rotate_band_and_guides_are_hit() {
+        let view = stencilcraft_ui_egui::View::default();
+        let bounds = stencilcraft_geom::Rect::new(10.0, 10.0, 50.0, 40.0);
+        let at = |x: f64, y: f64| view.world_to_screen(stencilcraft_geom::Point::new(x, y));
+        assert!(
+            over_selection_box_part(&view, bounds, at(50.0, 25.0)),
+            "edge handle"
+        );
+        assert!(
+            over_selection_box_part(&view, bounds, at(10.0, 10.0)),
+            "corner"
+        );
+        let corner = at(50.0, 40.0);
+        assert!(
+            over_selection_box_part(&view, bounds, corner + egui::vec2(15.0, 12.0)),
+            "rotate band"
+        );
+        assert!(
+            !over_selection_box_part(&view, bounds, at(30.0, 25.0)),
+            "inside"
+        );
+        let guides = [stencilcraft_doc::Guide {
+            axis: stencilcraft_doc::GuideAxis::Vertical,
+            position_mm: 30.0,
+            locked: false,
+        }];
+        assert!(over_guide_line(&view, &guides, at(30.0, 80.0)));
+        assert!(!over_guide_line(&view, &guides, at(60.0, 80.0)));
+    }
+
+    #[test]
+    fn dragging_a_selection_box_handle_resizes_in_one_step() {
+        // Regression: a press on the box's handle went to the app's canvas widget, which
+        // cleared the selection instead of resizing.
+        let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 20.0,
+            y: 20.0,
+            width: 40.0,
+            height: 30.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::Select;
+        app.engine.doc.snap = Default::default();
+        let canvas: fn(&mut StencilApp, &mut egui::Ui) = |app, ui| app.canvas_body(ui);
+        frame(&ctx, &mut app, vec![], canvas);
+        frame(&ctx, &mut app, vec![], canvas);
+        let edge = app
+            .view
+            .world_to_screen(stencilcraft_geom::Point::new(60.0, 35.0));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(edge)],
+            canvas,
+        );
+        frame(&ctx, &mut app, vec![button(edge, true)], canvas);
+        let mut at = edge;
+        for _ in 0..4 {
+            at += egui::vec2(15.0, 0.0);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], canvas);
+        }
+        frame(&ctx, &mut app, vec![button(at, false)], canvas);
+        frame(&ctx, &mut app, vec![], canvas);
+        assert_eq!(app.selected_shapes, vec![1], "the shape stays selected");
+        let b = stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &[1]).unwrap();
+        assert!(b.width() > 41.0, "the box stretched the shape: {b:?}");
+        assert!(app.engine.undo());
+        let b = stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &[1]).unwrap();
+        assert!((b.width() - 40.0).abs() < 1e-6, "one undo step: {b:?}");
     }
 
     #[test]

@@ -172,22 +172,34 @@ impl StencilApp {
         };
     }
 
-    /// File › Print: the page as a PDF, opened in the system viewer to print from there.
+    /// File › Print: the page opened in the system viewer to print from there: with Print &
+    /// Cut marks on, the alignment sheet (registration marks, fills and line colours, at
+    /// 100 %); otherwise the page as a PDF.
     pub fn print_via_pdf(&mut self) {
-        let bytes = match self.export_bytes(crate::file_menu::ExportKind::Pdf) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                self.status = format!("print: {e}");
-                return;
+        let (bytes, name) = if self.prefs.print_cut_marks {
+            match stencilcraft_svg::export_print_and_cut(&self.engine.doc) {
+                Ok(svg) => (svg.into_bytes(), "stencilcraft-print-and-cut.svg"),
+                Err(e) => {
+                    self.status = format!("print: {e}");
+                    return;
+                }
+            }
+        } else {
+            match self.export_bytes(crate::file_menu::ExportKind::Pdf) {
+                Ok(bytes) => (bytes, "stencilcraft-print.pdf"),
+                Err(e) => {
+                    self.status = format!("print: {e}");
+                    return;
+                }
             }
         };
-        let path = std::env::temp_dir().join("stencilcraft-print.pdf");
+        let path = std::env::temp_dir().join(name);
         if let Err(e) = std::fs::write(&path, bytes) {
             self.status = format!("print: {e}");
             return;
         }
         self.status = match open_with_system(&path) {
-            Ok(()) => "opened the page as a PDF to print".to_string(),
+            Ok(()) => "opened the page to print (print at 100 %)".to_string(),
             Err(e) => format!("print: {e}; the PDF is at {}", path.display()),
         };
     }

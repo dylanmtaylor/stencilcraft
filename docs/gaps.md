@@ -249,8 +249,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 39. **Colour tools**: swatches (Fill Color, Line Style), recolouring (Select by Color ›
     Recolor), graphic styles (saved line/fill/operation sets) and Match Style (the
     eyedropper, in the Graphic Styles panel) exist.
-40. **Automation**: missing recorded actions and batch replay inside the app. MCP and the
-    CLI cover scripting from outside.
+40. **Automation**: Panels › Actions records edits and plays them on another selection;
+    MCP and the CLI cover scripting from outside. Batch replay over many files is
+    missing.
 41. **Design Space conveniences**: Edit › History lists the undo steps and goes back or
     forward to any of them. Missing: tool and accessory prompts on the Make screen, a
     favourite-materials list, an uploaded-images library and project collections (as local

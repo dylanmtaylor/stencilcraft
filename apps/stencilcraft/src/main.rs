@@ -44,6 +44,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 
 /// CLI/agent control channel: JSON lines on a TCP socket, one session per
 /// connection (the same session core the CLI's `mcp` mode uses).
+mod actions;
 mod arc_draw;
 mod click_draw;
 mod colour_panels;
@@ -112,6 +113,8 @@ pub struct UserPrefs {
     pub select_after_drawing: bool,
     /// Panels › Graphic Styles: saved line/fill/operation sets.
     pub graphic_styles: Vec<graphic_styles::GraphicStyle>,
+    /// Panels › Actions: recorded edit sequences.
+    pub actions: Vec<actions::SavedAction>,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -141,6 +144,7 @@ impl Default for UserPrefs {
             recent_fonts: Vec::new(),
             select_after_drawing: false,
             graphic_styles: Vec::new(),
+            actions: Vec::new(),
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -810,6 +814,7 @@ pub enum WorkspacePanel {
     Selections,
     Distort,
     GraphicStyles,
+    Actions,
 }
 
 struct WorkspaceContent<'a> {
@@ -843,6 +848,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Selections => self.app.selections_panel(ui),
             WorkspacePanel::Distort => self.app.distort_panel(ui),
             WorkspacePanel::GraphicStyles => self.app.graphic_styles_panel(ui),
+            WorkspacePanel::Actions => self.app.actions_panel(ui),
         }
     }
 
@@ -872,6 +878,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Selections => "Selections",
             WorkspacePanel::Distort => "Distort",
             WorkspacePanel::GraphicStyles => "Graphic Styles",
+            WorkspacePanel::Actions => "Actions",
         }
         .to_owned()
     }
@@ -966,6 +973,8 @@ pub struct StencilApp {
     pub saved_selections: Vec<misc_panels::SavedSelection>,
     /// Graphic Styles panel: the name field.
     pub style_name_draft: String,
+    /// Actions panel: the name field.
+    pub action_name_draft: String,
     /// Free Distort / Lattice in progress.
     pub distort: Option<distort_tool::DistortDraft>,
     pub selection_name_draft: String,
@@ -1144,6 +1153,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::Selections,
     WorkspacePanel::Distort,
     WorkspacePanel::GraphicStyles,
+    WorkspacePanel::Actions,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -1264,6 +1274,7 @@ impl StencilApp {
             machine_action: None,
             saved_selections: Vec::new(),
             style_name_draft: String::new(),
+            action_name_draft: String::new(),
             distort: None,
             selection_name_draft: String::new(),
             mat_before_unload: None,

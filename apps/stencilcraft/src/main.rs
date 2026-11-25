@@ -17,9 +17,13 @@ use craft_theme::{ControlSize, TypeRole};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
-    Button, ButtonVariant, Checkbox, IconButton, LinkButton, LinkMode, NumberField, Select, Slider,
+    Button, ButtonVariant, Checkbox, LinkButton, LinkMode, NumberField, Select, Slider,
     SliderScale, ToggleButton,
 };
+use craft_behavior::IconId;
+use craft_ui::buttons::IconButton;
+use craft_ui::contract::{Props as _, Show as _};
+use craft_ui::display::Divider;
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
 use craft_behavior::dock::{Column, DockEdge, Group, Layout, Node, Permissions};
 use craft_ui::docking::{DockArea, DockContent, DockStyle};
@@ -29,13 +33,12 @@ use craft_behavior::flow::Axis;
 use craft_behavior::dock::SplitSize;
 use craft_ui::list::{ListRow, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::menu::{MenuBar, MenuItem};
 use craft_ui::patterns::{
     AlignAction, AlignBar, Inspector, InspectorHeader, LastUsed, OptionsBar, Panel, RailTool,
     StatusBar, ToolRail, ToolSlot,
 };
-use craft_ui::primitives::{Content, Divider, Text};
-use craft_ui::title_bar::{Frame, LeadingEnd, Title, TitleBar};
+use craft_ui::primitives::{Content, Text};
+use craft_ui::shell::{Title, TitleBar};
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use stencilcraft_doc::CutStyle;
@@ -809,8 +812,7 @@ fn main() -> Result<(), String> {
     let viewport = craft_window::policy::apply(viewport, &decision.frame);
 
     let mut app = StencilApp::new(open_path.as_deref());
-    let install_frame = decision.clone();
-    app.window_frame = decision.frame;
+    let install_frame = decision;
     app.control_port = control_port;
     if open_path.is_none() {
         app.open_new_document(0);
@@ -955,7 +957,6 @@ pub enum CanvasViewCommand {
 
 pub struct StencilApp {
     pub workspace: Layout<WorkspacePanel>,
-    pub window_frame: Frame,
     pub engine: stencilcraft_engine::Engine,
     pub view: stencilcraft_ui_egui::View,
     pub pending_view_command: Option<CanvasViewCommand>,
@@ -1284,7 +1285,6 @@ impl StencilApp {
         let saved_document = engine.doc.clone();
         Self {
             workspace: default_workspace(),
-            window_frame: Frame::Native,
             engine,
             view: stencilcraft_ui_egui::View::default(),
             pending_view_command: None,
@@ -3290,7 +3290,7 @@ impl StencilApp {
         }
     }
 
-    fn build_menu_bar(&self) -> Vec<MenuItem<TopMenuAction>> {
+    fn build_menu_bar(&self) -> Vec<menus::MenuItem<TopMenuAction>> {
         menus::build(self)
     }
 
@@ -3846,15 +3846,14 @@ impl StencilApp {
         let mut redo_clicked = false;
         let mut switch_theme_clicked = false;
 
-        let frame = self.window_frame.clone();
         let can_undo = self.engine.can_undo();
         let can_redo = self.engine.can_redo();
         let (theme_icon, next_theme) = match self.theme {
             stencilcraft_ui_egui::ColorTheme::Dark => {
-                (Icon::Sun, stencilcraft_ui_egui::ColorTheme::Light)
+                (IconId::new("sun"), stencilcraft_ui_egui::ColorTheme::Light)
             }
             stencilcraft_ui_egui::ColorTheme::Light => {
-                (Icon::Moon, stencilcraft_ui_egui::ColorTheme::Dark)
+                (IconId::new("moon"), stencilcraft_ui_egui::ColorTheme::Dark)
             }
         };
 
@@ -3862,52 +3861,46 @@ impl StencilApp {
             .frame(egui::Frame::NONE)
             .show_separator_line(false)
             .show(parent, |ui| {
-                let resp = TitleBar::new(&frame)
-                    .id_salt("stencilcraft-title-bar")
-                    .separator(true)
-                    .title(Title::new(title_text))
-                    .show_titled(
-                        ui,
-                        |ui, _| {
-                            if ui
-                                .add(IconButton::new(Icon::Home, "Home / Fit View"))
-                                .clicked()
-                            {
-                                chosen_action = Some(TopMenuAction::FitView);
-                            }
-                            let mb = MenuBar::new(&menus)
-                                .id(egui::Id::unique("stencilcraft-menubar"))
-                                .shrink_to_fit(f32::INFINITY)
-                                .help_search(menus.len() - 1)
-                                .show(ui);
-                            chosen_action = chosen_action.or(mb.chosen);
-                            LeadingEnd::from_ui(ui)
-                        },
-                        |ui, _| {
-                            // The trailing slot lays out right to left: Redo before Undo.
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .add(IconButton::new(Icon::Redo, "Redo").enabled(can_redo))
-                                    .clicked()
-                                {
-                                    redo_clicked = true;
-                                }
-                                if ui
-                                    .add(IconButton::new(Icon::Undo, "Undo").enabled(can_undo))
-                                    .clicked()
-                                {
-                                    undo_clicked = true;
-                                }
-                                Divider::vertical().show(ui);
-                                if ui
-                                    .add(IconButton::new(theme_icon, "Switch Theme"))
-                                    .clicked()
-                                {
-                                    switch_theme_clicked = true;
-                                }
-                            });
-                        },
-                    );
+                let resp = TitleBar::new().id_salt("stencilcraft-title-bar").show_titled(
+                    ui,
+                    Title::new(title_text),
+                    |ui, _| {
+                        if IconButton::new(IconId::new("home"))
+                            .label("Home / Fit View")
+                            .show(ui)
+                            .clicked()
+                        {
+                            chosen_action = Some(TopMenuAction::FitView);
+                        }
+                        chosen_action = chosen_action.or(menus::show_bar(ui, &menus));
+                    },
+                    |ui, _| {
+                        if IconButton::new(theme_icon)
+                            .label("Switch Theme")
+                            .show(ui)
+                            .clicked()
+                        {
+                            switch_theme_clicked = true;
+                        }
+                        Divider::vertical().show(ui);
+                        if IconButton::new(IconId::new("undo"))
+                            .label("Undo")
+                            .enabled(can_undo)
+                            .show(ui)
+                            .clicked()
+                        {
+                            undo_clicked = true;
+                        }
+                        if IconButton::new(IconId::new("redo"))
+                            .label("Redo")
+                            .enabled(can_redo)
+                            .show(ui)
+                            .clicked()
+                        {
+                            redo_clicked = true;
+                        }
+                    },
+                );
 
                 if resp.close_requested {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);

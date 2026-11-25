@@ -4,6 +4,8 @@
 
 use std::sync::{Arc, OnceLock};
 
+use eframe::egui;
+
 use craft_host::target::{Backend, ShellInfo};
 use craft_host::{AppInfo, Host};
 use craft_ui::fonts::{I18nScripts, UiFonts};

@@ -4,9 +4,12 @@
 //! "Not yet implemented" tooltip, so the structure is complete and users find where things
 //! will be.
 
-use craft_ui::controls::Kbd;
-use craft_ui::menu::{MenuEntry, MenuItem};
-use eframe::egui::{Key, KeyboardShortcut, Modifiers};
+use std::cell::Cell;
+
+use craft_ui::contract::{Props as _, Show as _, TooltipSpec};
+use craft_ui::display::Divider;
+use craft_ui::menu::{Menu, MenuBar, MenuTitle};
+use eframe::egui::{self, Key, KeyboardShortcut, Modifiers};
 use stencilcraft_doc::CutStyle;
 use stencilcraft_engine::document::{ArrangeOrder, PasteMode};
 use stencilcraft_engine::{Alignment, BooleanOperation, DistributionAxis, NodeAxis};
@@ -28,8 +31,179 @@ fn cmd_alt() -> Modifiers {
     Modifiers::COMMAND | Modifiers::ALT
 }
 
-fn kbd(modifiers: Modifiers, key: Key) -> Kbd {
-    Kbd::new(&KeyboardShortcut::new(modifiers, key))
+fn kbd(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
+    KeyboardShortcut::new(modifiers, key)
+}
+
+/// The mark an item shows in the menu's mark column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    Check(bool),
+    Radio(bool),
+}
+
+/// One item of the app's menu table: a command row, or a submenu of entries.
+#[derive(Clone, Debug)]
+pub struct MenuItem<T> {
+    label: String,
+    command: Option<T>,
+    children: Option<Vec<MenuEntry<T>>>,
+    enabled: bool,
+    tooltip: Option<String>,
+    shortcut: Option<KeyboardShortcut>,
+    mark: Option<Mark>,
+}
+
+/// An entry of a menu: an item or a separator.
+#[derive(Clone, Debug)]
+pub enum MenuEntry<T> {
+    Item(MenuItem<T>),
+    Separator,
+}
+
+impl<T> From<MenuItem<T>> for MenuEntry<T> {
+    fn from(item: MenuItem<T>) -> Self {
+        MenuEntry::Item(item)
+    }
+}
+
+impl<T> MenuEntry<T> {
+    /// The item, unless this is a separator.
+    pub fn item(&self) -> Option<&MenuItem<T>> {
+        match self {
+            MenuEntry::Item(item) => Some(item),
+            MenuEntry::Separator => None,
+        }
+    }
+}
+
+impl<T> MenuItem<T> {
+    /// A row that runs `command`.
+    pub fn new(label: &str, command: T) -> Self {
+        MenuItem {
+            label: label.to_owned(),
+            command: Some(command),
+            children: None,
+            enabled: true,
+            tooltip: None,
+            shortcut: None,
+            mark: None,
+        }
+    }
+
+    /// A submenu of `children`.
+    pub fn submenu(label: &str, children: Vec<MenuEntry<T>>) -> Self {
+        MenuItem {
+            label: label.to_owned(),
+            command: None,
+            children: Some(children),
+            enabled: true,
+            tooltip: None,
+            shortcut: None,
+            mark: None,
+        }
+    }
+
+    #[must_use]
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
+        self
+    }
+
+    #[must_use]
+    pub fn tooltip(mut self, text: &str) -> Self {
+        self.tooltip = Some(text.to_owned());
+        self
+    }
+
+    #[must_use]
+    pub fn shortcut(mut self, shortcut: KeyboardShortcut) -> Self {
+        self.shortcut = Some(shortcut);
+        self
+    }
+
+    /// A check mark, shown while `on`.
+    #[must_use]
+    pub fn check(mut self, on: bool) -> Self {
+        self.mark = Some(Mark::Check(on));
+        self
+    }
+
+    /// A radio mark, shown while `on`.
+    #[must_use]
+    pub fn radio(mut self, on: bool) -> Self {
+        self.mark = Some(Mark::Radio(on));
+        self
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub fn command(&self) -> Option<&T> {
+        self.command.as_ref()
+    }
+
+    pub fn children(&self) -> Option<&[MenuEntry<T>]> {
+        self.children.as_deref()
+    }
+}
+
+/// Shows the menu bar of `menus` (one title per top-level item) and returns the command picked this pass.
+pub fn show_bar<T: Copy>(ui: &mut egui::Ui, menus: &[MenuItem<T>]) -> Option<T> {
+    let chosen = Cell::new(None);
+    let titles = menus
+        .iter()
+        .map(|menu| {
+            let chosen = &chosen;
+            MenuTitle::new(menu.label.clone(), move |ui: &mut egui::Ui| {
+                if let Some(command) = show_rows(ui, menu.children().unwrap_or_default()) {
+                    chosen.set(Some(command));
+                }
+            })
+        })
+        .collect();
+    let _ = MenuBar::new("StencilCraft", titles).show(ui);
+    chosen.get()
+}
+
+/// Shows `entries` as menu rows, a submenu after its row, and returns the command of the row that ran.
+fn show_rows<T: Copy>(ui: &mut egui::Ui, entries: &[MenuEntry<T>]) -> Option<T> {
+    let mut picked = None;
+    for entry in entries {
+        let MenuEntry::Item(item) = entry else {
+            Divider::horizontal().show(ui);
+            continue;
+        };
+        if let Some(children) = &item.children {
+            let mut inner = None;
+            Menu::submenu_row_enabled(ui, item.label.clone(), item.enabled, |ui, _| {
+                inner = show_rows(ui, children);
+            });
+            picked = picked.or(inner);
+            continue;
+        }
+        let mut row = craft_ui::menu::MenuItem::new(item.label.clone()).enabled(item.enabled);
+        if let Some(shortcut) = &item.shortcut {
+            row = row.shortcut(ui.ctx().format_shortcut(shortcut));
+        }
+        match item.mark {
+            Some(Mark::Check(on)) => row = row.check(on),
+            Some(Mark::Radio(on)) => row = row.radio_mark(on),
+            None => {}
+        }
+        if let Some(tip) = &item.tooltip {
+            row = row.tooltip(TooltipSpec::new(tip.clone()).disabled_text(tip.clone()));
+        }
+        if row.show(ui).ran {
+            picked = item.command;
+        }
+    }
+    picked
 }
 
 /// A working item.

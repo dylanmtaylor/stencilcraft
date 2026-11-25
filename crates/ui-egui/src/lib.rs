@@ -1714,7 +1714,9 @@ pub fn canvas_guides(
     // key the guides control gave it, and is added on release.
     if let Some(drag) = preview
         && let Some(at) = drag.at
-        && !(1u64..).take(guides.len()).any(|key| GuideKey::new(key) == drag.key)
+        && !(1u64..)
+            .take(guides.len())
+            .any(|key| GuideKey::new(key) == drag.key)
     {
         shown.push(craft_ui::canvas::Guide::new(drag.key, drag.along, at));
     }

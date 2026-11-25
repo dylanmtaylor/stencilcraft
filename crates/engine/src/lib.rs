@@ -652,6 +652,8 @@ struct HistoryEntry {
     mappings: MappingSnapshot,
     vectorcraft: bool,
     rebuild_session: bool,
+    /// The command that made this step (its JSON name, e.g. `shape.add-rect`).
+    label: String,
 }
 
 impl History {
@@ -684,6 +686,7 @@ impl History {
         self.redo.push(HistoryEntry {
             vectorcraft: previous.vectorcraft,
             rebuild_session: previous.rebuild_session,
+            label: previous.label.clone(),
             ..current
         });
         Some(previous)
@@ -694,6 +697,7 @@ impl History {
         self.undo.push(HistoryEntry {
             vectorcraft: next.vectorcraft,
             rebuild_session: next.rebuild_session,
+            label: next.label.clone(),
             ..current
         });
         Some(next)
@@ -774,6 +778,7 @@ impl Engine {
             )));
         }
 
+        let label = command_label(&command);
         let rebuild_session = matches!(
             command,
             Command::DocumentNew { .. }
@@ -844,6 +849,7 @@ impl Engine {
                 self.history.push_snapshot(HistoryEntry {
                     vectorcraft,
                     rebuild_session,
+                    label,
                     ..before
                 });
                 Ok(effect)
@@ -2862,6 +2868,7 @@ impl Engine {
             },
             vectorcraft,
             rebuild_session,
+            label: String::new(),
         }
     }
 
@@ -2887,6 +2894,21 @@ impl Engine {
 
     pub fn can_redo(&self) -> bool {
         self.history.peek_redo().is_some()
+    }
+
+    /// The commands that can be undone, oldest first (their JSON names).
+    pub fn undo_labels(&self) -> Vec<String> {
+        self.history.undo.iter().map(|e| e.label.clone()).collect()
+    }
+
+    /// The commands that can be redone, the next one first.
+    pub fn redo_labels(&self) -> Vec<String> {
+        self.history
+            .redo
+            .iter()
+            .rev()
+            .map(|e| e.label.clone())
+            .collect()
     }
 
     /// Undo the last StencilCraft command through VectorCraft's journal when the command edited
@@ -2921,6 +2943,23 @@ impl Engine {
         self.restore_history_entry(&next);
         true
     }
+}
+
+/// A command's JSON name (`shape.add-rect`), for the History list.
+fn command_label(command: &Command) -> String {
+    serde_json::to_value(command)
+        .ok()
+        .and_then(|value| {
+            let name = value.get("command")?;
+            name.as_str().map(str::to_string).or_else(|| {
+                value
+                    .get("params")?
+                    .get("command")?
+                    .as_str()
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_else(|| "edit".to_string())
 }
 
 fn invalid<E: std::fmt::Display>(command: &'static str) -> impl Fn(E) -> EngineError {
@@ -4546,6 +4585,37 @@ mod tests {
         assert!(engine.can_redo());
         assert!(engine.redo());
         assert_eq!(engine.doc.layers.len(), 1);
+    }
+
+    #[test]
+    fn history_lists_commands_through_undo_and_redo() {
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 5.0,
+                height: 5.0,
+            })
+            .unwrap();
+        engine
+            .run(Command::Document(
+                crate::document::DocumentCommand::GridSet {
+                    spacing_mm: 5.0,
+                    subdivisions: 2,
+                    visible: None,
+                },
+            ))
+            .unwrap();
+        let labels = engine.undo_labels();
+        assert_eq!(labels.len(), 2, "{labels:?}");
+        assert_eq!(labels[0], "shape.add-rect");
+        assert_ne!(labels[1], "edit", "nested commands are named too");
+        assert!(engine.undo());
+        assert_eq!(engine.undo_labels(), vec!["shape.add-rect".to_string()]);
+        assert_eq!(engine.redo_labels(), vec![labels[1].clone()]);
+        assert!(engine.redo());
+        assert_eq!(engine.undo_labels(), labels);
     }
 
     #[test]

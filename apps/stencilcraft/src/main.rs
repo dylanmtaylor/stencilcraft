@@ -58,6 +58,7 @@ mod menus;
 /// File › New: the New Document dialog (preset cards and details).
 mod library_panel;
 mod machine_menu;
+mod misc_panels;
 mod new_doc;
 mod object_menu;
 
@@ -764,6 +765,9 @@ pub enum WorkspacePanel {
     FillColor,
     LineStyle,
     SelectByColor,
+    History,
+    Preferences,
+    Selections,
 }
 
 struct WorkspaceContent<'a> {
@@ -792,6 +796,9 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::FillColor => self.app.fill_colour_panel(ui),
             WorkspacePanel::LineStyle => self.app.line_style_panel(ui),
             WorkspacePanel::SelectByColor => self.app.select_by_colour_panel(ui),
+            WorkspacePanel::History => self.app.history_panel(ui),
+            WorkspacePanel::Preferences => self.app.preferences_panel(ui),
+            WorkspacePanel::Selections => self.app.selections_panel(ui),
         }
     }
 
@@ -816,6 +823,9 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::FillColor => "Fill Color",
             WorkspacePanel::LineStyle => "Line Style",
             WorkspacePanel::SelectByColor => "Select by Color",
+            WorkspacePanel::History => "History",
+            WorkspacePanel::Preferences => "Preferences",
+            WorkspacePanel::Selections => "Selections",
         }
         .to_owned()
     }
@@ -902,6 +912,9 @@ pub struct StencilApp {
     pub colour_hex_draft: String,
     /// A Machine-menu hardware action waiting for the Send tab.
     pub machine_action: Option<machine_menu::MachineAction>,
+    /// Select › Save Selection: named selections for this session.
+    pub saved_selections: Vec<misc_panels::SavedSelection>,
+    pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
     pub pending_style: Option<CutStyle>,
@@ -1057,6 +1070,9 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::FillColor,
                                 WorkspacePanel::LineStyle,
                                 WorkspacePanel::SelectByColor,
+                                WorkspacePanel::History,
+                                WorkspacePanel::Preferences,
+                                WorkspacePanel::Selections,
                             ],
                             0,
                         ),
@@ -1142,6 +1158,8 @@ impl StencilApp {
             stores: library_panel::FileStores::default(),
             colour_hex_draft: String::new(),
             machine_action: None,
+            saved_selections: Vec::new(),
+            selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
             canvas_drag_shape: None,
@@ -2477,6 +2495,10 @@ impl StencilApp {
                 || consume_exact(input, cmd_alt, egui::Key::T)
         }) {
             self.handle_menu_action(TopMenuAction::ShowPanel(WorkspacePanel::TextStyle));
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::K))
+        {
+            self.handle_menu_action(TopMenuAction::ShowPanel(WorkspacePanel::Preferences));
         } else if ctx
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::P))
         {

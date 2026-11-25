@@ -176,44 +176,47 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
     at SS's 300 dpi, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to
     96 dpi.
-25. **Print & Cut, beyond item 3**: missing printing from the app (resolution, preview),
-    a printable-area border on the canvas, mark size and position options, bleed,
-    printing cut lines, fill colour/gradient for printed artwork, Flatten, print size checks
-    and calibration. Scan-to-cut is low priority.
-26. **Formats**: DXF, PDF and EPS/AI vector import, PDF/PNG/JPEG export and placed
-    raster images are available with the fidelity limits in items 5, 11 and 12. The
-    `.studio`/`.studio3` reader imports a limited, lossy subset; writing, GSD and CDR
-    remain unsupported. Recovery helpers exist but automatic desktop recovery is not wired.
+25. **Print & Cut, beyond item 3**: File › Print opens the Print & Cut sheet (marks,
+    fills and line colours, at 100 %) or a PDF of the page in the system viewer, and View ›
+    Show Print Border draws a quarter-inch printable area. Missing: printing placed
+    images on the sheet, mark size and position options, bleed, gradients, print size
+    checks, reading the marks with the cutter's sensor, and calibration. Scan-to-cut
+    (PixScan) is low priority.
+26. **Formats**: DXF, PDF and EPS/AI vector import (File › Import), PDF/PNG/JPEG export
+    (File › Export) and placed raster images are available with the fidelity limits in
+    items 5, 11 and 12. The `.studio`/`.studio3` reader imports a limited, lossy subset;
+    writing, GSD and CDR remain unsupported. The desktop snapshots unsaved work every
+    30 s and offers earlier sessions' snapshots (File › Open Recovered…).
 27. **Documents and preferences**: one board per document and one document per window,
-    with no tabs. File › New opens a New Document dialog with size/mat/laser presets and
-    recent sizes, but presets add no starter geometry yet (card fold score, tag hole,
-    print-and-cut marks) and there are no saved user presets. No Home screen and no
-    simplified starter workspace. No
-    default machine/material preferences, no UI language choice and no local design
-    library beyond Recent. The browser/mobile client is item 9.
-28. **Line and fill styles for pens and specialty tools**: shapes are only cut or
-    engrave. Missing: dashed lines with joins and caps, solid/gradient/pattern fills,
-    sketch (hatch) and stipple fills for pens, and emboss/deboss/foil patterns. Low
-    priority: a pop-up card strut generator, a spelling check for text, and image
-    effects on placed rasters.
-29. **Outline Stroke and Expand**: the engine now has `path.outline-stroke`, which turns
-    a stroked or open path into a closed cuttable outline. Missing: its menu/UI wiring and
-    a general Expand. This is the usual way to make stencil lettering and line art
-    cuttable.
-30. **Mirror on mat and load type**: Make supports matless sheet size validation and optional AutoBlade depth; roller margins, cut-border preview and Pop-out cutting remain missing. Pop-out Cut is not implemented; [research and protocol gaps](pop-out-cut.md) track the required work. a per-job mirror (`cut --mirror`, MCP `mirror`)
-    flips about the media centre at job build time; the desktop Send panel doesn't offer it
-    yet and no material preset turns it on. No choice between on-mat, without-mat (Smart Materials) and roll feed,
-    no project copies, and no arranging pieces on a mat preview.
-31. **Weld on cut and cut by layer**: the job layer now has weld on cut (`cut --weld`,
-    MCP `weld`) and per-layer send settings (`cut --layer NAME:skip|tool=2,passes=…`,
-    MCP `layers`: skip, tool holder, passes, force, speed, by layer name or line
-    colour). Missing: the desktop Send panel doesn't offer either yet; no per-layer
-    material/media or tool type, no cut-by-fill-colour mode, no per-layer cut order (layers
-    cut in document order), and weld treats a shape lying wholly inside another as a
-    hole.
-32. **Path construction**: the engine now has `path.join`, `path.average-nodes`,
-    `path.break`, `path.close`, `shapes.make-compound` and `shapes.release-compound`.
-    Missing: clipping masks (make/release) and menu/UI wiring for the path commands.
+    with no tabs (Close Tab starts a new document). File › New opens a New Document dialog
+    with size/mat/laser presets and recent sizes, but presets add no starter geometry
+    (card fold score, tag hole, print-and-cut marks) and there are no saved user presets.
+    A local Library panel, Starter Mode (a short panel set) and a Preferences panel exist.
+    No Home screen, no default machine/material preferences and no UI language choice.
+    The browser/mobile client is item 9.
+28. **Line and fill styles for pens and specialty tools**: shapes are cut or engrave,
+    with a line colour and a solid fill colour (Line Style and Fill Color panels, drawn on
+    the canvas and on the Print & Cut sheet). Sketch, stipple, emboss/deboss patterns,
+    pop-up cards and image effects are in the Effects panel. Missing: dashed lines with
+    joins and caps, line widths, gradient/pattern fills, and a spelling check for text.
+29. **Outline Stroke and Expand**: Object › Path › Outline Stroke (`path.outline-stroke`)
+    turns a stroked or open path into a closed cuttable outline, and Object › Expand
+    converts live shapes and text to plain paths. A stroke width per shape (to outline at
+    that width) is missing.
+30. **Mirror on mat and load type**: Machine › Mirror on Mat, Load Type (on a mat or
+    without one / roll) and Mat Preview exist, and Make validates matless sheet sizes with
+    optional AutoBlade depth. Roller margins, Pop-out cutting ([research and protocol
+    gaps](pop-out-cut.md)), project copies and arranging pieces on a mat preview remain
+    missing.
+31. **Weld on cut and cut by layer**: the job layer has weld on cut (`cut --weld`, MCP
+    `weld`), and the desktop Send tab has Silhouette's send modes: Standard, or a row per
+    line colour, fill colour or layer, each with on/off, cut/draw, pressure, speed and
+    passes, cut one after another. Missing: weld on cut in the desktop, per-row tool
+    holder and material, a chosen row order, and weld treats a shape lying wholly inside
+    another as a hole. Per-row cutting is untested on hardware.
+32. **Path construction**: Join, Average, Break, Close, Merge/Delete Points, compound
+    paths and Clipping Mask › Make/Release (a non-destructive intersect of two shapes) are
+    in the Object menu. Clipping more than one shape with one mask is missing.
 33. **Transform power tools**: Transform Again, Transform Each, shear, flip, align to a
     key object and distribute spacing by value now run from the menus and the Transform
     panel, which also has Silhouette's 33/50/100/200/300 % Scale presets. Missing: a
@@ -226,26 +229,30 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     and exporters in items 5, 11, 12 and 26 cover subsets; HEIC, GSD and CDR remain
     unsupported. Cricut hardware control lacks a public protocol.
 35. **Multiple boards**: the document model supports extra pages and the command
-    layer can create a document from templates. Desktop multi-page editing, a fully
-    integrated template wizard and Save Selection As remain incomplete.
+    layer can create a document from templates. Desktop multi-page editing and a fully
+    integrated template wizard remain incomplete (Save Selection As exists).
 36. **View aids**: Zoom to Selection, zoom presets, Rotate Page (0/90/180/270, view
     only), Smart Guides, Snap to Point and Guides (show, lock, make, release, clear) exist.
     Outline View, Show Print/Cut Border and Show Dimensions exist too, and the Page Setup
     panel sets the page, mat, orientation and grid. Make Guides turns a
     shape into its bounds' edge lines, not a guide of its own outline (guides are
     straight lines only).
-37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.
-    Missing: Select Same operation and saved selections (Next Object Above/Below are in the Select menu).
-38. **Rhinestone, lattice and other generators**: engine/MCP include rhinestone, puzzle
-    and other geometric generators. Complete desktop controls, lattice, Flexishapes,
-    cross-stitch and a font creator remain open.
-39. **Colour tools**: missing swatches, recolour, graphic styles (saved
-    line/fill/operation sets) and an eyedropper.
+37. **Select menu**: Select Inverse, Select Same (fill, stroke, layer, operation), Next
+    Object Above/Below, Select by Color and saved selections (Save/Edit Selection) exist.
+    Select Same stroke weight is missing (shapes have no stroke weight).
+38. **Rhinestone, lattice and other generators**: the Effects panel runs rhinestone,
+    sketch, stipple, emboss patterns, warp, puzzle, pop-up card, weed lines, lattice and
+    stencil bridges, with a live preview; Free Distort and Lattice Distort bend shapes by
+    a grid of handles. Flexishapes, cross-stitch and a font creator remain open.
+39. **Colour tools**: swatches (Fill Color, Line Style) and recolouring (Select by
+    Color › Recolor) exist. Missing: graphic styles (saved line/fill/operation sets) and an
+    eyedropper.
 40. **Automation**: missing recorded actions and batch replay inside the app. MCP and the
     CLI cover scripting from outside.
-41. **Design Space conveniences**: missing a history panel, tool and accessory prompts on
-    the Make screen, a favourite-materials list, an uploaded-images library and project
-    collections (as local folders).
+41. **Design Space conveniences**: Edit › History lists the undo steps and goes back or
+    forward to any of them. Missing: tool and accessory prompts on the Make screen, a
+    favourite-materials list, an uploaded-images library and project collections (as local
+    folders).
 
 42. **Sticker workflow** (Design Space Create Sticker): engine/MCP provide a sticker
     command with a welded border and kiss-cut or die-cut operation metadata. Desktop

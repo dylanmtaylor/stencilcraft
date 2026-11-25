@@ -6243,7 +6243,9 @@ impl StencilApp {
                 .reference_point(false)
                 .show_at(ui, body.rect);
                 overlay_claimed = overlay_claimed || r.hovered.is_some() || r.held.is_some();
-                if let Some(after) = r.edit.events.landed() {
+                // Updates preview; the shapes change once, on Commit or Set (`landed` carries an
+                // Update's value too, which would apply the box per drag update).
+                if let Some(after) = r.edit.events.committed() {
                     self.box_preview = None;
                     self.snap_lines.clear();
                     if let Some(affine) =

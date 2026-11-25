@@ -204,6 +204,7 @@ impl Session {
                 let (doc, warnings) = open_document(path.as_str())?;
                 let result = serde_json::json!({
                     "layers": doc.layers.len(),
+                    "operations": doc.operations.len(),
                     "shapes": doc.shape_count(),
                     "warnings": warnings,
                 });
@@ -227,6 +228,7 @@ impl Session {
             "doc.summary" => Ok(serde_json::json!({
                 "format": FORMAT_NAME,
                 "layers": self.engine.doc.layers.len(),
+                "operations": self.engine.doc.operations.len(),
                 "shapes": self.engine.doc.shape_count(),
                 "kerf_mm": self.engine.doc.kerf.width_mm,
                 "board": [
@@ -1824,9 +1826,13 @@ fn machine_dry_run(
         });
     }
     let mut layers = Vec::new();
-    for layer in doc.layers.iter().filter(|l| l.visible) {
+    for op in doc
+        .operations
+        .iter()
+        .filter(|o| o.visible && !o.kind.is_guide())
+    {
         let mut paths = Vec::new();
-        for shape in layer.members.iter().filter_map(|id| doc.get_shape(*id)) {
+        for shape in op.members.iter().filter_map(|id| doc.get_shape(*id)) {
             let pl = stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
@@ -1834,8 +1840,8 @@ fn machine_dry_run(
             paths.extend(m::paths_from_polylines(&pl));
         }
         layers.push(m::LayerPaths {
-            name: layer.name.clone(),
-            color: layer.color.clone(),
+            name: op.name.clone(),
+            color: op.color.clone(),
             paths,
         });
     }

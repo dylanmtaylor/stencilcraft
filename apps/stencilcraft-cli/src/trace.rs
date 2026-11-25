@@ -1,7 +1,7 @@
 //! Bounded raster-to-vector threshold silhouette tracing for the CLI.
 
 use std::collections::BTreeSet;
-use stencilcraft_doc::{Document, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{Document, Layer, Operation, OperationKind, OperationSettings};
 use stencilcraft_geom::BezPath;
 use stencilcraft_geom::Point;
 
@@ -118,12 +118,21 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
             width_mm: f64::from(width) * pixels_to_mm,
             height_mm: f64::from(height) * pixels_to_mm,
         },
-        layers: vec![Layer::new(
-            "trace",
-            Some(Operation::Cut(OperationSettings::default())),
-        )],
+        layers: vec![Layer::new("trace")],
         ..Document::default()
     };
+    let trace_op_id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id: trace_op_id,
+        name: "trace".to_string(),
+        kind: OperationKind::Cut,
+        settings: OperationSettings::default(),
+        color: None,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
     let mut contour_count = 0_usize;
     while let Some(&first_edge) = edges.iter().next() {
         contour_count += 1;
@@ -176,7 +185,13 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
                 path.line_to(*point);
             }
             path.close_path();
-            doc.push_shape(0, path).map_err(|error| error.to_string())?;
+            let id = doc
+                .push_shape(0, path)
+                .map_err(|error| error.to_string())?
+                .id;
+            if let Some(op) = doc.operations.iter_mut().find(|o| o.id == trace_op_id) {
+                op.members.push(id);
+            }
         }
     }
     doc.validate().map_err(|error| error.to_string())?;
@@ -225,7 +240,7 @@ mod tests {
         assert_eq!(doc.shape_count(), 1);
         assert!((doc.board.width_mm - 4.0 * 25.4 / 96.0).abs() < 1e-9);
         let polylines = stencilcraft_geom::path_to_polylines(
-            &doc.get_shape(doc.layers[0].members[0]).unwrap().path,
+            &doc.get_shape(doc.operations[0].members[0]).unwrap().path,
             stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
         );
         assert_eq!(polylines.len(), 1);

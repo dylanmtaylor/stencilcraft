@@ -818,6 +818,10 @@ pub struct StencilApp {
     pub pen_undo_requested: bool,
     /// The Polyline/Curve tool's points while placing them.
     pub click_draft: Option<click_draw::ClickDraft>,
+    /// The selection box part under the pointer, which picks how a drag of it scales.
+    pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
+    /// The transform a selection-box drag would apply, previewed until release.
+    pub box_preview: Option<craft_ui::canvas::kurbo::Affine>,
     /// The Arc tool after its first drag: centre and radius are set, the sweep follows the pointer.
     pub arc_draft: Option<arc_draw::ArcDraft>,
     /// The Freehand/Smooth Freehand stroke while the pointer is down.
@@ -1024,6 +1028,8 @@ impl StencilApp {
             pen_draft: None,
             pen_undo_requested: false,
             click_draft: None,
+            box_part: None,
+            box_preview: None,
             arc_draft: None,
             freehand_stroke: None,
             shape_drag_start: None,
@@ -1890,7 +1896,9 @@ impl StencilApp {
             self.delete_selection();
             return;
         }
-        if self.send_mode || ctx.egui_wants_keyboard_input() {
+        // Only a focused text field keeps the keys: canvas controls (the selection box, a
+        // button just clicked) hold keyboard focus too, and must not swallow Cmd+Z and friends.
+        if self.send_mode || ctx.text_edit_focused() {
             return;
         }
         // Shifted shortcuts first (harmless now that keys match exactly).
@@ -4706,6 +4714,85 @@ impl StencilApp {
             }
         }
 
+        // The selection box: corner handles scale in proportion and edge handles stretch (as in
+        // Silhouette Studio), the band just outside a corner rotates (Shift snaps 15°). Presses
+        // inside stay with the move-drag below, which snaps. One `shapes.affine` on release.
+        if self.active_tool == ActiveTool::Select
+            && !overlay_claimed
+            && self.canvas_drag_shape.is_none()
+            && self.canvas_selection_start.is_none()
+            && let Some(bounds) =
+                stencilcraft_ui_egui::selected_world_bounds(&self.engine.doc, &self.selected_shapes)
+            && bounds.width() > 0.0
+            && bounds.height() > 0.0
+        {
+            use craft_ui::canvas::quad::{BoxAllow, BoxPart, BoxRules, BoxState, ScaleRule};
+            let state = BoxState::from_rect(bounds);
+            let rules = BoxRules {
+                scale: if matches!(self.box_part, Some(BoxPart::Corner(_))) {
+                    ScaleRule::Proportional
+                } else {
+                    ScaleRule::Free
+                },
+                allow: BoxAllow {
+                    rotate: true,
+                    skew: false,
+                    distort: false,
+                },
+                ..BoxRules::default()
+            };
+            let r = craft_draw::ui::TransformBox::new(
+                "stencil-selection-box",
+                &state,
+                craft_draw::ui::TransformNames::default(),
+            )
+            .rules(rules)
+            .rotate_zone(craft_draw::ui::RotateZone::Band)
+            .inside_moves(false)
+            .reference_point(false)
+            .units(&mm_units, &mm_units)
+            .start(bounds, 0.0)
+            .show(ui, &response, &canvas_view);
+            overlay_claimed = overlay_claimed || r.claimed;
+            match r.event {
+                Some(EditEvent::Begin { .. }) | None => {}
+                Some(EditEvent::Update { value, .. }) => {
+                    self.box_preview = value.affine_from(bounds);
+                }
+                Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) => {
+                    self.box_preview = None;
+                    if let Some(affine) = value.affine_from(bounds)
+                        && affine != craft_ui::canvas::kurbo::Affine::IDENTITY
+                    {
+                        self.run_command(Command::ShapesAffine {
+                            ids: self.selected_shapes.clone(),
+                            matrix: affine.as_coeffs(),
+                        });
+                    }
+                }
+                Some(_) => self.box_preview = None,
+            }
+            if self.box_preview.is_none() {
+                self.box_part = r.hovered.or(r.picked);
+            }
+            if let Some(affine) = self.box_preview {
+                let paths: Vec<_> = self
+                    .selected_shapes
+                    .iter()
+                    .filter_map(|id| self.engine.doc.get_shape(*id))
+                    .map(|shape| affine * shape.path.clone())
+                    .collect();
+                stencilcraft_ui_egui::paint_preview_paths(
+                    &painter,
+                    &view,
+                    &paths,
+                    stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+                );
+            }
+        } else {
+            self.box_preview = None;
+        }
+
         // Polyline and Curve: click to place points (Silhouette Studio's tools). Switching to
         // another tool keeps what was placed, like the pen.
         if self
@@ -6784,6 +6871,39 @@ mod tests {
             1,
             "Cut removes the pasted copy"
         );
+    }
+
+    #[test]
+    fn shortcuts_work_while_a_canvas_control_has_keyboard_focus() {
+        // Regression: after dragging a selection handle the box kept keyboard focus and
+        // Cmd+Z (every shortcut but Delete) did nothing.
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        });
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: Some(egui::Key::Z),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                ui.memory_mut(|m| m.request_focus(egui::Id::unique("selection-box")));
+                assert!(ui.ctx().egui_wants_keyboard_input());
+                app.handle_keyboard_shortcuts(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
+        assert_eq!(app.engine.doc.shape_count(), 0, "Cmd+Z undid the rectangle");
     }
 
     #[test]

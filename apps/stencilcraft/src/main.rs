@@ -1741,6 +1741,120 @@ impl StencilApp {
         }
     }
 
+    /// The right-click menu of the Select tool, in Silhouette's order: undo/redo, clipboard,
+    /// flip, edit points/weld/offset, group, arrange. With nothing selected it offers undo,
+    /// paste and Select All.
+    fn shape_context_menu(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_engine::document::{ArrangeOrder, PasteMode};
+        let count = self.selected_shapes.len();
+        let any = count > 0;
+        let grouped = self
+            .selected_shapes
+            .iter()
+            .any(|id| self.outer_group(*id).is_some());
+        let mut chosen = None;
+        let mut item = |ui: &mut egui::Ui, label: &str, enabled: bool, action: TopMenuAction| {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                chosen = Some(action);
+                ui.close();
+            }
+        };
+        item(ui, "Undo", self.engine.can_undo(), TopMenuAction::Undo);
+        item(ui, "Redo", self.engine.can_redo(), TopMenuAction::Redo);
+        ui.separator();
+        if any {
+            item(ui, "Cut", true, TopMenuAction::Cut);
+            item(ui, "Copy", true, TopMenuAction::Copy);
+        }
+        item(ui, "Paste", true, TopMenuAction::Paste(PasteMode::Offset));
+        item(
+            ui,
+            "Paste in Front",
+            true,
+            TopMenuAction::Paste(PasteMode::InFront),
+        );
+        if !any {
+            item(ui, "Select All", true, TopMenuAction::SelectAll);
+            if let Some(action) = chosen {
+                self.handle_menu_action(action);
+            }
+            return;
+        }
+        item(ui, "Duplicate", true, TopMenuAction::Duplicate);
+        item(ui, "Delete", true, TopMenuAction::Delete);
+        ui.separator();
+        item(
+            ui,
+            "Flip Horizontally",
+            true,
+            TopMenuAction::Flip(DistributionAxis::Horizontal),
+        );
+        item(
+            ui,
+            "Flip Vertically",
+            true,
+            TopMenuAction::Flip(DistributionAxis::Vertical),
+        );
+        ui.separator();
+        let mut edit_points = false;
+        if ui
+            .add_enabled(count == 1 && !grouped, egui::Button::new("Edit Points"))
+            .clicked()
+        {
+            edit_points = true;
+            ui.close();
+        }
+        item(
+            ui,
+            "Weld",
+            count >= 2,
+            TopMenuAction::Pathfinder(BooleanOperation::Union),
+        );
+        let mut offset = false;
+        if ui.button("Offset").clicked() {
+            offset = true;
+            ui.close();
+        }
+        ui.separator();
+        item(ui, "Group", count >= 2, TopMenuAction::Group);
+        item(ui, "Ungroup", grouped || count >= 1, TopMenuAction::Ungroup);
+        ui.separator();
+        item(
+            ui,
+            "Send to Back",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Back),
+        );
+        item(
+            ui,
+            "Bring to Front",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Front),
+        );
+        item(
+            ui,
+            "Bring Forward",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Forward),
+        );
+        item(
+            ui,
+            "Send Backward",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Backward),
+        );
+        if let Some(action) = chosen {
+            self.handle_menu_action(action);
+        }
+        if edit_points {
+            self.path_selection = PathSelection::default();
+            self.active_tool = ActiveTool::DirectSelect;
+        }
+        if offset {
+            self.handle_edit_action(panels::EditAction::Offset { internal: false });
+        }
+    }
+
     /// The right-click menu in point editing (Silhouette's Delete Point / Break Path and the
     /// Point Editing panel's actions), acting on the point or line under the click.
     fn point_context_menu(&mut self, ui: &mut egui::Ui) {
@@ -5410,6 +5524,16 @@ impl StencilApp {
                 );
                 self.set_selection(ids);
             }
+            // Silhouette's right-click menu: a right-click on a shape selects it (and its group)
+            // first, then the menu acts on the selection.
+            if response.secondary_clicked()
+                && let Some(pointer) = response.interact_pointer_pos()
+                && let Some(id) = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0)
+                && !self.selected_shapes.contains(&id)
+            {
+                self.set_selection([id]);
+            }
+            response.context_menu(|ui| self.shape_context_menu(ui));
             if response.drag_stopped() {
                 if self.canvas_drag_shape.is_some() {
                     self.fold_drag_into_one_step();

@@ -646,7 +646,11 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Print & Cut", A::TogglePrintCutMarks).into(),
         item("Point Editing", A::ShowPanel(P::Points)).into(),
         item("Geometry", A::ShowPanel(crate::WorkspacePanel::Geometry)).into(),
-        item("Operations", A::ShowPanel(crate::WorkspacePanel::Operations)).into(),
+        item(
+            "Operations",
+            A::ShowPanel(crate::WorkspacePanel::Operations),
+        )
+        .into(),
         SEP,
         item("Properties", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
         item("Tools", A::ShowPanel(crate::WorkspacePanel::Tools)).into(),

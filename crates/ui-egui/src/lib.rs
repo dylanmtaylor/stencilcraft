@@ -17,45 +17,27 @@ pub enum ColorTheme {
 /// `craft-design-theme` file the design system resolves like any built-in.
 const THEME_JSON: &[u8] = include_bytes!("stencilcraft-theme.json");
 
-/// The design-system theme base StencilCraft installs each frame (`craft_ui::theme::install`),
-/// in `theme`'s mode at the Compact size. Falls back to the suite default if the bundled theme
-/// file ever fails to parse.
-pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
-    use craft_theme::{
-        AppDefaults, ModeChoice, Size, SuiteChoice, SystemAppearance, ThemeId, ThemePair,
-    };
-    let own = craft_theme::format::parse(THEME_JSON)
-        .ok()
-        .map(|file| file.theme);
-    let id = own
-        .as_ref()
-        .map_or_else(ThemeId::suite_default, |t| t.id.clone());
-    // Dark chrome is the suite's built-in Pro dark (charcoal #323232 panels, blue accent), the
-    // reference cutting-software look; light keeps StencilCraft Modern.
-    let dark = ThemeId::parse("craft.pro").unwrap_or_else(|_| id.clone());
-    let defaults = AppDefaults {
-        theme: ThemePair { light: id, dark },
-        mode: match theme {
-            ColorTheme::Dark => ModeChoice::Dark,
-            ColorTheme::Light => ModeChoice::Light,
-        },
-        size: Size::Compact,
-        sizes: Default::default(),
-    };
-    craft_ui::theme::Base::resolve(
-        &SuiteChoice::default().with_defaults(&defaults),
-        SystemAppearance::default(),
-        &defaults,
-        None,
-        &mut |wanted| {
-            own.clone().filter(|t| t.id == *wanted).or_else(|| {
-                craft_theme::builtins()
-                    .iter()
-                    .find(|t| t.id == *wanted)
-                    .cloned()
-            })
-        },
-    )
+/// The runtime root StencilCraft hands the framework each frame (`FrameInput`): `theme`'s mode
+/// at the Compact density. Dark chrome is the suite's built-in Pro dark (charcoal #323232
+/// panels, blue accent), the reference cutting-software look; light is StencilCraft Modern, the
+/// bundled library theme. Falls back to the suite default if the bundled theme file ever fails
+/// to parse.
+pub fn root_env(theme: ColorTheme) -> craft_ui::runtime::env::RootEnv {
+    use craft_theme::{ModeChoice, Size, ThemeId};
+    let root = craft_ui::runtime::env::RootEnv::new().density(Size::Compact);
+    match theme {
+        ColorTheme::Dark => {
+            let pro = ThemeId::parse("craft.pro").unwrap_or_else(|_| ThemeId::suite_default());
+            root.mode(ModeChoice::Dark).theme(pro)
+        }
+        ColorTheme::Light => {
+            let root = root.mode(ModeChoice::Light);
+            match craft_theme::format::parse(THEME_JSON) {
+                Ok(file) => root.library_theme(std::sync::Arc::new(file.theme)),
+                Err(_) => root,
+            }
+        }
+    }
 }
 
 /// Theme tokens: every colour the frontend draws comes from here.
@@ -537,24 +519,18 @@ impl View {
         )
     }
 
-    /// Convert to [`craft_ui::canvas::CanvasView`] for `Rulers`, `BezierOverlay`, `PenDraft`,
+    /// Convert to [`craft_behavior::CanvasView`] for `Rulers`, `BezierOverlay`, `PenDraft`,
     /// `TransformBox`, `CanvasScrollbars`, and `MarqueeDrag`.
-    pub fn to_canvas_view(&self, viewport: egui::Rect) -> craft_ui::canvas::CanvasView {
+    pub fn to_canvas_view(&self, viewport: egui::Rect) -> craft_behavior::CanvasView {
         let center_screen = viewport.center();
         let center_world = self.screen_to_world(egui::vec2(center_screen.x, center_screen.y));
-        craft_ui::canvas::CanvasView {
-            rotation: 90.0 * f64::from(self.quarter_turns % 4),
-            ..craft_ui::canvas::CanvasView::new(
-                viewport,
-                center_world,
-                f64::from(self.zoom.max(0.05)),
-            )
-        }
+        craft_behavior::CanvasView::new(viewport, center_world, f64::from(self.zoom.max(0.05)))
+            .rotation(90.0 * f64::from(self.quarter_turns % 4))
     }
 
-    /// Update `zoom` and `pan_mm` from a [`craft_ui::canvas::CanvasView`] (its rotation is
+    /// Update `zoom` and `pan_mm` from a [`craft_behavior::CanvasView`] (its rotation is
     /// ignored: the view keeps its own quarter turns).
-    pub fn from_canvas_view(&mut self, cv: &craft_ui::canvas::CanvasView) {
+    pub fn from_canvas_view(&mut self, cv: &craft_behavior::CanvasView) {
         if !cv.zoom.is_finite()
             || cv.zoom <= 0.0
             || !cv.center.x.is_finite()
@@ -1016,50 +992,31 @@ pub fn bezpath_to_edit_subpaths(path: &kurbo::BezPath) -> Vec<craft_draw::ui::pe
                     finalize_subpath_smoothness(&mut sub);
                     subpaths.push(sub);
                 }
-                current = Some(EditSubpath {
-                    knots: vec![Knot::corner(p)],
-                    closed: false,
-                });
+                current = Some(EditSubpath::new(vec![Knot::corner(p)], false));
             }
             kurbo::PathEl::LineTo(p) => {
-                let sub = current.get_or_insert_with(|| EditSubpath {
-                    knots: vec![Knot::corner(p)],
-                    closed: false,
-                });
+                let sub =
+                    current.get_or_insert_with(|| EditSubpath::new(vec![Knot::corner(p)], false));
                 sub.knots.push(Knot::corner(p));
             }
             kurbo::PathEl::QuadTo(c, p) => {
-                let sub = current.get_or_insert_with(|| EditSubpath {
-                    knots: vec![Knot::corner(p)],
-                    closed: false,
-                });
+                let sub =
+                    current.get_or_insert_with(|| EditSubpath::new(vec![Knot::corner(p)], false));
                 let p0 = sub.knots.last().map_or(p, |k| k.anchor);
                 let c1 = p0 + (2.0 / 3.0) * (c - p0);
                 let c2 = p + (2.0 / 3.0) * (c - p);
                 if let Some(prev) = sub.knots.last_mut() {
                     prev.out_ctrl = c1;
                 }
-                sub.knots.push(Knot {
-                    anchor: p,
-                    in_ctrl: c2,
-                    out_ctrl: p,
-                    smooth: false,
-                });
+                sub.knots.push(Knot::new(p, c2, p, false));
             }
             kurbo::PathEl::CurveTo(c1, c2, p) => {
-                let sub = current.get_or_insert_with(|| EditSubpath {
-                    knots: vec![Knot::corner(p)],
-                    closed: false,
-                });
+                let sub =
+                    current.get_or_insert_with(|| EditSubpath::new(vec![Knot::corner(p)], false));
                 if let Some(prev) = sub.knots.last_mut() {
                     prev.out_ctrl = c1;
                 }
-                sub.knots.push(Knot {
-                    anchor: p,
-                    in_ctrl: c2,
-                    out_ctrl: p,
-                    smooth: false,
-                });
+                sub.knots.push(Knot::new(p, c2, p, false));
             }
             kurbo::PathEl::ClosePath => {
                 if let Some(mut sub) = current.take() {
@@ -1144,11 +1101,7 @@ pub fn apply_path_edit(
     base: &[craft_draw::ui::pen::EditSubpath],
     edit: &craft_draw::ui::pen::PathEdit,
 ) -> Vec<craft_draw::ui::pen::EditSubpath> {
-    let mut path = craft_draw::ui::pen::EditPath {
-        key: edit.path(),
-        subpaths: base.to_vec(),
-        color: None,
-    };
+    let mut path = craft_draw::ui::pen::EditPath::new(edit.path(), base.to_vec());
     edit.apply(&mut path);
     path.subpaths
 }
@@ -1177,12 +1130,7 @@ pub fn insert_path_knot(
         let right = c.subsegment(t..1.0);
         sub.knots.get_mut(a)?.out_ctrl = left.p1;
         sub.knots.get_mut(b)?.in_ctrl = right.p2;
-        Knot {
-            anchor: left.p3,
-            in_ctrl: left.p2,
-            out_ctrl: right.p1,
-            smooth: true,
-        }
+        Knot::new(left.p3, left.p2, right.p1, true)
     };
     let at = a + 1;
     if at > sub.knots.len() {
@@ -1733,31 +1681,46 @@ pub fn scroll_extent(width_mm: f64, height_mm: f64) -> kurbo::Rect {
 }
 
 /// The document's ruler guides as `craft_ui` canvas guides: key = index + 1, so the
-/// engine's `guide.*` index is `key - 1`. `preview` (a guide being dragged: key and
-/// place) moves or hides that guide until the drag commits.
+/// engine's `guide.*` index is `key - 1`. `preview` (a guide being dragged: its key, the axis
+/// it runs along and its position, `None` off the canvas) moves or hides that guide until the
+/// drag commits.
 pub fn canvas_guides(
     guides: &[stencilcraft_doc::Guide],
-    preview: Option<(u64, craft_ui::canvas::GuidePlace)>,
+    preview: Option<GuidePreview>,
 ) -> Vec<craft_ui::canvas::Guide> {
-    use craft_ui::canvas::Orientation;
+    use craft_behavior::Axis;
+    use craft_ui::canvas::GuideKey;
     guides
         .iter()
         .zip(1u64..)
         .filter_map(|(g, key)| {
-            let orientation = match g.axis {
-                stencilcraft_doc::GuideAxis::Horizontal => Orientation::Horizontal,
-                stencilcraft_doc::GuideAxis::Vertical => Orientation::Vertical,
+            let key = GuideKey::new(key);
+            // A horizontal guide runs along x, at a y position.
+            let along = match g.axis {
+                stencilcraft_doc::GuideAxis::Horizontal => Axis::X,
+                stencilcraft_doc::GuideAxis::Vertical => Axis::Y,
             };
-            let (orientation, position) = match preview {
-                Some((k, place)) if k == key => (place.orientation, place.position?),
-                _ => (orientation, g.position_mm),
+            let (along, position) = match preview {
+                Some(drag) if drag.key == key => (drag.along, drag.at?),
+                _ => (along, g.position_mm),
             };
             Some(craft_ui::canvas::Guide {
                 locked: g.locked,
-                ..craft_ui::canvas::Guide::new(key, orientation, position)
+                ..craft_ui::canvas::Guide::new(key, along, position)
             })
         })
         .collect()
+}
+
+/// A document guide being dragged, as [`canvas_guides`] previews it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GuidePreview {
+    /// The dragged guide's key (its document index + 1).
+    pub key: craft_ui::canvas::GuideKey,
+    /// The axis it runs along.
+    pub along: craft_behavior::Axis,
+    /// Its position across that axis; `None` off the canvas, which removes it on release.
+    pub at: Option<f64>,
 }
 
 /// Paint smart guides: the alignment and spacing lines snapping found while dragging,
@@ -1922,14 +1885,14 @@ mod tests {
     fn adding_a_point_to_a_straight_line_keeps_it_straight() {
         use craft_draw::ui::pen::{EditSubpath, Knot, KnotRef};
         use stencilcraft_geom::Point;
-        let mut subs = vec![EditSubpath {
-            knots: vec![
+        let mut subs = vec![EditSubpath::new(
+            vec![
                 Knot::corner(Point::new(0.0, 0.0)),
                 Knot::corner(Point::new(10.0, 0.0)),
                 Knot::corner(Point::new(10.0, 10.0)),
             ],
-            closed: true,
-        }];
+            true,
+        )];
         let new = insert_path_knot(&mut subs, KnotRef::new(0, 0), 0.5).expect("inserted");
         assert_eq!(new, KnotRef::new(0, 1));
         let knots = &subs[0].knots;
@@ -1952,12 +1915,13 @@ mod tests {
     fn dragging_an_open_end_onto_the_other_closes_or_joins() {
         use craft_draw::ui::pen::{EditSubpath, Knot, KnotRef};
         use stencilcraft_geom::Point;
-        let open = |pts: &[(f64, f64)]| EditSubpath {
-            knots: pts
-                .iter()
-                .map(|&(x, y)| Knot::corner(Point::new(x, y)))
-                .collect(),
-            closed: false,
+        let open = |pts: &[(f64, f64)]| {
+            EditSubpath::new(
+                pts.iter()
+                    .map(|&(x, y)| Knot::corner(Point::new(x, y)))
+                    .collect(),
+                false,
+            )
         };
         // One open subpath: its last end dropped on its first closes it.
         let mut subs = vec![open(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.2, 0.1)])];
@@ -2020,11 +1984,11 @@ mod tests {
     #[test]
     fn bundled_theme_parses_and_resolves_in_both_modes() {
         assert!(craft_theme::format::parse(THEME_JSON).is_ok());
-        for theme in [ColorTheme::Dark, ColorTheme::Light] {
-            let base = theme_base(theme);
-            assert_eq!(base.inputs.dark.id.as_str(), "craft.pro");
-            assert_eq!(base.inputs.light.id.as_str(), "stencilcraft.modern");
-        }
+        assert_eq!(root_env(ColorTheme::Dark).theme_id().as_str(), "craft.pro");
+        assert_eq!(
+            root_env(ColorTheme::Light).theme_id().as_str(),
+            "stencilcraft.modern"
+        );
     }
 
     #[test]
@@ -2417,7 +2381,8 @@ mod tests {
 
     #[test]
     fn canvas_guides_map_keys_locks_and_a_drag_preview() {
-        use craft_ui::canvas::{GuidePlace, Orientation};
+        use craft_behavior::Axis;
+        use craft_ui::canvas::GuideKey;
         let guides = [
             stencilcraft_doc::Guide {
                 axis: stencilcraft_doc::GuideAxis::Vertical,
@@ -2435,36 +2400,35 @@ mod tests {
         assert_eq!(
             (
                 shown[0].key,
-                shown[0].orientation,
+                shown[0].along,
                 shown[0].position,
                 shown[0].locked
             ),
-            (1, Orientation::Vertical, 10.0, false)
+            (GuideKey::new(1), Axis::Y, 10.0, false)
         );
-        assert_eq!((shown[1].key, shown[1].locked), (2, true));
+        assert_eq!(
+            (shown[1].key, shown[1].along, shown[1].locked),
+            (GuideKey::new(2), Axis::X, true)
+        );
         let moved = canvas_guides(
             &guides,
-            Some((
-                1,
-                GuidePlace {
-                    orientation: Orientation::Vertical,
-                    position: Some(15.0),
-                },
-            )),
+            Some(GuidePreview {
+                key: GuideKey::new(1),
+                along: Axis::Y,
+                at: Some(15.0),
+            }),
         );
         assert_eq!(moved[0].position, 15.0);
         let removed = canvas_guides(
             &guides,
-            Some((
-                1,
-                GuidePlace {
-                    orientation: Orientation::Vertical,
-                    position: None,
-                },
-            )),
+            Some(GuidePreview {
+                key: GuideKey::new(1),
+                along: Axis::Y,
+                at: None,
+            }),
         );
         assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].key, 2);
+        assert_eq!(removed[0].key, GuideKey::new(2));
     }
 
     #[test]

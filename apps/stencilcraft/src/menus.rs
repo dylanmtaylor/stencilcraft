@@ -796,6 +796,13 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
     ]
 }
 
+/// A Machine › Send Mode radio item.
+fn send_mode(app: &StencilApp, label: &str, mode: crate::send_modes::SendMode) -> MenuEntry<A> {
+    item(label, A::SetSendMode(mode))
+        .radio(app.send.mode == mode)
+        .into()
+}
+
 fn machine(app: &StencilApp) -> Vec<MenuEntry<A>> {
     vec![
         item("Send…", A::ShowSend).shortcut(kbd(CMD, Key::L)).into(),
@@ -807,10 +814,10 @@ fn machine(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Send Mode",
             vec![
-                todo("Standard"),
-                todo("By Line Color"),
-                todo("By Fill Color"),
-                todo("By Layer"),
+                send_mode(app, "Standard", crate::send_modes::SendMode::Standard),
+                send_mode(app, "By Line Color", crate::send_modes::SendMode::LineColor),
+                send_mode(app, "By Fill Color", crate::send_modes::SendMode::FillColor),
+                send_mode(app, "By Layer", crate::send_modes::SendMode::Layer),
             ],
         ),
         item("Tool Holders…", A::ShowSend).into(),

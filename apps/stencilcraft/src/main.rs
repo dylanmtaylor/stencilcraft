@@ -66,6 +66,7 @@ mod object_menu;
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod page_setup;
 mod panels;
+mod send_modes;
 mod text_tool;
 mod trace_panel;
 
@@ -531,6 +532,8 @@ pub enum TopMenuAction {
         rows: u32,
         columns: u32,
     },
+    /// Machine › Send Mode.
+    SetSendMode(send_modes::SendMode),
     /// Panels › Starter Mode.
     ToggleStarterMode,
     ToggleMirror,
@@ -1031,6 +1034,10 @@ pub struct SendTab {
     pub bluetooth_channel: u8,
     pub hardware_result: HardwareResult,
     pub busy: bool,
+    /// Machine › Send Mode: one set of settings, or a row per line colour, fill colour or
+    /// layer.
+    pub mode: send_modes::SendMode,
+    pub rows: Vec<send_modes::SendRow>,
 }
 
 impl Default for SendTab {
@@ -1056,6 +1063,8 @@ impl Default for SendTab {
             bluetooth_channel: 1,
             hardware_result: Default::default(),
             busy: false,
+            mode: send_modes::SendMode::Standard,
+            rows: Vec::new(),
         }
     }
 }
@@ -3431,6 +3440,10 @@ impl StencilApp {
             }
             TopMenuAction::ToggleMirror => self.send.mirror = !self.send.mirror,
             TopMenuAction::BeginDistort { rows, columns } => self.begin_distort(rows, columns),
+            TopMenuAction::SetSendMode(mode) => {
+                self.send.mode = mode;
+                self.send_mode = true;
+            }
             TopMenuAction::ToggleStarterMode => {
                 self.prefs.starter_mode = !self.prefs.starter_mode;
                 self.save_prefs();
@@ -4092,19 +4105,27 @@ impl StencilApp {
             .target(target)
             .header(header)
             .show(ui, |ui| {
-                if self.send_mode {
-                    ui.add(
-                        Text::new("Review your material and machine settings before cutting.")
-                            .role(TypeRole::Caption)
-                            .content(Content::Muted),
-                    );
-                    self.send_tab(ui);
-                    if ui.add(Button::new("← Back to canvas")).clicked() {
-                        self.send_mode = false;
-                    }
-                } else {
-                    self.inspector(ui);
-                }
+                // The Send settings are long; they scroll when the dock is short.
+                egui::ScrollArea::vertical()
+                    .id_salt("stencilcraft-inspector-scroll")
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        if self.send_mode {
+                            ui.add(
+                                Text::new(
+                                    "Review your material and machine settings before cutting.",
+                                )
+                                .role(TypeRole::Caption)
+                                .content(Content::Muted),
+                            );
+                            self.send_tab(ui);
+                            if ui.add(Button::new("← Back to canvas")).clicked() {
+                                self.send_mode = false;
+                            }
+                        } else {
+                            self.inspector(ui);
+                        }
+                    });
             });
     }
 
@@ -4398,6 +4419,43 @@ impl StencilApp {
     ) {
         let doc = self.engine.doc.clone();
         self.start_hardware_on(doc, command, ctx);
+    }
+
+    /// Run cut jobs one after another in the background (a by-colour send has one per row).
+    fn start_hardware_jobs(
+        &mut self,
+        jobs: Vec<(
+            stencilcraft_doc::Document,
+            stencilcraft_engine::HardwareCommand,
+        )>,
+        ctx: egui::Context,
+    ) {
+        if self.send.busy || jobs.is_empty() {
+            return;
+        }
+        self.send.busy = true;
+        let result = self.send.hardware_result.clone();
+        let spawned = std::thread::Builder::new()
+            .name("cutter-jobs".into())
+            .spawn(move || {
+                let mut outcome = Err("no jobs".to_string());
+                for (doc, command) in jobs {
+                    outcome = stencilcraft_engine::Engine::new(doc)
+                        .run(Command::Hardware(command))
+                        .map_err(|e| e.to_string());
+                    if outcome.is_err() {
+                        break;
+                    }
+                }
+                if let Ok(mut slot) = result.lock() {
+                    *slot = Some(outcome);
+                }
+                ctx.request_repaint();
+            });
+        if let Err(error) = spawned {
+            self.send.busy = false;
+            self.send.summary = Some(vec![error.to_string()]);
+        }
     }
 
     /// Run a hardware command on `doc` in the background (the test cut sends its own design).
@@ -4773,6 +4831,7 @@ impl StencilApp {
             });
         }
         let _ = Checkbox::bool("Bounding box preview", &mut self.send.bbox_only).show(ui);
+        self.send_mode_ui(ui);
         Divider::horizontal().show(ui);
         let selected_connection = if self.send.connection_mode == 2 {
             !self.send.bluetooth_address.trim().is_empty()
@@ -4790,8 +4849,8 @@ impl StencilApp {
             };
             for (label, send) in [(validate_label, false), (send_label, true)] {
                 if ui.add(Button::new(label)).clicked() {
-                    let command = self.cut_command(send);
-                    self.start_hardware(command, ui.ctx().clone());
+                    let jobs = self.send_jobs(send);
+                    self.start_hardware_jobs(jobs, ui.ctx().clone());
                 }
             }
         }

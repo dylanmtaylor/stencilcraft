@@ -2,9 +2,9 @@
 //! saved from a shape and applied to the selection; Match Style is the eyedropper: the other
 //! selected shapes take the first one's style.
 
-use craft_ui::controls::TextField;
-use craft_behavior::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_doc::CutStyle;
 use stencilcraft_engine::{Command, ProductionCommand, ProductionField};
@@ -116,7 +116,9 @@ impl StencilApp {
         let (mut save, mut matching) = (false, false);
         let mut apply = None;
         let mut remove = None;
-        let _ = Panel::new("stencilcraft-graphic-styles-panel").show(ui, |ui| {
+        let _ = Panel::new("Graphic Styles")
+            .id_salt("stencilcraft-graphic-styles-panel")
+            .show(ui, |ui, _| {
             for (i, s) in styles.iter().enumerate() {
                 ui.horizontal(|ui| {
                     if let Some(c) = s
@@ -148,16 +150,12 @@ impl StencilApp {
                     "Save a shape's colours and operation as a style to reuse them.",
                 );
             }
-            let edit = TextField::new("graphic-style-name", "Style name", name.as_str())
-                .char_limit(80)
+            let _ = TextField::new("Style name", Bind::bound(&mut name))
+                .id_salt("graphic-style-name")
                 .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                name = value;
+            // A style's name is at most 80 characters.
+            if name.chars().count() > 80 {
+                name = name.chars().take(80).collect();
             }
             ui.horizontal(|ui| {
                 save = button(

@@ -3,9 +3,9 @@
 //! playing runs them again with the current selection in place of the recorded shapes, each
 //! step's new shapes becoming the selection for the next.
 
-use craft_ui::controls::TextField;
-use craft_behavior::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use serde_json::{Value, json};
 use stencilcraft_engine::{Command, Effect};
@@ -103,23 +103,21 @@ impl StencilApp {
         let (mut start, mut stop) = (false, false);
         let mut play = None;
         let mut remove = None;
-        let _ = Panel::new("stencilcraft-actions-panel").show(ui, |ui| {
+        let _ = Panel::new("Actions")
+            .id_salt("stencilcraft-actions-panel")
+            .show(ui, |ui, _| {
             match recording {
                 None => {
                     start = button(ui, "Start Recording", true);
                 }
                 Some(steps) => {
                     ui.label(format!("Recording… {steps} steps"));
-                    let edit = TextField::new("action-name", "Action name", name.as_str())
-                        .char_limit(80)
+                    let _ = TextField::new("Action name", Bind::bound(&mut name))
+                        .id_salt("action-name")
                         .show(ui);
-                    if let Some(
-                        EditEvent::Update { value, .. }
-                        | EditEvent::Commit { value, .. }
-                        | EditEvent::Set { value, .. },
-                    ) = edit.event
-                    {
-                        name = value;
+                    // An action's name is at most 80 characters.
+                    if name.chars().count() > 80 {
+                        name = name.chars().take(80).collect();
                     }
                     stop = button(ui, "Stop and Save", true);
                 }

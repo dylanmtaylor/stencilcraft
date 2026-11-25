@@ -531,51 +531,60 @@ fn tick_style(index: f64, palette: Palette) -> (f32, egui::Color32) {
     }
 }
 
-/// Colour and stroke weight for one shape, given its owning layer and the view.
-/// The layer's material colour overrides the operation token when set (and
-/// parseable); an unparseable colour falls back to the token, never panics.
-/// The colour a layer row's swatch shows: the layer's stored colour when it
-/// parses, else the operation's token colour — the same fallback the canvas
-/// paint uses in [`shape_visual`].
-pub fn layer_swatch_color(layer: &stencilcraft_doc::Layer, theme: ColorTheme) -> egui::Color32 {
+/// Token colour for an operation kind: cutting kinds share the cut token,
+/// engraving the engrave token, everything else the plain text colour.
+fn kind_token_color(kind: stencilcraft_doc::OperationKind, palette: Palette) -> egui::Color32 {
+    use stencilcraft_doc::OperationKind::*;
+    match kind {
+        Cut | KissCut | DieCut => palette.cut_line,
+        Engrave => palette.engrave_line,
+        _ => palette.text,
+    }
+}
+
+/// The colour an operation row's swatch shows: the operation's stored colour
+/// when it parses, else the kind's token colour — the same fallback the canvas
+/// paint uses in [`shape_visual`]. Colour is display/filter only, never identity.
+pub fn operation_swatch_color(
+    op: &stencilcraft_doc::Operation,
+    theme: ColorTheme,
+) -> egui::Color32 {
     let palette = Palette::for_theme(theme);
-    if let Some([r, g, b]) = layer
+    if let Some([r, g, b]) = op
         .color
         .as_deref()
         .and_then(stencilcraft_doc::canvas::parse_hex_color)
     {
         egui::Color32::from_rgb(r, g, b)
     } else {
-        match layer.operation.as_ref() {
-            Some(stencilcraft_doc::Operation::Cut(_)) => palette.cut_line,
-            Some(stencilcraft_doc::Operation::Engrave(_)) => palette.engrave_line,
-            _ => palette.text,
-        }
+        kind_token_color(op.kind, palette)
     }
 }
 
+/// Colour and stroke weight for one shape, given the document (its effective
+/// operation in `Document::operations`) and the view. The operation's material
+/// colour overrides the kind token when set (and parseable); an unparseable
+/// colour falls back to the token, never panics.
 fn shape_visual(
-    layer: &stencilcraft_doc::Layer,
+    doc: &stencilcraft_doc::Document,
+    shape_id: u64,
     view: &View,
     kerf_preview: bool,
     palette: Palette,
 ) -> (egui::Color32, f32) {
+    let op = doc.operation_of_shape(shape_id);
     let line_color = if kerf_preview {
         // The compensated-contours preview: a different line colour so a user can
         // tell what the machine will actually trace.
         palette.kerf_line
-    } else if let Some([r, g, b]) = layer
-        .color
-        .as_deref()
+    } else if let Some([r, g, b]) = op
+        .and_then(|op| op.color.as_deref())
         .and_then(stencilcraft_doc::canvas::parse_hex_color)
     {
         egui::Color32::from_rgb(r, g, b)
     } else {
-        match layer.operation.as_ref() {
-            Some(stencilcraft_doc::Operation::Cut(_)) => palette.cut_line,
-            Some(stencilcraft_doc::Operation::Engrave(_)) => palette.engrave_line,
-            _ => palette.text,
-        }
+        op.map(|op| kind_token_color(op.kind, palette))
+            .unwrap_or(palette.text)
     };
     (line_color, 1.5_f32.max(0.4 * view.zoom))
 }
@@ -660,7 +669,8 @@ pub fn paint_document(
             .filter_map(|id| doc.get_shape(*id))
             .filter(|shape| !shape.hidden)
         {
-            let (mut color, mut width) = shape_visual(layer, view, options.kerf_preview, palette);
+            let (mut color, mut width) =
+                shape_visual(doc, shape.id, view, options.kerf_preview, palette);
             if selection.selected_shapes.contains(&shape.id) {
                 color = palette.selection;
                 width = width.max(2.5);
@@ -1583,35 +1593,42 @@ mod tests {
         let doc = simple_square();
         let view = View::default();
         let palette = Palette::for_theme(ColorTheme::Dark);
-        let (plain_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
-        let (kerf_col, _) = shape_visual(&doc.layers[0], &view, true, palette);
+        let shape = doc.layers[0].members[0];
+        let (plain_col, _) = shape_visual(&doc, shape, &view, false, palette);
+        let (kerf_col, _) = shape_visual(&doc, shape, &view, true, palette);
         assert_ne!(plain_col, kerf_col);
     }
 
     #[test]
-    fn layer_colour_affects_visual() {
+    fn operation_colour_affects_visual() {
         let mut doc = simple_square();
         let view = View::default();
         let palette = Palette::for_theme(ColorTheme::Dark);
-        let (op_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
-        assert_eq!(op_col, palette.cut_line, "operation token is the default");
+        let shape = doc.layers[0].members[0];
+        let (op_col, _) = shape_visual(&doc, shape, &view, false, palette);
+        assert_eq!(op_col, palette.cut_line, "kind token is the default");
 
-        doc.layers[0].color = Some("#ff0000".to_string());
-        let (layer_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
-        assert_eq!(layer_col, egui::Color32::from_rgb(255, 0, 0));
-        assert_ne!(layer_col, op_col);
+        doc.operations[0].color = Some("#ff0000".to_string());
+        let (op_row_col, _) = shape_visual(&doc, shape, &view, false, palette);
+        assert_eq!(op_row_col, egui::Color32::from_rgb(255, 0, 0));
+        assert_eq!(
+            operation_swatch_color(&doc.operations[0], ColorTheme::Dark),
+            egui::Color32::from_rgb(255, 0, 0),
+            "the swatch shows the same colour"
+        );
+        assert_ne!(op_row_col, op_col);
 
-        doc.layers[0].color = Some("red".to_string());
-        let (fallback_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
+        doc.operations[0].color = Some("red".to_string());
+        let (fallback_col, _) = shape_visual(&doc, shape, &view, false, palette);
         assert_eq!(
             fallback_col, op_col,
             "unparseable colour falls back to the token"
         );
 
-        let (kerf_col, _) = shape_visual(&doc.layers[0], &view, true, palette);
+        let (kerf_col, _) = shape_visual(&doc, shape, &view, true, palette);
         assert_eq!(
             kerf_col, palette.kerf_line,
-            "kerf preview wins over layer colour"
+            "kerf preview wins over the operation colour"
         );
     }
 
@@ -1657,63 +1674,50 @@ mod tests {
     }
 
     #[test]
-    fn unassigned_rows() {
-        let mut doc = simple_square();
-        doc.layers.push(stencilcraft_doc::Layer::new("base", None));
-        let lone = doc
-            .push_shape(1, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
-            .unwrap();
-        let open: std::collections::BTreeSet<usize> =
-            [0, layers::UNASSIGNED_GROUP].into_iter().collect();
-        let rows = layers::build_layer_rows(&doc, &open);
-        assert_eq!(
-            rows,
-            vec![
-                layers::LayerRow::Layer { index: 0 },
-                layers::LayerRow::Member {
-                    layer: 0,
-                    shape: doc.layers[0].members[0]
-                },
-                layers::LayerRow::Layer { index: 1 },
-                layers::LayerRow::UnassignedGroup,
-                layers::LayerRow::UnassignedMember { shape: lone.id },
-            ]
-        );
-        assert_eq!(
-            doc.layers.len(),
-            2,
-            "Unassigned stays derived, never persisted"
-        );
-    }
-
-    #[test]
-    fn effective_operation() {
+    fn unassigned_shapes_are_those_in_no_operation() {
         let mut doc = simple_square();
         let member = doc.layers[0].members[0];
-        let (op, source) = layers::effective_operation(&doc, member).unwrap();
-        assert!(matches!(op, stencilcraft_doc::Operation::Cut(_)));
-        assert_eq!(source, "cut");
-
-        doc.layers.push(stencilcraft_doc::Layer::new("base", None));
         let lone = doc
-            .push_shape(1, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
+            .push_shape(0, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
             .unwrap();
-        assert_eq!(layers::effective_operation(&doc, lone.id), None);
+        let unassigned: Vec<u64> = doc.unassigned_shapes().map(|s| s.id).collect();
+        assert_eq!(unassigned, vec![lone.id], "the op-less shape is unassigned");
+        assert!(doc.get_shape(member).is_some());
+        // Unassigned stays derived: no field was added to the document.
+        assert_eq!(doc.operations.len(), 1);
     }
 
     #[test]
-    fn pass_number_skips_container_layers() {
+    fn effective_operation_reads_document_operations() {
         let mut doc = simple_square();
-        doc.layers
-            .insert(0, stencilcraft_doc::Layer::new("base", None));
-        doc.layers.push(stencilcraft_doc::Layer::new(
-            "guide",
-            Some(stencilcraft_doc::Operation::Guide),
-        ));
-        assert_eq!(layers::pass_number(&doc, 0), None, "container: no badge");
-        assert_eq!(layers::pass_number(&doc, 1), Some(1));
-        assert_eq!(layers::pass_number(&doc, 2), None, "Guide: no badge (D-12)");
-        assert_eq!(layers::pass_number(&doc, 3), None, "out of range");
+        let member = doc.layers[0].members[0];
+        let op = doc.operation_of_shape(member).expect("owning operation");
+        assert_eq!(op.kind, stencilcraft_doc::OperationKind::Cut);
+        assert_eq!(op.name, "cut");
+
+        let lone = doc
+            .push_shape(0, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
+            .unwrap();
+        assert_eq!(doc.operation_of_shape(lone.id), None);
+    }
+
+    #[test]
+    fn pass_number_skips_guide_and_hidden_operations() {
+        let mut doc = simple_square();
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 2,
+            name: "guide".to_string(),
+            kind: stencilcraft_doc::OperationKind::Guide,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: Vec::new(),
+            icon: None,
+        });
+        assert_eq!(layers::pass_number(&doc, 0), Some(1));
+        assert_eq!(layers::pass_number(&doc, 1), None, "Guide: no badge");
+        assert_eq!(layers::pass_number(&doc, 2), None, "out of range");
     }
 
     #[test]

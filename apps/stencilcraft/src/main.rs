@@ -97,6 +97,8 @@ pub struct UserPrefs {
     pub mat_preview: bool,
     /// Panels › Starter Mode: only the everyday panels.
     pub starter_mode: bool,
+    /// Send › My materials: saved cut settings.
+    pub custom_materials: Vec<send_modes::CustomMaterial>,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -119,6 +121,7 @@ impl Default for UserPrefs {
             outline_view: false,
             mat_preview: true,
             starter_mode: false,
+            custom_materials: Vec::new(),
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -1041,6 +1044,9 @@ pub struct SendTab {
     /// Advanced: path order (`roller`, `speed`, `none`), interior contours first, closed
     /// overcut (mm), weld on cut and roller track enhancing.
     pub order: String,
+    /// My materials: the chosen saved material and the name field for saving one.
+    pub custom_material: Option<usize>,
+    pub custom_name: String,
     pub interior_first: bool,
     pub overcut_mm: f64,
     pub weld: bool,
@@ -1073,6 +1079,8 @@ impl Default for SendTab {
             mode: send_modes::SendMode::Standard,
             rows: Vec::new(),
             order: "roller".to_string(),
+            custom_material: None,
+            custom_name: String::new(),
             interior_first: true,
             overcut_mm: 0.0,
             weld: false,
@@ -4918,6 +4926,7 @@ impl StencilApp {
             }
         }
         self.send_advanced_ui(ui);
+        self.custom_materials_ui(ui);
     }
 
     /// Encode the visible flattened design through the machine crate and

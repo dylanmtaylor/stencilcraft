@@ -8,6 +8,20 @@ use stencilcraft_doc::Document;
 
 use crate::StencilApp;
 
+/// A saved material (Send › My materials): its cut settings by name.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CustomMaterial {
+    pub name: String,
+    pub pressure: u8,
+    pub speed: u8,
+    pub passes: u8,
+    #[serde(default)]
+    pub depth: Option<u8>,
+}
+
+/// Most saved materials kept.
+pub const MAX_CUSTOM_MATERIALS: usize = 100;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SendMode {
     #[default]
@@ -198,6 +212,114 @@ impl StencilApp {
         });
     }
 
+    /// Save the current Send settings as a material named `name` (replacing one of that name).
+    pub fn save_custom_material(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() {
+            self.status = "name the material first".to_string();
+            return;
+        }
+        let material = CustomMaterial {
+            name: name.to_string(),
+            pressure: self.send.pressure_override,
+            speed: self.send.speed_override,
+            passes: self.send.passes,
+            depth: self.send.set_blade_depth.then_some(self.send.blade_depth),
+        };
+        let list = &mut self.prefs.custom_materials;
+        list.retain(|m| m.name != material.name);
+        list.push(material);
+        if list.len() > MAX_CUSTOM_MATERIALS {
+            list.remove(0);
+        }
+        self.send.custom_material = list.len().checked_sub(1);
+        self.save_prefs();
+        self.status = format!("saved material {name}");
+    }
+
+    /// Use saved material `index`'s settings.
+    pub fn apply_custom_material(&mut self, index: usize) {
+        let Some(m) = self.prefs.custom_materials.get(index).cloned() else {
+            return;
+        };
+        self.send.pressure_override = m.pressure.clamp(1, 33);
+        self.send.speed_override = m.speed.clamp(1, 30);
+        self.send.passes = m.passes.clamp(1, 10);
+        self.send.set_blade_depth = m.depth.is_some();
+        if let Some(depth) = m.depth {
+            self.send.blade_depth = depth.min(10);
+        }
+        self.send.custom_material = Some(index);
+        self.status = format!("using material {}", m.name);
+    }
+
+    /// Send › My materials: pick, save or delete saved cut settings.
+    pub fn custom_materials_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label("My materials");
+        let names: Vec<String> = self
+            .prefs
+            .custom_materials
+            .iter()
+            .map(|m| {
+                format!(
+                    "{} (pressure {}, speed {}, {}×)",
+                    m.name, m.pressure, m.speed, m.passes
+                )
+            })
+            .collect();
+        let mut picked = None;
+        let mut delete = false;
+        ui.horizontal(|ui| {
+            let current = self
+                .send
+                .custom_material
+                .and_then(|i| names.get(i))
+                .cloned()
+                .unwrap_or_else(|| "Choose…".to_string());
+            egui::ComboBox::from_id_salt("send-my-material")
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    for (i, name) in names.iter().enumerate() {
+                        if ui
+                            .selectable_label(self.send.custom_material == Some(i), name)
+                            .clicked()
+                        {
+                            picked = Some(i);
+                        }
+                    }
+                });
+            delete = ui
+                .add_enabled(
+                    self.send.custom_material.is_some(),
+                    egui::Button::new("Delete"),
+                )
+                .clicked();
+        });
+        let mut save = false;
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.send.custom_name)
+                    .hint_text("Material name")
+                    .desired_width(140.0),
+            );
+            save = ui.button("Save current settings").clicked();
+        });
+        if let Some(i) = picked {
+            self.apply_custom_material(i);
+        }
+        if save {
+            let name = self.send.custom_name.clone();
+            self.save_custom_material(&name);
+        }
+        if delete
+            && let Some(i) = self.send.custom_material.take()
+            && i < self.prefs.custom_materials.len()
+        {
+            self.prefs.custom_materials.remove(i);
+            self.save_prefs();
+        }
+    }
+
     /// The jobs a cut sends: the whole design in Standard mode, else one per enabled row.
     pub fn send_jobs(&self, send: bool) -> Vec<(Document, stencilcraft_engine::HardwareCommand)> {
         if self.send.mode == SendMode::Standard {
@@ -235,6 +357,26 @@ impl StencilApp {
 mod tests {
     use super::*;
     use stencilcraft_engine::Command;
+
+    #[test]
+    fn custom_materials_save_apply_and_replace() {
+        let mut app = StencilApp::new(None);
+        app.send.pressure_override = 22;
+        app.send.speed_override = 3;
+        app.send.passes = 2;
+        app.save_custom_material("  ");
+        assert!(app.prefs.custom_materials.is_empty());
+        app.save_custom_material("Kraft board");
+        app.send.pressure_override = 5;
+        app.save_custom_material("Kraft board");
+        assert_eq!(app.prefs.custom_materials.len(), 1, "same name replaces");
+        app.send.pressure_override = 30;
+        app.apply_custom_material(0);
+        assert_eq!(app.send.pressure_override, 5);
+        assert_eq!((app.send.speed_override, app.send.passes), (3, 2));
+        app.apply_custom_material(99);
+        assert_eq!(app.send.custom_material, Some(0));
+    }
 
     #[test]
     fn rows_group_by_colour_and_layer_and_keep_settings() {

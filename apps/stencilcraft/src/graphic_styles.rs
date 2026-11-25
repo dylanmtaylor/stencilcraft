@@ -3,7 +3,7 @@
 //! selected shapes take the first one's style.
 
 use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_doc::CutStyle;

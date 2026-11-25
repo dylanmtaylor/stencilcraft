@@ -5,7 +5,7 @@
 //! current design into it. File › Print opens the page as a PDF in the system viewer.
 
 use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_doc::library::{Library, LibraryItem};

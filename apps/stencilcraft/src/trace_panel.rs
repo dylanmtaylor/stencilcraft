@@ -5,7 +5,7 @@
 
 use craft_ui::composites::SectionHeader;
 use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, Segmented, Slider};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_engine::Command;

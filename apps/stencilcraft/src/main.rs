@@ -32,7 +32,7 @@ use craft_ui::contract::{Bind, BodyCx, Tracked};
 use craft_ui::docking::{DockConfig, DockPanels, GroupAt, PanelSpec, PanelSpecs};
 use craft_ui::patterns::dock::DockArea;
 use craft_window::policy::WindowKind;
-use craft_ui::edit::{CancelReason, EditEvent};
+use craft_behavior::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_behavior::flow::Axis;
 use craft_behavior::dock::SplitSize;
@@ -1132,7 +1132,7 @@ pub struct StencilApp {
     /// The selection box part under the pointer, which picks how a drag of it scales.
     pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
     /// The transform a selection-box drag would apply, previewed until release.
-    pub box_preview: Option<craft_ui::canvas::kurbo::Affine>,
+    pub box_preview: Option<craft_behavior::kurbo::Affine>,
     /// The Arc tool after its first drag: centre and radius are set, the sweep follows the pointer.
     pub arc_draft: Option<arc_draw::ArcDraft>,
     /// The Freehand/Smooth Freehand stroke while the pointer is down.
@@ -2055,9 +2055,9 @@ impl StencilApp {
     pub fn snap_box_scale(
         &mut self,
         bounds: stencilcraft_geom::Rect,
-        affine: craft_ui::canvas::kurbo::Affine,
-    ) -> craft_ui::canvas::kurbo::Affine {
-        use craft_ui::canvas::kurbo::Affine;
+        affine: craft_behavior::kurbo::Affine,
+    ) -> craft_behavior::kurbo::Affine {
+        use craft_behavior::kurbo::Affine;
         let [sx, b, c, sy, _, _] = affine.as_coeffs();
         if b.abs() > 1e-9 || c.abs() > 1e-9 || !(sx > 0.0 && sy > 0.0) {
             return affine;
@@ -5922,7 +5922,7 @@ impl StencilApp {
                     if let Some(affine) = value
                         .affine_from(bounds)
                         .map(|a| self.snap_box_scale(bounds, a))
-                        && affine != craft_ui::canvas::kurbo::Affine::IDENTITY
+                        && affine != craft_behavior::kurbo::Affine::IDENTITY
                     {
                         self.run_command(Command::ShapesAffine {
                             ids: self.selected_shapes.clone(),
@@ -8563,7 +8563,7 @@ mod tests {
 
     #[test]
     fn resizing_snaps_edges_and_ctrl_suspends_snapping() {
-        use craft_ui::canvas::kurbo::Affine;
+        use craft_behavior::kurbo::Affine;
         let mut app = StencilApp::new(None);
         app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
         let bounds = stencilcraft_geom::Rect::new(0.0, 0.0, 20.0, 10.0);

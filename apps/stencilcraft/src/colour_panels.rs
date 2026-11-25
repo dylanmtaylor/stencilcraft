@@ -3,7 +3,7 @@
 //! they label the design (cut by colour, print) without changing what is cut.
 
 use craft_ui::controls::{ControlSize, Swatch, TextField};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_doc::CutStyle;
@@ -345,7 +345,7 @@ mod perforate_tests {
         let pieces = path
             .elements()
             .iter()
-            .filter(|el| matches!(el, craft_ui::canvas::kurbo::PathEl::MoveTo(_)))
+            .filter(|el| matches!(el, craft_behavior::kurbo::PathEl::MoveTo(_)))
             .count();
         assert!(pieces > 20, "{pieces} dashes along 120 mm at 4 mm pitch");
         assert!(app.engine.undo());

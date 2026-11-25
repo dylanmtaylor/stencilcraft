@@ -11,7 +11,7 @@ use craft_ui::behavior::GridNav;
 use craft_ui::composites::SectionLabel;
 use craft_ui::controls::{NumberField, Segmented, Select, TextField};
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome, Width};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::icons::Icon;
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::primitives::{Content, Corner, Divider, Gap, Interactive, Pad, SurfaceKind, Text};

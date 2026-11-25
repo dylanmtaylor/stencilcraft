@@ -7,7 +7,7 @@ use craft_theme::TypeRole;
 use craft_ui::canvas::quad::Anchor9;
 use craft_ui::composites::SectionHeader;
 use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, NumberField, Segmented};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::icons::Icon;
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::patterns::{AlignBar, Panel};

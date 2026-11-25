@@ -15,7 +15,7 @@ use crate::panels::{button, hint};
 pub fn contour_count(path: &stencilcraft_geom::BezPath) -> usize {
     path.elements()
         .iter()
-        .filter(|el| matches!(el, craft_ui::canvas::kurbo::PathEl::MoveTo(_)))
+        .filter(|el| matches!(el, craft_behavior::kurbo::PathEl::MoveTo(_)))
         .count()
 }
 

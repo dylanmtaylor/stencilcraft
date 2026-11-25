@@ -1,7 +1,7 @@
 //! Edit › History, Edit › Preferences and Select › Save/Edit Selection panels.
 
 use craft_ui::controls::{Checkbox, Segmented, TextField};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_ui_egui::ColorTheme;

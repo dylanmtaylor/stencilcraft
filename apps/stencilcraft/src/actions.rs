@@ -4,7 +4,7 @@
 //! step's new shapes becoming the selection for the next.
 
 use craft_ui::controls::TextField;
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use serde_json::{Value, json};

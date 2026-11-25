@@ -8,7 +8,7 @@
 
 use craft_ui::composites::SectionHeader;
 use craft_ui::controls::{Checkbox, ControlSize, Segmented, Select, TextField};
-use craft_ui::edit::EditEvent;
+use craft_behavior::EditEvent;
 use craft_ui::patterns::Panel;
 use eframe::egui;
 use stencilcraft_doc::{FontSpec, TextAlign, TextSpec};

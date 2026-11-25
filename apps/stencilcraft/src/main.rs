@@ -6000,8 +6000,27 @@ impl StencilApp {
                 .handles(self.handles_shown)
                 .show_at(ui, body.rect);
 
-                // The overlay's parts take their presses before the canvas below them.
-                overlay_claimed = b_resp.hover.is_some() || !b_resp.edit.events.is_empty();
+                // The overlay's parts take their presses before the canvas below them. The
+                // app's canvas widget sees the same press, and egui may start its drag a pass
+                // before the overlay reports one: a press that began on a point, handle or line
+                // is the overlay's for as long as it lasts (it used to start a marquee there and
+                // clear the selection).
+                let press_on_part = ui
+                    .input(|input| input.pointer.press_origin())
+                    .and_then(|at| {
+                        BezierOverlay::hit_test(
+                            &edit_paths,
+                            &self.path_selection,
+                            self.handles_shown,
+                            &canvas_view,
+                            at,
+                            8.0,
+                        )
+                    })
+                    .is_some();
+                overlay_claimed = b_resp.hover.is_some()
+                    || !b_resp.edit.events.is_empty()
+                    || press_on_part;
                 if let Some(sel) = b_resp.select.clone() {
                     if let Some(pid) = sel.path {
                         self.selected_shape = Some(pid);
@@ -6009,7 +6028,9 @@ impl StencilApp {
                     }
                     self.path_selection = sel;
                 }
-                let landed = b_resp.edit.events.landed().is_some();
+                // The drag's updates preview the path; it reshapes once, on Commit (or a key's
+                // Set): one undo step. (`landed` carries an Update's value too.)
+                let landed = b_resp.edit.events.committed().is_some();
                 let cancelled = b_resp.edit.events.cancel_reason().is_some();
                 if cancelled {
                     self.bezier_gesture_base = None;
@@ -8435,6 +8456,61 @@ mod tests {
             app.engine.doc.shape_count(),
             1,
             "Cut removes the pasted copy"
+        );
+    }
+
+    #[test]
+    fn dragging_a_point_of_a_selected_path_reshapes_it_in_one_step() {
+        // Regression: in Direct Select a press on a node started the canvas's marquee, which
+        // cleared the selection ("No selection") and left the rectangle as it was.
+        let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 20.0,
+            y: 20.0,
+            width: 40.0,
+            height: 30.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::DirectSelect;
+        let canvas: fn(&mut StencilApp, &mut egui::Ui) = |app, ui| app.canvas_body(ui);
+        frame(&ctx, &mut app, vec![], canvas);
+        frame(&ctx, &mut app, vec![], canvas);
+        let before = app.engine.doc.get_shape(1).unwrap().path.clone();
+        let corner = app
+            .view
+            .world_to_screen(stencilcraft_geom::Point::new(20.0, 20.0));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(corner)], canvas);
+        frame(&ctx, &mut app, vec![button(corner, true)], canvas);
+        let mut at = corner;
+        for _ in 0..4 {
+            at += egui::vec2(10.0, 8.0);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], canvas);
+            assert_eq!(app.selected_shapes, vec![1], "the dragged path stays selected");
+        }
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().path,
+            before,
+            "the drag previews; the document changes on release"
+        );
+        frame(&ctx, &mut app, vec![button(at, false)], canvas);
+        frame(&ctx, &mut app, vec![], canvas);
+        assert_eq!(app.selected_shapes, vec![1], "{}", app.status);
+        assert_eq!(app.active_tool, ActiveTool::DirectSelect);
+        let after = app.engine.doc.get_shape(1).unwrap().path.clone();
+        assert_ne!(after, before, "the point moved and the path reshaped");
+        assert!(app.engine.undo());
+        assert_eq!(
+            app.engine.doc.get_shape(1).unwrap().path,
+            before,
+            "one undo step"
         );
     }
 

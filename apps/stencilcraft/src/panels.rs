@@ -113,6 +113,8 @@ pub struct OffsetDraft {
     pub internal: bool,
     pub join: JoinStyle,
     pub limit: f64,
+    /// Unite overlapping offsets into one outline.
+    pub weld: bool,
     /// The preview shows (a control was touched and neither Apply nor Cancel came since).
     pub armed: bool,
 }
@@ -124,6 +126,7 @@ impl Default for OffsetDraft {
             internal: false,
             join: JoinStyle::Round,
             limit: stencilcraft_kerf::DEFAULT_MITER_LIMIT,
+            weld: false,
             armed: false,
         }
     }
@@ -138,6 +141,7 @@ impl OffsetDraft {
             distance_mm: if self.internal { -distance } else { distance },
             join: self.join,
             miter_limit: self.limit,
+            weld: self.weld,
         }
     }
 }
@@ -770,12 +774,22 @@ impl StencilApp {
             join: draft.join,
             miter_limit: draft.limit,
         };
-        let result = source
+        let result: Result<Vec<BezPath>, String> = source
             .iter()
             .map(|path| {
                 stencilcraft_kerf::offset_path(path, distance, &options).map_err(|e| e.to_string())
             })
             .collect();
+        let result = match result {
+            Ok(paths) if draft.weld => stencilcraft_engine::weld_by_style(
+                paths
+                    .into_iter()
+                    .map(|p| (p, stencilcraft_doc::CutStyle::Cut))
+                    .collect(),
+            )
+            .map(|welded| welded.into_iter().map(|(p, _)| p).collect()),
+            other => other,
+        };
         self.panels.offset_preview = Some(OffsetPreview {
             source,
             draft,
@@ -833,6 +847,7 @@ impl StencilApp {
                     );
                 });
             }
+            let _ = Checkbox::bool("Weld overlapping offsets", &mut draft.weld).show(ui);
             if let Some(error) = &error {
                 ui.add(Text::new(error).content(Content::Muted));
             }

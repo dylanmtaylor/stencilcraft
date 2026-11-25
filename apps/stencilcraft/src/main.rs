@@ -48,6 +48,7 @@ mod arc_draw;
 mod click_draw;
 mod colour_panels;
 mod control;
+mod distort_tool;
 mod effects;
 mod file_menu;
 mod freehand;
@@ -154,7 +155,11 @@ fn arrow_nudge(ctx: &egui::Context) -> Option<(f64, f64)> {
 /// Consume `key` only when it was pressed with exactly `modifiers`. egui's `consume_key`
 /// ignores extra Shift and Alt, so Shift+G would pick the Polygon tool and Cmd+Shift+L would
 /// run Cmd+L; shortcuts here want the combination as written.
-fn consume_exact(input: &mut egui::InputState, modifiers: egui::Modifiers, key: egui::Key) -> bool {
+pub(crate) fn consume_exact(
+    input: &mut egui::InputState,
+    modifiers: egui::Modifiers,
+    key: egui::Key,
+) -> bool {
     let pressed = input.events.iter().any(|event| {
         matches!(
             event,
@@ -521,6 +526,11 @@ pub enum TopMenuAction {
     Machine(machine_menu::MachineAction),
     /// Machine › Mat Preview and Mirror on Mat.
     ToggleMatPreview,
+    /// Object › Distort › Free Distort (1 × 1) and Effect › Lattice (a grid).
+    BeginDistort {
+        rows: u32,
+        columns: u32,
+    },
     /// Panels › Starter Mode.
     ToggleStarterMode,
     ToggleMirror,
@@ -773,6 +783,7 @@ pub enum WorkspacePanel {
     History,
     Preferences,
     Selections,
+    Distort,
 }
 
 struct WorkspaceContent<'a> {
@@ -804,6 +815,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::History => self.app.history_panel(ui),
             WorkspacePanel::Preferences => self.app.preferences_panel(ui),
             WorkspacePanel::Selections => self.app.selections_panel(ui),
+            WorkspacePanel::Distort => self.app.distort_panel(ui),
         }
     }
 
@@ -831,6 +843,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::History => "History",
             WorkspacePanel::Preferences => "Preferences",
             WorkspacePanel::Selections => "Selections",
+            WorkspacePanel::Distort => "Distort",
         }
         .to_owned()
     }
@@ -921,6 +934,8 @@ pub struct StencilApp {
     pub machine_action: Option<machine_menu::MachineAction>,
     /// Select › Save Selection: named selections for this session.
     pub saved_selections: Vec<misc_panels::SavedSelection>,
+    /// Free Distort / Lattice in progress.
+    pub distort: Option<distort_tool::DistortDraft>,
     pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
@@ -1069,6 +1084,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::History,
     WorkspacePanel::Preferences,
     WorkspacePanel::Selections,
+    WorkspacePanel::Distort,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -1187,6 +1203,7 @@ impl StencilApp {
             recolor_row: None,
             machine_action: None,
             saved_selections: Vec::new(),
+            distort: None,
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -2334,7 +2351,10 @@ impl StencilApp {
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
         // Typing on the canvas takes every plain key; Cmd shortcuts other than undo still work.
         self.handle_text_session_keys(ctx);
-        if self.handle_click_draft_keys(ctx) || self.handle_clipboard_events(ctx) {
+        if self.handle_distort_keys(ctx)
+            || self.handle_click_draft_keys(ctx)
+            || self.handle_clipboard_events(ctx)
+        {
             return;
         }
         // Buttons and other controls can retain keyboard focus after a click. Only
@@ -3410,6 +3430,7 @@ impl StencilApp {
                 self.save_prefs();
             }
             TopMenuAction::ToggleMirror => self.send.mirror = !self.send.mirror,
+            TopMenuAction::BeginDistort { rows, columns } => self.begin_distort(rows, columns),
             TopMenuAction::ToggleStarterMode => {
                 self.prefs.starter_mode = !self.prefs.starter_mode;
                 self.save_prefs();
@@ -5049,6 +5070,7 @@ impl StencilApp {
         let mut overlay_claimed = guides_claimed;
         overlay_claimed |= self.trace_canvas(ui, &response, &painter);
         overlay_claimed |= self.text_canvas(ui, &response, &painter);
+        overlay_claimed |= self.distort_canvas(ui, &response, &painter);
         self.paint_effect_preview(&painter);
 
         // Interactive BezierOverlay for node editing

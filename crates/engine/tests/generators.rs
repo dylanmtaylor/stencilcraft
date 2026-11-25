@@ -458,3 +458,47 @@ fn generators_stand_upright_on_the_y_down_page() {
         "the heart's point is at the bottom: {bottom:?}"
     );
 }
+
+/// Free Distort moves the four corners; a lattice bends inside its cells.
+#[test]
+fn distort_moves_corners_and_lattice_cells() {
+    let mut e = Engine::default();
+    let sq = square(&mut e, 0.0, 20.0);
+    // Free Distort: pull the top-right corner up and right.
+    let points = "[[0,0],[30,-10],[20,20],[0,20]]";
+    undoable(
+        &mut e,
+        &format!(
+            r#"{{"command":"shapes.distort","params":{{"ids":[{sq}],"rows":1,"columns":1,"points":{points}}}}}"#
+        ),
+    );
+    let b = e.doc.get_shape(sq).unwrap().path.bounding_box();
+    assert!(
+        (b.x1 - 30.0).abs() < 1e-6 && (b.y0 + 10.0).abs() < 1e-6,
+        "{b:?}"
+    );
+    // A 2 × 2 lattice with the centre pulled down bends the middle only.
+    let sq2 = square(&mut e, 100.0, 20.0);
+    let mut pts = Vec::new();
+    for j in 0..=2 {
+        for i in 0..=2 {
+            let (x, y) = (100.0 + 10.0 * f64::from(i), 10.0 * f64::from(j));
+            pts.push(if (i, j) == (1, 1) {
+                [x, y + 5.0]
+            } else {
+                [x, y]
+            });
+        }
+    }
+    let json = serde_json::json!({"command": "shapes.distort", "params": {"ids": [sq2], "rows": 2, "columns": 2, "points": pts}});
+    e.run(serde_json::from_value(json).unwrap()).unwrap();
+    let b2 = e.doc.get_shape(sq2).unwrap().path.bounding_box();
+    assert!(
+        (b2.width() - 20.0).abs() < 1e-6 && (b2.height() - 20.0).abs() < 1e-6,
+        "{b2:?}"
+    );
+    // Wrong point counts and non-finite points are refused.
+    assert!(e.run(cmd(&format!(
+        r#"{{"command":"shapes.distort","params":{{"ids":[{sq}],"rows":1,"columns":1,"points":[[0,0]]}}}}"#
+    ))).is_err());
+}

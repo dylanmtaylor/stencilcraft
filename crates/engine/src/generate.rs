@@ -208,6 +208,83 @@ fn upright<E>(
     Ok(out)
 }
 
+/// `shapes.distort`: Free Distort and Lattice. The selection's bounds are split into
+/// `rows` × `columns` cells; `points` are where the cell corners move to (row by row from
+/// the top left, `(rows + 1) × (columns + 1)` of them). Each path is flattened and mapped
+/// cell by cell (bilinear), so it can bend in ways an affine transform cannot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DistortArgs {
+    pub ids: Vec<u64>,
+    #[serde(default = "one")]
+    pub rows: u32,
+    #[serde(default = "one")]
+    pub columns: u32,
+    pub points: Vec<[f64; 2]>,
+}
+
+/// Most rows or columns a lattice may have.
+pub const MAX_LATTICE: u32 = 20;
+
+/// The lattice's corner points for an undistorted `bounds`.
+pub fn lattice_points(bounds: kurbo::Rect, rows: u32, columns: u32) -> Vec<[f64; 2]> {
+    let (rows, columns) = (rows.clamp(1, MAX_LATTICE), columns.clamp(1, MAX_LATTICE));
+    (0..=rows)
+        .flat_map(|j| {
+            (0..=columns).map(move |i| {
+                [
+                    bounds.x0 + bounds.width() * f64::from(i) / f64::from(columns),
+                    bounds.y0 + bounds.height() * f64::from(j) / f64::from(rows),
+                ]
+            })
+        })
+        .collect()
+}
+
+/// Map `p` from `bounds` through the lattice (bilinear in its cell).
+fn lattice_map(
+    p: kurbo::Point,
+    bounds: kurbo::Rect,
+    rows: u32,
+    columns: u32,
+    points: &[[f64; 2]],
+) -> kurbo::Point {
+    let u = ((p.x - bounds.x0) / bounds.width()).clamp(0.0, 1.0) * f64::from(columns);
+    let v = ((p.y - bounds.y0) / bounds.height()).clamp(0.0, 1.0) * f64::from(rows);
+    // In 0..=columns-1 / rows-1 after the clamps, so the casts are exact.
+    let i = (u.floor() as u32).min(columns - 1);
+    let j = (v.floor() as u32).min(rows - 1);
+    let (s, t) = (u - f64::from(i), v - f64::from(j));
+    let at = |row: u32, col: u32| -> kurbo::Point {
+        let index = (row * (columns + 1) + col) as usize;
+        points
+            .get(index)
+            .map_or(p, |q| kurbo::Point::new(q[0], q[1]))
+    };
+    let (a, b, c, d) = (at(j, i), at(j, i + 1), at(j + 1, i + 1), at(j + 1, i));
+    let top = a.lerp(b, s);
+    let bottom = d.lerp(c, s);
+    top.lerp(bottom, t)
+}
+
+/// `path` flattened and mapped through the lattice.
+pub fn distort_path(
+    path: &BezPath,
+    bounds: kurbo::Rect,
+    rows: u32,
+    columns: u32,
+    points: &[[f64; 2]],
+) -> BezPath {
+    let mut out = BezPath::new();
+    let tolerance = (bounds.width().max(bounds.height()) * 1e-4).max(0.005);
+    kurbo::flatten(path.iter(), tolerance, |el| match el {
+        kurbo::PathEl::MoveTo(p) => out.move_to(lattice_map(p, bounds, rows, columns, points)),
+        kurbo::PathEl::LineTo(p) => out.line_to(lattice_map(p, bounds, rows, columns, points)),
+        kurbo::PathEl::ClosePath => out.close_path(),
+        _ => {}
+    });
+    out
+}
+
 /// Most copies one replicate/object-on-path command adds.
 const MAX_COPIES: usize = 10_000;
 
@@ -366,6 +443,29 @@ impl Engine {
                 let marks = generate::weed::registration(bounds, a.margin_mm, a.arm_mm, a.mark)
                     .map_err(|e| invalid(NAME, e))?;
                 self.add_tagged(vec![(marks, a.style, None)], NAME)
+            }
+            Command::GenerateDistort(a) => {
+                const NAME: &str = "shapes.distort";
+                let (rows, columns) = (a.rows, a.columns);
+                let expected = (rows as usize + 1) * (columns as usize + 1);
+                if !(1..=MAX_LATTICE).contains(&rows)
+                    || !(1..=MAX_LATTICE).contains(&columns)
+                    || a.points.len() != expected
+                    || !a.points.iter().flatten().all(|v| v.is_finite())
+                {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: rows and columns 1–{MAX_LATTICE}, and {expected} finite points"
+                    )));
+                }
+                let bounds = self.bounds_of(&a.ids, NAME)?;
+                if !(bounds.width() > 0.0 && bounds.height() > 0.0) {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the shapes have no width or height"
+                    )));
+                }
+                self.edit_in_place(&a.ids, NAME, |p| {
+                    Ok(distort_path(p, bounds, rows, columns, &a.points))
+                })
             }
             Command::GenerateWarp(a) => self.edit_in_place(&a.ids, "generate.warp", |p| {
                 upright(p, |p| generate::warp::warp(p, &a.params))

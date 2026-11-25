@@ -99,7 +99,12 @@ fn execute(
         .ok_or_else(|| machine::MachineError::Config(format!("Unknown cutter {model}")))?;
     let mut paths = Vec::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
-        for shape in layer.shapes.iter().filter(|s| !s.hidden) {
+        for shape in layer
+            .members
+            .iter()
+            .filter_map(|id| doc.get_shape(*id))
+            .filter(|s| !s.hidden)
+        {
             for line in stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,

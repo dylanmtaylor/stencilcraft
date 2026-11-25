@@ -540,7 +540,7 @@ fn subtract_all_removes_every_front_shape_from_the_bottom_one() {
     })
     .unwrap();
     assert_eq!(e.doc.shape_count(), 1);
-    let (_, shape) = e.doc.shapes().next().unwrap();
+    let shape = e.doc.shapes().next().unwrap();
     assert!((shape.path.area().abs() - 100.0).abs() < 1e-6);
     let b = shape.bounds().unwrap();
     assert!((b.x0 - 10.0).abs() < 1e-6 && (b.x1 - 20.0).abs() < 1e-6);

@@ -170,6 +170,15 @@ pub fn split_regions(path: &BezPath) -> Vec<BezPath> {
 mod tests {
     use super::*;
 
+    /// The `i`-th member shape of `layer` in `doc`.
+    pub(crate) fn member(
+        doc: &stencilcraft_doc::Document,
+        layer: usize,
+        i: usize,
+    ) -> &stencilcraft_doc::Shape {
+        doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
+
     pub(crate) fn rect(x: f64, y: f64, w: f64, h: f64) -> BezPath {
         let mut p = BezPath::new();
         p.move_to((x, y));

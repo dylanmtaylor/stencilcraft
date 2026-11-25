@@ -4,26 +4,31 @@
 //! with explicit shape ids.
 
 use kurbo::{BezPath, Point};
-use stencilcraft_doc::{Board, CutStyle, Document, KerfSettings, Layer, Shape};
+use stencilcraft_doc::{
+    Board, CutStyle, Document, KerfSettings, Layer, Operation, OperationSettings, Shape,
+};
 
-fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> Layer {
-    Layer {
-        name: name.to_string(),
-        kind,
-        visible: true,
-        shapes,
-        ..Layer::new("", kind)
-    }
+/// The production pass a legacy `CutStyle` maps to.
+fn op_of(kind: CutStyle) -> Option<Operation> {
+    Some(match kind {
+        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
+        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+    })
 }
 
-fn shape(id: u64, path: BezPath, style: CutStyle) -> Shape {
+/// A layer plus the shapes that belong to it (v2 keeps geometry in `Document::shapes`).
+fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> (Layer, Vec<Shape>) {
+    let mut layer = Layer::new(name, op_of(kind));
+    layer.members = shapes.iter().map(|s| s.id).collect();
+    (layer, shapes)
+}
+
+fn shape(id: u64, path: BezPath, _style: CutStyle) -> Shape {
     Shape {
         id,
         path,
-        style,
         hidden: false,
         locked: false,
-        tool: None,
         text: None,
         production: Default::default(),
     }
@@ -46,16 +51,21 @@ pub fn line_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BezPath {
     p
 }
 
-fn base_document(board: Board, kerf: KerfSettings, layers: Vec<Layer>) -> Document {
+fn base_document(board: Board, kerf: KerfSettings, layers: Vec<(Layer, Vec<Shape>)>) -> Document {
     let id_top = layers
         .iter()
-        .map(|l| l.shapes.iter().map(|s| s.id).max().unwrap_or(0))
+        .flat_map(|(_, shapes)| shapes.iter().map(|s| s.id))
         .max()
         .unwrap_or(0);
+    let shapes: Vec<Shape> = layers
+        .iter()
+        .flat_map(|(_, shapes)| shapes.iter().cloned())
+        .collect();
     Document {
         board,
         kerf,
-        layers,
+        layers: layers.into_iter().map(|(layer, _)| layer).collect(),
+        shapes,
         next_shape_id: id_top + 1,
         ..Document::default()
     }
@@ -204,7 +214,7 @@ mod tests {
     fn ids_are_consistent_with_next_shape_id() {
         for (_, doc) in samples() {
             assert!(doc.next_shape_id > doc.shape_count() as u64);
-            for (_, s) in doc.shapes() {
+            for s in doc.shapes() {
                 assert!(s.id < doc.next_shape_id);
             }
         }

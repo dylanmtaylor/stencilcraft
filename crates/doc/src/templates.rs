@@ -10,7 +10,18 @@
 use kurbo::{BezPath, Point, Rect, Shape as _};
 use serde::{Deserialize, Serialize};
 
-use crate::{CutStyle, DocError, Document, Group, GroupChild, Layer, PagePreset};
+use crate::{
+    CutStyle, DocError, Document, Group, GroupChild, Layer, Operation, OperationSettings,
+    PagePreset,
+};
+
+/// The production pass a legacy `CutStyle` maps to.
+fn op_of(kind: CutStyle) -> Option<Operation> {
+    Some(match kind {
+        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
+        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+    })
+}
 
 const INCH_MM: f64 = 25.4;
 /// Dash and gap of a fold (score) line, millimetres.
@@ -354,16 +365,18 @@ impl Builder {
         if let Some(i) = self.doc.layers.iter().position(|l| l.name == name) {
             return i;
         }
-        self.doc.layers.push(Layer {
-            template,
-            ..Layer::new(name, kind)
-        });
+        let operation = if template {
+            Some(Operation::Guide)
+        } else {
+            op_of(kind)
+        };
+        self.doc.layers.push(Layer::new(name, operation));
         self.doc.layers.len() - 1
     }
 
     fn add(&mut self, layer: &str, kind: CutStyle, path: BezPath) -> Result<u64, DocError> {
         let index = self.layer(layer, kind, false);
-        let id = self.doc.push_shape(index, path, kind)?.id;
+        let id = self.doc.push_shape(index, path)?.id;
         self.grouped.push(id);
         Ok(id)
     }
@@ -371,7 +384,7 @@ impl Builder {
     /// A guide drawn on a template (non-cutting) layer; not part of the group.
     fn guide(&mut self, path: BezPath) -> Result<(), DocError> {
         let index = self.layer("guide", CutStyle::Cut, true);
-        self.doc.push_shape(index, path, CutStyle::Cut)?;
+        self.doc.push_shape(index, path)?;
         Ok(())
     }
 
@@ -436,6 +449,9 @@ pub fn new_from_template(
     };
     let (mut page_w, mut page_h) = preset.size_mm().unwrap_or(inch(12.0, 12.0));
     let mut doc = Document::default();
+    // Templates build their own named layers; drop the default operation-less base
+    // so layer indices match the named template layers (D-18 keeps it for DocumentNew).
+    doc.layers.clear();
     doc.meta.title = format!("{} project", template.label());
     doc.meta.notes = template.info().description.to_string();
     doc.board_setup.mat = preset.mat_label().map(str::to_string);
@@ -458,7 +474,7 @@ pub fn new_from_template(
     };
     let media = |b: &mut Builder, m: &str| b.doc.board_setup.media = Some(m.to_string());
     let only_layer = |b: &mut Builder, name: &str, kind: CutStyle| {
-        b.doc.layers = vec![Layer::new(name, kind)];
+        b.doc.layers = vec![Layer::new(name, op_of(kind))];
     };
     match template {
         T::Blank => {}
@@ -706,6 +722,11 @@ pub fn new_from_template(
 mod tests {
     use super::*;
 
+    /// The `i`-th member shape of `layer` in `doc`.
+    fn member(doc: &Document, layer: usize, i: usize) -> &crate::Shape {
+        doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
+
     #[test]
     fn every_template_builds_fits_and_round_trips() {
         let mut ids = Vec::new();
@@ -717,7 +738,7 @@ mod tests {
             let back = Document::load_json(&doc.save_json().unwrap()).unwrap();
             assert_eq!(back, doc, "{:?}", info.id);
             let page = kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm);
-            for (_, shape) in doc.shapes() {
+            for shape in doc.shapes() {
                 let b = shape.bounds().unwrap();
                 assert!(
                     page.contains(b.origin()) && b.x1 <= page.x1 && b.y1 <= page.y1,
@@ -735,12 +756,15 @@ mod tests {
     fn card_is_a_grouped_outline_with_a_dashed_score_fold() {
         let doc = new_from_template(ProjectTemplate::Card, &TemplateParams::default()).unwrap();
         assert!((doc.board.width_mm - 304.8).abs() < 1e-9);
-        let outline = doc.layers[0].shapes[0].bounds().unwrap();
+        let outline = member(&doc, 0, 0).bounds().unwrap();
         assert!((outline.width() - 254.0).abs() < 1e-9 && (outline.height() - 177.8).abs() < 1e-9);
-        let fold = &doc.layers[1].shapes[0];
+        let fold = member(&doc, 1, 0);
         assert_eq!(
-            (doc.layers[1].name.as_str(), fold.style),
-            ("score", CutStyle::Engrave)
+            (doc.layers[1].name.as_str(), doc.layers[1].operation.clone()),
+            (
+                "score",
+                Some(Operation::Engrave(OperationSettings::default()))
+            )
         );
         let b = fold.bounds().unwrap();
         assert!(b.width() < 1e-9 && (b.center().x - outline.center().x).abs() < 1e-9);
@@ -757,14 +781,14 @@ mod tests {
             ..TemplateParams::default()
         };
         let doc = new_from_template(ProjectTemplate::Card, &horizontal).unwrap();
-        assert!(doc.layers[1].shapes[0].bounds().unwrap().height() < 1e-9);
+        assert!(member(&doc, 1, 0).bounds().unwrap().height() < 1e-9);
     }
 
     #[test]
     fn gift_tag_hole_and_large_items_grow_the_page() {
         let doc = new_from_template(ProjectTemplate::GiftTag, &TemplateParams::default()).unwrap();
-        assert_eq!(doc.layers[0].shapes.len(), 2);
-        let hole = doc.layers[0].shapes[1].bounds().unwrap();
+        assert_eq!(doc.layers[0].members.len(), 2);
+        let hole = member(&doc, 0, 1).bounds().unwrap();
         assert!((hole.width() - 6.35).abs() < 0.01);
         let big = TemplateParams {
             width_mm: Some(500.0),
@@ -801,18 +825,27 @@ mod tests {
             Some("heat-transfer vinyl")
         );
         assert!(
-            shirt.layers.iter().any(|l| l.template),
+            shirt
+                .layers
+                .iter()
+                .any(|l| matches!(l.operation, Some(Operation::Guide))),
             "print area is a guide"
         );
         let sheet = t(ProjectTemplate::StickerSheet);
         assert!(sheet.board_setup.registration_marks);
         assert!((sheet.board.width_mm - 215.9).abs() < 1e-9);
         let cut = sheet.layers.iter().find(|l| l.name == "cut").unwrap();
-        assert_eq!(cut.shapes.len(), 12);
+        assert_eq!(cut.members.len(), 12);
         let sketch = t(ProjectTemplate::Sketch);
         assert_eq!(
-            (sketch.layers[0].name.as_str(), sketch.layers[0].kind),
-            ("pen", CutStyle::Engrave)
+            (
+                sketch.layers[0].name.as_str(),
+                sketch.layers[0].operation.clone()
+            ),
+            (
+                "pen",
+                Some(Operation::Engrave(OperationSettings::default()))
+            )
         );
         let coin = t(ProjectTemplate::CoinCase);
         assert_eq!(
@@ -820,20 +853,20 @@ mod tests {
                 .iter()
                 .find(|l| l.name == "score")
                 .unwrap()
-                .shapes
+                .members
                 .len(),
             2
         );
         assert!(t(ProjectTemplate::Stamping).board_setup.mirror);
         let tray = t(ProjectTemplate::FauxLeatherTray);
-        assert_eq!(tray.layers[0].shapes.len(), 9, "outline + 8 punch points");
+        assert_eq!(tray.layers[0].members.len(), 9, "outline + 8 punch points");
         assert_eq!(tray.board_setup.media.as_deref(), Some("faux leather"));
         let ear = t(ProjectTemplate::LeatherEarrings);
-        let a = ear.layers[0].shapes[0].bounds().unwrap();
-        let b = ear.layers[0].shapes[2].bounds().unwrap();
+        let a = member(&ear, 0, 0).bounds().unwrap();
+        let b = member(&ear, 0, 2).bounds().unwrap();
         assert!((a.width() - b.width()).abs() < 1e-9 && (a.height() - b.height()).abs() < 1e-9);
         let key = t(ProjectTemplate::LeatherKeychain);
-        assert_eq!(key.layers[0].shapes.len(), 3);
+        assert_eq!(key.layers[0].members.len(), 3);
         assert_eq!(key.group_shapes(1).len(), 4);
     }
 }

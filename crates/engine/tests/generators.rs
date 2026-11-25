@@ -3,8 +3,20 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use kurbo::Shape as _;
-use stencilcraft_doc::{CutStyle, Tip, ToolOp};
+use stencilcraft_doc::{CutStyle, Operation, OperationSettings, Tip};
+use stencilcraft_engine::document::style_of_shape;
 use stencilcraft_engine::{Command, Effect, Engine};
+
+fn layer_op(e: &Engine, id: u64) -> Option<Operation> {
+    e.doc
+        .layer_of_shape(id)
+        .and_then(|li| e.doc.layers.get(li))
+        .and_then(|l| l.operation.clone())
+}
+
+fn style_of(e: &Engine, id: u64) -> CutStyle {
+    style_of_shape(&e.doc, id)
+}
 
 fn cmd(json: &str) -> Command {
     serde_json::from_str(json).unwrap_or_else(|e| panic!("{json}: {e}"))
@@ -111,8 +123,11 @@ fn fills_are_tagged_engrave_paths_and_release_to_plain_paths() {
         panic!("{effect:?}")
     };
     let fill = e.doc.get_shape(ids[0]).unwrap();
-    assert_eq!(fill.style, CutStyle::Engrave);
-    assert_eq!(fill.tool, Some(ToolOp::HeatPen));
+    assert_eq!(style_of(&e, fill.id), CutStyle::Engrave);
+    assert_eq!(
+        layer_op(&e, ids[0]),
+        Some(Operation::Engrave(OperationSettings::default()))
+    );
     let lines = fill
         .path
         .elements()
@@ -127,7 +142,10 @@ fn fills_are_tagged_engrave_paths_and_release_to_plain_paths() {
         dy_mm: 0.0,
     })
     .unwrap();
-    assert_eq!(e.doc.get_shape(ids[0]).unwrap().tool, Some(ToolOp::HeatPen));
+    assert_eq!(
+        layer_op(&e, ids[0]),
+        Some(Operation::Engrave(OperationSettings::default()))
+    );
     let released = undoable(
         &mut e,
         &format!(
@@ -142,7 +160,7 @@ fn fills_are_tagged_engrave_paths_and_release_to_plain_paths() {
     assert!(
         plain
             .iter()
-            .all(|id| e.doc.get_shape(*id).unwrap().tool.is_none())
+            .all(|id| layer_op(&e, *id) == Some(Operation::Engrave(OperationSettings::default())))
     );
     assert!(e.doc.get_shape(ids[0]).is_none());
     // Power engraver stipple and a bad spacing.
@@ -179,27 +197,23 @@ fn tool_lines_score_and_emboss_convert_outlines() {
     assert!(e.doc.get_shape(sq).is_none());
     for id in ids {
         let s = e.doc.get_shape(id).unwrap();
-        assert_eq!(s.style, CutStyle::Engrave);
-        assert_eq!(
-            s.tool,
-            Some(ToolOp::Emboss {
-                tip: Tip::Wide,
-                passes: 2,
-                deboss: false
-            })
-        );
+        assert_eq!(style_of(&e, s.id), CutStyle::Engrave);
+        let settings = OperationSettings {
+            tip: Some(Tip::Wide),
+            passes: 2,
+            ..OperationSettings::default()
+        };
+        assert_eq!(layer_op(&e, id), Some(Operation::Engrave(settings)));
     }
     let line = added(
         &mut e,
         r#"{"command":"generate.score-line","params":{"x0":0,"y0":0,"x1":0,"y1":50}}"#,
     );
-    assert_eq!(
-        e.doc.get_shape(line[0]).unwrap().tool,
-        Some(ToolOp::Score {
-            tip: Tip::Fine,
-            passes: 1
-        })
-    );
+    let settings = OperationSettings {
+        tip: Some(Tip::Fine),
+        ..OperationSettings::default()
+    };
+    assert_eq!(layer_op(&e, line[0]), Some(Operation::Score(settings)));
     assert!(
         e.run(cmd(
             r#"{"command":"generate.score-line","params":{"x0":0,"y0":0,"x1":0,"y1":5,"passes":0}}"#
@@ -218,7 +232,7 @@ fn rhinestones_punches_puzzle_weed_and_marks() {
             r#"{{"command":"generate.rhinestone","params":{{"ids":[{sq}],"size":"ss10","spacing_mm":1}}}}"#
         ),
     );
-    assert_eq!(e.doc.get_shape(stones[0]).unwrap().style, CutStyle::Cut);
+    assert_eq!(style_of(&e, stones[0]), CutStyle::Cut);
     let puzzle = undoable(
         &mut e,
         &format!(r#"{{"command":"generate.puzzle","params":{{"id":{sq},"rows":3,"columns":3}}}}"#),
@@ -254,8 +268,11 @@ fn rhinestones_punches_puzzle_weed_and_marks() {
     let Effect::ShapesAdded { ids } = punched else {
         panic!()
     };
-    let s = e.doc.get_shape(ids[0]).unwrap();
-    assert_eq!(s.tool, Some(ToolOp::Punch { diameter_mm: 1.0 }));
+    let settings = OperationSettings {
+        punch_diameter_mm: Some(1.0),
+        ..OperationSettings::default()
+    };
+    assert_eq!(layer_op(&e, ids[0]), Some(Operation::Punch(settings)));
     assert!(e.doc.get_shape(circle).is_none());
     assert!(
         e.run(cmd(&format!(
@@ -277,10 +294,10 @@ fn popup_card_cuts_and_scores() {
         panic!()
     };
     assert_eq!(ids.len(), 2);
-    assert_eq!(e.doc.get_shape(ids[0]).unwrap().style, CutStyle::Cut);
+    assert_eq!(style_of(&e, ids[0]), CutStyle::Cut);
     let scores = e.doc.get_shape(ids[1]).unwrap();
-    assert_eq!(scores.style, CutStyle::Engrave);
-    assert!(matches!(scores.tool, Some(ToolOp::Score { .. })));
+    assert!(scores.id == ids[1]);
+    assert!(matches!(layer_op(&e, ids[1]), Some(Operation::Score(_))));
     assert!(
         e.run(cmd(
             r#"{"command":"generate.popup","params":{"struts":20,"strut_width_mm":20}}"#

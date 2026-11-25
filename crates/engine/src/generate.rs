@@ -7,7 +7,7 @@
 use kurbo::{Affine, BezPath, Shape as _};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stencilcraft_doc::{CutStyle, Tip, ToolOp};
+use stencilcraft_doc::{CutStyle, Operation, OperationSettings, Tip, ToolOp};
 use stencilcraft_generate as generate;
 
 use crate::{Command, Effect, Engine, EngineError, POINTS_PER_MM, transform_path, unique_ids};
@@ -434,7 +434,11 @@ impl Engine {
                         "shape {id} is locked; unlock it first"
                     )));
                 }
-                Ok((id, shape.path.clone(), shape.style))
+                Ok((
+                    id,
+                    shape.path.clone(),
+                    crate::document::style_of_shape(&self.doc, id),
+                ))
             })
             .collect()
     }
@@ -455,7 +459,8 @@ impl Engine {
         acc.ok_or_else(|| EngineError::Invalid(format!("{name}: nothing selected")))
     }
 
-    /// Adds paths with their styles, then tags the new shapes with their tools.
+    /// Adds paths with their styles, then moves tool-tagged shapes onto the
+    /// matching operation layer (v2 has no per-shape tool; the pass is the layer).
     fn add_tagged(
         &mut self,
         paths: Vec<(BezPath, CutStyle, Option<ToolOp>)>,
@@ -472,12 +477,27 @@ impl Engine {
                 "{name}: generated non-finite geometry"
             )));
         }
-        let tools: Vec<Option<ToolOp>> = paths.iter().map(|(_, _, t)| t.clone()).collect();
+        let tools: Vec<Option<Operation>> = paths
+            .iter()
+            .map(|(_, _, t)| t.as_ref().map(operation_of_tool))
+            .collect();
         let ids =
             self.vector_add_paths(paths.into_iter().map(|(p, s, _)| (p, s)).collect(), name)?;
         for (id, tool) in ids.iter().zip(tools) {
-            if let Some(shape) = self.doc.get_shape_mut(*id) {
-                shape.tool = tool;
+            if let Some(op) = tool {
+                let op_layers: Vec<usize> = self
+                    .doc
+                    .layers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| l.operation.is_some())
+                    .map(|(i, _)| i)
+                    .collect();
+                for li in op_layers {
+                    crate::document::remove_members(&mut self.doc, li, &[*id]);
+                }
+                let li = crate::document::ensure_operation_layer(&mut self.doc, op);
+                crate::document::add_members(&mut self.doc, li, &[*id]);
             }
         }
         Ok(Effect::ShapesAdded { ids })
@@ -494,17 +514,35 @@ impl Engine {
                 "{name}: more than {MAX_COPIES} copies"
             )));
         }
-        let tools: Vec<Option<ToolOp>> = objects
+        // Copies inherit the source shapes' operation-layer memberships.
+        let memberships: Vec<Vec<usize>> = objects
             .iter()
-            .map(|(id, _, _)| self.doc.get_shape(*id).and_then(|s| s.tool.clone()))
+            .map(|(id, _, _)| {
+                self.doc
+                    .layers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| l.operation.is_some() && l.members.contains(id))
+                    .map(|(i, _)| i)
+                    .collect()
+            })
             .collect();
         let mut out = Vec::new();
         for t in placements {
-            for ((_, path, style), tool) in objects.iter().zip(&tools) {
-                out.push((*t * path.clone(), *style, tool.clone()));
+            for (_, path, style) in objects.iter() {
+                out.push((*t * path.clone(), *style, None));
             }
         }
-        self.add_tagged(out, name)
+        let ids = self.add_tagged(out, name)?;
+        let Effect::ShapesAdded { ids } = ids else {
+            return Err(EngineError::Internal(format!("{name}: unexpected effect")));
+        };
+        for (id, layers) in ids.iter().zip(memberships) {
+            for li in layers {
+                crate::document::add_members(&mut self.doc, li, &[*id]);
+            }
+        }
+        Ok(Effect::ShapesAdded { ids })
     }
 
     /// Replaces each shape's path with `edit(path)`, keeping ids, style and tool.
@@ -575,6 +613,34 @@ fn invalid(name: &str, e: generate::GenError) -> EngineError {
 }
 
 /// Score/emboss passes 1–10; punch diameter 0.5–20 mm.
+/// A v1 tool tag mapped to its v2 operation layer pass (same mapping as the model
+/// migration in craft-libs).
+fn operation_of_tool(tool: &ToolOp) -> Operation {
+    let mut s = OperationSettings::default();
+    match tool {
+        ToolOp::Score { tip, passes } => {
+            s.tip = Some(*tip);
+            s.passes = *passes;
+            Operation::Score(s)
+        }
+        ToolOp::Emboss {
+            tip,
+            passes,
+            deboss,
+        } => {
+            s.tip = Some(*tip);
+            s.passes = *passes;
+            s.deboss = *deboss;
+            Operation::Engrave(s)
+        }
+        ToolOp::PowerEngrave | ToolOp::HeatPen => Operation::Engrave(s),
+        ToolOp::Punch { diameter_mm } => {
+            s.punch_diameter_mm = Some(*diameter_mm);
+            Operation::Punch(s)
+        }
+    }
+}
+
 fn check_tool(tool: &ToolOp, name: &str) -> Result<(), EngineError> {
     match *tool {
         ToolOp::Score { passes, .. } | ToolOp::Emboss { passes, .. }

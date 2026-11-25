@@ -7,6 +7,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use crate::operations::{OpDrag, OperationPreset};
 use craft_draw::ui::pen::{
     BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
     PenDraft, PenNames,
@@ -14,6 +15,7 @@ use craft_draw::ui::pen::{
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
 use craft_theme::{ControlSize, TypeRole};
+use craft_ui::behavior::{Axis, DropPosition, Move, Reorder, RowInfo, Selection};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
@@ -27,9 +29,9 @@ use craft_ui::docking::{
 use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
-use craft_ui::list::{ListRow, ToggleColumn};
+use craft_ui::list::{List, ListEvent, ListRow, RowEvent, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::menu::{MenuBar, MenuItem};
+use craft_ui::menu::{Menu, MenuBar, MenuEntry, MenuItem};
 use craft_ui::patterns::{
     AlignAction, AlignBar, Inspector, InspectorHeader, LastUsed, OptionsBar, Panel, RailTool,
     StatusBar, ToolRail, ToolSlot,
@@ -48,6 +50,9 @@ mod control;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
+
+/// The built-in operation-preset catalogue (Cut, Engrave, Score, Guide).
+mod operations;
 
 /// File › New: the New Document dialog (preset cards and details).
 mod new_doc;
@@ -79,6 +84,29 @@ pub struct UserPrefs {
     pub recent_files: Vec<String>,
     /// Sizes created from New Document, newest first (its Recent tab).
     pub recent_new: Vec<new_doc::RecentDoc>,
+    /// Modifier that opens the operation popup on the Add Layer button (D-02).
+    pub op_popup_modifier: OpPopupModifier,
+}
+
+/// The keyboard modifier that turns an Add Layer click into the operation popup (D-02).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpPopupModifier {
+    #[default]
+    Shift,
+    Alt,
+    Control,
+    Command,
+}
+
+impl OpPopupModifier {
+    pub fn held(self, modifiers: egui::Modifiers) -> bool {
+        match self {
+            Self::Shift => modifiers.shift,
+            Self::Alt => modifiers.alt,
+            Self::Control => modifiers.ctrl,
+            Self::Command => modifiers.command,
+        }
+    }
 }
 
 impl Default for UserPrefs {
@@ -94,6 +122,7 @@ impl Default for UserPrefs {
             link_aspect: false,
             recent_files: Vec::new(),
             recent_new: Vec::new(),
+            op_popup_modifier: OpPopupModifier::default(),
         }
     }
 }
@@ -278,12 +307,19 @@ pub enum TopMenuAction {
     AlignToKey(Alignment),
     TransformAgain,
     CenterToPage,
-    SetStyle(CutStyle),
     PlaceText,
     EditText,
     SelectInverse,
     SelectSameStyle,
     SelectSameLayer,
+    /// Object › Arrange › Send to Layer…: additively add the selection to a layer (D-05/D-07).
+    AssignToLayer {
+        layer: usize,
+    },
+    /// Remove the selection from a layer; geometry never moves (D-06/D-07).
+    RemoveFromLayer {
+        layer: usize,
+    },
     ShowDesign,
     ShowSend,
     ShowPanel(WorkspacePanel),
@@ -428,7 +464,7 @@ fn machine_paths(doc: &stencilcraft_doc::Document) -> Vec<Vec<(f64, f64)>> {
         if !layer.visible {
             continue;
         }
-        for shape in &layer.shapes {
+        for shape in layer.members.iter().filter_map(|id| doc.get_shape(*id)) {
             for pl in stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
@@ -584,6 +620,97 @@ pub enum CanvasViewCommand {
     Rotate(u8),
 }
 
+/// Stable key for one row of the layers tree panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PanelKey {
+    Layer(usize),
+    /// A member leaf under a layer group (layer index keeps N:M memberships unique).
+    Member {
+        layer: usize,
+        shape: u64,
+    },
+    /// A leaf under the derived Unassigned group.
+    Shape(u64),
+    Unassigned,
+}
+
+/// Pre-built display data for one tree row; the panel never reads the doc mid-pass.
+struct RowVisual {
+    label: String,
+    detail: String,
+    icon: Option<Icon>,
+    eye: Option<bool>,
+    lock: Option<bool>,
+    swatch: Option<egui::Color32>,
+    dimmed: bool,
+}
+
+/// Reorder accepts only layer group rows as drag sources and drop targets —
+/// member leaves, shape leaves and the Unassigned group reject drops (D-11).
+fn layer_rows_only(mv: &Move<PanelKey>) -> bool {
+    mv.items.len() == 1
+        && matches!(mv.items.first(), Some(PanelKey::Layer(_)))
+        && matches!(mv.target, PanelKey::Layer(_))
+        && mv.position != DropPosition::Into
+        && !mv.copy
+}
+
+/// Map a committed reorder gesture on layer rows to engine `LayerMove` indices.
+/// `to` is the post-removal insert slot the engine's `layer.move` arm expects.
+fn layer_move(mv: &Move<PanelKey>) -> Option<(usize, usize)> {
+    let [PanelKey::Layer(from)] = mv.items.as_slice() else {
+        return None;
+    };
+    let PanelKey::Layer(target) = mv.target else {
+        return None;
+    };
+    let to = match mv.position {
+        DropPosition::Before => {
+            if *from < target {
+                target - 1
+            } else {
+                target
+            }
+        }
+        DropPosition::After => {
+            if *from < target {
+                target
+            } else {
+                target + 1
+            }
+        }
+        DropPosition::Into => return None,
+    };
+    Some((*from, to))
+}
+
+/// Display label for a layer's operation: the built-in preset catalogue's label
+/// where the operation matches a preset, a plain name otherwise.
+fn operation_label(op: &stencilcraft_doc::Operation) -> &'static str {
+    if let Some(preset) = operation_preset(op) {
+        return preset.label();
+    }
+    use stencilcraft_doc::Operation::*;
+    match op {
+        KissCut(_) => "Kiss Cut",
+        DieCut(_) => "Die Cut",
+        Draw(_) => "Draw",
+        Perforate(_) => "Perforate",
+        PrintThenCut(_) => "Print Then Cut",
+        Punch(_) => "Punch",
+        // Cut/Engrave/Score/Guide are always covered by the preset catalogue above.
+        _ => "Operation",
+    }
+}
+
+/// The built-in preset whose operation equals `op`, if any.
+fn operation_preset(op: &stencilcraft_doc::Operation) -> Option<operations::OperationPreset> {
+    operations::OperationPreset::ALL
+        .iter()
+        .copied()
+        .find(|preset| preset.operation() == *op)
+}
+
 pub struct StencilApp {
     pub workspace: Layout<WorkspacePanel>,
     pub window_frame: Frame,
@@ -617,6 +744,18 @@ pub struct StencilApp {
     pub selected_shape: Option<u64>,
     pub selected_shapes: Vec<u64>,
     pub selected_layer: Option<usize>,
+    /// Which layers-tree groups are expanded (layer indices plus the Unassigned sentinel).
+    pub open_layer_groups: std::collections::BTreeSet<usize>,
+    /// The layers tree's selection.
+    pub layer_selection: Selection<PanelKey>,
+    /// The open operation popup (D-02): the layer it targets and the anchor it hangs from.
+    pub op_popup: Option<(usize, egui::Response)>,
+    /// The open colour-picker popup (UI-05): the layer it targets and the anchor it hangs from.
+    pub color_popup: Option<(usize, egui::Response)>,
+    /// Working colour while the colour popup is open; committed on close when dirty.
+    pub color_popup_value: egui::Color32,
+    /// Whether the working colour changed since the popup opened.
+    pub color_popup_dirty: bool,
     pub text_dialog: bool,
     /// File › Quit was chosen; the next frame closes the window.
     pub quit_requested: bool,
@@ -819,6 +958,12 @@ impl StencilApp {
             selected_shape: None,
             selected_shapes: Vec::new(),
             selected_layer: Some(0),
+            open_layer_groups: Default::default(),
+            layer_selection: Selection::default(),
+            op_popup: None,
+            color_popup: None,
+            color_popup_value: egui::Color32::WHITE,
+            color_popup_dirty: false,
             text_dialog: false,
             quit_requested: false,
             text_dialog_state: DialogState::new(),
@@ -1069,12 +1214,8 @@ impl StencilApp {
                     .layers
                     .iter()
                     .zip(&doc.layers)
-                    .all(|(old, new)| {
-                        old.shapes.len() == new.shapes.len()
-                            && old.shapes.iter().zip(&new.shapes).all(|(old, new)| {
-                                old.id == new.id && old.style == new.style && old.path == new.path
-                            })
-                    })
+                    .all(|(old, new)| old.members == new.members)
+                && cache.source.shapes == doc.shapes
         });
 
         if unchanged_geometry {
@@ -1132,7 +1273,7 @@ impl StencilApp {
             .engine
             .doc
             .shapes()
-            .map(|(_, shape)| shape.id)
+            .map(|shape| shape.id)
             .collect::<Vec<_>>();
         self.set_selection(ids);
     }
@@ -1464,16 +1605,15 @@ impl StencilApp {
     }
 
     pub fn add_imported_shapes(&mut self, imported: stencilcraft_doc::Document, label: &str) {
-        let shapes = imported
-            .layers
-            .into_iter()
-            .flat_map(|layer| {
-                layer
-                    .shapes
-                    .into_iter()
-                    .map(|shape| (shape.path, shape.style))
+        let shapes: Vec<_> = imported
+            .shapes()
+            .map(|shape| {
+                (
+                    shape.path.clone(),
+                    stencilcraft_engine::document::style_of_shape(&imported, shape.id),
+                )
             })
-            .collect::<Vec<_>>();
+            .collect();
         let count = shapes.len();
         if count == 0 {
             self.status = format!("no cuttable paths found in {label}");
@@ -1991,6 +2131,18 @@ impl StencilApp {
             }
             TopMenuAction::Duplicate => self.duplicate_selection(),
             TopMenuAction::Delete => self.delete_selection(),
+            TopMenuAction::AssignToLayer { layer } => {
+                self.run_command(Command::Document(DocumentCommand::LayerAddMembers {
+                    layer,
+                    ids: self.selected_shapes.clone(),
+                }));
+            }
+            TopMenuAction::RemoveFromLayer { layer } => {
+                self.run_command(Command::Document(DocumentCommand::LayerRemoveMembers {
+                    layer,
+                    ids: self.selected_shapes.clone(),
+                }));
+            }
             TopMenuAction::SelectAll => self.select_all_shapes(),
             TopMenuAction::Deselect => {
                 self.set_selection([]);
@@ -2056,10 +2208,6 @@ impl StencilApp {
                     });
                 }
             }
-            TopMenuAction::SetStyle(style) => self.run_command(Command::ShapesSetStyle {
-                ids: self.selected_shapes.clone(),
-                style,
-            }),
             TopMenuAction::PlaceText => {
                 self.active_tool = ActiveTool::Text;
                 self.open_text_dialog(false);
@@ -2069,17 +2217,20 @@ impl StencilApp {
                 self.handle_edit_action(panels::EditAction::SelectInverse);
             }
             TopMenuAction::SelectSameStyle => {
+                let doc = &self.engine.doc;
                 let styles: Vec<CutStyle> = self
                     .selected_shapes
                     .iter()
-                    .filter_map(|id| self.engine.doc.get_shape(*id).map(|s| s.style))
+                    .map(|id| stencilcraft_engine::document::style_of_shape(doc, *id))
                     .collect();
-                let same: Vec<u64> = self
-                    .engine
-                    .doc
+                let same: Vec<u64> = doc
                     .shapes()
-                    .filter(|(_, shape)| styles.contains(&shape.style))
-                    .map(|(_, shape)| shape.id)
+                    .filter(|shape| {
+                        styles.contains(&stencilcraft_engine::document::style_of_shape(
+                            doc, shape.id,
+                        ))
+                    })
+                    .map(|shape| shape.id)
                     .collect();
                 self.set_selection(same);
             }
@@ -2091,11 +2242,11 @@ impl StencilApp {
                     .iter()
                     .filter(|layer| {
                         layer
-                            .shapes
+                            .members
                             .iter()
-                            .any(|shape| self.selected_shapes.contains(&shape.id))
+                            .any(|id| self.selected_shapes.contains(id))
                     })
-                    .flat_map(|layer| layer.shapes.iter().map(|shape| shape.id))
+                    .flat_map(|layer| layer.members.iter().copied())
                     .collect();
                 self.set_selection(same);
             }
@@ -2571,43 +2722,145 @@ impl StencilApp {
     }
 
     pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_ui_egui::layers::{self, LayerRow};
+
         let mut add_layer = false;
         let mut delete_layer = false;
         let mut selected_idx = self.selected_layer;
-        let mut toggles = Vec::new();
-
-        let can_delete = self.engine.doc.layers.len() > 1;
-        let layer_data: Vec<(usize, String, bool)> = self
-            .engine
-            .doc
-            .layers
-            .iter()
-            .enumerate()
-            .map(|(i, l)| (i, l.name.clone(), l.visible))
-            .collect();
-        // Every shape with its eye (shown) and lock toggles: hidden and locked shapes are left
-        // off the canvas's picking, so this list is where they come back.
-        let shape_rows: Vec<(u64, String, bool, bool)> = self
-            .engine
-            .doc
-            .shapes()
-            .map(|(_, s)| {
-                let kind = match s.style {
-                    CutStyle::Cut => "Cut",
-                    CutStyle::Engrave => "Engrave",
-                };
-                (s.id, format!("#{} {kind}", s.id), !s.hidden, s.locked)
-            })
-            .collect();
-        let mut shape_toggles: Vec<(u64, usize, bool)> = Vec::new();
         let mut clicked_shape = None;
+        let mut events: Vec<ListEvent<PanelKey>> = Vec::new();
+        // One-frame open command for the operation popup; the anchor itself lives
+        // in self.op_popup so the popup survives across frames.
+        let mut op_popup_open = false;
+        // Palette drag-onto-row result: (layer index, preset) on pointer release.
+        let mut op_drop: Option<(usize, OperationPreset)> = None;
+        let hammer_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+            std::cell::RefCell::new(None);
+        // Colour-swatch click: opens the colour picker popup for that layer row.
+        let swatch_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+            std::cell::RefCell::new(None);
+        // Committed reorder gestures, dispatched as LayerMove after the UI pass.
+        let mut reorder_moves: Vec<(usize, usize)> = Vec::new();
+        // One-frame open command for the colour popup; the anchor lives in
+        // self.color_popup so the popup survives across frames.
+        let mut color_popup_open = false;
+        let op_mod = self.prefs.op_popup_modifier;
+
+        // Snapshot the document into plain rows first: the UI pass never touches
+        // self.engine.doc, and commands dispatch only after show() returns.
+        let doc = &self.engine.doc;
+        let can_delete = doc.layers.len() > 1;
+        let layer_count = doc.layers.len();
+        let layer_rows = layers::build_layer_rows(doc, &self.open_layer_groups);
+        let mut row_infos: Vec<RowInfo<PanelKey>> = Vec::with_capacity(layer_rows.len());
+        let mut visuals: Vec<(PanelKey, RowVisual)> = Vec::with_capacity(layer_rows.len());
+        for row in &layer_rows {
+            match *row {
+                LayerRow::Layer { index } => {
+                    let Some(layer) = doc.layers.get(index) else {
+                        continue;
+                    };
+                    let mut detail = layer
+                        .operation
+                        .as_ref()
+                        .map(operation_label)
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some(n) = layers::pass_number(doc, index) {
+                        if !detail.is_empty() {
+                            detail.push_str(" · ");
+                        }
+                        detail.push_str(&format!("Pass {n}"));
+                    }
+                    let swatch = Some(stencilcraft_ui_egui::layer_swatch_color(layer, self.theme));
+                    row_infos.push(RowInfo::group(
+                        PanelKey::Layer(index),
+                        self.open_layer_groups.contains(&index),
+                    ));
+                    visuals.push((
+                        PanelKey::Layer(index),
+                        RowVisual {
+                            label: layer.name.clone(),
+                            detail,
+                            icon: layer
+                                .operation
+                                .as_ref()
+                                .and_then(operation_preset)
+                                .map(|preset| preset.icon())
+                                .or(Some(Icon::Layers)),
+                            eye: Some(layer.visible),
+                            lock: Some(layer.locked),
+                            swatch,
+                            dimmed: false,
+                        },
+                    ));
+                }
+                LayerRow::Member { layer, shape } => {
+                    row_infos.push(RowInfo::leaf(PanelKey::Member { layer, shape }).at_depth(1));
+                    visuals.push((
+                        PanelKey::Member { layer, shape },
+                        RowVisual {
+                            label: format!("#{shape}"),
+                            detail: layers::membership_labels(doc, shape).join(", "),
+                            icon: Some(Icon::Spline),
+                            eye: None,
+                            lock: None,
+                            swatch: None,
+                            dimmed: false,
+                        },
+                    ));
+                }
+                LayerRow::UnassignedGroup => {
+                    row_infos.push(RowInfo::group(
+                        PanelKey::Unassigned,
+                        self.open_layer_groups.contains(&layers::UNASSIGNED_GROUP),
+                    ));
+                    visuals.push((
+                        PanelKey::Unassigned,
+                        RowVisual {
+                            label: "Unassigned".to_string(),
+                            detail: String::new(),
+                            icon: Some(Icon::Layers),
+                            eye: None,
+                            lock: None,
+                            swatch: None,
+                            dimmed: false,
+                        },
+                    ));
+                }
+                LayerRow::UnassignedMember { shape } => {
+                    row_infos.push(RowInfo::leaf(PanelKey::Shape(shape)).at_depth(1));
+                    visuals.push((
+                        PanelKey::Shape(shape),
+                        RowVisual {
+                            label: format!("#{shape}"),
+                            detail: "Unassigned".to_string(),
+                            icon: Some(Icon::Spline),
+                            eye: None,
+                            lock: None,
+                            swatch: None,
+                            dimmed: true,
+                        },
+                    ));
+                }
+            }
+        }
+        let mut selection = std::mem::take(&mut self.layer_selection);
+        let selected_keys: Vec<PanelKey> = selection.items.clone();
 
         Panel::new("stencilcraft-layers-panel")
             .footer_label("Layer actions")
             .footer(|ui| {
                 PanelFooter::show(ui, |ui| {
-                    if ui.add(IconButton::new(Icon::Plus, "Add Layer")).clicked() {
+                    // Plain click adds an operation-less layer (D-01); the configured
+                    // modifier (default shift) also opens the operation popup (D-02).
+                    let add = ui.add(IconButton::new(Icon::Plus, "Add Layer"));
+                    if add.clicked() {
                         add_layer = true;
+                        if op_mod.held(ui.input(|i| i.modifiers)) {
+                            self.op_popup = Some((layer_count, add.clone()));
+                            op_popup_open = true;
+                        }
                     }
                     if ui
                         .add(IconButton::new(Icon::Trash, "Delete Layer").enabled(can_delete))
@@ -2618,70 +2871,166 @@ impl StencilApp {
                 });
             })
             .show(ui, |ui| {
-                for (i, name, visible) in layer_data {
-                    let is_sel = selected_idx == Some(i);
-                    let row = ListRow::new(i, &name)
-                        .toggle(ToggleColumn::eye(format!("Visibility {name}"), visible))
-                        .selected(is_sel)
-                        .show(ui);
-                    if row.response.clicked() {
-                        selected_idx = Some(i);
-                    }
-                    for ev in row.events {
-                        if let craft_ui::list::RowEvent::Toggle(
-                            EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
-                        ) = ev
-                        {
-                            toggles.push((value.row, value.on));
-                        }
-                    }
-                }
-                let _ = SectionHeader::new("layers-objects", "Objects").show(ui, |ui| {
-                    for (id, label, shown, locked) in &shape_rows {
-                        let row = ListRow::new(*id, label)
-                            .icon(Icon::Spline)
-                            .toggle(ToggleColumn::eye(format!("Visibility {label}"), *shown))
-                            .toggle(ToggleColumn::lock(format!("Lock {label}"), *locked))
-                            .selected(self.selected_shapes.contains(id))
-                            .dimmed(!*shown)
-                            .show(ui);
-                        if row.response.clicked() {
-                            clicked_shape = Some(*id);
-                        }
-                        for ev in row.events {
-                            if let craft_ui::list::RowEvent::Toggle(
-                                EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
-                            ) = ev
-                            {
-                                shape_toggles.push((value.row, value.column, value.on));
+                let out = List::new("layers-tree", "Layers", row_infos.as_slice())
+                    .tree(true)
+                    .selection(&mut selection)
+                    // Drag-handle reorder (D-11): only layer group rows drag and
+                    // take drops; the new row position is the production order.
+                    .can_drag(|key| matches!(key, PanelKey::Layer(_)))
+                    .reorder(Reorder::new(Axis::Vertical).accepts(|mv, _mods| layer_rows_only(mv)))
+                    .show(ui, |_, &key| {
+                        let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
+                        let mut row =
+                            ListRow::new(key, visual.map(|v| v.label.clone()).unwrap_or_default());
+                        if let Some(v) = visual {
+                            if !v.detail.is_empty() {
+                                row = row.detail(v.detail.clone());
                             }
+                            if let Some(icon) = v.icon {
+                                row = row.icon(icon);
+                            }
+                            if let Some(on) = v.eye {
+                                row = row.toggle(ToggleColumn::eye(
+                                    format!("Visibility {}", v.label),
+                                    on,
+                                ));
+                            }
+                            if let Some(on) = v.lock {
+                                row =
+                                    row.toggle(ToggleColumn::lock(format!("Lock {}", v.label), on));
+                            }
+                            // Colour swatch button (UI-05): opens the egui colour
+                            // picker for this layer row.
+                            if let (Some(col), PanelKey::Layer(index)) = (v.swatch, key) {
+                                let hit = &swatch_click;
+                                row = row.trailing_item(16.0, move |ui| {
+                                    let (rect, resp) = ui.allocate_exact_size(
+                                        egui::vec2(12.0, 12.0),
+                                        egui::Sense::click(),
+                                    );
+                                    ui.painter().rect_filled(rect, 2.0, col);
+                                    if resp.clicked() {
+                                        *hit.borrow_mut() = Some((index, resp.clone()));
+                                    }
+                                });
+                            }
+                            // Hammer-equivalent trailing button: opens the same
+                            // operation popup anchored to this layer row (D-02).
+                            if let PanelKey::Layer(index) = key {
+                                let hit = &hammer_click;
+                                let label = v.label.clone();
+                                row = row.trailing_item(20.0, move |ui| {
+                                    let btn = ui.add(
+                                        IconButton::new(
+                                            Icon::Settings,
+                                            format!("Set operation of {label}"),
+                                        )
+                                        .size(ControlSize::Sm),
+                                    );
+                                    if btn.clicked() {
+                                        *hit.borrow_mut() = Some((index, btn));
+                                    }
+                                });
+                            }
+                            row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
+                        }
+                        row
+                    });
+                let list_rows = out.rows;
+                events.extend(out.events);
+
+                // Palette drop: an OpDrag payload released over a layer row assigns
+                // that row's layer the dragged preset (D-13). Shape rows and the
+                // Unassigned group are ignored — only PanelKey::Layer rects hit-test.
+                if ui.input(|i| i.pointer.any_released())
+                    && let Some(payload) = egui::DragAndDrop::payload::<OpDrag>(ui.ctx())
+                    && let Some(pos) = ui.ctx().pointer_interact_pos()
+                {
+                    for (key, rect) in &list_rows {
+                        if let PanelKey::Layer(i) = key
+                            && rect.contains(pos)
+                        {
+                            op_drop = Some((*i, payload.0));
                         }
                     }
-                });
-            });
-        for (id, column, on) in shape_toggles {
-            self.run_command(if column == 0 {
-                Command::ShapesSetHidden {
-                    ids: vec![id],
-                    hidden: !on,
                 }
-            } else {
-                Command::ShapesSetLocked {
-                    ids: vec![id],
-                    locked: on,
-                }
+
+                // Draggable operations palette: each entry carries a distinct OpDrag
+                // payload so it can never be confused with a list reorder drag.
+                let _ = SectionHeader::new("layers-operations", "Operations")
+                    .collapsible(false)
+                    .show(ui, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for preset in OperationPreset::ALL {
+                                ui.dnd_drag_source(
+                                    ui.make_persistent_id(["op-palette", preset.label()]),
+                                    OpDrag(preset),
+                                    |ui| {
+                                        ui.add(
+                                            Button::new(preset.label())
+                                                .icon(preset.icon())
+                                                .size(ControlSize::Sm),
+                                        );
+                                    },
+                                );
+                            }
+                        });
+                    });
             });
-            self.retain_valid_selection();
-        }
-        if let Some(id) = clicked_shape {
-            self.set_selection([id]);
+
+        self.layer_selection = selection;
+        let mut vis_toggles: Vec<(usize, bool)> = Vec::new();
+        let mut lock_toggles: Vec<(usize, bool)> = Vec::new();
+        for ev in events {
+            match ev {
+                ListEvent::Open(change) => match change.row {
+                    PanelKey::Layer(i) => {
+                        if change.open {
+                            self.open_layer_groups.insert(i);
+                        } else {
+                            self.open_layer_groups.remove(&i);
+                        }
+                    }
+                    PanelKey::Unassigned => {
+                        if change.open {
+                            self.open_layer_groups.insert(layers::UNASSIGNED_GROUP);
+                        } else {
+                            self.open_layer_groups.remove(&layers::UNASSIGNED_GROUP);
+                        }
+                    }
+                    _ => {}
+                },
+                ListEvent::Row(RowEvent::Toggle(
+                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+                )) => {
+                    if let PanelKey::Layer(i) = value.row {
+                        if value.column == 0 {
+                            vis_toggles.push((i, value.on));
+                        } else {
+                            lock_toggles.push((i, value.on));
+                        }
+                    }
+                }
+                ListEvent::Clicked(PanelKey::Layer(i)) => selected_idx = Some(i),
+                ListEvent::Clicked(PanelKey::Member { shape, .. })
+                | ListEvent::Clicked(PanelKey::Shape(shape)) => clicked_shape = Some(shape),
+                ListEvent::Reorder(EditEvent::Commit { value, .. }) => {
+                    if let Some((from, to)) = layer_move(&value) {
+                        reorder_moves.push((from, to));
+                    }
+                }
+                _ => {}
+            }
         }
 
         self.selected_layer = selected_idx;
+        if let Some(id) = clicked_shape {
+            self.set_selection([id]);
+        }
         if add_layer {
             self.run_command(Command::LayerAdd {
                 name: format!("Layer {}", self.engine.doc.layers.len() + 1),
-                kind: CutStyle::Cut,
+                operation: None,
             });
             self.selected_layer = Some(self.engine.doc.layers.len() - 1);
         }
@@ -2689,11 +3038,106 @@ impl StencilApp {
             self.run_command(Command::LayerRemove { index: idx });
             self.selected_layer = Some(idx.saturating_sub(1));
         }
-        for (idx, vis) in toggles {
+        for (idx, vis) in vis_toggles {
             self.run_command(Command::LayerSetVisible {
                 index: idx,
                 visible: vis,
             });
+        }
+        for (idx, locked) in lock_toggles {
+            self.run_command(Command::Document(DocumentCommand::LayerSetLocked {
+                index: idx,
+                locked,
+            }));
+        }
+        // Reorder dispatches LayerMove through run_command after the UI pass
+        // (D-11); Pass N badges renumber next frame via pass_number.
+        for (from, to) in reorder_moves {
+            self.run_command(Command::Document(DocumentCommand::LayerMove { from, to }));
+        }
+        if let Some((index, anchor)) = hammer_click.into_inner() {
+            self.op_popup = Some((index, anchor));
+            op_popup_open = true;
+        }
+        if let Some((index, preset)) = op_drop {
+            self.run_command(Command::Document(DocumentCommand::LayerSetOperation {
+                index,
+                operation: Some(preset.operation()),
+            }));
+        }
+        if let Some((layer, anchor)) = self.op_popup.take() {
+            let open_cmd = op_popup_open.then_some(egui::SetOpenCommand::Bool(true));
+            let entries: Vec<MenuEntry<OperationPreset>> = OperationPreset::ALL
+                .iter()
+                .map(|p| MenuItem::new(p.label(), *p).icon(p.icon()).into())
+                .collect();
+            let shown =
+                Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
+            if let Some(preset) = shown.chosen {
+                self.run_command(Command::Document(DocumentCommand::LayerSetOperation {
+                    index: layer,
+                    operation: Some(preset.operation()),
+                }));
+            }
+            if shown.open {
+                self.op_popup = Some((layer, anchor));
+            }
+        }
+        // Colour picker popup (UI-05): the swatch opens it; the chosen colour is
+        // canonicalised and dispatched as LayerSetColor when the popup closes.
+        if let Some((index, anchor)) = swatch_click.into_inner() {
+            self.color_popup_value = self
+                .engine
+                .doc
+                .layers
+                .get(index)
+                .map(|l| stencilcraft_ui_egui::layer_swatch_color(l, self.theme))
+                .unwrap_or(egui::Color32::WHITE);
+            self.color_popup_dirty = false;
+            self.color_popup = Some((index, anchor));
+            color_popup_open = true;
+        }
+        if let Some((index, anchor)) = self.color_popup.clone() {
+            let mut clear = false;
+            let open_cmd = color_popup_open.then_some(egui::SetOpenCommand::Bool(true));
+            let shown = egui::Popup::menu(&anchor).open_memory(open_cmd).show(|ui| {
+                let name = self
+                    .engine
+                    .doc
+                    .layers
+                    .get(index)
+                    .map(|l| l.name.clone())
+                    .unwrap_or_else(|| "layer".to_string());
+                ui.label(format!("Colour of {name}"));
+                let resp = ui.color_edit_button_srgba(&mut self.color_popup_value);
+                if resp.changed() {
+                    self.color_popup_dirty = true;
+                }
+                if ui.button("Clear colour").clicked() {
+                    clear = true;
+                }
+            });
+            if clear {
+                self.run_command(Command::Document(DocumentCommand::LayerSetColor {
+                    index,
+                    color: None,
+                }));
+                self.color_popup = None;
+            } else if shown.is_some() {
+                self.color_popup = Some((index, anchor));
+            } else {
+                // Popup closed: commit the picked colour, canonicalised to
+                // #rrggbb (the engine rejects anything else, T-02-15).
+                if self.color_popup_dirty {
+                    let c = self.color_popup_value;
+                    let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
+                    self.run_command(Command::Document(DocumentCommand::LayerSetColor {
+                        index,
+                        color: Some(hex),
+                    }));
+                }
+                self.color_popup = None;
+            }
         }
     }
 
@@ -2737,6 +3181,37 @@ impl StencilApp {
     }
 
     pub fn inspector(&mut self, ui: &mut egui::Ui) {
+        // UI-07: the effective operation of the current selection, read-only. A layer
+        // row as the panel's lead shows that layer's operation; otherwise the first
+        // selected shape's owning operation layer, or "Unassigned" when it has none.
+        let doc = &self.engine.doc;
+        let effective: Option<(Option<stencilcraft_doc::Operation>, String)> =
+            match self.layer_selection.lead {
+                Some(PanelKey::Layer(i)) => doc
+                    .layers
+                    .get(i)
+                    .map(|l| (l.operation.clone(), l.name.clone())),
+                _ => self.selected_shapes.first().copied().map(|id| {
+                    match stencilcraft_ui_egui::layers::effective_operation(doc, id) {
+                        Some((op, name)) => (Some(op), name),
+                        None => (None, "Unassigned".to_string()),
+                    }
+                }),
+            };
+        if let Some((op, source)) = effective {
+            let op_text = op.as_ref().map(operation_label).unwrap_or("—").to_string();
+            let _ = SectionHeader::new("inspector-operation", "Operation").show(ui, |ui| {
+                PropertyGroup::new("inspector-operation-group").show(ui, |ui| {
+                    PropertyRow::word("Operation").show(ui, |ui, _| {
+                        ui.add(Text::new(op_text).content(Content::Muted))
+                    });
+                    PropertyRow::word("Source").show(ui, |ui, _| {
+                        ui.add(Text::new(source).content(Content::Muted))
+                    });
+                });
+            });
+        }
+
         PropertyGroup::new("design-mat-group").show(ui, |ui| {
             PropertyRow::word("Cutting mat").show(ui, |ui, _| {
                 let mut mat_select = Select::new("design-mat", "Cutting mat", &mut self.mat);
@@ -2851,7 +3326,7 @@ impl StencilApp {
             .iter()
             .map(|layer| {
                 (
-                    format!("{}  ·  {}", layer.name, layer.shapes.len()),
+                    format!("{}  ·  {}", layer.name, layer.members.len()),
                     layer.visible,
                 )
             })
@@ -2874,7 +3349,7 @@ impl StencilApp {
         if add_layer {
             self.run_command(Command::LayerAdd {
                 name: format!("Layer {}", self.engine.doc.layers.len() + 1),
-                kind: stencilcraft_doc::CutStyle::Cut,
+                operation: None,
             });
         }
         // Visibility is document state: it goes through the engine so it undoes.
@@ -2886,7 +3361,16 @@ impl StencilApp {
             .engine
             .doc
             .shapes()
-            .map(|(_, shape)| (shape.id, format!("Shape #{} · {:?}", shape.id, shape.style)))
+            .map(|shape| {
+                (
+                    shape.id,
+                    format!(
+                        "Shape #{} · {:?}",
+                        shape.id,
+                        stencilcraft_engine::document::style_of_shape(&self.engine.doc, shape.id)
+                    ),
+                )
+            })
             .collect();
         let mut clicked_shape = None;
         let _ = SectionHeader::new("inspector-objects", "Objects").show(ui, |ui| {
@@ -3833,7 +4317,13 @@ impl StencilApp {
                         .doc
                         .layers
                         .iter()
-                        .flat_map(|layer| layer.shapes.iter().map(|shape| shape.path.clone()))
+                        .flat_map(|layer| {
+                            layer
+                                .members
+                                .iter()
+                                .filter_map(|id| doc.get_shape(*id))
+                                .map(|shape| shape.path.clone())
+                        })
                         .collect();
                     stencilcraft_ui_egui::paint_preview_paths(
                         &painter,
@@ -4883,8 +5373,8 @@ mod tests {
         assert_eq!(cached_preview.board, metadata_only_change.board);
         assert!(!cached_preview.layers[0].visible);
         assert_eq!(
-            cached_preview.layers[0].shapes,
-            first.as_ref().unwrap().layers[0].shapes
+            cached_preview.layers[0].members,
+            first.as_ref().unwrap().layers[0].members
         );
         assert!(!app.update_kerf_preview_cache(&app.engine.doc.clone()));
 
@@ -5333,7 +5823,10 @@ mod tests {
         let spec = shape.text.as_deref().expect("live text");
         assert_eq!(spec.text, "Hello");
         assert_eq!(spec.size, 24.0);
-        assert_eq!(shape.style, CutStyle::Engrave);
+        assert_eq!(
+            stencilcraft_engine::document::style_of_shape(&app.engine.doc, shape.id),
+            CutStyle::Engrave
+        );
         assert!(!shape.path.elements().is_empty());
 
         app.open_text_dialog(true);
@@ -6085,8 +6578,8 @@ mod tests {
             app.engine.doc.get_shape(2).unwrap().bounds()
         );
         assert_eq!(
-            app.engine.doc.get_shape(1).unwrap().style,
-            app.engine.doc.get_shape(2).unwrap().style
+            stencilcraft_engine::document::style_of_shape(&app.engine.doc, 1),
+            stencilcraft_engine::document::style_of_shape(&app.engine.doc, 2)
         );
     }
 
@@ -6135,5 +6628,272 @@ mod tests {
         assert!(app.engine.can_undo());
         let _ = app.engine.undo();
         assert_eq!(app.engine.doc.shape_count(), initial_count);
+    }
+}
+
+// End-to-end tests over the real layers panel: the "Playwright for StencilCraft" harness.
+//
+// `craft_ui::testing` (the sibling craft-libs crates' harness) is built on
+// `egui_kittest`; this module uses the same engine against this app: boot a
+// headless `StencilApp`, mount the real `layers_panel`, drive widgets by their
+// accessibility labels, and assert on BOTH sides of the wire — the engine
+// document (backend) and the accessibility tree the user sees (frontend) — with
+// no screenshots.
+#[cfg(test)]
+mod ui_e2e {
+    use super::*;
+    use eframe::egui;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+    type App = Harness<'static, StencilApp>;
+
+    /// Boot the app with the layers panel mounted as the only surface.
+    fn boot() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([680.0, 720.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(|ui, app: &mut StencilApp| app.layers_panel(ui), app);
+        h.run();
+        h
+    }
+
+    fn click(h: &mut App, label: &str) {
+        h.get_by_label(label).click();
+        h.run();
+    }
+
+    /// Menu entries expose both the host `MenuItem` node and its inner button;
+    /// click the `MenuItem` so a label shared with a row button is unambiguous.
+    fn click_menu(h: &mut App, label: &str) {
+        h.get_by_role_and_label(egui::accesskit::Role::MenuItem, label)
+            .click();
+        h.run();
+    }
+
+    fn has(h: &App, label: &str) -> bool {
+        h.query_by_label(label).is_some()
+    }
+
+    /// Rows are `TreeItem` nodes whose accessible name is `"{label}, {detail}"`.
+    fn is_row(n: &egui_kittest::Node<'_>, matches: impl Fn(&str) -> bool) -> bool {
+        let node = n.accesskit_node();
+        node.role() == egui::accesskit::Role::TreeItem && node.label().is_some_and(|l| matches(&l))
+    }
+
+    fn has_row_containing(h: &App, needle: &str) -> bool {
+        h.query_all_by_label_contains(needle)
+            .any(|n| is_row(&n, |l| l.contains(needle)))
+    }
+
+    fn row_rect(h: &App, name: &str) -> Option<egui::Rect> {
+        h.query_all_by_label_contains(name)
+            .find(|n| is_row(n, |l| l.starts_with(name)))
+            .map(|n| n.rect())
+    }
+
+    fn toggled(h: &App, label: &str) -> egui::accesskit::Toggled {
+        h.get_by_label(label)
+            .accesskit_node()
+            .toggled()
+            .expect("toggle")
+    }
+
+    fn layer_name(app: &StencilApp, index: usize) -> String {
+        app.engine
+            .doc
+            .layers
+            .get(index)
+            .expect("layer")
+            .name
+            .clone()
+    }
+
+    fn drag(h: &mut App, from: egui::Pos2, to: egui::Pos2) {
+        h.event(egui::Event::PointerMoved(from));
+        h.step();
+        h.event(egui::Event::PointerButton {
+            pos: from,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.step();
+        for step in 1..=8 {
+            let p = from + (to - from) * (step as f32 / 8.0);
+            h.event(egui::Event::PointerMoved(p));
+            h.step();
+        }
+        h.event(egui::Event::PointerButton {
+            pos: to,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.step();
+        h.run();
+    }
+
+    // D-01 / D-18 incongruence, pinned: a plain "Add Layer" click makes an
+    // operation-less layer. It shows up, accepts shapes, and produces nothing
+    // until an operation is set — which the row does not say out loud.
+    #[test]
+    fn add_layer_makes_an_operationless_layer_and_shows_it() {
+        let mut h = boot();
+        let before = h.state().engine.doc.layers.len();
+        let new_name = format!("Layer {}", before + 1);
+        assert!(!has(&h, &new_name));
+
+        click(&mut h, "Add Layer");
+
+        assert_eq!(h.state().engine.doc.layers.len(), before + 1);
+        let added = h.state().engine.doc.layers.last().expect("added layer");
+        assert_eq!(added.name, new_name);
+        assert!(
+            added.operation.is_none(),
+            "D-01: Add Layer is operation-less"
+        );
+        assert!(has(&h, &new_name), "the new row is on screen");
+        assert!(
+            !has_row_containing(&h, "Pass "),
+            "an operation-less layer has no pass badge"
+        );
+    }
+
+    #[test]
+    fn visibility_toggle_drives_backend_and_frontend() {
+        let mut h = boot();
+        let name = layer_name(h.state(), 0);
+        let label = format!("Visibility {name}");
+        assert_eq!(toggled(&h, &label), egui::accesskit::Toggled::True);
+
+        click(&mut h, &label);
+
+        assert!(!h.state().engine.doc.layers[0].visible, "backend hidden");
+        assert_eq!(
+            toggled(&h, &label),
+            egui::accesskit::Toggled::False,
+            "frontend hidden"
+        );
+
+        click(&mut h, &label);
+        assert!(h.state().engine.doc.layers[0].visible, "backend shown");
+        assert_eq!(
+            toggled(&h, &label),
+            egui::accesskit::Toggled::True,
+            "frontend shown"
+        );
+    }
+
+    #[test]
+    fn lock_toggle_drives_backend_and_frontend() {
+        let mut h = boot();
+        let name = layer_name(h.state(), 0);
+        let label = format!("Lock {name}");
+        assert_eq!(toggled(&h, &label), egui::accesskit::Toggled::False);
+
+        click(&mut h, &label);
+
+        assert!(h.state().engine.doc.layers[0].locked, "backend locked");
+        assert_eq!(
+            toggled(&h, &label),
+            egui::accesskit::Toggled::True,
+            "frontend locked"
+        );
+    }
+
+    #[test]
+    fn operation_popup_sets_operation_on_both_sides() {
+        let mut h = boot();
+        let name = layer_name(h.state(), 0);
+        click(&mut h, &format!("Set operation of {name}"));
+
+        click_menu(&mut h, "Engrave");
+
+        assert!(
+            matches!(
+                h.state().engine.doc.layers[0].operation,
+                Some(stencilcraft_doc::Operation::Engrave(_))
+            ),
+            "backend operation is Engrave"
+        );
+        assert!(
+            has_row_containing(&h, "Engrave"),
+            "the row detail shows Engrave (frontend)"
+        );
+    }
+
+    #[test]
+    fn dragging_a_layer_reorders_and_renumbers_passes() {
+        let mut h = boot();
+        click(&mut h, "Add Layer");
+        let second = layer_name(h.state(), 1);
+        click(&mut h, &format!("Set operation of {second}"));
+        click_menu(&mut h, "Cut");
+        assert_eq!(layer_name(h.state(), 0), "base");
+        let second = layer_name(h.state(), 1);
+        let from = row_rect(&h, &second).expect("Layer 2 row").center();
+        let above_base = row_rect(&h, "base").expect("base row");
+        // Drop above the first row's midpoint: "insert at position 0".
+        let to = egui::pos2(above_base.center().x, above_base.top() + 1.0);
+
+        drag(&mut h, from, to);
+
+        assert_eq!(
+            layer_name(h.state(), 0),
+            "Layer 2",
+            "the dragged layer is now first"
+        );
+        assert!(
+            has_row_containing(&h, "Pass 1"),
+            "the reordered layer is pass 1 on screen"
+        );
+    }
+
+    // Pins the D-09 gap: the spec says a layer expands to show its member
+    // objects "with eye/lock toggles", but member rows are built with
+    // `eye: None, lock: None`. The members show; only the toggles are missing.
+    #[test]
+    fn member_rows_show_the_shape_but_not_the_d09_eye_and_lock() {
+        let mut h = boot();
+        h.state_mut().run_command(Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 20.0,
+            height: 10.0,
+        });
+        h.run();
+        let id = h.state().engine.doc.shapes.last().expect("shape").id;
+        // Force membership on the base layer regardless of where the add landed.
+        h.state_mut()
+            .run_command(Command::Document(DocumentCommand::LayerAddMembers {
+                layer: 0,
+                ids: vec![id],
+            }));
+        h.run();
+
+        click(&mut h, "Expand base");
+
+        let member = format!("#{id}");
+        assert!(
+            row_rect(&h, &member).is_some(),
+            "member row {member} is on screen"
+        );
+        assert!(
+            !has(&h, &format!("Visibility {member}")),
+            "D-09 gap: member rows have no eye toggle"
+        );
+        assert!(
+            !has(&h, &format!("Lock {member}")),
+            "D-09 gap: member rows have no lock toggle"
+        );
     }
 }

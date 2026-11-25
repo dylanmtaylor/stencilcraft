@@ -14,7 +14,15 @@ mod render;
 use std::collections::HashMap;
 
 use kurbo::{BezPath, PathEl, Point, Shape as _};
-use stencilcraft_doc::{CutStyle, Document, Layer};
+use stencilcraft_doc::{CutStyle, Document, Layer, Operation, OperationSettings};
+
+/// The production pass a legacy `CutStyle` maps to.
+fn op_of(style: CutStyle) -> Option<Operation> {
+    Some(match style {
+        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
+        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+    })
+}
 
 pub use handlers::{FORMAT_CAPABILITIES, FormatCapabilities, write_document};
 pub use render::{RenderFormat, render, render_document};
@@ -213,7 +221,7 @@ fn vector_document(
             width_mm: scene.width_mm,
             height_mm: scene.height_mm,
         },
-        layers: vec![Layer::new("cut", CutStyle::Cut)],
+        layers: vec![Layer::new("cut", op_of(CutStyle::Cut))],
         ..Document::default()
     };
     let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
@@ -249,14 +257,14 @@ fn vector_document(
         let layer_index = if let Some(index) = layers.get(&key) {
             *index
         } else {
-            let mut layer = Layer::new(layer_name, style);
+            let mut layer = Layer::new(layer_name, op_of(style));
             layer.color = color;
             doc.layers.push(layer);
             let index = doc.layers.len() - 1;
             layers.insert(key, index);
             index
         };
-        doc.push_shape(layer_index, source.path, style)
+        doc.push_shape(layer_index, source.path)
             .map_err(|e| bad(name, e))?;
     }
     doc.validate().map_err(|e| bad(name, e))?;
@@ -265,10 +273,8 @@ fn vector_document(
 
 /// Scale the art uniformly to fill the page, its corner at the page's.
 fn fit(doc: &mut Document, (page_w, page_h): (f64, f64)) {
-    let bounds = doc
-        .layers
-        .iter()
-        .filter_map(Layer::bounds)
+    let bounds = (0..doc.layers.len())
+        .filter_map(|i| doc.layer_bounds(i))
         .reduce(|a, b| a.union(b));
     doc.board.width_mm = page_w;
     doc.board.height_mm = page_h;
@@ -282,7 +288,7 @@ fn fit(doc: &mut Document, (page_w, page_h): (f64, f64)) {
         .unwrap_or(1.0);
     let transform =
         kurbo::Affine::scale(scale) * kurbo::Affine::translate(-bounds.origin().to_vec2());
-    for shape in doc.layers.iter_mut().flat_map(|l| l.shapes.iter_mut()) {
+    for shape in &mut doc.shapes {
         shape.path = transform * shape.path.clone();
     }
 }
@@ -291,16 +297,21 @@ fn fit(doc: &mut Document, (page_w, page_h): (f64, f64)) {
 /// within the tolerance is closed. Closed subpaths are left alone.
 fn join_document(doc: &mut Document, tolerance: f64) {
     let mut next_id = doc.next_shape_id;
-    for layer in &mut doc.layers {
-        let mut open = Vec::new();
-        let mut kept = Vec::new();
-        for mut shape in std::mem::take(&mut layer.shapes) {
+    for li in 0..doc.layers.len() {
+        let mut open: Vec<BezPath> = Vec::new();
+        let mut kept: Vec<stencilcraft_doc::Shape> = Vec::new();
+        let old_members = std::mem::take(&mut doc.layers[li].members);
+        for id in old_members {
+            let Some(pos) = doc.shapes.iter().position(|s| s.id == id) else {
+                continue;
+            };
+            let mut shape = doc.shapes.remove(pos);
             let mut closed = BezPath::new();
             for sub in subpaths(&shape.path) {
                 if matches!(sub.elements().last(), Some(PathEl::ClosePath)) {
                     closed.extend(sub.elements().iter().copied());
                 } else if sub.elements().len() > 1 {
-                    open.push((sub, shape.style));
+                    open.push(sub);
                 }
             }
             if !closed.elements().is_empty() {
@@ -308,27 +319,22 @@ fn join_document(doc: &mut Document, tolerance: f64) {
                 kept.push(shape);
             }
         }
-        for style in [CutStyle::Cut, CutStyle::Engrave] {
-            let group: Vec<BezPath> = open
-                .iter()
-                .filter(|(_, s)| *s == style)
-                .map(|(p, _)| p.clone())
-                .collect();
-            for path in join(group, tolerance) {
-                kept.push(stencilcraft_doc::Shape {
-                    id: next_id,
-                    path,
-                    style,
-                    hidden: false,
-                    locked: false,
-                    tool: None,
-                    text: None,
-                    production: Default::default(),
-                });
-                next_id = next_id.saturating_add(1);
-            }
+        // A layer carries one operation, so all its open subpaths join together.
+        for path in join(open, tolerance) {
+            kept.push(stencilcraft_doc::Shape {
+                id: next_id,
+                path,
+                hidden: false,
+                locked: false,
+                text: None,
+                production: Default::default(),
+            });
+            next_id = next_id.saturating_add(1);
         }
-        layer.shapes = kept;
+        for shape in &kept {
+            doc.layers[li].members.push(shape.id);
+        }
+        doc.shapes.extend(kept);
     }
     doc.next_shape_id = next_id;
 }
@@ -433,9 +439,8 @@ pub fn join(paths: Vec<BezPath>, tolerance: f64) -> Vec<BezPath> {
 
 /// Bounds of a whole document's art, for callers placing an import.
 pub fn art_bounds(doc: &Document) -> Option<kurbo::Rect> {
-    doc.layers
+    doc.shapes
         .iter()
-        .flat_map(|l| l.shapes.iter())
         .filter_map(|s| s.path.bounding_box().as_rect())
         .reduce(|a, b| a.union(b))
 }

@@ -1,7 +1,7 @@
 //! Bounded raster-to-vector threshold silhouette tracing for the CLI.
 
 use std::collections::BTreeSet;
-use stencilcraft_doc::{CutStyle, Document, Layer};
+use stencilcraft_doc::{Document, Layer, Operation, OperationSettings};
 use stencilcraft_geom::BezPath;
 use stencilcraft_geom::Point;
 
@@ -118,7 +118,10 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
             width_mm: f64::from(width) * pixels_to_mm,
             height_mm: f64::from(height) * pixels_to_mm,
         },
-        layers: vec![Layer::new("trace", CutStyle::Cut)],
+        layers: vec![Layer::new(
+            "trace",
+            Some(Operation::Cut(OperationSettings::default())),
+        )],
         ..Document::default()
     };
     let mut contour_count = 0_usize;
@@ -173,8 +176,7 @@ fn trace_bytes(bytes: &[u8], options: TraceOptions) -> Result<Document, String> 
                 path.line_to(*point);
             }
             path.close_path();
-            doc.push_shape(0, path, CutStyle::Cut)
-                .map_err(|error| error.to_string())?;
+            doc.push_shape(0, path).map_err(|error| error.to_string())?;
         }
     }
     doc.validate().map_err(|error| error.to_string())?;
@@ -223,7 +225,7 @@ mod tests {
         assert_eq!(doc.shape_count(), 1);
         assert!((doc.board.width_mm - 4.0 * 25.4 / 96.0).abs() < 1e-9);
         let polylines = stencilcraft_geom::path_to_polylines(
-            &doc.layers[0].shapes[0].path,
+            &doc.get_shape(doc.layers[0].members[0]).unwrap().path,
             stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
         );
         assert_eq!(polylines.len(), 1);
@@ -246,9 +248,8 @@ mod tests {
             3,
             "outer boundary, enclosed hole, and separate island"
         );
-        let paths = doc.layers[0]
-            .shapes
-            .iter()
+        let paths = doc
+            .shapes()
             .map(|shape| stencilcraft_geom::path_to_polylines(&shape.path, 4))
             .collect::<Vec<_>>();
         assert!(

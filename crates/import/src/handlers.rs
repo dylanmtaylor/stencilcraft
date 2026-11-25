@@ -1,6 +1,6 @@
 //! Stencil document adapters for the shared format registry.
 
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::{Document, Operation};
 
 use crate::{ImportError, bad};
 
@@ -50,11 +50,9 @@ fn output_scene(
             "board dimensions must be finite and positive",
         ));
     }
-    let svg_bounds = doc
-        .layers
-        .iter()
-        .filter(|layer| !layer.template)
-        .filter_map(stencilcraft_doc::Layer::bounds)
+    let svg_bounds = (0..doc.layers.len())
+        .filter(|&i| !matches!(doc.layers[i].operation, Some(Operation::Guide)))
+        .filter_map(|i| doc.layer_bounds(i))
         .fold(
             kurbo::Rect::new(0.0, 0.0, board.0, board.1),
             |bounds, layer| bounds.union(layer),
@@ -83,29 +81,17 @@ fn output_scene(
         .layers
         .iter()
         .enumerate()
-        .filter(|(_, layer)| !layer.template)
+        .filter(|(_, layer)| !matches!(layer.operation, Some(Operation::Guide)))
     {
-        let style = layer.kind;
+        let style = layer.operation.as_ref();
         mapped[source_index] = Some(layers.len());
         layers.push(craft_file_import::write::OutputLayer {
             name: layer.name.clone(),
             dxf_name: layer_name(&layer.name),
             visible: layer.visible,
             dxf_color_index: layer_color(style) as u8,
-            class: Some(
-                match style {
-                    CutStyle::Cut => "stencilcraft-cut",
-                    CutStyle::Engrave => "stencilcraft-engrave",
-                }
-                .into(),
-            ),
-            data_kind: Some(
-                match style {
-                    CutStyle::Cut => "cut",
-                    CutStyle::Engrave => "engrave",
-                }
-                .into(),
-            ),
+            class: Some(class_for(style).into()),
+            data_kind: Some(style.map_or("none", Operation::kind_name).into()),
         });
     }
     let mut paths = Vec::new();
@@ -113,17 +99,17 @@ fn output_scene(
         .layers
         .iter()
         .enumerate()
-        .filter(|(_, layer)| !layer.template)
+        .filter(|(_, layer)| !matches!(layer.operation, Some(Operation::Guide)))
     {
         let Some(output_layer) = mapped.get(layer_index).copied().flatten() else {
             continue;
         };
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let style = shape.style;
-            let color_rgb = match style {
-                CutStyle::Cut => [192, 57, 43],
-                CutStyle::Engrave => [45, 108, 223],
+        let style = layer.operation.as_ref();
+        for id in &layer.members {
+            let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
+                continue;
             };
+            let color_rgb = color_for(style);
             let pdf = format == craft_file_import::write::WriteFormat::Pdf;
             let dxf = format == craft_file_import::write::WriteFormat::Dxf;
             paths.push(craft_file_import::write::OutputPath {
@@ -136,27 +122,14 @@ fn output_scene(
                 color_rgb,
                 stroke_width_mm: if pdf {
                     0.25
-                } else if style == CutStyle::Cut {
+                } else if matches!(style, Some(Operation::Cut(_))) {
                     0.3
                 } else {
                     0.2
                 },
-                class: Some(
-                    match style {
-                        CutStyle::Cut => "stencilcraft-cut",
-                        CutStyle::Engrave => "stencilcraft-engrave",
-                    }
-                    .into(),
-                ),
-                data_kind: Some(
-                    match style {
-                        CutStyle::Cut => "cut",
-                        CutStyle::Engrave => "engrave",
-                    }
-                    .into(),
-                ),
-                close_open_contours: dxf
-                    && matches!((style, layer.kind), (CutStyle::Cut, _) | (_, CutStyle::Cut)),
+                class: Some(class_for(style).into()),
+                data_kind: Some(style.map_or("none", Operation::kind_name).into()),
+                close_open_contours: dxf && matches!(style, Some(Operation::Cut(_))),
             });
         }
     }
@@ -169,10 +142,24 @@ fn output_scene(
     })
 }
 
-fn layer_color(kind: CutStyle) -> i32 {
-    match kind {
-        CutStyle::Cut => 1,
-        CutStyle::Engrave => 5,
+fn layer_color(operation: Option<&Operation>) -> i32 {
+    match operation {
+        Some(Operation::Engrave(_)) => 5,
+        _ => 1,
+    }
+}
+
+fn class_for(operation: Option<&Operation>) -> &'static str {
+    match operation {
+        Some(Operation::Engrave(_)) => "stencilcraft-engrave",
+        _ => "stencilcraft-cut",
+    }
+}
+
+fn color_for(operation: Option<&Operation>) -> [u8; 3] {
+    match operation {
+        Some(Operation::Engrave(_)) => [45, 108, 223],
+        _ => [192, 57, 43],
     }
 }
 
@@ -208,8 +195,7 @@ mod tests {
         path.line_to((9.0, 1.0));
         path.line_to((9.0, 9.0));
         path.close_path();
-        doc.push_shape(0, path, stencilcraft_doc::CutStyle::Cut)
-            .unwrap();
+        doc.push_shape(0, path).unwrap();
         for ext in ["svg", "dxf", "pdf", "png", "jpg"] {
             let bytes = write_document(&doc, ext, 72.0).unwrap();
             let back =

@@ -48,9 +48,15 @@ pub fn import_into(
         .iter()
         .flat_map(|layer| {
             layer
-                .shapes
+                .members
                 .iter()
-                .map(|shape| (shape.path.clone(), shape.style))
+                .filter_map(|id| imported.get_shape(*id))
+                .map(|shape| {
+                    (
+                        shape.path.clone(),
+                        stencilcraft_engine::document::style_of_shape(&imported, shape.id),
+                    )
+                })
         })
         .collect();
     let count = shapes.len();

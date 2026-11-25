@@ -4086,14 +4086,27 @@ impl StencilApp {
         let mut toggles = Vec::new();
 
         let can_delete = self.engine.doc.layers.len() > 1;
-        let layer_data: Vec<(usize, String, bool)> = self
+        let layer_count = self.engine.doc.layers.len();
+        let layer_data: Vec<(usize, String, bool, bool)> = self
             .engine
             .doc
             .layers
             .iter()
             .enumerate()
-            .map(|(i, l)| (i, l.name.clone(), l.visible))
+            .map(|(i, l)| (i, l.name.clone(), l.visible, l.locked))
             .collect();
+        let selected_layer = self.selected_layer.and_then(|i| {
+            self.engine
+                .doc
+                .layers
+                .get(i)
+                .map(|l| (i, l.name.clone(), l.template))
+        });
+        let mut lock_toggles: Vec<(usize, bool)> = Vec::new();
+        let mut move_layer: Option<(usize, usize)> = None;
+        let footer_selected = self.selected_layer;
+        let mut rename: Option<(usize, String)> = None;
+        let mut template: Option<(usize, bool)> = None;
         // Every shape with its eye (shown) and lock toggles: hidden and locked shapes are left
         // off the canvas's picking, so this list is where they come back.
         let shape_rows: Vec<(u64, String, bool, bool)> = self
@@ -4124,13 +4137,31 @@ impl StencilApp {
                     {
                         delete_layer = true;
                     }
+                    if let Some(i) = footer_selected {
+                        if ui
+                            .add(IconButton::new(Icon::ChevronUp, "Move Layer Up").enabled(i > 0))
+                            .clicked()
+                        {
+                            move_layer = Some((i, i - 1));
+                        }
+                        if ui
+                            .add(
+                                IconButton::new(Icon::ChevronDown, "Move Layer Down")
+                                    .enabled(i + 1 < layer_count),
+                            )
+                            .clicked()
+                        {
+                            move_layer = Some((i, i + 1));
+                        }
+                    }
                 });
             })
             .show(ui, |ui| {
-                for (i, name, visible) in layer_data {
+                for (i, name, visible, locked) in layer_data {
                     let is_sel = selected_idx == Some(i);
                     let row = ListRow::new(i, &name)
                         .toggle(ToggleColumn::eye(format!("Visibility {name}"), visible))
+                        .toggle(ToggleColumn::lock(format!("Lock {name}"), locked))
                         .selected(is_sel)
                         .show(ui);
                     if row.response.clicked() {
@@ -4141,8 +4172,34 @@ impl StencilApp {
                             EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
                         ) = ev
                         {
-                            toggles.push((value.row, value.on));
+                            if value.column == 0 {
+                                toggles.push((value.row, value.on));
+                            } else {
+                                lock_toggles.push((value.row, value.on));
+                            }
                         }
+                    }
+                }
+                // The selected layer's name and whether it is a guide (shown, never cut).
+                if let Some((i, name, is_template)) = &selected_layer {
+                    let edit = craft_ui::controls::TextField::new(
+                        "layer-name",
+                        "Layer name",
+                        name.as_str(),
+                    )
+                    .char_limit(80)
+                    .show(ui);
+                    if let Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) =
+                        edit.event
+                        && !value.trim().is_empty()
+                        && value != *name
+                    {
+                        rename = Some((*i, value.trim().to_string()));
+                    }
+                    let mut guide = *is_template;
+                    let _ = Checkbox::bool("Guide layer (shown, never cut)", &mut guide).show(ui);
+                    if guide != *is_template {
+                        template = Some((*i, guide));
                     }
                 }
                 let _ = SectionHeader::new("layers-objects", "Objects").show(ui, |ui| {
@@ -4203,6 +4260,29 @@ impl StencilApp {
                 index: idx,
                 visible: vis,
             });
+        }
+        for (index, locked) in lock_toggles {
+            self.run_command(Command::Document(DocumentCommand::LayerSetLocked {
+                index,
+                locked,
+            }));
+            self.retain_valid_selection();
+        }
+        if let Some((index, name)) = rename {
+            self.run_command(Command::Document(DocumentCommand::LayerRename {
+                index,
+                name,
+            }));
+        }
+        if let Some((index, on)) = template {
+            self.run_command(Command::Document(DocumentCommand::LayerSetTemplate {
+                index,
+                template: on,
+            }));
+        }
+        if let Some((from, to)) = move_layer {
+            self.run_command(Command::Document(DocumentCommand::LayerMove { from, to }));
+            self.selected_layer = Some(to);
         }
     }
 

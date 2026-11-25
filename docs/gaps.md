@@ -118,9 +118,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     multiple offset results into one remains missing.
 17. **Groups, stacking and layer control**: the desktop groups and ungroups (groups select
     and move as one), arranges (Bring to Front/Forward, Send Backward/to Back) and has
-    object and layer locks. Still missing in the desktop: renaming groups and moving objects
-    between layers. Attach and Contour commands exist
-    in the production engine; their desktop workflows still need integration.
+    object and layer locks. The Layers panel shows, locks, renames, reorders and
+    deletes layers and makes guide layers (shown, never cut); Object › Arrange › Send to
+    Layer moves objects between layers, and Attach/Detach and Contour have desktop
+    controls. Still missing: renaming groups.
 18. **Snapping and guides**: guides, grid and snap settings, snapping and measuring are
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
@@ -264,8 +265,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     desktop Pathfinder remains destructive and needs a live-combine workflow.
 44. **Offset UI**: the desktop Offset panel previews and applies `shapes.offset` with
     join style and miter limit. A weld-offsets option remains missing.
-45. **Templates and Guide layers**: missing sizing backgrounds that are shown but never
-    cut, a Guide operation, and document presets ("base type").
+45. **Templates and Guide layers**: a layer can be a guide layer (Layers panel: shown,
+    never cut). Missing: built-in sizing backgrounds (shirt, mug, card blanks) and document
+    presets ("base type").
 46. **Make-screen validation**: missing checks for each machine's limits: Smart Materials
     minimum and maximum lengths, card mats (2×2, 1×2, Joy), Print Then Cut usable area
     and page size, and roller margins. Also missing: per-machine default load type and

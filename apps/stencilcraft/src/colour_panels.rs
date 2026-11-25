@@ -187,6 +187,8 @@ impl StencilApp {
     pub fn select_by_colour_panel(&mut self, ui: &mut egui::Ui) {
         let colours = self.colours_in_use();
         let mut select = None;
+        let mut recolor_row = self.recolor_row;
+        let mut recolor_to: Option<(usize, String)> = None;
         let _ = Panel::new("stencilcraft-select-by-colour-panel").show(ui, |ui| {
             if colours.is_empty() {
                 hint(ui, "No shape has a line or fill colour yet.");
@@ -207,11 +209,42 @@ impl StencilApp {
                     if button(ui, "Select", true) {
                         select = Some(ids.clone());
                     }
+                    if button(ui, "Recolor", true) {
+                        recolor_row = (recolor_row != Some(i)).then_some(i);
+                    }
                 });
+                if recolor_row == Some(i) {
+                    ui.horizontal_wrapped(|ui| {
+                        for (k, swatch) in PALETTE.iter().enumerate() {
+                            let Some(c) = stencilcraft_ui_egui::parse_hex_colour(swatch) else {
+                                continue;
+                            };
+                            if ui
+                                .add(
+                                    Swatch::new(format!("recolor-{i}-{k}"), *swatch, c)
+                                        .size(ControlSize::Sm),
+                                )
+                                .clicked()
+                            {
+                                recolor_to = Some((i, (*swatch).to_string()));
+                            }
+                        }
+                    });
+                }
             }
         });
+        self.recolor_row = recolor_row;
         if let Some(ids) = select {
             self.set_selection(ids);
+        }
+        if let Some((row, colour)) = recolor_to
+            && let Some((target, _, ids)) = colours.get(row)
+        {
+            // Recolor Artwork: every shape with that colour takes the new one (one step).
+            let keep = std::mem::replace(&mut self.selected_shapes, ids.clone());
+            self.set_selection_colour(*target, Some(colour));
+            self.set_selection(keep);
+            self.recolor_row = None;
         }
     }
 }

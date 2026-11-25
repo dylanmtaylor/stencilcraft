@@ -93,6 +93,8 @@ pub struct UserPrefs {
     pub outline_view: bool,
     /// Machine › Mat Preview: draw the cutting mat behind the page.
     pub mat_preview: bool,
+    /// Panels › Starter Mode: only the everyday panels.
+    pub starter_mode: bool,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -114,6 +116,7 @@ impl Default for UserPrefs {
             show_dimensions: true,
             outline_view: false,
             mat_preview: true,
+            starter_mode: false,
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -518,6 +521,8 @@ pub enum TopMenuAction {
     Machine(machine_menu::MachineAction),
     /// Machine › Mat Preview and Mirror on Mat.
     ToggleMatPreview,
+    /// Panels › Starter Mode.
+    ToggleStarterMode,
     ToggleMirror,
     /// Machine › Load Type: on a mat (`true`) or without one.
     LoadOnMat(bool),
@@ -910,6 +915,8 @@ pub struct StencilApp {
     pub stores: library_panel::FileStores,
     /// The colour panels' hex field, and a line style picked there (applied after drawing).
     pub colour_hex_draft: String,
+    /// Select by Color: the colour row whose recolour palette is open.
+    pub recolor_row: Option<usize>,
     /// A Machine-menu hardware action waiting for the Send tab.
     pub machine_action: Option<machine_menu::MachineAction>,
     /// Select › Save Selection: named selections for this session.
@@ -1039,6 +1046,48 @@ impl Default for SendTab {
 }
 
 pub fn default_workspace() -> Layout<WorkspacePanel> {
+    workspace_with(FULL_PANELS.to_vec())
+}
+
+/// Silhouette's right-hand panel strip, in full.
+const FULL_PANELS: &[WorkspacePanel] = &[
+    WorkspacePanel::Transform,
+    WorkspacePanel::Replicate,
+    WorkspacePanel::Offset,
+    WorkspacePanel::Modify,
+    WorkspacePanel::Points,
+    WorkspacePanel::Trace,
+    WorkspacePanel::TextStyle,
+    WorkspacePanel::PageSetup,
+    WorkspacePanel::Effects,
+    WorkspacePanel::Contour,
+    WorkspacePanel::Library,
+    WorkspacePanel::Glyphs,
+    WorkspacePanel::FillColor,
+    WorkspacePanel::LineStyle,
+    WorkspacePanel::SelectByColor,
+    WorkspacePanel::History,
+    WorkspacePanel::Preferences,
+    WorkspacePanel::Selections,
+];
+
+/// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
+/// Transform, Replicate, Text Style).
+const STARTER_PANELS: &[WorkspacePanel] = &[
+    WorkspacePanel::PageSetup,
+    WorkspacePanel::FillColor,
+    WorkspacePanel::LineStyle,
+    WorkspacePanel::Trace,
+    WorkspacePanel::Transform,
+    WorkspacePanel::Replicate,
+    WorkspacePanel::TextStyle,
+];
+
+pub fn starter_workspace() -> Layout<WorkspacePanel> {
+    workspace_with(STARTER_PANELS.to_vec())
+}
+
+fn workspace_with(strip: Vec<WorkspacePanel>) -> Layout<WorkspacePanel> {
     Layout {
         root: Some(Node::Split {
             axis: SplitAxis::Horizontal,
@@ -1053,29 +1102,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                     vec![
                         Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Layers], 0),
                         // Silhouette's right-hand panel strip.
-                        Group::new(
-                            vec![
-                                WorkspacePanel::Transform,
-                                WorkspacePanel::Replicate,
-                                WorkspacePanel::Offset,
-                                WorkspacePanel::Modify,
-                                WorkspacePanel::Points,
-                                WorkspacePanel::Trace,
-                                WorkspacePanel::TextStyle,
-                                WorkspacePanel::PageSetup,
-                                WorkspacePanel::Effects,
-                                WorkspacePanel::Contour,
-                                WorkspacePanel::Library,
-                                WorkspacePanel::Glyphs,
-                                WorkspacePanel::FillColor,
-                                WorkspacePanel::LineStyle,
-                                WorkspacePanel::SelectByColor,
-                                WorkspacePanel::History,
-                                WorkspacePanel::Preferences,
-                                WorkspacePanel::Selections,
-                            ],
-                            0,
-                        ),
+                        Group::new(strip, 0),
                     ],
                     300.0,
                 )],
@@ -1157,6 +1184,7 @@ impl StencilApp {
             effect_preview: None,
             stores: library_panel::FileStores::default(),
             colour_hex_draft: String::new(),
+            recolor_row: None,
             machine_action: None,
             saved_selections: Vec::new(),
             selection_name_draft: String::new(),
@@ -1285,6 +1313,9 @@ impl StencilApp {
             let (store, _report) = SettingsStore::<UserPrefs>::open(Location::Auto);
             self.prefs = store.get().clone();
             self.stores = library_panel::FileStores::open();
+            if self.prefs.starter_mode {
+                self.workspace = starter_workspace();
+            }
             if !self.stores.recovered.is_empty() {
                 self.pending_panel = Some(WorkspacePanel::Library);
                 self.status = "recovered designs from an earlier session are in the Library panel"
@@ -1324,7 +1355,11 @@ impl StencilApp {
     }
 
     pub fn reset_workspace(&mut self) {
-        self.workspace = default_workspace();
+        self.workspace = if self.prefs.starter_mode {
+            starter_workspace()
+        } else {
+            default_workspace()
+        };
         self.status = "panel layout restored".to_string();
     }
 
@@ -3375,6 +3410,11 @@ impl StencilApp {
                 self.save_prefs();
             }
             TopMenuAction::ToggleMirror => self.send.mirror = !self.send.mirror,
+            TopMenuAction::ToggleStarterMode => {
+                self.prefs.starter_mode = !self.prefs.starter_mode;
+                self.save_prefs();
+                self.reset_workspace();
+            }
             TopMenuAction::LoadOnMat(on) => {
                 if on {
                     if self.mat == stencilcraft_machine::Mat::None {

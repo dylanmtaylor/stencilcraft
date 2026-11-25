@@ -721,7 +721,7 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Registration Marks", A::TogglePrintCutMarks)
             .check(app.prefs.print_cut_marks)
             .into(),
-        todo("Design Page Settings…"),
+        item("Design Page Settings…", A::ShowPanel(P::PageSetup)).into(),
         SEP,
         item("Show Design", A::ShowDesign)
             .radio(!app.send_mode)
@@ -757,13 +757,15 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Properties", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
         item("Tools", A::ShowPanel(crate::WorkspacePanel::Tools)).into(),
         item("Swatches", A::ShowPanel(P::FillColor)).into(),
-        todo("Recolor Artwork"),
+        item("Recolor Artwork", A::ShowPanel(P::SelectByColor)).into(),
         todo("Graphic Styles"),
         todo("Actions"),
         item("Libraries", A::ShowPanel(P::Library)).into(),
         SEP,
         item("Reset Panels to Default", A::ResetWorkspace).into(),
-        todo("Starter Mode"),
+        item("Starter Mode", A::ToggleStarterMode)
+            .check(app.prefs.starter_mode)
+            .into(),
         sub(
             "Theme",
             vec![
@@ -842,7 +844,7 @@ fn help() -> Vec<MenuEntry<A>> {
             .shortcut(kbd(NONE, Key::F1))
             .into(),
         item("Keyboard Shortcuts", A::HelpCheatsheet).into(),
-        todo("Tutorials"),
+        item("Tutorials", A::HelpManual).into(),
         SEP,
         item("About StencilCraft", A::HelpAbout).into(),
     ]

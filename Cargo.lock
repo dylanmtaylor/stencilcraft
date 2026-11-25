@@ -5990,6 +5990,7 @@ version = "0.1.0"
 dependencies = [
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569)",
  "kurbo 0.13.1",
+ "roxmltree 0.21.2",
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-testkit",

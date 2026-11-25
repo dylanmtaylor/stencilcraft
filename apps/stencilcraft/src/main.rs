@@ -8621,6 +8621,9 @@ mod tests {
                     egui::vec2(1000.0, 800.0),
                 )),
                 events,
+                // Half a second a pass: separate clicks at one spot stay separate clicks, not a
+                // double click that opens and closes a list again.
+                time: Some(ctx.input(|input| input.time) + 0.5),
                 ..Default::default()
             },
             |ui| panel(app, ui),
@@ -9183,11 +9186,12 @@ mod tests {
         let old_zoom = app.view.zoom;
         let out = frame(&ctx, &mut app, vec![], StencilApp::status_bar);
         // The pin's slider jumps to a click on its track and ignores one on its thumb, which the
-        // fitted view's zoom puts near the track's middle: the click lands near the start.
+        // fitted view's zoom (about 120 % of 5 to 40,000 %) puts near the track's start: click near
+        // its end.
         let track = node_rect(&out, "Zoom");
-        let target = egui::pos2(track.left() + track.width() * 0.1, track.center().y);
-        eprintln!("DIAG zoom slider rect {track:?}, click at {target:?}, zoom {old_zoom}");
+        let target = egui::pos2(track.left() + track.width() * 0.9, track.center().y);
         click(&ctx, &mut app, StencilApp::status_bar, target);
+        eprintln!("DIAG zoom after click: pending {:?}", app.pending_zoom);
         assert!(app.pending_zoom.is_some());
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         assert_ne!(app.view.zoom, old_zoom);
@@ -9224,6 +9228,7 @@ mod tests {
             StencilApp::send_tab,
         );
         assert_eq!(app.send.media_index, initial);
+        frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         click(
             &ctx,

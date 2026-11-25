@@ -6,16 +6,15 @@
 //! one keeps the shape and swaps the fields for cutting ones. Create runs `document.new` and
 //! `kerf.set` through the engine; mat and machine are app state, as on the Send tab.
 
+use craft_behavior::IconId;
 use craft_theme::TypeRole;
-use craft_ui::behavior::GridNav;
-use craft_ui::composites::SectionLabel;
-use craft_ui::controls::{NumberField, Segmented, Select, TextField};
-use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome, Width};
-use craft_behavior::EditEvent;
-use craft_ui::icons::Icon;
-use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::primitives::{Content, Corner, Divider, Gap, Interactive, Pad, SurfaceKind, Text};
-use craft_ui::theme::{ToEgui as _, Tokens, TokensOf as _};
+use craft_ui::choice::Segmented;
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::dialog::Dialog;
+use craft_ui::display::{Divider, Shade, Text};
+use craft_ui::pickers::Select;
+use craft_ui::sections::{DialogRole, FooterButton};
+use craft_ui::text::{NumberField, TextField};
 use eframe::egui::{
     self, Align, Color32, Id, Rect, ScrollArea, Sense, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
@@ -579,11 +578,56 @@ pub fn push_recent(recent: &mut Vec<RecentDoc>, doc: RecentDoc, max: usize) {
     recent.truncate(max);
 }
 
+/// The New Document layout. The pin's theme has no New Document tokens, so these are the values
+/// of the old `component.new_document` tokens (craft-libs 8504e84, `theme/src/values.rs`).
+struct NewDocMetrics {
+    card: [f32; 2],
+    card_columns: usize,
+    card_rows: usize,
+    page_icon: f32,
+    page_box: f32,
+    card_icon_center: f32,
+    card_title_center: f32,
+    card_line_center: f32,
+    scroll_room: f32,
+}
+
+const ND: NewDocMetrics = NewDocMetrics {
+    card: [164.0, 112.0],
+    card_columns: 3,
+    card_rows: 3,
+    page_icon: 30.0,
+    page_box: 40.0,
+    card_icon_center: 34.0,
+    card_title_center: 70.0,
+    card_line_center: 97.0,
+    scroll_room: 16.0,
+};
+
+/// The old `Gap::Row`, `Gap::Section`, `Pad::Control` and `Corner::Control` measures.
+const GAP_ROW: f32 = 8.0;
+const GAP_SECTION: f32 = 16.0;
+const PAD_CONTROL: f32 = 6.0;
+const RADIUS_CONTROL: f32 = 4.0;
+
+/// A text format of the old `Text::format(role, content)`: `role` picks the egui text style.
+fn text_format(ui: &Ui, role: TypeRole, color: Color32) -> egui::TextFormat {
+    let style = match role {
+        TypeRole::Caption => egui::TextStyle::Small,
+        _ => egui::TextStyle::Body,
+    };
+    egui::TextFormat::simple(style.resolve(ui.style()), color)
+}
+
+/// The accent ink (the old `Content::Accent`): the theme's selection stroke as installed into egui.
+fn accent(ui: &Ui) -> Color32 {
+    ui.visuals().selection.stroke.color
+}
+
 /// The dialog's state between frames.
 #[derive(Debug, Default)]
 pub struct NewDocState {
     pub open: bool,
-    pub dialog: DialogState,
     /// 0 is Recent; `i` is `CATEGORIES[i - 1]`.
     pub tab: usize,
     pub selected: Option<usize>,
@@ -643,36 +687,33 @@ impl NewDocState {
 
     /// One frame. Returns the choice when the user pressed Create (or double-clicked a card)
     /// with valid details.
-    pub fn show(&mut self, ctx: &egui::Context, recent: &[RecentDoc]) -> Option<Choice> {
+    /// Shown from `parent`: the dialog is a container of the framework's overlay host. OK
+    /// (Create) is the first footer button, as the old footer's OK.
+    pub fn show(&mut self, parent: &mut Ui, recent: &[RecentDoc]) -> Option<Choice> {
         if !self.open {
             return None;
         }
-        let width = craft_ui::theme::current(ctx).component.new_document.width;
         let valid = self.choice.is_valid();
-        let mut dialog = std::mem::take(&mut self.dialog);
-        let shown = Dialog::new("new-document", "New Document")
-            .width(Width::Fixed(width))
-            .footer(
-                Footer::standard()
-                    .ok("Create")
-                    .cancel("Close")
-                    .ok_enabled(valid),
-            )
-            .show(ctx, &mut dialog, &mut (), |ui, ()| self.body(ui, recent));
-        self.dialog = dialog;
-        let create = shown.outcome == Some(Outcome::Ok)
+        let mut open = true;
+        let shown = Dialog::new("New Document")
+            .id_salt("new-document")
+            .opened(Bind::bound(&mut open))
+            .buttons([
+                FooterButton::new("Create", DialogRole::Accept).enabled(valid),
+                FooterButton::new("Close", DialogRole::Cancel),
+            ])
+            .show(parent, |ui, _| self.body(ui, recent));
+        let create = shown.output.picked == Some(0)
             || (std::mem::take(&mut self.create_now) && self.choice.is_valid());
-        if shown.closed || create {
+        if !open || shown.output.closed.is_some() || create {
             self.open = false;
-            self.dialog.close();
         }
         (create && self.choice.is_valid()).then(|| self.choice.clone())
     }
 
     fn body(&mut self, ui: &mut Ui, recent: &[RecentDoc]) {
-        let tokens = Tokens::of(ui);
-        let nd = tokens.component.new_document;
-        let row = Gap::Row.points(&tokens);
+        let nd = &ND;
+        let row = GAP_ROW;
         let grid_width = nd.card_columns as f32 * nd.card[0]
             + nd.card_columns.saturating_sub(1) as f32 * row
             + nd.scroll_room;
@@ -681,11 +722,11 @@ impl NewDocState {
                 ui.set_width(grid_width);
                 self.tab_strip(ui);
                 ui.add_space(row);
-                Divider::horizontal().show(ui);
+                let _ = Divider::horizontal().show(ui);
                 ui.add_space(row);
                 self.card_grid(ui, recent);
             });
-            ui.add_space(Gap::Section.points(&tokens));
+            ui.add_space(GAP_SECTION);
             ui.vertical(|ui| {
                 ui.set_width(ui.available_width());
                 self.details(ui);
@@ -693,26 +734,27 @@ impl NewDocState {
         });
     }
 
+    /// The category tabs. The old `Interactive` roving stop is gone at the pin, so each tab is
+    /// a plain focusable egui response (Tab moves between them; no arrow-key roving).
     fn tab_strip(&mut self, ui: &mut Ui) {
-        let tokens = Tokens::of(ui);
         let titles: Vec<&str> = std::iter::once("Recent")
             .chain(CATEGORIES.iter().map(|c| c.title))
             .collect();
         let ids: Vec<Id> = (0..titles.len())
-            .map(|i| Interactive::id_in(ui, ("new-document-tab", i)))
+            .map(|i| ui.id().with(("new-document-tab", i)))
             .collect();
-        let stop = GridNav::roving_stop(ui, &ids, Some(self.tab), true);
-        let pad = Pad::Control.points(&tokens);
+        let pad = PAD_CONTROL;
         let mut picked = None;
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = Gap::Section.points(&tokens);
+            ui.spacing_mut().item_spacing.x = GAP_SECTION;
             for (i, (title, id)) in titles.iter().zip(&ids).enumerate() {
                 let on = i == self.tab;
-                let format = Text::format(
-                    &tokens,
-                    TypeRole::Label,
-                    if on { Content::Normal } else { Content::Muted },
-                );
+                let color = if on {
+                    ui.visuals().text_color()
+                } else {
+                    ui.visuals().weak_text_color()
+                };
+                let format = text_format(ui, TypeRole::Label, color);
                 let galley = ui
                     .painter()
                     .layout_job(egui::text::LayoutJob::single_section(
@@ -721,13 +763,11 @@ impl NewDocState {
                     ));
                 let (_, rect) =
                     ui.allocate_space(vec2(galley.size().x, galley.size().y + 2.0 * pad));
-                let mut element = Interactive::with_id(*id, egui::accesskit::Role::Tab, *title)
-                    .selected(on)
-                    .position_in_set(i);
-                if i != stop {
-                    element = element.sense(Sense::CLICK);
-                }
-                let response = element.interact_at(ui, rect).finish(ui);
+                let response = ui.interact(rect, *id, Sense::click());
+                let title = (*title).to_owned();
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::Tab, true, on, &title)
+                });
                 if ui.is_rect_visible(rect) {
                     ui.painter()
                         .galley(pos2(rect.left(), rect.top() + pad), galley, format.color);
@@ -735,7 +775,7 @@ impl NewDocState {
                         let y = rect.bottom();
                         ui.painter().line_segment(
                             [pos2(rect.left(), y), pos2(rect.right(), y)],
-                            Stroke::new(2.0, Content::Accent.color(&tokens).to_egui()),
+                            Stroke::new(2.0, accent(ui)),
                         );
                     }
                 }
@@ -751,27 +791,32 @@ impl NewDocState {
     }
 
     fn card_grid(&mut self, ui: &mut Ui, recent: &[RecentDoc]) {
-        let tokens = Tokens::of(ui);
         let cards = self.cards(recent);
         let heading = if self.tab == 0 {
             format!("Recent ({})", cards.len())
         } else {
             format!("Blank Document Presets ({})", cards.len())
         };
-        SectionLabel::new(heading).show(ui);
-        let gap = Gap::Row.points(&tokens);
+        let _ = Text::new(heading)
+            .role(TypeRole::Label)
+            .shade(Shade::Muted)
+            .show(ui);
+        let gap = GAP_ROW;
         ui.add_space(gap);
-        let nd = tokens.component.new_document;
+        let nd = &ND;
         let card_size = Vec2::from(nd.card);
         let columns = nd.card_columns.max(1);
         let rows = cards.len().div_ceil(columns);
-        let inset = Pad::Control.points(&tokens);
-        let title_format = Text::format(&tokens, TypeRole::Body, Content::Normal);
-        let line_format = Text::format(&tokens, TypeRole::Caption, Content::Faint);
-        let outline = Content::Muted.color(&tokens).to_egui();
-        let accent = Content::Accent.color(&tokens).to_egui();
+        let inset = PAD_CONTROL;
+        let title_format = text_format(ui, TypeRole::Body, ui.visuals().text_color());
+        let faint = ui.visuals().weak_text_color().gamma_multiply(0.8);
+        let line_format = text_format(ui, TypeRole::Caption, faint);
+        let outline = ui.visuals().weak_text_color();
+        let accent = accent(ui);
+        let surface = ui.visuals().faint_bg_color;
+        let hovered_surface = ui.visuals().widgets.hovered.weak_bg_fill;
         let ids: Vec<Id> = (0..cards.len())
-            .map(|i| Interactive::id_in(ui, ("new-document-card", self.tab, i)))
+            .map(|i| ui.id().with(("new-document-card", self.tab, i)))
             .collect();
         let mut clicked = None;
         let mut double = false;
@@ -786,7 +831,6 @@ impl NewDocState {
                 let width = columns as f32 * card_size.x + (columns - 1) as f32 * gap;
                 let height = rows as f32 * card_size.y + rows.saturating_sub(1) as f32 * gap;
                 let (_, area) = ui.allocate_space(vec2(width, height));
-                let stop = GridNav::roving_stop(ui, &ids, self.selected, true);
                 for (i, (card, id)) in cards.iter().zip(&ids).enumerate() {
                     let (r, c) = (i / columns, i % columns);
                     let rect = Rect::from_min_size(
@@ -799,26 +843,26 @@ impl NewDocState {
                     );
                     let on = self.selected == Some(i);
                     let line = size_line(card.width_mm, card.height_mm, units);
-                    let mut element = Interactive::with_id(
-                        *id,
-                        egui::accesskit::Role::Button,
-                        card.title.as_str(),
-                    )
-                    .surface(SurfaceKind::Raised)
-                    .corner(Corner::Control)
-                    .selected(on);
-                    if i != stop {
-                        element = element.sense(Sense::CLICK);
-                    }
-                    let response = element.interact_at(ui, rect).finish(ui);
+                    let response = ui.interact(rect, *id, Sense::click());
+                    let title = card.title.clone();
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(egui::Role::Button, true, on, &title)
+                    });
                     if response.gained_focus() {
                         ui.scroll_to_rect(rect, None);
                     }
                     if ui.is_rect_visible(rect) {
+                        // The old raised surface, painted by the app.
+                        let fill = if response.hovered() {
+                            hovered_surface
+                        } else {
+                            surface
+                        };
+                        ui.painter().rect_filled(rect, RADIUS_CONTROL, fill);
                         if on {
                             ui.painter().rect_stroke(
                                 rect,
-                                Corner::Control.radius(&tokens),
+                                RADIUS_CONTROL,
                                 Stroke::new(1.5, accent),
                                 StrokeKind::Inside,
                             );
@@ -865,100 +909,110 @@ impl NewDocState {
     }
 
     fn details(&mut self, ui: &mut Ui) {
-        let tokens = Tokens::of(ui);
-        let numbers = LocaleNumbers::of_ctx(ui.ctx());
         let saved_names: Vec<String> = self.saved.iter().map(|s| s.name.clone()).collect();
         let (mut save, mut delete) = (false, None);
         let choice = &mut self.choice;
         let before = (choice.width_mm, choice.height_mm, choice.mat);
-        SectionLabel::new("Preset Details").show(ui);
-        ui.add_space(Gap::Row.points(&tokens));
-        let edit = TextField::new("new-document-name", "Name", &choice.name)
-            .char_limit(255)
+        let _ = Text::new("Preset Details")
+            .role(TypeRole::Label)
+            .shade(Shade::Muted)
             .show(ui);
-        if let Some(name) = edit.event.as_ref().and_then(EditEvent::value) {
-            choice.name.clone_from(name);
-        }
+        ui.add_space(GAP_ROW);
+        // The field writes the name as it is typed, as the old field's every event did.
+        let _ = TextField::new("Name", Bind::bound(&mut choice.name))
+            .id_salt("new-document-name")
+            .limit(255)
+            .show(ui);
 
         let range = 0.01..=choice.units.display_value(MAX_SIDE_MM);
+        let side_unit = crate::panels::unit_text(choice.units.suffix());
+        let units = choice.units;
         for (label, side) in [
             ("Width", &mut choice.width_mm),
             ("Height", &mut choice.height_mm),
         ] {
             caption(ui, label);
-            let edit = NumberField::new(
-                ("new-document-side", label),
-                label,
-                choice.units.display_value(*side),
-                &numbers,
-            )
-            .range(range.clone())
-            .unit(Unit::new(choice.units.suffix()))
-            .show(ui);
-            if let Some(value) = edit.event.and_then(|e| e.value().copied())
+            let edit = NumberField::new(label, Bind::given(Some(units.display_value(*side))))
+                .id_salt(("new-document-side", label))
+                .range(range.clone())
+                .unit(side_unit.clone())
+                .show(ui);
+            if let Some(Some(value)) = edit.events.value().copied()
                 && value.is_finite()
             {
-                *side = choice.units.document_value(value);
+                *side = units.document_value(value);
             }
         }
 
         caption(ui, "Units");
-        let _ = Select::new("new-document-units", "Units", &mut choice.units)
-            .option(Units::Millimetres, Units::Millimetres.label())
-            .option(Units::Inches, Units::Inches.label())
+        let unit_entries = [
+            Entry::new(Units::Millimetres, Units::Millimetres.label()),
+            Entry::new(Units::Inches, Units::Inches.label()),
+        ];
+        let _ = Select::new("Units", Bind::bound(&mut choice.units), &unit_entries)
+            .id_salt("new-document-units")
             .show(ui);
 
         caption(ui, "Orientation");
         let mut orientation = choice.orientation();
-        let turned = Segmented::new("new-document-orientation", "Orientation", &mut orientation)
-            .icon_item(Orientation::Portrait, Icon::OrientationPortrait, "Portrait")
-            .icon_item(
-                Orientation::Landscape,
-                Icon::OrientationLandscape,
-                "Landscape",
-            )
+        let was_orientation = orientation;
+        let orientation_entries = [
+            Entry::new(Orientation::Portrait, "Portrait")
+                .icon(IconId::new("orientation_portrait")),
+            Entry::new(Orientation::Landscape, "Landscape")
+                .icon(IconId::new("orientation_landscape")),
+        ];
+        let _ = Segmented::new("Orientation", Bind::bound(&mut orientation), &orientation_entries)
+            .id_salt("new-document-orientation")
             .show(ui);
-        if turned.changed() {
+        let turned = orientation != was_orientation;
+        if turned {
             choice.set_orientation(orientation);
         }
 
         caption(ui, "Cutting Mat");
-        let mut mat_select = Select::new("new-document-mat", "Cutting Mat", &mut choice.mat);
-        for (mat, label) in crate::MAT_CHOICES {
-            mat_select = mat_select.option(*mat, *label);
-        }
-        let _ = mat_select.show(ui);
+        let mat_entries: Vec<_> = crate::MAT_CHOICES
+            .iter()
+            .map(|(mat, label)| Entry::new(*mat, *label))
+            .collect();
+        let _ = Select::new("Cutting Mat", Bind::bound(&mut choice.mat), &mat_entries)
+            .id_salt("new-document-mat")
+            .show(ui);
 
         caption(ui, "Machine");
-        let mut model_select = Select::new("new-document-machine", "Machine", &mut choice.model);
-        for (model, label) in crate::MODEL_CHOICES {
-            model_select = model_select.option(*model, *label);
-        }
-        let _ = model_select.show(ui);
+        let model_entries: Vec<_> = crate::MODEL_CHOICES
+            .iter()
+            .map(|(model, label)| Entry::new(*model, *label))
+            .collect();
+        let _ = Select::new("Machine", Bind::bound(&mut choice.model), &model_entries)
+            .id_salt("new-document-machine")
+            .show(ui);
 
         caption(ui, "Starts with");
-        let mut starter_select =
-            Select::new("new-document-starter", "Starts with", &mut choice.starter);
-        for (starter, label) in STARTERS {
-            starter_select = starter_select.option(*starter, *label);
-        }
-        let _ = starter_select.show(ui);
+        let starter_entries: Vec<_> = STARTERS
+            .iter()
+            .map(|(starter, label)| Entry::new(*starter, *label))
+            .collect();
+        let _ = Select::new("Starts with", Bind::bound(&mut choice.starter), &starter_entries)
+            .id_salt("new-document-starter")
+            .show(ui);
 
         caption(ui, "Kerf");
         let (shown, range, unit, per) =
             crate::panels::in_display(choice.kerf_mm, 0.0..=MAX_KERF_MM, "{n} mm");
-        let edit = NumberField::new("new-document-kerf", "Kerf", shown, &numbers)
+        let edit = NumberField::new("Kerf", Bind::given(Some(shown)))
+            .id_salt("new-document-kerf")
             .range(range)
-            .decimals(0..=4)
-            .unit(Unit::new(unit))
+            .max_decimals(4)
+            .unit(crate::panels::unit_text(unit))
             .show(ui);
-        if let Some(value) = edit.event.and_then(|e| e.value().copied())
+        if let Some(Some(value)) = edit.events.value().copied()
             && value.is_finite()
         {
             choice.kerf_mm = (value / per).clamp(0.0, MAX_KERF_MM);
         }
 
-        ui.add_space(Gap::Row.points(&tokens));
+        ui.add_space(GAP_ROW);
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(choice.is_valid(), egui::Button::new("Save as Preset"))
@@ -972,17 +1026,16 @@ impl NewDocState {
             }
         });
         if !choice.is_valid() {
-            ui.add_space(Gap::Row.points(&tokens));
-            ui.add(
-                Text::new("Enter a name, sides up to 10 m and a kerf of 0–2 mm.")
-                    .role(TypeRole::Caption)
-                    .content(Content::Muted),
-            );
+            ui.add_space(GAP_ROW);
+            let _ = Text::new("Enter a name, sides up to 10 m and a kerf of 0–2 mm.")
+                .role(TypeRole::Caption)
+                .shade(Shade::Muted)
+                .show(ui);
         }
         // Editing a size or mat by hand leaves the card it came from.
         if (choice.width_mm, choice.height_mm, choice.mat) != before
             && self.selected.is_some()
-            && !turned.changed()
+            && !turned
         {
             self.selected = None;
         }
@@ -994,11 +1047,10 @@ impl NewDocState {
 }
 
 fn caption(ui: &mut Ui, text: &str) {
-    ui.add(
-        Text::new(text)
-            .role(TypeRole::Caption)
-            .content(Content::Muted),
-    );
+    let _ = Text::new(text.to_owned())
+        .role(TypeRole::Caption)
+        .shade(Shade::Muted)
+        .show(ui);
 }
 
 /// "300 × 300 mm" or "12 × 12 in".

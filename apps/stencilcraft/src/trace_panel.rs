@@ -3,10 +3,12 @@
 //! image) while Threshold, Despeckle and the High/Low Pass filters change; Trace, Trace Outer
 //! Edge and Trace and Detach each make one compound cut path and clear the area.
 
-use craft_ui::composites::SectionHeader;
-use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, Segmented, Slider};
-use craft_behavior::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_theme::{ControlSize, Variant};
+use craft_ui::buttons::Button;
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::{Panel, Section};
+use craft_ui::value_drag::Slider;
 use eframe::egui;
 use stencilcraft_engine::Command;
 use stencilcraft_geom::{BezPath, Point};
@@ -634,18 +636,26 @@ impl StencilApp {
         let mut action = None;
         let (mut find_colours, mut by_colour) = (false, false);
         let draft = &mut self.panels.trace;
-        let _ = Panel::new("stencilcraft-trace-panel").show(ui, |ui| {
+        let display_entries = [Entry::new(false, "Solid Fill"), Entry::new(true, "Outline")];
+        let quality_entries = [
+            Entry::new(0, "Low"),
+            Entry::new(1, "2"),
+            Entry::new(2, "3"),
+            Entry::new(3, "4"),
+            Entry::new(4, "Max"),
+        ];
+        let _ = Panel::new("Trace")
+            .id_salt("stencilcraft-trace-panel")
+            .show(ui, |ui, _| {
             ui.horizontal(|ui| {
-                select_area = ui
-                    .add(
-                        Button::new("Select Trace Area")
-                            .variant(if has_area {
-                                ButtonVariant::Secondary
-                            } else {
-                                ButtonVariant::Primary
-                            })
-                            .size(ControlSize::Sm),
-                    )
+                select_area = Button::new("Select Trace Area")
+                    .variant(if has_area {
+                        Variant::SECONDARY
+                    } else {
+                        Variant::PRIMARY
+                    })
+                    .size(ControlSize::Sm)
+                    .show(ui)
                     .clicked();
                 clear_area = button(ui, "Clear Area", has_area || draft.picking);
             });
@@ -653,43 +663,35 @@ impl StencilApp {
                 hint(ui, "Drag a box over the image to trace.");
             }
             ui.add_enabled_ui(has_area, |ui| {
-                let _ = SectionHeader::new("trace-preview", "Trace Preview").show(ui, |ui| {
-                    let _ = Segmented::new("trace-display", "Preview", &mut draft.outline_preview)
-                        .item(false, "Solid Fill")
-                        .item(true, "Outline")
+                let _ = Section::new("Trace Preview").id_salt("trace-preview").show(ui, |ui, _| {
+                    let _ = Segmented::new(
+                        "Preview",
+                        Bind::bound(&mut draft.outline_preview),
+                        &display_entries,
+                    )
+                    .id_salt("trace-display")
+                    .size(ControlSize::Sm)
+                    .show(ui);
+                    labelled(ui, "Quality", |ui| {
+                        let _ = Segmented::new(
+                            "Trace quality",
+                            Bind::bound(&mut draft.quality),
+                            &quality_entries,
+                        )
+                        .id_salt("trace-quality")
                         .size(ControlSize::Sm)
                         .show(ui);
-                    labelled(ui, "Quality", |ui| {
-                        let _ =
-                            Segmented::new("trace-quality", "Trace quality", &mut draft.quality)
-                                .item(0, "Low")
-                                .item(1, "2")
-                                .item(2, "3")
-                                .item(3, "4")
-                                .item(4, "Max")
-                                .size(ControlSize::Sm)
-                                .show(ui);
                     });
                 });
-                let _ = SectionHeader::new("trace-filters", "Filters").show(ui, |ui| {
+                let _ = Section::new("Filters").id_salt("trace-filters").show(ui, |ui, _| {
                     labelled(ui, "Threshold", |ui| {
-                        let edit = Slider::new(
-                            "trace-threshold",
-                            "Threshold",
-                            draft.threshold,
-                            0.0..=100.0,
-                        )
-                        .default_value(45.0)
-                        .value_text(format!("{:.1} %", draft.threshold))
-                        .show(ui);
-                        if let Some(
-                            EditEvent::Update { value, .. }
-                            | EditEvent::Commit { value, .. }
-                            | EditEvent::Set { value, .. },
-                        ) = edit.event
-                        {
-                            draft.threshold = value;
-                        }
+                        let text = format!("{:.1} %", draft.threshold);
+                        // The slider writes the threshold as it moves; the reset is its default.
+                        let _ = Slider::new(Bind::bound(&mut draft.threshold).reset(45.0), 0.0..=100.0)
+                            .label("Threshold")
+                            .id_salt("trace-threshold")
+                            .value_text(text)
+                            .show(ui);
                     });
                     labelled(ui, "Despeckle", |ui| {
                         number(
@@ -703,7 +705,9 @@ impl StencilApp {
                         );
                     });
                     ui.horizontal(|ui| {
-                        let _ = Checkbox::bool("High Pass", &mut draft.high_pass_on).show(ui);
+                        let _ = Checkbox::new(Bind::bound(&mut draft.high_pass_on))
+                            .label("High Pass")
+                            .show(ui);
                         number(
                             ui,
                             "trace-high-pass",
@@ -715,7 +719,9 @@ impl StencilApp {
                         );
                     });
                     ui.horizontal(|ui| {
-                        let _ = Checkbox::bool("Low Pass", &mut draft.low_pass_on).show(ui);
+                        let _ = Checkbox::new(Bind::bound(&mut draft.low_pass_on))
+                            .label("Low Pass")
+                            .show(ui);
                         number(
                             ui,
                             "trace-low-pass",
@@ -743,7 +749,7 @@ impl StencilApp {
                 }
             });
             ui.add_enabled_ui(has_image, |ui| {
-                let _ = SectionHeader::new("trace-colours", "Trace by Colour").show(ui, |ui| {
+                let _ = Section::new("Trace by Colour").id_salt("trace-colours").show(ui, |ui, _| {
                     ui.horizontal(|ui| {
                         labelled(ui, "Colours", |ui| {
                             number(
@@ -766,7 +772,10 @@ impl StencilApp {
                             ui.painter()
                                 .rect_filled(rect, 2.0, egui::Color32::from_rgb(r, g, b));
                             let label = format!("{} {}", i + 1, stencilcraft_raster::hex(*colour));
-                            let _ = Checkbox::bool(&label, traced).show(ui);
+                            let _ = Checkbox::new(Bind::bound(traced))
+                                .label(label)
+                                .id_salt(("trace-colour", i))
+                                .show(ui);
                         });
                     }
                     by_colour = button(

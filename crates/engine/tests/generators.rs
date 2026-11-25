@@ -408,3 +408,53 @@ fn object_on_path_and_advanced_replicate() {
         .is_err());
     let _ = e.doc.get_shape(dot).unwrap().path.bounding_box();
 }
+
+/// The page is y down: an Arc warp arches up like a rainbow (its top is highest in the middle)
+/// and a heart's point is at its bottom.
+#[test]
+fn generators_stand_upright_on_the_y_down_page() {
+    let mut e = Engine::default();
+    let rect = added(
+        &mut e,
+        r#"{"command":"shape.add-rect","params":{"x":10,"y":10,"width":60,"height":40}}"#,
+    )[0];
+    e.run(cmd(&format!(
+        r#"{{"command":"generate.warp","params":{{"ids":[{rect}],"style":"arc","bend":0.5}}}}"#
+    )))
+    .unwrap();
+    let path = &e.doc.get_shape(rect).unwrap().path;
+    let b = path.bounding_box();
+    let mut top = Vec::new();
+    kurbo::flatten(path.iter(), 0.01, |el| {
+        if let kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) = el
+            && p.y < b.y0 + 0.05
+        {
+            top.push(p.x);
+        }
+    });
+    assert!(!top.is_empty());
+    let centre = b.center().x;
+    assert!(
+        top.iter().all(|x| (x - centre).abs() < b.width() / 10.0),
+        "the highest points are mid-width: {top:?} in {b:?}"
+    );
+
+    let heart = added(
+        &mut e,
+        r#"{"command":"generate.shape","params":{"shape":{"kind":"heart"},"x":0,"y":100,"width":40,"height":40}}"#,
+    )[0];
+    let path = &e.doc.get_shape(heart).unwrap().path;
+    let b = path.bounding_box();
+    let mut bottom = Vec::new();
+    kurbo::flatten(path.iter(), 0.01, |el| {
+        if let kurbo::PathEl::MoveTo(p) | kurbo::PathEl::LineTo(p) = el
+            && p.y > b.y1 - 0.05
+        {
+            bottom.push(p.x);
+        }
+    });
+    assert!(
+        bottom.iter().all(|x| (x - 20.0).abs() < 4.0),
+        "the heart's point is at the bottom: {bottom:?}"
+    );
+}

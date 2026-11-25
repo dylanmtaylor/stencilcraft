@@ -507,37 +507,43 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
     ]
 }
 
+/// An Effect menu item opening the Effects panel.
+fn eff(label: &str, menu: crate::effects::EffectMenu) -> MenuEntry<A> {
+    item(label, A::OpenEffect(menu)).into()
+}
+
 fn effect() -> Vec<MenuEntry<A>> {
+    use crate::effects::EffectMenu as M;
     vec![
         item("Offset…", A::Edit(E::Offset { internal: false })).into(),
         item("Internal Offset…", A::Edit(E::Offset { internal: true })).into(),
         item("Kerf Compensation…", A::ToggleKerfPreview).into(),
         todo("Bridges…"),
-        todo("Weed Lines and Border…"),
+        eff("Weed Lines and Border…", M::WeedLines),
         SEP,
         item("Trace Image…", A::ShowPanel(P::Trace)).into(),
-        todo("Remove Background…"),
+        eff("Remove Background…", M::RemoveBackground),
         todo("Image Effects…"),
         SEP,
-        todo("Sketch Fill…"),
-        todo("Stipple…"),
-        todo("Emboss / Deboss Patterns…"),
-        todo("Rhinestone…"),
+        eff("Sketch Fill…", M::SketchFill),
+        eff("Stipple…", M::Stipple),
+        eff("Emboss / Deboss Patterns…", M::EmbossPattern),
+        eff("Rhinestone…", M::Rhinestone),
         sub(
             "Warp",
             vec![
-                todo("Arc"),
-                todo("Flag"),
-                todo("Bulge"),
-                todo("Perspective…"),
+                eff("Arc", M::WarpArc),
+                eff("Flag", M::WarpFlag),
+                eff("Bulge", M::WarpBulge),
+                eff("Perspective…", M::WarpPerspective),
             ],
         ),
         sub("Distort", vec![todo("Shear"), todo("Free Distort")]),
         todo("Lattice…"),
-        todo("Pop-up Card…"),
-        todo("Puzzle…"),
+        eff("Pop-up Card…", M::PopupCard),
+        eff("Puzzle…", M::Puzzle),
         SEP,
-        todo("Apply Last Effect"),
+        item("Apply Last Effect", A::ApplyLastEffect).into(),
     ]
 }
 
@@ -670,6 +676,7 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
 }
 
 fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
+    use crate::effects::EffectMenu as M;
     use stencilcraft_ui_egui::ColorTheme;
     vec![
         item("Page Setup", A::ShowPanel(P::PageSetup)).into(),
@@ -685,9 +692,9 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Replicate", A::ShowPanel(P::Replicate)).into(),
         item("Modify", A::ShowPanel(P::Modify)).into(),
         item("Offset", A::ShowPanel(P::Offset)).into(),
-        todo("Pop up"),
-        todo("Sketch"),
-        todo("Specialty"),
+        eff("Pop up", M::PopupCard),
+        eff("Sketch", M::SketchFill),
+        eff("Specialty", M::Rhinestone),
         item("Print & Cut", A::TogglePrintCutMarks).into(),
         item("Point Editing", A::ShowPanel(P::Points)).into(),
         item("Layers", A::ShowPanel(crate::WorkspacePanel::Layers)).into(),

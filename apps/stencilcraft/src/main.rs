@@ -47,6 +47,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 mod arc_draw;
 mod click_draw;
 mod control;
+mod effects;
 mod freehand;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
@@ -499,6 +500,10 @@ pub enum TopMenuAction {
     ReleaseGuides,
     ClearGuides,
     ToggleKerfPreview,
+    /// An Effect menu item: the Effects panel on that effect.
+    OpenEffect(effects::EffectMenu),
+    /// Effect › Apply Last Effect.
+    ApplyLastEffect,
     ToggleOutlineView,
     ToggleCutBorder,
     TogglePrintBorder,
@@ -716,6 +721,7 @@ pub enum WorkspacePanel {
     Trace,
     TextStyle,
     PageSetup,
+    Effects,
 }
 
 struct WorkspaceContent<'a> {
@@ -737,6 +743,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Trace => self.app.trace_panel(ui),
             WorkspacePanel::TextStyle => self.app.text_style_panel(ui),
             WorkspacePanel::PageSetup => self.app.page_setup_panel(ui),
+            WorkspacePanel::Effects => self.app.effects_panel(ui),
         }
     }
 
@@ -754,6 +761,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Trace => "Trace",
             WorkspacePanel::TextStyle => "Text Style",
             WorkspacePanel::PageSetup => "Page Setup",
+            WorkspacePanel::Effects => "Effects",
         }
         .to_owned()
     }
@@ -831,6 +839,9 @@ pub struct StencilApp {
     /// A panel to bring forward once the dock has drawn (the canvas draws inside the dock,
     /// while its layout cannot change).
     pub pending_panel: Option<WorkspacePanel>,
+    /// The Effects panel and its live preview.
+    pub effects: effects::EffectsState,
+    pub effect_preview: Option<effects::EffectPreview>,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
@@ -976,6 +987,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Trace,
                                 WorkspacePanel::TextStyle,
                                 WorkspacePanel::PageSetup,
+                                WorkspacePanel::Effects,
                             ],
                             0,
                         ),
@@ -1056,6 +1068,8 @@ impl StencilApp {
             text_style: text_tool::TextStyle::default(),
             text_session: None,
             pending_panel: None,
+            effects: effects::EffectsState::default(),
+            effect_preview: None,
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,
@@ -3232,6 +3246,8 @@ impl StencilApp {
                 self.save_prefs();
             }
             TopMenuAction::ToggleKerfPreview => self.kerf_preview = !self.kerf_preview,
+            TopMenuAction::OpenEffect(menu) => self.open_effect(menu),
+            TopMenuAction::ApplyLastEffect => self.apply_last_effect(),
             TopMenuAction::ToggleOutlineView => {
                 self.prefs.outline_view = !self.prefs.outline_view;
                 self.save_prefs();
@@ -4832,6 +4848,7 @@ impl StencilApp {
         let mut overlay_claimed = guides_claimed;
         overlay_claimed |= self.trace_canvas(ui, &response, &painter);
         overlay_claimed |= self.text_canvas(ui, &response, &painter);
+        self.paint_effect_preview(&painter);
 
         // Interactive BezierOverlay for node editing
         if matches!(

@@ -5601,6 +5601,7 @@ dependencies = [
  "stencilcraft-dxf",
  "stencilcraft-engine",
  "stencilcraft-gcode",
+ "stencilcraft-generate",
  "stencilcraft-geom",
  "stencilcraft-import",
  "stencilcraft-kerf",

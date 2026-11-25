@@ -107,6 +107,20 @@ impl Settings for UserPrefs {
     const SCHEMA_VERSION: u32 = 1;
 }
 
+/// Consume `key` only when it was pressed with exactly `modifiers`. egui's `consume_key`
+/// ignores extra Shift and Alt, so Shift+G would pick the Polygon tool and Cmd+Shift+L would
+/// run Cmd+L; shortcuts here want the combination as written.
+fn consume_exact(input: &mut egui::InputState, modifiers: egui::Modifiers, key: egui::Key) -> bool {
+    let pressed = input.events.iter().any(|event| {
+        matches!(
+            event,
+            egui::Event::Key { key: k, pressed: true, modifiers: m, .. }
+                if *k == key && m.matches_exact(modifiers)
+        )
+    });
+    pressed && input.consume_key(modifiers, key)
+}
+
 /// Modifier keys that shape a drag-drawn box, read at release as in Silhouette Studio.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DragMods {
@@ -1550,9 +1564,9 @@ impl StencilApp {
         if self.arc_draft.is_some() && !ctx.text_edit_focused() {
             // Enter places the arc as swept so far; Esc or Backspace drops it.
             let (place, drop) = ctx.input_mut(|input| {
-                let place = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
-                let drop = input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                    | input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace);
+                let place = consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter);
+                let drop = consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape)
+                    | consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace);
                 (place, drop)
             });
             if place {
@@ -1568,11 +1582,11 @@ impl StencilApp {
             return false;
         }
         let (end, back) = ctx.input_mut(|input| {
-            let end = input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                | input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
-            let back = input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
-                | input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-                | input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
+            let end = consume_exact(input, egui::Modifiers::NONE, egui::Key::Enter)
+                | consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape);
+            let back = consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace)
+                | consume_exact(input, egui::Modifiers::NONE, egui::Key::Delete)
+                | consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Z);
             (end, back)
         });
         if end {
@@ -1615,8 +1629,8 @@ impl StencilApp {
             && !self.pen_drawing()
             && !self.editing_points()
             && ctx.input_mut(|input| {
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-                    || input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+                consume_exact(input, egui::Modifiers::NONE, egui::Key::Delete)
+                    || consume_exact(input, egui::Modifiers::NONE, egui::Key::Backspace)
             })
         {
             self.delete_selection();
@@ -1625,7 +1639,7 @@ impl StencilApp {
         if self.send_mode || ctx.egui_wants_keyboard_input() {
             return;
         }
-        // Shifted shortcuts first: `consume_key` matches Cmd+A while Shift is also held.
+        // Shifted shortcuts first (harmless now that keys match exactly).
         let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
         let cmd_alt = egui::Modifiers::COMMAND | egui::Modifiers::ALT;
         // Object and Path menu keys (menus.rs), modified variants before their plain twins.
@@ -1688,44 +1702,53 @@ impl StencilApp {
             ),
         ];
         if let Some(action) = view_keys.into_iter().find_map(|(modifiers, key, action)| {
-            ctx.input_mut(|input| input.consume_key(modifiers, key))
+            ctx.input_mut(|input| consume_exact(input, modifiers, key))
                 .then_some(action)
         }) {
             self.handle_menu_action(action);
         } else if let Some(action) = edit_keys.into_iter().find_map(|(modifiers, key, action)| {
-            ctx.input_mut(|input| input.consume_key(modifiers, key))
+            ctx.input_mut(|input| consume_exact(input, modifiers, key))
                 .then_some(action)
         }) {
             self.handle_edit_action(action);
-        } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::A)) {
+        } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::A)) {
             self.handle_menu_action(TopMenuAction::Deselect);
-        } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::D)) {
+        } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::D)) {
             self.handle_menu_action(TopMenuAction::TransformAgain);
-        } else if ctx.input_mut(|input| input.consume_key(cmd_shift, egui::Key::W)) {
+        } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::W)) {
             self.handle_menu_action(TopMenuAction::Pathfinder(BooleanOperation::Union));
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::L)) {
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::L))
+        {
             self.handle_menu_action(TopMenuAction::ShowSend);
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::A))
+        {
             self.select_all_shapes();
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F))
-            || ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Num0))
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::F))
+            || ctx
+                .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Num0))
         {
             self.pending_view_command = Some(CanvasViewCommand::Fit);
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::C)) {
             self.pending_view_command = Some(CanvasViewCommand::Center);
         } else if ctx
-            .input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Num1))
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Num1))
         {
             self.view.zoom = 1.0;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::D)) {
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::D))
+        {
             self.duplicate_selection();
         } else if ctx.input_mut(|input| {
-            input.consume_key(cmd_shift, egui::Key::Z)
-                || input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+            consume_exact(input, cmd_shift, egui::Key::Z)
+                || consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Y)
         }) {
             let _ = self.engine.redo();
             self.retain_valid_selection();
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Z))
+        {
             if self.pen_drawing() {
                 self.pen_undo_requested = true;
             } else {
@@ -1733,7 +1756,8 @@ impl StencilApp {
                 self.retain_valid_selection();
             }
         } else if ctx.input_mut(|input| {
-            input.consume_key(
+            consume_exact(
+                input,
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
                 egui::Key::R,
             )
@@ -1741,58 +1765,58 @@ impl StencilApp {
             self.prefs.show_rulers = !self.prefs.show_rulers;
             self.save_prefs();
         } else if ctx
-            .input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Quote))
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Quote))
         {
             self.prefs.show_grid = !self.prefs.show_grid;
             self.save_prefs();
         } else if !self.pen_drawing()
             && !self.editing_points()
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            && ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.set_selection([]);
             self.path_selection = PathSelection::default();
             self.pen_draft = None;
             self.shape_drag_start = None;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::V)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::V)) {
             self.active_tool = ActiveTool::Select;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::A)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::A)) {
             self.active_tool = ActiveTool::DirectSelect;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::X)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::X)) {
             self.active_tool = ActiveTool::ConvertPoint;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::M)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::M)) {
             self.active_tool = ActiveTool::BoxSelect;
             self.canvas_lasso_mode = false;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::L)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::L)) {
             self.active_tool = ActiveTool::LassoSelect;
             self.canvas_lasso_mode = true;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::P)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::P)) {
             self.active_tool = ActiveTool::Pen;
         } else if ctx
-            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Backslash))
+            .input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Backslash))
         {
             self.active_tool = ActiveTool::Line;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::N)) {
             self.active_tool = ActiveTool::Freehand;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::E)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::E)) {
             self.active_tool = ActiveTool::Eraser;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::K)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::K)) {
             self.active_tool = ActiveTool::Knife;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::R)) {
             self.active_tool = ActiveTool::Rect;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::U)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::U)) {
             self.active_tool = ActiveTool::RoundedRect;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::O)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::O)) {
             self.active_tool = ActiveTool::Ellipse;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::G)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::G)) {
             self.active_tool = ActiveTool::Polygon;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::S)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::S)) {
             self.active_tool = ActiveTool::Star;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::T)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::T)) {
             self.active_tool = ActiveTool::Text;
             self.open_text_dialog(false);
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::H)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::H)) {
             self.active_tool = ActiveTool::Hand;
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Z)) {
+        } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Z)) {
             self.active_tool = ActiveTool::Zoom;
         }
     }
@@ -6096,6 +6120,26 @@ mod tests {
         app.panels.eraser_size_mm = 2.0;
         app.erase_stroke(&[Point::new(-5.0, 5.0), Point::new(25.0, 5.0)]);
         assert_eq!(app.engine.doc.shape_count(), 4, "each half split in two");
+    }
+
+    #[test]
+    fn shortcuts_need_their_exact_modifiers() {
+        // Regression: Shift+G picked the Polygon tool and Cmd+Shift+L opened Send (Cmd+L).
+        let mut app = StencilApp::new(None);
+        press_key(&mut app, egui::Key::G, egui::Modifiers::SHIFT);
+        assert_eq!(app.active_tool, ActiveTool::Select, "Shift+G is not G");
+        press_key(&mut app, egui::Key::G, egui::Modifiers::ALT);
+        assert_eq!(app.active_tool, ActiveTool::Select, "Alt+G is not G");
+        press_key(&mut app, egui::Key::G, egui::Modifiers::NONE);
+        assert_eq!(app.active_tool, ActiveTool::Polygon);
+        press_key(
+            &mut app,
+            egui::Key::L,
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        );
+        assert!(!app.send_mode, "Cmd+Shift+L is not Cmd+L");
+        press_key(&mut app, egui::Key::L, egui::Modifiers::COMMAND);
+        assert!(app.send_mode);
     }
 
     #[test]

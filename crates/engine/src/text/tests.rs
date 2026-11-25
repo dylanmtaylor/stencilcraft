@@ -779,3 +779,33 @@ fn letters_stand_upright_on_the_y_down_page() {
         }
     }
 }
+
+#[test]
+fn vertical_outline_text_keeps_letters_upright() {
+    // Regression: outline fonts' vertical text turned each letter on its side.
+    let across = spec("AB", font());
+    let down = TextSpec {
+        vertical: true,
+        ..across.clone()
+    };
+    let flat = outline_glyphs(&across, FontDb::global(), "test").unwrap();
+    let stacked = outline_glyphs(&down, FontDb::global(), "test").unwrap();
+    assert_eq!(flat.len(), stacked.len());
+    for (a, b) in flat.iter().zip(&stacked) {
+        let (ba, bb) = (a.outline.bounding_box(), b.outline.bounding_box());
+        if ba.area() <= 0.0 {
+            continue;
+        }
+        assert!(
+            (ba.width() - bb.width()).abs() < 1e-6 && (ba.height() - bb.height()).abs() < 1e-6,
+            "the same upright letter, moved: {ba:?} vs {bb:?}"
+        );
+    }
+    // B sits below A in one column.
+    let (a, b) = (
+        stacked[0].outline.bounding_box(),
+        stacked[1].outline.bounding_box(),
+    );
+    assert!(b.y1 < a.y1, "y is up: B is lower: {a:?} {b:?}");
+    assert!((a.center().x - b.center().x).abs() < 72.0 / POINTS_PER_MM / 2.0);
+}

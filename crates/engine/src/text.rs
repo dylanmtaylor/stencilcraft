@@ -460,8 +460,9 @@ fn outline_glyphs(spec: &TextSpec, db: &FontDb, command: &str) -> Result<Vec<Gly
         kerning: (!spec.kerning).then_some(0.0),
         ..CharStyle::default()
     };
+    // Laid out across, then restacked: Silhouette's vertical text keeps each letter upright
+    // (a CJK vertical layout would turn Latin letters on their side).
     let mut object = TextObject::point(Point::ZERO, &spec.text, style);
-    object.vertical = spec.vertical;
     object.para.justify = match spec.alignment {
         TextAlign::Left | TextAlign::Justify => Justify::Left,
         TextAlign::Centre => Justify::Center,
@@ -470,7 +471,7 @@ fn outline_glyphs(spec: &TextSpec, db: &FontDb, command: &str) -> Result<Vec<Gly
     let laid = vectorcraft_text::layout(db, &object);
     // Text space is points, y down; ours is mm, y up.
     let to_mm = Affine::scale_non_uniform(1.0 / POINTS_PER_MM, -1.0 / POINTS_PER_MM);
-    Ok(laid
+    let mut glyphs: Vec<Glyph> = laid
         .glyphs
         .iter()
         .map(|g| Glyph {
@@ -481,7 +482,43 @@ fn outline_glyphs(spec: &TextSpec, db: &FontDb, command: &str) -> Result<Vec<Gly
             byte: g.byte,
             len: g.len.max(1),
         })
-        .collect())
+        .collect();
+    if spec.vertical {
+        stack_upright(&mut glyphs, spec);
+    }
+    Ok(glyphs)
+}
+
+/// Vertical text: each line becomes a column, right to left, its letters upright and centred
+/// on the column, one em (plus tracking) apart, top to bottom; the same placement as the
+/// single-line font's vertical text.
+fn stack_upright(glyphs: &mut [Glyph], spec: &TextSpec) {
+    let em = spec.size / POINTS_PER_MM;
+    let track = spec.letter_spacing / 100.0 * em;
+    let step = em + track;
+    let line_gap = 1.2 * em * spec.line_spacing / 100.0;
+    let Some(last) = glyphs.iter().map(|g| g.line).max() else {
+        return;
+    };
+    for line in 0..=last {
+        let count = glyphs.iter().filter(|g| g.line == line).count();
+        let length = (count as f64 * step - track).max(0.0);
+        let start = match spec.alignment {
+            TextAlign::Left | TextAlign::Justify => 0.0,
+            TextAlign::Centre => -length / 2.0,
+            TextAlign::Right => -length,
+        };
+        let across = -(line as f64) * line_gap;
+        for (k, g) in glyphs.iter_mut().filter(|g| g.line == line).enumerate() {
+            let origin = Point::new(
+                across - g.advance / 2.0,
+                -(start + k as f64 * step) - 0.75 * em,
+            );
+            g.outline = Affine::translate(origin - g.origin) * g.outline.clone();
+            g.origin = origin;
+            g.advance = step;
+        }
+    }
 }
 
 fn single_line_glyphs(spec: &TextSpec) -> Vec<Glyph> {

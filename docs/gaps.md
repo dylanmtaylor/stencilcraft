@@ -171,10 +171,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     a live solid-yellow or outline preview follows Threshold (default 45 %), Despeckle and
     the High/Low Pass filters; Trace, Trace Outer Edge and Trace and Detach each make one
     compound path (`image.trace` with `area` and `compound`), keep the image and clear the
-    area. Still missing: resizing the trace box and its × button (Clear Area instead), SS's
-    Scale and Trace Quality settings (our smoothing and corner settings stay at their
-    defaults in the panel), background removal in the desktop, and multi-colour tracing to
-    layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
+    area. The trace box resizes from eight handles and moves when dragged inside;
+    Trace Quality (Low…Max) sets how closely outlines follow the pixels; Effect › Remove
+    Background clears an image's background. Still missing: the box's × button (Clear Area
+    instead), SS's Scale setting, and multi-colour tracing to layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
     at SS's 300 dpi, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to
     96 dpi.
 25. **Print & Cut, beyond item 3**: File › Print opens the Print & Cut sheet (marks,

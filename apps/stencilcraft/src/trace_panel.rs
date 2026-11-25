@@ -37,6 +37,72 @@ pub struct TraceDraft {
     pub low_pass: f64,
     /// Preview as outlines over the dimmed image instead of a solid fill.
     pub outline_preview: bool,
+    /// Silhouette's Trace Quality, Low (0) to Max (4): how closely the outlines follow the
+    /// pixels.
+    pub quality: u8,
+}
+
+/// Smoothing tolerance (pixels) for each Trace Quality stop, Low to Max.
+const QUALITY_SMOOTHING: [f64; 5] = [2.0, 1.5, 1.0, 0.5, 0.25];
+
+/// What a drag on the trace box changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AreaGrab {
+    Move,
+    /// A corner, clockwise from the top left.
+    Corner(u8),
+    /// An edge midpoint: top, right, bottom, left.
+    Edge(u8),
+}
+
+/// The trace box after dragging `grab` by `d` (millimetres), at least the minimum size.
+pub fn edit_area(area: [f64; 4], grab: AreaGrab, d: stencilcraft_geom::Vec2) -> [f64; 4] {
+    let [x, y, w, h] = area;
+    let (mut x0, mut y0, mut x1, mut y1) = (x, y, x + w, y + h);
+    match grab {
+        AreaGrab::Move => {
+            x0 += d.x;
+            x1 += d.x;
+            y0 += d.y;
+            y1 += d.y;
+        }
+        AreaGrab::Corner(c) => {
+            if c == 0 || c == 3 {
+                x0 += d.x;
+            } else {
+                x1 += d.x;
+            }
+            if c < 2 {
+                y0 += d.y;
+            } else {
+                y1 += d.y;
+            }
+        }
+        AreaGrab::Edge(0) => y0 += d.y,
+        AreaGrab::Edge(1) => x1 += d.x,
+        AreaGrab::Edge(2) => y1 += d.y,
+        AreaGrab::Edge(_) => x0 += d.x,
+    }
+    if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+        return area;
+    }
+    area_between(Point::new(x0, y0), Point::new(x1, y1)).unwrap_or(area)
+}
+
+/// The eight handles of a trace box (screen space), with what each grabs.
+fn area_handles(area: [f64; 4], view: &stencilcraft_ui_egui::View) -> Vec<(AreaGrab, egui::Pos2)> {
+    let [x, y, w, h] = area;
+    let at = |px: f64, py: f64| view.world_to_screen(Point::new(px, py));
+    vec![
+        (AreaGrab::Corner(0), at(x, y)),
+        (AreaGrab::Corner(1), at(x + w, y)),
+        (AreaGrab::Corner(2), at(x + w, y + h)),
+        (AreaGrab::Corner(3), at(x, y + h)),
+        (AreaGrab::Edge(0), at(x + w / 2.0, y)),
+        (AreaGrab::Edge(1), at(x + w, y + h / 2.0)),
+        (AreaGrab::Edge(2), at(x + w / 2.0, y + h)),
+        (AreaGrab::Edge(3), at(x, y + h / 2.0)),
+    ]
 }
 
 impl Default for TraceDraft {
@@ -51,6 +117,7 @@ impl Default for TraceDraft {
             low_pass_on: false,
             low_pass: 2.0,
             outline_preview: false,
+            quality: 2,
         }
     }
 }
@@ -81,6 +148,10 @@ impl TraceDraft {
                 0.0
             },
             mode,
+            smoothing: QUALITY_SMOOTHING
+                .get(usize::from(self.quality))
+                .copied()
+                .unwrap_or(1.0),
             ..TraceOptions::default()
         }
     }
@@ -327,9 +398,41 @@ impl StencilApp {
                 }
             }
         }
-        let Some(area) = self.panels.trace.area.filter(|_| shown) else {
+        let Some(mut area) = self.panels.trace.area.filter(|_| shown) else {
             return claimed;
         };
+        // Silhouette's trace box resizes from its handles and moves when dragged inside.
+        if !self.panels.trace.picking {
+            if response.drag_started()
+                && let Some(press) = ui
+                    .input(|input| input.pointer.press_origin())
+                    .or(response.interact_pointer_pos())
+            {
+                let handle = area_handles(area, &view)
+                    .into_iter()
+                    .map(|(grab, at)| (grab, at.distance(press)))
+                    .filter(|(_, d)| *d <= 8.0)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(grab, _)| grab);
+                let p = view.screen_to_world(press.to_vec2());
+                let [x, y, w, h] = area;
+                let inside = p.x >= x && p.x <= x + w && p.y >= y && p.y <= y + h;
+                if let Some(grab) = handle.or(inside.then_some(AreaGrab::Move)) {
+                    self.trace_area_grab = Some((grab, area, p));
+                }
+            }
+            if let Some((grab, original, from)) = self.trace_area_grab {
+                claimed = true;
+                if let Some(now) = response.interact_pointer_pos() {
+                    let now = view.screen_to_world(now.to_vec2());
+                    area = edit_area(original, grab, now - from);
+                    self.panels.trace.area = Some(area);
+                }
+                if response.drag_stopped() {
+                    self.trace_area_grab = None;
+                }
+            }
+        }
         self.refresh_trace_preview(ui.ctx());
         if let Some(preview) = &self.trace_preview {
             for piece in &preview.pieces {
@@ -361,12 +464,20 @@ impl StencilApp {
                 }
             }
         }
+        let colour = stencilcraft_ui_egui::Palette::for_theme(self.theme).selection;
         stencilcraft_ui_egui::paint_preview_paths(
             painter,
             &view,
             &[outline_of(area_corners(area))],
-            stencilcraft_ui_egui::Palette::for_theme(self.theme).selection,
+            colour,
         );
+        for (_, at) in area_handles(area, &view) {
+            painter.rect_filled(
+                egui::Rect::from_center_size(at, egui::vec2(7.0, 7.0)),
+                1.0,
+                colour,
+            );
+        }
         claimed
     }
 
@@ -438,6 +549,17 @@ impl StencilApp {
                         .item(true, "Outline")
                         .size(ControlSize::Sm)
                         .show(ui);
+                    labelled(ui, "Quality", |ui| {
+                        let _ =
+                            Segmented::new("trace-quality", "Trace quality", &mut draft.quality)
+                                .item(0, "Low")
+                                .item(1, "2")
+                                .item(2, "3")
+                                .item(3, "4")
+                                .item(4, "Max")
+                                .size(ControlSize::Sm)
+                                .show(ui);
+                    });
                 });
                 let _ = SectionHeader::new("trace-filters", "Filters").show(ui, |ui| {
                     labelled(ui, "Threshold", |ui| {
@@ -558,6 +680,39 @@ mod tests {
             (0.0, 0, 0.0, 50.0)
         );
         assert!(o.validate().is_ok());
+    }
+
+    #[test]
+    fn the_trace_box_moves_and_resizes_and_quality_sets_smoothing() {
+        use stencilcraft_geom::Vec2;
+        let area = [10.0, 10.0, 20.0, 10.0];
+        assert_eq!(
+            edit_area(area, AreaGrab::Move, Vec2::new(5.0, -2.0)),
+            [15.0, 8.0, 20.0, 10.0]
+        );
+        assert_eq!(
+            edit_area(area, AreaGrab::Corner(2), Vec2::new(5.0, 5.0)),
+            [10.0, 10.0, 25.0, 15.0]
+        );
+        assert_eq!(
+            edit_area(area, AreaGrab::Edge(3), Vec2::new(-4.0, 9.0)),
+            [6.0, 10.0, 24.0, 10.0]
+        );
+        // Dragging an edge past the other flips the box rather than breaking it.
+        assert_eq!(
+            edit_area(area, AreaGrab::Edge(1), Vec2::new(-30.0, 0.0)),
+            [0.0, 10.0, 10.0, 10.0]
+        );
+        assert_eq!(
+            edit_area(area, AreaGrab::Move, Vec2::new(f64::NAN, 0.0)),
+            area
+        );
+        let mut draft = TraceDraft::default();
+        assert_eq!(draft.options(TraceMode::AllEdges).smoothing, 1.0);
+        draft.quality = 4;
+        assert_eq!(draft.options(TraceMode::AllEdges).smoothing, 0.25);
+        draft.quality = 200;
+        assert_eq!(draft.options(TraceMode::AllEdges).smoothing, 1.0);
     }
 
     #[test]

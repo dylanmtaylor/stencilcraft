@@ -979,6 +979,8 @@ pub struct StencilApp {
     pub trace_preview: Option<trace_panel::TracePreview>,
     /// Where a trace-area drag started (millimetres).
     pub trace_area_drag: Option<stencilcraft_geom::Point>,
+    /// A drag on the trace box: what it grabs, the box before and the press point.
+    pub trace_area_grab: Option<(trace_panel::AreaGrab, [f64; 4], stencilcraft_geom::Point)>,
     /// The selection box part under the pointer, which picks how a drag of it scales.
     pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
     /// The transform a selection-box drag would apply, previewed until release.
@@ -1259,6 +1261,7 @@ impl StencilApp {
             image_drag: None,
             trace_preview: None,
             trace_area_drag: None,
+            trace_area_grab: None,
             box_part: None,
             box_preview: None,
             arc_draft: None,

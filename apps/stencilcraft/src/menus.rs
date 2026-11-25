@@ -69,6 +69,7 @@ impl<T> From<MenuItem<T>> for MenuEntry<T> {
 
 impl<T> MenuEntry<T> {
     /// The item, unless this is a separator.
+    #[cfg(test)]
     pub fn item(&self) -> Option<&MenuItem<T>> {
         match self {
             MenuEntry::Item(item) => Some(item),
@@ -136,14 +137,17 @@ impl<T> MenuItem<T> {
         self
     }
 
+    #[cfg(test)]
     pub fn label(&self) -> &str {
         &self.label
     }
 
+    #[cfg(test)]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
+    #[cfg(test)]
     pub fn command(&self) -> Option<&T> {
         self.command.as_ref()
     }

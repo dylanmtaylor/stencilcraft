@@ -16,7 +16,9 @@ use craft_ui::runtime::focus::{EditSet, KeyUse};
 use craft_ui::runtime::frame::FrameInput;
 use craft_ui::runtime::keys::{Intent, with_window_intents};
 use craft_ui::shell::embed::{self, CloseDecision};
-use craft_window::system::{NoWindows, SystemWindows, WindowSystem};
+#[cfg(test)]
+use craft_window::system::NoWindows;
+use craft_window::system::{SystemWindows, WindowSystem};
 
 /// The settings folder name and display name the framework's dialogs and the window host use.
 const APP: AppInfo = AppInfo {
@@ -48,6 +50,7 @@ pub fn install(ctx: &egui::Context, frame: craft_window::policy::Decision) -> Re
 }
 
 /// Installs the runtime with no window system: for every test harness that runs the app's UI.
+#[cfg(test)]
 pub fn install_headless(ctx: &egui::Context) -> Result<(), String> {
     install_spec(ctx, spec(ShellInfo::default(), Arc::new(NoWindows)))
 }

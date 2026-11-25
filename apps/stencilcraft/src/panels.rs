@@ -6,12 +6,15 @@ use craft_draw::ui::pen::PathSelection;
 use craft_theme::TypeRole;
 use craft_ui::canvas::quad::Anchor9;
 use craft_ui::composites::SectionHeader;
-use craft_ui::controls::{Button, ButtonVariant, Checkbox, ControlSize, NumberField, Segmented};
+use craft_theme::ControlSize;
+use craft_ui::controls::{ButtonVariant, Checkbox, NumberField, Segmented};
 use craft_behavior::EditEvent;
 use craft_ui::icons::Icon;
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::patterns::{AlignBar, Panel};
-use craft_ui::primitives::{Content, Text};
+use craft_ui::buttons::Button;
+use craft_ui::contract::{Props as _, Show as _};
+use craft_ui::display::{Shade, Text};
 use eframe::egui;
 use stencilcraft_engine::document::{DocumentCommand, TransformRequest};
 use stencilcraft_engine::{
@@ -409,22 +412,24 @@ pub(crate) fn len(mm: f64) -> String {
 
 pub(crate) fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
-        ui.add(Text::new(label).role(TypeRole::Label));
+        let _ = Text::new(label.to_owned()).role(TypeRole::Label).show(ui);
         add(ui);
     });
 }
 
 pub(crate) fn button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
-    ui.add(Button::new(label).size(ControlSize::Sm).enabled(enabled))
+    Button::new(label.to_owned())
+        .size(ControlSize::Sm)
+        .enabled(enabled)
+        .show(ui)
         .clicked()
 }
 
 pub(crate) fn hint(ui: &mut egui::Ui, text: &str) {
-    ui.add(
-        Text::new(text)
-            .role(TypeRole::Caption)
-            .content(Content::Muted),
-    );
+    let _ = Text::new(text.to_owned())
+        .role(TypeRole::Caption)
+        .shade(Shade::Muted)
+        .show(ui);
 }
 
 impl StencilApp {

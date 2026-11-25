@@ -1,8 +1,9 @@
 //! Edit › History, Edit › Preferences and Select › Save/Edit Selection panels.
 
-use craft_ui::controls::{Checkbox, Segmented, TextField};
-use craft_behavior::EditEvent;
-use craft_ui::patterns::Panel;
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
+use craft_ui::text::TextField;
 use eframe::egui;
 use stencilcraft_ui_egui::ColorTheme;
 
@@ -56,7 +57,9 @@ impl StencilApp {
         let undo = self.engine.undo_labels();
         let redo = self.engine.redo_labels();
         let mut go_to = None;
-        let _ = Panel::new("stencilcraft-history-panel").show(ui, |ui| {
+        let _ = Panel::new("History")
+            .id_salt("stencilcraft-history-panel")
+            .show(ui, |ui, _| {
             if ui.selectable_label(undo.is_empty(), "Start").clicked() {
                 go_to = Some(0);
             }
@@ -82,11 +85,21 @@ impl StencilApp {
     pub fn preferences_panel(&mut self, ui: &mut egui::Ui) {
         let mut prefs = self.prefs.clone();
         let mut theme = self.theme;
-        let _ = Panel::new("stencilcraft-preferences-panel").show(ui, |ui| {
+        let theme_entries = [
+            Entry::new(ColorTheme::Dark, "Dark"),
+            Entry::new(ColorTheme::Light, "Light"),
+        ];
+        let unit_entries: Vec<Entry<stencilcraft_ui_egui::LengthUnit>> =
+            stencilcraft_ui_egui::LengthUnit::ALL
+                .into_iter()
+                .map(|u| Entry::new(u, u.symbol()))
+                .collect();
+        let _ = Panel::new("Preferences")
+            .id_salt("stencilcraft-preferences-panel")
+            .show(ui, |ui, _| {
             ui.label("Appearance");
-            let _ = Segmented::new("pref-theme", "Theme", &mut theme)
-                .item(ColorTheme::Dark, "Dark")
-                .item(ColorTheme::Light, "Light")
+            let _ = Segmented::new("Theme", Bind::bound(&mut theme), &theme_entries)
+                .id_salt("pref-theme")
                 .show(ui);
             ui.separator();
             ui.label("Canvas");
@@ -101,24 +114,18 @@ impl StencilApp {
                 ("Mat preview", &mut prefs.mat_preview),
                 ("Outline view", &mut prefs.outline_view),
             ] {
-                let _ = Checkbox::bool(label, value).show(ui);
+                let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
             }
             ui.separator();
             ui.label("Units");
-            let mut unit = prefs.length_unit;
-            let mut units = Segmented::new("pref-units", "Units", &mut unit);
-            for u in stencilcraft_ui_egui::LengthUnit::ALL {
-                units = units.item(u, u.symbol());
-            }
-            let _ = units.show(ui);
-            prefs.length_unit = unit;
+            let _ = Segmented::new("Units", Bind::bound(&mut prefs.length_unit), &unit_entries)
+                .id_salt("pref-units")
+                .show(ui);
             ui.separator();
             ui.label("Tools");
-            let _ = Checkbox::bool(
-                "Return to the Select tool after drawing a shape",
-                &mut prefs.select_after_drawing,
-            )
-            .show(ui);
+            let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))
+                .label("Return to the Select tool after drawing a shape")
+                .show(ui);
             hint(
                 ui,
                 "Designs are always stored in millimetres; Units sets what you read and type. \
@@ -141,17 +148,15 @@ impl StencilApp {
         let mut pick = None;
         let mut remove = None;
         let saved = self.saved_selections.clone();
-        let _ = Panel::new("stencilcraft-selections-panel").show(ui, |ui| {
-            let edit = TextField::new("selection-name", "Selection name", name.as_str())
-                .char_limit(80)
+        let _ = Panel::new("Selections")
+            .id_salt("stencilcraft-selections-panel")
+            .show(ui, |ui, _| {
+            let _ = TextField::new("Selection name", Bind::bound(&mut name))
+                .id_salt("selection-name")
                 .show(ui);
-            if let Some(
-                EditEvent::Update { value, .. }
-                | EditEvent::Commit { value, .. }
-                | EditEvent::Set { value, .. },
-            ) = edit.event
-            {
-                name = value;
+            // A saved selection's name is at most 80 characters.
+            if name.chars().count() > 80 {
+                name = name.chars().take(80).collect();
             }
             save = button(ui, "Save Current Selection", any && !name.trim().is_empty());
             for (i, s) in saved.iter().enumerate() {
@@ -233,9 +238,9 @@ mod starter_tests {
         app.prefs.starter_mode = false;
         app.handle_menu_action(TopMenuAction::ToggleStarterMode);
         assert!(app.prefs.starter_mode);
-        assert!(app.workspace.contains(&WorkspacePanel::TextStyle));
-        assert!(!app.workspace.contains(&WorkspacePanel::Glyphs));
+        assert!(app.workspace.layout().contains(&WorkspacePanel::TextStyle));
+        assert!(!app.workspace.layout().contains(&WorkspacePanel::Glyphs));
         app.handle_menu_action(TopMenuAction::ToggleStarterMode);
-        assert!(app.workspace.contains(&WorkspacePanel::Glyphs));
+        assert!(app.workspace.layout().contains(&WorkspacePanel::Glyphs));
     }
 }

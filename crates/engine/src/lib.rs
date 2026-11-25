@@ -10,6 +10,7 @@
 
 pub mod hardware;
 pub use hardware::HardwareCommand;
+pub mod cut_tools;
 pub mod document;
 pub mod generate;
 mod path_edit;
@@ -369,6 +370,30 @@ pub enum Command {
     /// contour keeps the id).
     #[serde(rename = "shapes.release-compound")]
     ShapesReleaseCompound { ids: Vec<u64> },
+    /// Cut the shapes along the straight line `from` → `to` (Silhouette's Knife). `solid`
+    /// separates closed shapes into closed pieces with `gap_mm` between them; `outline` splits
+    /// every shape's lines into open pieces where the line crosses (and removes `gap_mm` of line
+    /// there when it is above zero). Shapes the line misses are unchanged.
+    #[serde(rename = "shapes.knife")]
+    ShapesKnife {
+        ids: Vec<u64>,
+        from: [f64; 2],
+        to: [f64; 2],
+        mode: cut_tools::CutMode,
+        #[serde(default)]
+        gap_mm: f64,
+    },
+    /// Erase along a brush stroke through `points` (Silhouette's Eraser). `solid` removes the
+    /// swept area from closed shapes and keeps each piece left; `outline` removes the lines the
+    /// brush covers. Shapes erased completely are removed.
+    #[serde(rename = "shapes.erase")]
+    ShapesErase {
+        ids: Vec<u64>,
+        points: Vec<[f64; 2]>,
+        size_mm: f64,
+        brush: cut_tools::BrushShape,
+        mode: cut_tools::CutMode,
+    },
     /// Lock or unlock shapes. Locked shapes reject edits and are left out of selections.
     #[serde(rename = "shapes.set-locked")]
     ShapesSetLocked { ids: Vec<u64>, locked: bool },
@@ -756,6 +781,8 @@ impl Engine {
                 | Command::PathOutlineStroke { .. }
                 | Command::ShapesMakeCompound { .. }
                 | Command::ShapesReleaseCompound { .. }
+                | Command::ShapesKnife { .. }
+                | Command::ShapesErase { .. }
                 | Command::ShapesSetLocked { .. }
                 | Command::ShapesSetHidden { .. }
                 | Command::TextAdd(_)
@@ -1503,6 +1530,20 @@ impl Engine {
             }
             Command::ShapesToPath { ids } => self.shapes_to_path(&ids),
             Command::ShapesMakeCompound { ids } => self.make_compound(&ids),
+            Command::ShapesKnife {
+                ids,
+                from,
+                to,
+                mode,
+                gap_mm,
+            } => self.knife(&ids, from, to, mode, gap_mm),
+            Command::ShapesErase {
+                ids,
+                points,
+                size_mm,
+                brush,
+                mode,
+            } => self.erase(&ids, &points, size_mm, brush, mode),
             Command::ShapesReleaseCompound { ids } => self.release_compound(&ids),
             Command::ShapesSetLocked { ids, locked } => {
                 self.set_flags(&ids, "shapes.set-locked", |shape| shape.locked = locked)
@@ -1762,6 +1803,112 @@ impl Engine {
             shape.path = combined;
         }
         Ok(Effect::ShapesEdited { ids: vec![base] })
+    }
+
+    fn knife(
+        &mut self,
+        ids: &[u64],
+        from: [f64; 2],
+        to: [f64; 2],
+        mode: cut_tools::CutMode,
+        gap_mm: f64,
+    ) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.knife";
+        let (from, to) = (
+            kurbo::Point::new(from[0], from[1]),
+            kurbo::Point::new(to[0], to[1]),
+        );
+        if ![from.x, from.y, to.x, to.y].iter().all(|v| v.is_finite())
+            || !(0.0..=100.0).contains(&gap_mm)
+            || (to - from).hypot() == 0.0
+        {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: from and to must be two different finite points; gap_mm 0 to 100"
+            )));
+        }
+        let strip = cut_tools::knife_strip(from, to, gap_mm);
+        self.cut_each(ids, NAME, |path| match mode {
+            cut_tools::CutMode::Solid if cut_tools::is_closed_area(path) => {
+                cut_tools::solid_cut(path, &strip)
+            }
+            _ if gap_mm > 0.0 => Ok(cut_tools::outline_cut(path, &strip)),
+            _ => Ok(cut_tools::knife_split(path, from, to)),
+        })
+    }
+
+    fn erase(
+        &mut self,
+        ids: &[u64],
+        points: &[[f64; 2]],
+        size_mm: f64,
+        brush: cut_tools::BrushShape,
+        mode: cut_tools::CutMode,
+    ) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.erase";
+        if points.is_empty()
+            || points.len() > 20_000
+            || !points.iter().flatten().all(|v| v.is_finite())
+            || !(0.01..=500.0).contains(&size_mm)
+        {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: 1 to 20000 finite points and size_mm 0.01 to 500"
+            )));
+        }
+        let points: Vec<kurbo::Point> = points
+            .iter()
+            .map(|p| kurbo::Point::new(p[0], p[1]))
+            .collect();
+        let region = cut_tools::brush_region(&points, size_mm, brush);
+        self.cut_each(ids, NAME, |path| match mode {
+            cut_tools::CutMode::Solid if cut_tools::is_closed_area(path) => {
+                cut_tools::solid_cut(path, &region)
+            }
+            _ => Ok(cut_tools::outline_cut(path, &region)),
+        })
+    }
+
+    /// Replaces each shape with the pieces `cut` makes of its path: unchanged shapes stay as they
+    /// are, cut ones become their pieces (same style), fully removed ones are deleted. One undo
+    /// step; an error when nothing was cut.
+    fn cut_each(
+        &mut self,
+        ids: &[u64],
+        name: &str,
+        cut: impl Fn(&BezPath) -> Result<Vec<BezPath>, String>,
+    ) -> Result<Effect, EngineError> {
+        let ids = unique_ids(ids, name)?;
+        let mut plans = Vec::new();
+        for id in &ids {
+            let shape = self
+                .doc
+                .get_shape(*id)
+                .ok_or_else(|| EngineError::Invalid(format!("{name}: no shape has id {id}")))?;
+            let pieces =
+                cut(&shape.path).map_err(|e| EngineError::Invalid(format!("{name}: {e}")))?;
+            let unchanged = pieces.len() == 1
+                && pieces
+                    .first()
+                    .is_some_and(|p| p.elements() == shape.path.elements());
+            if !unchanged {
+                plans.push((*id, pieces));
+            }
+        }
+        if plans.is_empty() {
+            return Err(EngineError::Invalid(format!(
+                "{name}: the cut does not touch the selected shapes"
+            )));
+        }
+        let mut results = Vec::new();
+        for (id, pieces) in plans {
+            if pieces.is_empty() {
+                for layer in &mut self.doc.layers {
+                    layer.shapes.retain(|s| s.id != id);
+                }
+            } else {
+                results.extend(self.replace_shape_with(id, pieces)?);
+            }
+        }
+        Ok(Effect::ShapesAdded { ids: results })
     }
 
     fn release_compound(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
@@ -2733,6 +2880,8 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesToPath { ids }
         | Command::ShapesMakeCompound { ids }
         | Command::ShapesReleaseCompound { ids }
+        | Command::ShapesKnife { ids, .. }
+        | Command::ShapesErase { ids, .. }
         | Command::ShapesSetHidden { ids, .. }
         | Command::TextToOutlines { ids } => ids.clone(),
         Command::Production(c) => c.targets(),
@@ -3207,6 +3356,96 @@ mod tests {
             .unwrap();
         assert_eq!(engine.doc.shape_count(), 2);
         assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn knife_and_eraser_cut_shapes_into_pieces_in_one_undo_step() {
+        use cut_tools::{BrushShape, CutMode};
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 20.0,
+                height: 10.0,
+            })
+            .unwrap();
+        let effect = engine
+            .run(Command::ShapesKnife {
+                ids: vec![1],
+                from: [10.0, -5.0],
+                to: [10.0, 15.0],
+                mode: CutMode::Solid,
+                gap_mm: 1.0,
+            })
+            .unwrap();
+        let Effect::ShapesAdded { ids } = effect else {
+            panic!("the knife returns the pieces");
+        };
+        assert_eq!(ids.len(), 2, "two closed halves");
+        assert_eq!(engine.doc.shape_count(), 2);
+        assert!(engine.undo());
+        assert_eq!(
+            engine.doc.shape_count(),
+            1,
+            "one undo restores the rectangle"
+        );
+
+        // Outline eraser: a dab on the top edge opens the rectangle into one line.
+        engine
+            .run(Command::ShapesErase {
+                ids: vec![1],
+                points: vec![[5.0, 0.0]],
+                size_mm: 2.0,
+                brush: BrushShape::Round,
+                mode: CutMode::Outline,
+            })
+            .unwrap();
+        assert_eq!(engine.doc.shape_count(), 1);
+        let path = &engine.doc.get_shape(1).unwrap().path;
+        assert!(!cut_tools::is_closed_area(path));
+
+        // A cut that touches nothing, and hostile input, are refused.
+        assert!(
+            engine
+                .run(Command::ShapesKnife {
+                    ids: vec![1],
+                    from: [100.0, 100.0],
+                    to: [120.0, 100.0],
+                    mode: CutMode::Outline,
+                    gap_mm: 0.0,
+                })
+                .is_err()
+        );
+        for (points, size_mm) in [
+            (vec![[f64::NAN, 0.0]], 2.0),
+            (vec![], 2.0),
+            (vec![[0.0, 0.0]], 0.0),
+            (vec![[0.0, 0.0]], f64::INFINITY),
+        ] {
+            assert!(
+                engine
+                    .run(Command::ShapesErase {
+                        ids: vec![1],
+                        points,
+                        size_mm,
+                        brush: BrushShape::Square,
+                        mode: CutMode::Solid,
+                    })
+                    .is_err()
+            );
+        }
+        // Erasing a whole shape removes it.
+        engine
+            .run(Command::ShapesErase {
+                ids: vec![1],
+                points: vec![[10.0, 5.0]],
+                size_mm: 100.0,
+                brush: BrushShape::Square,
+                mode: CutMode::Outline,
+            })
+            .unwrap();
         assert_eq!(engine.doc.shape_count(), 0);
     }
 

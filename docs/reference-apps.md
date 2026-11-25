@@ -205,9 +205,9 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Exclude / XOR | both | Keep everything except the overlap | have: `xor` | replicate | 2026-11-02, SS 5.0.539: no exclude/XOR action in Basic's Modify panel. DS: docs only (sign-in required) |
 | Divide / Slice | both | Split overlapping shapes into separate pieces | have: `divide`, `trim`, `crop`, `outline` | replicate | 2026-11-02, SS 5.0.539: Divide and Crop in the Modify panel. DS: docs only (sign-in required) |
 | Detach Lines | SS | Separate a shape's lines from it | missing | replicate once its behaviour is confirmed | 2026-11-02, SS 5.0.539: a Modify panel action; its behaviour not tested yet |
-| Attach | DS | Keep pieces in their relative positions on the mat without merging them | partial: production engine/MCP support attach/detach; desktop mat workflow is not wired | reimagine (groups that keep positions when sent to the mat) | docs only (sign-in required) |
+| Attach | DS | Keep pieces in their relative positions on the mat without merging them | partial: Object › Attach / Detach in the desktop; engine/MCP attach/detach; the mat preview does not show attach groups yet | reimagine (groups that keep positions when sent to the mat) | docs only (sign-in required) |
 | Flatten (print layers into one printable image) | DS | Merge layers into one Print Then Cut image | partial: production engine/MCP support flatten/unflatten metadata; end-to-end printed artwork and desktop workflow remain open | reimagine as part of Print & Cut | docs only (sign-in required) |
-| Contour (hide parts of a shape) | DS | Hide individual sub-paths so they are not cut | partial: engine/MCP hide individual contours; desktop controls remain open | replicate (per-subpath enable) | docs only (sign-in required) |
+| Contour (hide parts of a shape) | DS | Hide individual sub-paths so they are not cut | have: Object › Contour… panel hides or shows each contour (hidden ones are drawn faint and not cut) | replicate (per-subpath enable) | docs only (sign-in required) |
 
 ## Replicate and array
 
@@ -577,7 +577,7 @@ against the engine command set on main (2026-11-02).
 | Combine (non-destructive Unite/Subtract/Intersect/Exclude) | Layers panel | Shape operations that stay editable ([library](cricut-design-space/layers-panel.md#combine-unite-subtract-intersect-exclude)) | partial: engine/MCP preserve source members and support uncombine; desktop workflow remains open | replicate (live boolean groups) | docs only (sign-in required) |
 | Attach / detach | Layers panel | Keep positions on the mat; fasten draw/score to cut ([library](cricut-design-space/layers-panel.md#attach--detach)) | partial: engine/MCP support attach/detach; desktop workflow remains open | replicate | docs only (sign-in required) |
 | Flatten / unflatten | Layers panel | Merge into one printable layer ([library](cricut-design-space/layers-panel.md#flatten--unflatten)) | partial: engine/MCP commands exist; complete print rendering and desktop workflow remain open | replicate | docs only (sign-in required) |
-| Contour | Layers panel | Hide individual cut lines ([library](cricut-design-space/layers-panel.md#contour)) | partial: engine/MCP `shape.contour`; desktop controls remain open | replicate | docs only (sign-in required) |
+| Contour | Layers panel | Hide individual cut lines ([library](cricut-design-space/layers-panel.md#contour)) | have: Object › Contour… panel (`shape.contour`) | replicate | docs only (sign-in required) |
 | Color Sync | Layers panel | Merge colours to use fewer mats ([library](cricut-design-space/layers-panel.md#color-sync-panel)) | partial: engine/MCP `layer.color-sync`; desktop workflow remains open | replicate | docs only (sign-in required) |
 | Basic Cut | Operations | Cut the outline ([library](cricut-design-space/operations-and-linetypes.md)) | have: `cut` style | replicate | docs only (sign-in required) |
 | Pen / Draw | Operations | Draw with a pen ([library](cricut-design-space/operations-and-linetypes.md)) | partial: `engrave` style | replicate | docs only (sign-in required) |

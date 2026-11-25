@@ -702,13 +702,22 @@ pub fn paint_document(
                 color = palette.selection;
                 width = width.max(if options.outline_view { 1.5 } else { 2.5 });
             }
-            for pl in stencilcraft_geom::path_to_polylines(
+            for (index, pl) in stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
-            ) {
+            )
+            .into_iter()
+            .enumerate()
+            {
                 if pl.points.is_empty() {
                     continue;
                 }
+                // Contours hidden from cutting (Contour) are shown faintly.
+                let (color, width) = if shape.production.hidden_contours.contains(&index) {
+                    (color.linear_multiply(0.3), 1.0)
+                } else {
+                    (color, width)
+                };
                 let mut screen: Vec<egui::Pos2> =
                     pl.points.iter().map(|p| view.world_to_screen(*p)).collect();
                 if pl.closed

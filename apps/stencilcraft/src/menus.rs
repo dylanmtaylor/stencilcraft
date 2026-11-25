@@ -600,16 +600,17 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     },
                     any,
                 ),
+                when(
+                    "Lattice Distort…",
+                    A::BeginDistort {
+                        rows: 3,
+                        columns: 3,
+                    },
+                    any,
+                ),
             ],
         ),
-        when(
-            "Lattice…",
-            A::BeginDistort {
-                rows: 3,
-                columns: 3,
-            },
-            any,
-        ),
+        todo("Lattice…"),
         eff("Pop-up Card…", M::PopupCard),
         eff("Puzzle…", M::Puzzle),
         SEP,

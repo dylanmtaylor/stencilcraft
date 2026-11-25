@@ -1,221 +1,360 @@
-//! Pure helpers behind the Layers panel tree (D-08/D-09/D-12).
+//! Pure helpers behind the Geometry and Operations panels (D-08/D-09).
 //!
-//! Everything here is derived from the document on each frame. The Unassigned
-//! group and the Pass N badges are never persisted — no layer, enum variant or
-//! stored field is ever created for them (Phase 1 D-04, D-09).
+//! Everything here is derived from the document on each frame: the Unassigned
+//! group, pass numbers, operation tags and the view-only filter are never
+//! persisted into the document — the UI reads `Document.groups` and
+//! `Document.operations` directly, with no adapter layer.
 
 use std::collections::BTreeSet;
 
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, Group, GroupChild, OperationKind};
 
-/// Sentinel entry in [`build_layer_rows`]' `open` set that expands the derived
-/// Unassigned group (a real layer index can never collide with it).
-pub const UNASSIGNED_GROUP: usize = usize::MAX;
+/// Sentinel open-set key for the derived Unassigned group (a real group id can
+/// never collide with it).
+pub const UNASSIGNED_GROUP: u64 = u64::MAX;
 
-/// One row of the layers tree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LayerRow {
-    /// A layer header row; `index` is into `Document::layers`.
-    Layer { index: usize },
-    /// A member shape leaf under an expanded layer group.
-    Member { layer: usize, shape: u64 },
-    /// The derived Unassigned group header (never a persisted layer, D-09).
+/// One row of the geometry tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeoRow {
+    /// The ".." navigation row shown while a group is entered.
+    Up,
+    /// A group header row; `depth` drives the indent.
+    Group { id: u64, depth: usize },
+    /// A shape leaf inside a group.
+    Shape { id: u64, depth: usize },
+    /// The derived Unassigned group header (never persisted, D-09).
     UnassignedGroup,
-    /// A zero-membership shape leaf under the Unassigned group, in document order.
-    UnassignedMember { shape: u64 },
+    /// A shape that belongs to no group, listed under Unassigned in document order.
+    UnassignedShape { id: u64 },
 }
 
-/// 1-based index of `layer_index` in `doc.production_sequence()`; `None` for
-/// layers that do not produce (operation-less containers and Guide layers, D-12).
-pub fn pass_number(doc: &Document, layer_index: usize) -> Option<usize> {
-    if !doc.layers.get(layer_index)?.produces() {
-        return None;
-    }
-    Some(
-        doc.layers
-            .iter()
-            .take(layer_index + 1)
-            .filter(|l| l.produces())
-            .count(),
-    )
+fn group_by_id(doc: &Document, id: u64) -> Option<&Group> {
+    doc.groups.iter().find(|g| g.id == id)
 }
 
-/// The tree rows for the layers panel: one group row per layer plus member
-/// leaves for open groups, then the Unassigned group with the zero-membership
-/// shapes (`Document::unassigned_shapes`) in document order.
-pub fn build_layer_rows(doc: &Document, open: &BTreeSet<usize>) -> Vec<LayerRow> {
-    let mut rows = Vec::new();
-    for index in 0..doc.layers.len() {
-        rows.push(LayerRow::Layer { index });
-        if open.contains(&index)
-            && let Some(layer) = doc.layers.get(index)
-        {
-            for &shape in &layer.members {
-                rows.push(LayerRow::Member {
-                    layer: index,
-                    shape,
-                });
+/// Ids of the groups that are not nested inside another group, in document order.
+pub fn top_level_groups(doc: &Document) -> Vec<u64> {
+    let nested: BTreeSet<u64> = doc
+        .groups
+        .iter()
+        .flat_map(|g| g.children.iter())
+        .filter_map(|child| match child {
+            GroupChild::Group(id) => Some(*id),
+            GroupChild::Shape(_) => None,
+        })
+        .collect();
+    doc.groups
+        .iter()
+        .map(|g| g.id)
+        .filter(|id| !nested.contains(id))
+        .collect()
+}
+
+/// Every shape id inside group `id`, nested groups included, in child order.
+pub fn group_member_shapes(doc: &Document, id: u64) -> Vec<u64> {
+    fn walk(doc: &Document, id: u64, out: &mut Vec<u64>) {
+        let Some(group) = group_by_id(doc, id) else {
+            return;
+        };
+        for child in &group.children {
+            match child {
+                GroupChild::Shape(shape) => {
+                    if !out.contains(shape) {
+                        out.push(*shape);
+                    }
+                }
+                GroupChild::Group(inner) => walk(doc, *inner, out),
             }
         }
     }
-    rows.push(LayerRow::UnassignedGroup);
+    let mut out = Vec::new();
+    walk(doc, id, &mut out);
+    out
+}
+
+/// Shape ids that belong to no group, in document order.
+pub fn ungrouped_shape_ids(doc: &Document) -> Vec<u64> {
+    let grouped: BTreeSet<u64> = doc
+        .groups
+        .iter()
+        .flat_map(|g| group_member_shapes(doc, g.id))
+        .collect();
+    doc.shapes()
+        .map(|s| s.id)
+        .filter(|id| !grouped.contains(id))
+        .collect()
+}
+
+fn push_group_rows(
+    doc: &Document,
+    id: u64,
+    depth: usize,
+    open: &BTreeSet<u64>,
+    rows: &mut Vec<GeoRow>,
+) {
+    let Some(group) = group_by_id(doc, id) else {
+        return;
+    };
+    rows.push(GeoRow::Group { id, depth });
+    if !open.contains(&id) {
+        return;
+    }
+    for child in &group.children {
+        match child {
+            GroupChild::Group(inner) => push_group_rows(doc, *inner, depth + 1, open, rows),
+            GroupChild::Shape(shape) => rows.push(GeoRow::Shape {
+                id: *shape,
+                depth: depth + 1,
+            }),
+        }
+    }
+}
+
+/// The geometry tree rows: when `entered` is a group, its subtree behind an
+/// `Up` row; otherwise the top-level groups. The derived Unassigned group with
+/// the ungrouped shapes always closes the list.
+pub fn build_geometry_rows(
+    doc: &Document,
+    open: &BTreeSet<u64>,
+    entered: Option<u64>,
+) -> Vec<GeoRow> {
+    let mut rows = Vec::new();
+    match entered {
+        Some(id) => {
+            rows.push(GeoRow::Up);
+            if let Some(group) = group_by_id(doc, id) {
+                for child in &group.children {
+                    match child {
+                        GroupChild::Group(inner) => {
+                            push_group_rows(doc, *inner, 0, open, &mut rows)
+                        }
+                        GroupChild::Shape(shape) => rows.push(GeoRow::Shape {
+                            id: *shape,
+                            depth: 0,
+                        }),
+                    }
+                }
+            }
+        }
+        None => {
+            for id in top_level_groups(doc) {
+                push_group_rows(doc, id, 0, open, &mut rows);
+            }
+        }
+    }
+    rows.push(GeoRow::UnassignedGroup);
     if open.contains(&UNASSIGNED_GROUP) {
-        for shape in doc.unassigned_shapes() {
-            rows.push(LayerRow::UnassignedMember { shape: shape.id });
+        for id in ungrouped_shape_ids(doc) {
+            rows.push(GeoRow::UnassignedShape { id });
         }
     }
     rows
 }
 
-/// The operation a shape effectively runs with and the name of the owning
-/// operation layer; `None` for unassigned shapes.
-pub fn effective_operation(doc: &Document, shape_id: u64) -> Option<(Operation, String)> {
-    doc.layers
-        .iter()
-        .find(|l| l.operation.is_some() && l.members.contains(&shape_id))
-        .and_then(|l| l.operation.clone().map(|op| (op, l.name.clone())))
+/// 1-based pass number of operation `op_index` in `Document::operations` order;
+/// `None` for Guide/hidden operations (they produce no pass) and out-of-range.
+pub fn pass_number(doc: &Document, op_index: usize) -> Option<usize> {
+    if !doc.operations.get(op_index)?.is_output() {
+        return None;
+    }
+    Some(
+        doc.operations
+            .iter()
+            .take(op_index + 1)
+            .filter(|op| op.is_output())
+            .count(),
+    )
 }
 
-/// Names of every operation layer containing the shape (N:M membership, D-08).
-pub fn membership_labels(doc: &Document, shape_id: u64) -> Vec<String> {
-    doc.layers
+/// Indexes into `Document::operations` of every operation whose members contain
+/// `shape_id`, in pass order (N:M membership, D-08).
+pub fn operation_tags(doc: &Document, shape_id: u64) -> Vec<usize> {
+    doc.operations
         .iter()
-        .filter(|l| l.operation.is_some() && l.members.contains(&shape_id))
-        .map(|l| l.name.clone())
+        .enumerate()
+        .filter(|(_, op)| op.members.contains(&shape_id))
+        .map(|(i, _)| i)
         .collect()
+}
+
+/// The view-only filter (never persisted): a shape is hidden when it belongs
+/// to at least one operation and every one of those operations is filtered out.
+/// Shapes with no operation stay visible.
+pub fn shape_filtered_out(doc: &Document, shape_id: u64, hidden_ops: &BTreeSet<u64>) -> bool {
+    let tags = operation_tags(doc, shape_id);
+    !tags.is_empty()
+        && tags.iter().all(|i| {
+            doc.operations
+                .get(*i)
+                .is_some_and(|op| hidden_ops.contains(&op.id))
+        })
+}
+
+/// Display icon-name hint for an operation kind in the operations panel.
+pub fn icon_name_for_kind(kind: OperationKind) -> Option<&'static str> {
+    Some(match kind {
+        OperationKind::Cut => "scissors",
+        OperationKind::Engrave => "flame",
+        OperationKind::Score => "spline",
+        OperationKind::Guide => "ruler",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stencilcraft_doc::{Layer, OperationSettings};
+    use stencilcraft_doc::{Group, Layer, Operation, OperationSettings};
     use stencilcraft_testkit::rect_path;
 
-    fn cut() -> Operation {
-        Operation::Cut(OperationSettings::default())
-    }
-
-    fn engrave() -> Operation {
-        Operation::Engrave(OperationSettings::default())
-    }
-
-    /// `Document::default()`'s "base" container (index 0) / cut / guide / engrave,
-    /// with shape 1 in cut and engrave, shape 2 in base only, shape 3 in no layer.
-    fn doc() -> Document {
-        let mut doc = Document::default();
-        doc.layers.push(Layer::new("cut", Some(cut())));
-        doc.layers.push(Layer::new("guide", Some(Operation::Guide)));
-        doc.layers.push(Layer::new("engrave", Some(engrave())));
-        let one = doc.push_shape(1, rect_path(0.0, 0.0, 10.0, 10.0)).unwrap();
-        doc.layers[3].members.push(one.id);
-        doc.push_shape(0, rect_path(20.0, 0.0, 10.0, 10.0)).unwrap();
-        doc.shapes.push(stencilcraft_doc::Shape {
-            id: 3,
-            path: rect_path(40.0, 0.0, 10.0, 10.0),
-            hidden: false,
+    fn op(id: u64, kind: OperationKind, members: Vec<u64>) -> Operation {
+        Operation {
+            id,
+            name: format!("op{id}"),
+            kind,
+            settings: OperationSettings::default(),
+            color: None,
+            visible: true,
             locked: false,
-            text: None,
-            production: Default::default(),
+            members,
+            icon: None,
+        }
+    }
+
+    /// Shapes 1..=4 on a base layer; groups: outer(1) = [shape 1, inner(2)],
+    /// inner(2) = [shape 2, shape 3]; shape 4 belongs to no group.
+    /// Operations: op 1 = cut over [1, 2], op 2 = guide over [2], op 3 = engrave over [3].
+    fn fixture() -> Document {
+        let mut doc = Document::default();
+        doc.layers.push(Layer::new("base"));
+        for i in 1..=4u64 {
+            doc.push_shape(0, rect_path(f64::from(i as u32) * 10.0, 0.0, 5.0, 5.0))
+                .unwrap();
+        }
+        doc.groups.push(Group {
+            id: 1,
+            name: "outer".to_string(),
+            children: vec![GroupChild::Shape(1), GroupChild::Group(2)],
         });
-        doc.next_shape_id = 4;
+        doc.groups.push(Group {
+            id: 2,
+            name: "inner".to_string(),
+            children: vec![GroupChild::Shape(2), GroupChild::Shape(3)],
+        });
+        doc.operations.push(op(1, OperationKind::Cut, vec![1, 2]));
+        doc.operations.push(op(2, OperationKind::Guide, vec![2]));
+        doc.operations.push(op(3, OperationKind::Engrave, vec![3]));
         doc
     }
 
     #[test]
-    fn pass_number_skips_container_and_guide_layers_and_renumbers_after_reorder() {
-        let mut doc = doc();
-        assert_eq!(pass_number(&doc, 0), None, "operation-less container");
-        assert_eq!(pass_number(&doc, 1), Some(1), "first producing layer");
-        assert_eq!(pass_number(&doc, 2), None, "Guide produces nothing (D-17)");
-        assert_eq!(pass_number(&doc, 3), Some(2), "second producing layer");
-        assert_eq!(pass_number(&doc, 4), None, "out of range");
-
-        doc.layers.swap(1, 3);
-        assert_eq!(pass_number(&doc, 1), Some(1), "engrave moved to the front");
-        assert_eq!(pass_number(&doc, 3), Some(2), "cut renumbered");
-    }
-
-    /// The engine's `layer.move` arm is `remove(from); insert(to)` — this test
-    /// applies that exact move (the through-the-engine path is covered by
-    /// `reorder_changes_pass_order` in stencilcraft-engine) and asserts the
-    /// derived Pass N badges renumber. Adding stencilcraft-engine as a dev-dep
-    /// here would force a Cargo.lock re-resolution (T-02-SC: no dependency
-    /// changes in this plan), so the move is applied the same way instead.
-    #[test]
-    fn pass_number_renumbers_after_layer_move() {
-        let mut doc = doc();
-        assert_eq!(pass_number(&doc, 1), Some(1), "cut is Pass 1");
-        assert_eq!(pass_number(&doc, 3), Some(2), "engrave is Pass 2");
-
-        // LayerMove { from: 3, to: 1 } as the engine arm applies it.
-        let layer = doc.layers.remove(3);
-        doc.layers.insert(1, layer);
+    fn geometry_rows_walk_groups_recursively_and_close_with_unassigned() {
+        let doc = fixture();
+        let rows = build_geometry_rows(&doc, &BTreeSet::new(), None);
         assert_eq!(
-            pass_number(&doc, 1),
-            Some(1),
-            "engrave moved to the front is Pass 1"
+            rows,
+            vec![GeoRow::Group { id: 1, depth: 0 }, GeoRow::UnassignedGroup]
         );
-        assert_eq!(pass_number(&doc, 2), Some(2), "cut renumbered to Pass 2");
-    }
 
-    #[test]
-    fn build_layer_rows_lists_exactly_the_unassigned_shapes_and_persists_nothing() {
-        let doc = doc();
-        let open: BTreeSet<usize> = [1, UNASSIGNED_GROUP].into_iter().collect();
-        let rows = build_layer_rows(&doc, &open);
+        let open: BTreeSet<u64> = [1, 2, UNASSIGNED_GROUP].into_iter().collect();
+        let rows = build_geometry_rows(&doc, &open, None);
         assert_eq!(
             rows,
             vec![
-                LayerRow::Layer { index: 0 },
-                LayerRow::Layer { index: 1 },
-                LayerRow::Member { layer: 1, shape: 1 },
-                LayerRow::Layer { index: 2 },
-                LayerRow::Layer { index: 3 },
-                LayerRow::UnassignedGroup,
-                LayerRow::UnassignedMember { shape: 2 },
-                LayerRow::UnassignedMember { shape: 3 },
+                GeoRow::Group { id: 1, depth: 0 },
+                GeoRow::Shape { id: 1, depth: 1 },
+                GeoRow::Group { id: 2, depth: 1 },
+                GeoRow::Shape { id: 2, depth: 2 },
+                GeoRow::Shape { id: 3, depth: 2 },
+                GeoRow::UnassignedGroup,
+                GeoRow::UnassignedShape { id: 4 },
             ]
         );
-        // Shape 2 sits in the operation-less container only, so it is unassigned too.
-        assert_eq!(
-            doc.unassigned_shapes().map(|s| s.id).collect::<Vec<_>>(),
-            vec![2, 3]
-        );
-        assert_eq!(
-            doc.layers.len(),
-            4,
-            "no Unassigned layer is ever persisted (D-09)"
-        );
+        // Nothing is persisted: the Unassigned group is derived only.
+        assert_eq!(doc.groups.len(), 2);
+    }
 
-        // A collapsed Unassigned group still renders, without its leaves.
-        let rows = build_layer_rows(&doc, &BTreeSet::new());
-        assert_eq!(rows.last(), Some(&LayerRow::UnassignedGroup));
+    #[test]
+    fn entering_a_group_shows_its_subtree_behind_an_up_row() {
+        let doc = fixture();
+        let open: BTreeSet<u64> = [2].into_iter().collect();
+        let rows = build_geometry_rows(&doc, &open, Some(1));
+        assert_eq!(
+            rows,
+            vec![
+                GeoRow::Up,
+                GeoRow::Shape { id: 1, depth: 0 },
+                GeoRow::Group { id: 2, depth: 0 },
+                GeoRow::Shape { id: 2, depth: 1 },
+                GeoRow::Shape { id: 3, depth: 1 },
+                GeoRow::UnassignedGroup,
+            ]
+        );
+    }
+
+    #[test]
+    fn group_member_shapes_is_recursive_and_unioned() {
+        let doc = fixture();
+        assert_eq!(group_member_shapes(&doc, 1), vec![1, 2, 3]);
+        assert_eq!(group_member_shapes(&doc, 2), vec![2, 3]);
+        assert!(group_member_shapes(&doc, 99).is_empty());
+        assert_eq!(ungrouped_shape_ids(&doc), vec![4]);
+    }
+
+    #[test]
+    fn pass_number_counts_only_output_operations_in_order() {
+        let doc = fixture();
+        assert_eq!(pass_number(&doc, 0), Some(1), "cut is pass 1");
+        assert_eq!(pass_number(&doc, 1), None, "guide produces no pass");
+        assert_eq!(pass_number(&doc, 2), Some(2), "engrave is pass 2");
+        assert_eq!(pass_number(&doc, 3), None, "out of range");
+
+        let mut doc = fixture();
+        doc.operations[0].visible = false;
+        assert_eq!(
+            pass_number(&doc, 0),
+            None,
+            "hidden operation produces no pass"
+        );
+        assert_eq!(pass_number(&doc, 2), Some(1), "engrave renumbers to pass 1");
+    }
+
+    #[test]
+    fn operation_tags_lists_every_operation_of_a_shape_in_pass_order() {
+        let doc = fixture();
+        assert_eq!(operation_tags(&doc, 1), vec![0]);
+        assert_eq!(operation_tags(&doc, 2), vec![0, 1]);
+        assert_eq!(operation_tags(&doc, 3), vec![2]);
+        assert!(operation_tags(&doc, 4).is_empty());
+    }
+
+    #[test]
+    fn filter_hides_a_shape_only_when_all_its_operations_are_filtered_out() {
+        let document = fixture();
+        let none: BTreeSet<u64> = BTreeSet::new();
+        assert!(!shape_filtered_out(&document, 2, &none));
+
+        let mut hidden: BTreeSet<u64> = [1].into_iter().collect();
         assert!(
-            !rows
-                .iter()
-                .any(|r| matches!(r, LayerRow::UnassignedMember { .. }))
+            !shape_filtered_out(&document, 2, &hidden),
+            "shape 2 also runs in op 2 (guide), which is not filtered"
         );
-    }
-
-    #[test]
-    fn effective_operation_resolves_the_owning_layer_and_none_for_unassigned() {
-        let doc = doc();
-        let (op, source) = effective_operation(&doc, 1).unwrap();
-        assert_eq!(op, cut());
-        assert_eq!(source, "cut");
-        assert_eq!(effective_operation(&doc, 2), None);
-        assert_eq!(effective_operation(&doc, 3), None);
-        assert_eq!(effective_operation(&doc, 99), None);
-    }
-
-    #[test]
-    fn membership_labels_lists_every_owning_operation_layer_n_to_m() {
-        let doc = doc();
-        assert_eq!(
-            membership_labels(&doc, 1),
-            vec!["cut".to_string(), "engrave".to_string()]
+        hidden.insert(2);
+        assert!(
+            shape_filtered_out(&document, 2, &hidden),
+            "both its operations are out"
         );
-        assert!(membership_labels(&doc, 2).is_empty());
-        assert!(membership_labels(&doc, 3).is_empty());
+        assert!(
+            shape_filtered_out(&document, 1, &hidden),
+            "shape 1's only operation is out"
+        );
+        assert!(
+            !shape_filtered_out(&document, 3, &hidden),
+            "shape 3 keeps op 3"
+        );
+        assert!(
+            !shape_filtered_out(&document, 4, &hidden),
+            "a shape with no operation is never hidden by the filter"
+        );
     }
 }

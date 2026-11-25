@@ -86,6 +86,9 @@ pub struct UserPrefs {
     pub recent_new: Vec<new_doc::RecentDoc>,
     /// Modifier that opens the operation popup on the Add Layer button (D-02).
     pub op_popup_modifier: OpPopupModifier,
+    /// Import source styling as operation layers instead of keeping geometry untouched
+    /// with non-binding hints (ADR 0001, GEO-03; default false).
+    pub import_legacy_style_operations: bool,
 }
 
 /// The keyboard modifier that turns an Add Layer click into the operation popup (D-02).
@@ -123,6 +126,7 @@ impl Default for UserPrefs {
             recent_files: Vec::new(),
             recent_new: Vec::new(),
             op_popup_modifier: OpPopupModifier::default(),
+            import_legacy_style_operations: false,
         }
     }
 }
@@ -793,6 +797,9 @@ pub struct StencilApp {
     pub ruler_origin: stencilcraft_geom::Point,
     pub locale_numbers: LocaleNumbers,
     pub prefs: UserPrefs,
+    /// Operation hints collected by the last import, awaiting the user's confirm
+    /// ("Apply N operation hints?"); never applied at import time (GEO-02).
+    pub pending_operation_hints: Vec<stencilcraft_svg::OperationHint>,
     #[cfg(not(target_arch = "wasm32"))]
     pub settings_store: Option<SettingsStore<UserPrefs>>,
     /// Port requested with `--control`; the socket starts once eframe hands us the
@@ -998,6 +1005,7 @@ impl StencilApp {
             ruler_origin: stencilcraft_geom::Point::ZERO,
             locale_numbers: LocaleNumbers::from_tag("en-US"),
             prefs,
+            pending_operation_hints: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             settings_store: None,
             control_port: None,
@@ -1629,14 +1637,60 @@ impl StencilApp {
     }
 
     pub fn import_svg(&mut self, path: std::path::PathBuf) {
-        let name = path.to_string_lossy();
-        let result =
-            stencilcraft_import::import_file(&name, &stencilcraft_import::ImportOptions::default())
-                .map_err(|error| error.to_string());
+        let name = path.to_string_lossy().into_owned();
+        let policy = stencilcraft_svg::ImportPolicy {
+            legacy_style_operations: self.prefs.import_legacy_style_operations,
+        };
+        // SVG/SVGZ goes through the svg crate directly so the operation hints and the
+        // legacy preference reach the app; other formats keep the shared importer.
+        const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024;
+        let result = (|| {
+            let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+            if bytes.len() as u64 > MAX_IMPORT_FILE_BYTES {
+                return Err("the file exceeds the 64 MiB input limit".to_string());
+            }
+            stencilcraft_svg::import_bytes_with_warnings_policy(&bytes, &name, &policy)
+                .map_err(|error| error.to_string())
+        })();
         match result {
-            Ok(document) => self.add_imported_shapes(document, &name),
+            Ok(imported) => {
+                for warning in &imported.warnings {
+                    eprintln!("{name}: {warning}");
+                }
+                self.pending_operation_hints = imported.operation_hints;
+                self.add_imported_shapes(imported.document, &name);
+            }
             Err(error) => self.status = error,
         }
+    }
+
+    /// Confirm the pending import hints: create one operation layer per hint through
+    /// the normal `layer.add` command (no import-time writes to the document).
+    fn apply_operation_hints(&mut self) {
+        let hints = std::mem::take(&mut self.pending_operation_hints);
+        let count = hints.len();
+        for hint in hints {
+            let name = if hint.group_path.is_empty() {
+                hint.operation.kind_name().to_string()
+            } else {
+                format!(
+                    "{} ({})",
+                    hint.group_path.join(" / "),
+                    hint.operation.kind_name()
+                )
+            };
+            match self.engine.run(Command::LayerAdd {
+                name,
+                operation: Some(hint.operation),
+            }) {
+                Ok(_) => {}
+                Err(error) => {
+                    self.status = format!("operation hint failed: {error}");
+                    return;
+                }
+            }
+        }
+        self.status = format!("applied {count} operation hint(s) as layers");
     }
 
     pub fn import_image(&mut self, path: std::path::PathBuf) {
@@ -4543,6 +4597,7 @@ impl StencilApp {
             self.engine.doc.shape_count()
         );
         let status_msg = self.status.clone();
+        let tool_label = self.active_tool.label();
         let mut zoom_value = f64::from((self.view.zoom * 100.0).round().clamp(5.0, 40000.0));
 
         egui::Panel::bottom("status")
@@ -4586,9 +4641,28 @@ impl StencilApp {
                         });
                         StatusBar::info(ui, &info);
                         StatusBar::message(ui, &status_msg, false);
+                        if !self.pending_operation_hints.is_empty() {
+                            let count = self.pending_operation_hints.len();
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Apply {count} operation hint(s)?"));
+                                if ui
+                                    .add(Button::new("Apply").size(ControlSize::Sm))
+                                    .on_hover_text("Create one operation layer per imported hint")
+                                    .clicked()
+                                {
+                                    self.apply_operation_hints();
+                                }
+                                if ui
+                                    .add(Button::new("Dismiss").size(ControlSize::Sm))
+                                    .clicked()
+                                {
+                                    self.pending_operation_hints.clear();
+                                }
+                            });
+                        }
                     });
                     bar.trailing(|ui| {
-                        ui.add(Text::new(format!("Tool: {}", self.active_tool.label())))
+                        ui.add(Text::new(format!("Tool: {tool_label}")))
                             .on_hover_text("Space+drag or middle-drag to pan · wheel to zoom");
                     });
                 });

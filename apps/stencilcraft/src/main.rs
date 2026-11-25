@@ -58,10 +58,6 @@ mod new_doc;
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod panels;
 
-/// The same bounded PNG/JPEG silhouette tracer used by the CLI.
-#[path = "../../stencilcraft-cli/src/trace.rs"]
-mod trace;
-
 const APP_ICON_PNG: &[u8] =
     include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.stencilcraft.png");
 
@@ -820,6 +816,12 @@ pub struct StencilApp {
     pub pen_undo_requested: bool,
     /// The Polyline/Curve tool's points while placing them.
     pub click_draft: Option<click_draw::ClickDraft>,
+    /// Uploaded textures of placed images, keyed by image id with the pixel data they show.
+    pub image_textures: std::collections::HashMap<u64, (usize, egui::TextureHandle)>,
+    /// A placed image picked on the canvas (images select on their own, as in Silhouette).
+    pub selected_image: Option<u64>,
+    /// An image being dragged: its id and the press point.
+    pub image_drag: Option<(u64, egui::Pos2)>,
     /// The selection box part under the pointer, which picks how a drag of it scales.
     pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
     /// The transform a selection-box drag would apply, previewed until release.
@@ -1030,6 +1032,9 @@ impl StencilApp {
             pen_draft: None,
             pen_undo_requested: false,
             click_draft: None,
+            image_textures: std::collections::HashMap::new(),
+            selected_image: None,
+            image_drag: None,
             box_part: None,
             box_preview: None,
             arc_draft: None,
@@ -1711,6 +1716,9 @@ impl StencilApp {
 
     pub fn delete_selection(&mut self) {
         if self.selected_shapes.is_empty() {
+            if let Some(id) = self.selected_image.take() {
+                self.run_command(Command::ImageRemove { id });
+            }
             return;
         }
         let ids = self.selected_shapes.clone();
@@ -2415,12 +2423,93 @@ impl StencilApp {
         }
     }
 
+    /// Place a PNG/JPEG on the page as Silhouette Studio does: at 300 dpi, at the page's top
+    /// left, selected, ready to trace with the Trace panel.
     pub fn import_image(&mut self, path: std::path::PathBuf) {
-        let name = path.to_string_lossy();
-        let result = trace::trace_file(&name, trace::TraceOptions::default());
-        match result {
-            Ok(imported) => self.add_imported_shapes(imported, &name),
-            Err(error) => self.status = error,
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "image".to_string());
+        let placed = std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| stencilcraft_raster::decode(&bytes).map_err(|e| e.to_string()))
+            .and_then(|pixels| {
+                stencilcraft_raster::place(&pixels, &name, 300.0).map_err(|e| e.to_string())
+            });
+        match placed {
+            Ok(image) => self.place_image(image),
+            Err(error) => self.status = format!("{}: {error}", path.display()),
+        }
+    }
+
+    /// Move a placed image by `by` millimetres in one undoable step.
+    pub fn move_image(&mut self, id: u64, by: stencilcraft_geom::Vec2) {
+        let Some(image) = self.engine.doc.get_image(id) else {
+            return;
+        };
+        if by.hypot() < 1e-9 {
+            return;
+        }
+        let (x, y, width, height) = (
+            image.x_mm + by.x,
+            image.y_mm + by.y,
+            image.width_mm,
+            image.height_mm,
+        );
+        self.run_command(Command::ImageSetBounds {
+            id,
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+
+    pub fn place_image(&mut self, image: stencilcraft_doc::RasterImage) {
+        let before: std::collections::BTreeSet<u64> =
+            self.engine.doc.images.iter().map(|i| i.id).collect();
+        self.run_command(Command::ImagePlace { image });
+        self.selected_image = self
+            .engine
+            .doc
+            .images
+            .iter()
+            .map(|i| i.id)
+            .find(|id| !before.contains(id));
+        if self.selected_image.is_some() {
+            self.set_selection([]);
+            self.status = "placed image (trace it from the Trace panel)".to_string();
+        }
+    }
+
+    /// Upload or refresh the textures of placed images; drop those of removed ones.
+    fn sync_image_textures(&mut self, ctx: &egui::Context) {
+        let live: std::collections::BTreeSet<u64> =
+            self.engine.doc.images.iter().map(|i| i.id).collect();
+        self.image_textures.retain(|id, _| live.contains(id));
+        for image in &self.engine.doc.images {
+            let key = std::sync::Arc::as_ptr(&image.png_base64).cast::<u8>() as usize;
+            if self
+                .image_textures
+                .get(&image.id)
+                .is_some_and(|(cached, _)| *cached == key)
+            {
+                continue;
+            }
+            let Ok(pixels) = stencilcraft_raster::image_pixels(image) else {
+                continue;
+            };
+            let (w, h) = pixels.dimensions();
+            let (Ok(w), Ok(h)) = (usize::try_from(w), usize::try_from(h)) else {
+                continue;
+            };
+            let colour = egui::ColorImage::from_rgba_unmultiplied([w, h], &pixels.into_raw());
+            let texture = ctx.load_texture(
+                format!("placed-image-{}", image.id),
+                colour,
+                egui::TextureOptions::LINEAR,
+            );
+            self.image_textures.insert(image.id, (key, texture));
         }
     }
 
@@ -4576,6 +4665,7 @@ impl StencilApp {
         {
             self.status = format!("kerf preview: {error}");
         }
+        self.sync_image_textures(ui.ctx());
         let paint_doc = if self.kerf_preview {
             self.kerf_preview_cache
                 .as_ref()
@@ -4605,12 +4695,20 @@ impl StencilApp {
                     }
                 }),
         };
+        let textures: std::collections::HashMap<u64, egui::TextureId> = self
+            .image_textures
+            .iter()
+            .map(|(id, (_, texture))| (*id, texture.id()))
+            .collect();
         stencilcraft_ui_egui::paint_document(
             &painter,
             clip,
             paint_doc,
             &view,
-            Some(&backdrop),
+            stencilcraft_ui_egui::CanvasLayers {
+                backdrop: Some(&backdrop),
+                image_textures: &textures,
+            },
             stencilcraft_ui_egui::CanvasOptions {
                 kerf_preview: self.kerf_preview,
                 show_grid: self.prefs.show_grid,
@@ -4620,6 +4718,36 @@ impl StencilApp {
             },
             &selection,
         );
+        // The picked image: its outline, moved with a drag in progress.
+        if let Some(image) = self
+            .selected_image
+            .and_then(|id| self.engine.doc.get_image(id))
+        {
+            let shift = match self.image_drag {
+                Some((id, from)) if id == image.id => ui
+                    .ctx()
+                    .pointer_interact_pos()
+                    .map(|now| self.view.screen_delta_to_world(now - from))
+                    .unwrap_or_default(),
+                _ => stencilcraft_geom::Vec2::ZERO,
+            };
+            let corners = stencilcraft_ui_egui::image_corners(image).map(|p| p + shift);
+            let mut outline = stencilcraft_geom::BezPath::new();
+            for (i, corner) in corners.into_iter().enumerate() {
+                if i == 0 {
+                    outline.move_to(corner);
+                } else {
+                    outline.line_to(corner);
+                }
+            }
+            outline.close_path();
+            stencilcraft_ui_egui::paint_preview_paths(
+                &painter,
+                &view,
+                &[outline],
+                stencilcraft_ui_egui::Palette::for_theme(self.theme).selection,
+            );
+        }
         // The Offset panel's live preview, painted only while that panel is on screen.
         if std::mem::take(&mut self.panels.offset_preview_shown)
             && let Some(Ok(paths)) = self.panels.offset_preview.as_ref().map(|p| &p.result)
@@ -5406,10 +5534,22 @@ impl StencilApp {
                         self.set_selection([id]);
                         self.canvas_drag_shape = Some(id);
                     }
+                } else if !self.canvas_selection_additive
+                    && let press = ui
+                        .input(|input| input.pointer.press_origin())
+                        .unwrap_or(pointer)
+                    && let Some(image) = stencilcraft_ui_egui::hit_test_image(&doc, &view, press)
+                {
+                    // A press on a placed image (and no shape) drags the image. The drag starts
+                    // only once the pointer has moved, so test where the button went down.
+                    self.set_selection([]);
+                    self.selected_image = Some(image);
+                    self.image_drag = Some((image, press));
                 } else {
                     self.canvas_selection_start = Some(pointer);
                     if !self.canvas_selection_additive {
                         self.set_selection([]);
+                        self.selected_image = None;
                     }
                 }
                 self.last_drag_delta = egui::Vec2::ZERO;
@@ -5431,6 +5571,12 @@ impl StencilApp {
                     self.set_selection(ids);
                 } else {
                     self.set_selection(hit);
+                    // No shape there: a placed image under the click is picked instead.
+                    self.selected_image = if hit.is_none() {
+                        stencilcraft_ui_egui::hit_test_image(&doc, &view, pointer)
+                    } else {
+                        None
+                    };
                 }
             }
             // Silhouette's point editing: double-click a shape to edit its points, double-click
@@ -5468,7 +5614,7 @@ impl StencilApp {
                 if let Some(id) = self.canvas_drag_shape {
                     let total = response.total_drag_delta().unwrap_or_default();
                     self.drag_selection_to(id, total);
-                } else if self.canvas_selection_start.is_none() {
+                } else if self.canvas_selection_start.is_none() && self.image_drag.is_none() {
                     self.view.pan_mm -= response.drag_delta() / self.view.zoom;
                 }
                 // Live position callout while a selection is dragged.
@@ -5537,6 +5683,11 @@ impl StencilApp {
             if response.drag_stopped() {
                 if self.canvas_drag_shape.is_some() {
                     self.fold_drag_into_one_step();
+                }
+                if let Some((id, from)) = self.image_drag.take()
+                    && let Some(to) = response.interact_pointer_pos()
+                {
+                    self.move_image(id, self.view.screen_delta_to_world(to - from));
                 }
                 self.canvas_drag_shape = None;
                 self.canvas_selection_base.clear();
@@ -7177,6 +7328,29 @@ mod tests {
             app.selected_shapes.len(),
             2,
             "released into its two contours"
+        );
+    }
+
+    #[test]
+    fn placed_images_select_move_and_delete_like_objects() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let mut app = StencilApp::new(None);
+        // 600 × 400 px at Silhouette's 300 dpi: 2 × 1.333 in at the page's top left.
+        let pixels = Pixels::from_pixel(600, 400, Pixel([200, 20, 20, 255]));
+        let image = stencilcraft_raster::place(&pixels, "red", 300.0).expect("placed");
+        app.place_image(image);
+        let id = app.selected_image.expect("the placed image is picked");
+        let placed = app.engine.doc.get_image(id).expect("image");
+        assert!((placed.width_mm - 50.8).abs() < 1e-9 && placed.x_mm == 0.0 && placed.y_mm == 0.0);
+        app.move_image(id, stencilcraft_geom::Vec2::new(10.0, 5.0));
+        let moved = app.engine.doc.get_image(id).expect("image");
+        assert_eq!((moved.x_mm, moved.y_mm), (10.0, 5.0));
+        assert!(app.engine.undo(), "a move is one undo step");
+        assert_eq!(app.engine.doc.get_image(id).map(|i| i.x_mm), Some(0.0));
+        press_key(&mut app, egui::Key::Delete, egui::Modifiers::NONE);
+        assert!(
+            app.engine.doc.images.is_empty(),
+            "Delete removes the picked image"
         );
     }
 

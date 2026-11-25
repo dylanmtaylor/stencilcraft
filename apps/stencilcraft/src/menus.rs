@@ -125,7 +125,7 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
             "Import",
             vec![
                 item("SVG…", A::ImportSvg).into(),
-                item("Image (Trace)…", A::ImportImage).into(),
+                item("Image…", A::ImportImage).into(),
                 todo("DXF…"),
                 todo("PDF…"),
                 todo("AI / EPS…"),

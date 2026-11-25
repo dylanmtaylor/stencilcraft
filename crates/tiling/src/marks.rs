@@ -10,7 +10,7 @@
 //! printer can score/print them, and they travel with the sheet's SVG.
 
 use kurbo::{BezPath, Point};
-use stencilcraft_doc::{CutStyle, Document, Layer};
+use stencilcraft_doc::{Document, Layer, Operation, OperationSettings};
 
 use crate::{Tile, TilingError};
 
@@ -60,12 +60,13 @@ pub fn add_marks(piece: &mut Document, tile: &Tile, overlap_mm: f64) -> Result<(
         }
     }
     let layer_index = piece.layers.len();
-    piece
-        .layers
-        .push(Layer::new(MARKS_LAYER, CutStyle::Engrave));
+    piece.layers.push(Layer::new(
+        MARKS_LAYER,
+        Some(Operation::Engrave(OperationSettings::default())),
+    ));
     for path in paths {
         piece
-            .push_shape(layer_index, path, CutStyle::Engrave)
+            .push_shape(layer_index, path)
             .map_err(|e| TilingError::Model(e.to_string()))?;
     }
     Ok(())
@@ -186,10 +187,14 @@ mod tests {
         add_marks(&mut piece, &tile(0, 0), 10.0).unwrap();
         let marks = &piece.layers[0];
         assert_eq!(marks.name, MARKS_LAYER);
-        assert_eq!(marks.kind, CutStyle::Engrave);
+        assert!(matches!(
+            marks.operation,
+            Some(stencilcraft_doc::Operation::Engrave(_))
+        ));
         // Three brackets, no guide ticks on the first sheet.
-        assert_eq!(marks.shapes.len(), 3);
-        for shape in &marks.shapes {
+        assert_eq!(marks.members.len(), 3);
+        for id in &marks.members {
+            let shape = piece.get_shape(*id).unwrap();
             let b = shape.bounds().unwrap();
             assert!(b.x0 >= MARK_MARGIN_MM - 1e-9, "{b:?}");
             assert!(b.y0 >= MARK_MARGIN_MM - 1e-9, "{b:?}");
@@ -204,15 +209,17 @@ mod tests {
         add_marks(&mut piece, &tile(1, 1), 10.0).unwrap();
         let marks = &piece.layers[0];
         // Three brackets plus four guide ticks (two per shared edge).
-        assert_eq!(marks.shapes.len(), 7);
+        assert_eq!(marks.members.len(), 7);
         let near_x = marks
-            .shapes
+            .members
             .iter()
+            .filter_map(|id| piece.get_shape(*id))
             .any(|s| s.bounds().is_some_and(|b| (b.x0 - 9.8).abs() < 0.01));
         assert!(near_x, "a vertical guide sits at the overlap distance");
         let near_y = marks
-            .shapes
+            .members
             .iter()
+            .filter_map(|id| piece.get_shape(*id))
             .any(|s| s.bounds().is_some_and(|b| (b.y0 - 9.8).abs() < 0.01));
         assert!(near_y, "a horizontal guide sits at the overlap distance");
     }

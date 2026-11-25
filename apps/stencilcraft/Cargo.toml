@@ -36,6 +36,9 @@ stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
 craft-raster-codecs = { workspace = true }
 
+[dev-dependencies]
+egui_kittest = { workspace = true }
+
 [features]
 default = ["usb", "bluetooth"]
 usb = ["stencilcraft-engine/usb"]

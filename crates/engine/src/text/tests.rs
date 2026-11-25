@@ -712,5 +712,8 @@ fn bad_text_input_is_refused_calmly() {
     let Effect::ShapeAdded { id } = engine.run(c).unwrap() else {
         panic!()
     };
-    assert_eq!(engine.doc.get_shape(id).unwrap().style, CutStyle::Engrave);
+    assert_eq!(
+        crate::document::style_of_shape(&engine.doc, id),
+        CutStyle::Engrave
+    );
 }

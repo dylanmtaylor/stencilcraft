@@ -6,7 +6,7 @@
 
 use craft_raster_codecs::common::{Pixel, Pixels, encode_for_path};
 
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::Document;
 use stencilcraft_import::{ImportOptions, import_bytes};
 
 fn exercise(bytes: &[u8], name: &str) {
@@ -55,13 +55,13 @@ fn sample_doc() -> Document {
     square.line_to((40.0, 30.0));
     square.line_to((10.0, 30.0));
     square.close_path();
-    doc.push_shape(0, square, CutStyle::Cut).unwrap();
+    doc.push_shape(0, square).unwrap();
     let mut tri = kurbo::BezPath::new();
     tri.move_to((50.0, 50.0));
     tri.line_to((80.0, 50.0));
     tri.line_to((65.0, 90.0));
     tri.close_path();
-    doc.push_shape(0, tri, CutStyle::Cut).unwrap();
+    doc.push_shape(0, tri).unwrap();
     doc
 }
 
@@ -82,7 +82,7 @@ const DXF_ENTITIES: &str = "0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSE
 fn dxf_reads_every_entity_and_joins_lines() {
     let doc = import_bytes(DXF_ENTITIES.as_bytes(), "e.dxf", &ImportOptions::default()).unwrap();
     // Four LINEs join into one closed square; circle, arc, ellipse, polyline, spline.
-    assert_eq!(doc.shape_count(), 6, "{:#?}", doc.layers[0].shapes.len());
+    assert_eq!(doc.shape_count(), 6, "{:#?}", doc.layers[0].members.len());
     let loose = import_bytes(
         DXF_ENTITIES.as_bytes(),
         "e.dxf",
@@ -121,10 +121,10 @@ fn dxf_round_trip_preserves_asymmetric_art_orientation() {
     path.line_to((40.0, 20.0));
     path.line_to((10.0, 70.0));
     path.close_path();
-    doc.push_shape(0, path, CutStyle::Cut).unwrap();
+    doc.push_shape(0, path).unwrap();
     let dxf = stencilcraft_dxf::export(&doc).unwrap();
     let back = import_bytes(dxf.as_bytes(), "asymmetric.dxf", &ImportOptions::default()).unwrap();
-    let shape = &back.layers[0].shapes[0];
+    let shape = &back.get_shape(back.layers[0].members[0]).unwrap();
     let bounds = shape.bounds().unwrap();
     let points: Vec<_> = shape
         .path
@@ -161,9 +161,8 @@ fn dxf_round_trips_our_exporter() {
     assert_eq!(back.shape_count(), 2);
     let size = |d: &Document| {
         let mut sizes: Vec<(i64, i64)> = d
-            .layers
+            .shapes
             .iter()
-            .flat_map(|l| l.shapes.iter())
             .map(|s| {
                 let b = s.bounds().unwrap();
                 (
@@ -176,7 +175,7 @@ fn dxf_round_trips_our_exporter() {
         sizes
     };
     assert_eq!(size(&back), size(&doc));
-    for shape in back.layers.iter().flat_map(|l| l.shapes.iter()) {
+    for shape in back.shapes.iter() {
         assert!(matches!(
             shape.path.elements().last(),
             Some(kurbo::PathEl::ClosePath)
@@ -194,7 +193,7 @@ fn pdf_round_trips_our_exporter() {
         "{}",
         back.board.width_mm
     );
-    let square = back.layers[0]
+    let square = back
         .shapes
         .iter()
         .filter_map(|s| s.bounds())
@@ -320,10 +319,14 @@ fn svg_registry_preserves_clipped_cut_lines_and_stroke_layers() {
         .find(|layer| layer.name == "Line #ff0000")
         .unwrap();
     assert_eq!(layer.color.as_deref(), Some("#ff0000"));
-    assert_eq!(layer.shapes.len(), 1);
+    assert_eq!(layer.members.len(), 1);
     let unpainted = doc.layers.iter().find(|layer| layer.name == "cut").unwrap();
-    assert_eq!(unpainted.shapes.len(), 1);
-    let unpainted_bounds = unpainted.shapes[0].bounds().unwrap();
+    assert_eq!(unpainted.members.len(), 1);
+    let unpainted_bounds = doc
+        .get_shape(unpainted.members[0])
+        .unwrap()
+        .bounds()
+        .unwrap();
     assert!(
         (unpainted_bounds.x0 - 0.0).abs() < 0.001 && (unpainted_bounds.x1 - 10.0).abs() < 0.001,
         "{unpainted_bounds:?}"
@@ -332,7 +335,7 @@ fn svg_registry_preserves_clipped_cut_lines_and_stroke_layers() {
         (unpainted_bounds.y0 - 8.0).abs() < 0.001 && (unpainted_bounds.y1 - 8.0).abs() < 0.001,
         "{unpainted_bounds:?}"
     );
-    let bounds = layer.shapes[0].bounds().unwrap();
+    let bounds = doc.get_shape(layer.members[0]).unwrap().bounds().unwrap();
     assert!(
         (bounds.x0 - 0.0).abs() < 0.001 && (bounds.x1 - 10.0).abs() < 0.001,
         "{bounds:?}"

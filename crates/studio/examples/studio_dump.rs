@@ -13,9 +13,11 @@ fn main() -> Result<(), String> {
                     got.doc.shape_count()
                 );
                 for layer in &got.doc.layers {
-                    println!("  layer {:?} ({} shapes)", layer.name, layer.shapes.len());
-                    for s in &layer.shapes {
-                        println!("    {:?}", s.path);
+                    println!("  layer {:?} ({} shapes)", layer.name, layer.members.len());
+                    for id in &layer.members {
+                        if let Some(s) = got.doc.get_shape(*id) {
+                            println!("    {:?}", s.path);
+                        }
                     }
                 }
                 for w in got.warnings {

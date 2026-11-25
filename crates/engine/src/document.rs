@@ -17,7 +17,8 @@ use stencilcraft_doc::templates::{
     ProjectTemplate, TemplateInfo, TemplateParams, list_templates, new_from_template,
 };
 use stencilcraft_doc::{
-    CutStyle, Group, GroupChild, Guide, GuideAxis, Orientation, Page, PagePreset, PageSetup,
+    CutStyle, Document, Group, GroupChild, Guide, GuideAxis, Operation, OperationSettings,
+    Orientation, Page, PagePreset, PageSetup,
 };
 
 use super::{
@@ -81,6 +82,20 @@ pub enum DocumentCommand {
     /// Make a layer a template (guide) layer: shown, never exported or cut.
     #[serde(rename = "layer.set-template")]
     LayerSetTemplate { index: usize, template: bool },
+    /// Add shapes to a layer's membership: additive and idempotent, never touches
+    /// `Document.shapes` and never removes a shape from another layer.
+    #[serde(rename = "layer.add-members")]
+    LayerAddMembers { layer: usize, ids: Vec<u64> },
+    /// Remove memberships from a layer; a no-op for shapes that are not members.
+    #[serde(rename = "layer.remove-members")]
+    LayerRemoveMembers { layer: usize, ids: Vec<u64> },
+    /// Set or clear (`null`) a layer's operation.
+    #[serde(rename = "layer.set-operation")]
+    LayerSetOperation {
+        index: usize,
+        #[serde(default)]
+        operation: Option<Operation>,
+    },
     /// Set or clear (`null`) a layer's material colour, `#rrggbb`.
     #[serde(rename = "layer.set-color")]
     LayerSetColor { index: usize, color: Option<String> },
@@ -471,6 +486,60 @@ fn invalid(message: String) -> EngineError {
     EngineError::Invalid(message)
 }
 
+/// Legacy `CutStyle` input mapped onto the v2 model (D-16): Cut/Engrave become the
+/// matching `Operation` with default settings; never a per-shape style.
+pub fn op_of_style(style: CutStyle) -> Option<Operation> {
+    Some(match style {
+        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
+        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+    })
+}
+
+/// The legacy `CutStyle` a shape's owning layer operation maps back to.
+pub fn style_of_shape(doc: &Document, id: u64) -> CutStyle {
+    doc.layer_of_shape(id)
+        .and_then(|li| doc.layers.get(li))
+        .and_then(|l| l.operation.as_ref())
+        .map_or(CutStyle::Cut, |op| match op {
+            Operation::Engrave(_) => CutStyle::Engrave,
+            _ => CutStyle::Cut,
+        })
+}
+
+/// Appends ids not already present; never touches `Document.shapes`.
+pub(crate) fn add_members(doc: &mut Document, layer_index: usize, ids: &[u64]) {
+    if let Some(layer) = doc.layers.get_mut(layer_index) {
+        for id in ids {
+            if !layer.members.contains(id) {
+                layer.members.push(*id);
+            }
+        }
+    }
+}
+
+/// Retains ids not in the removal set; a no-op for absent members.
+pub(crate) fn remove_members(doc: &mut Document, layer_index: usize, ids: &[u64]) {
+    if let Some(layer) = doc.layers.get_mut(layer_index) {
+        layer.members.retain(|m| !ids.contains(m));
+    }
+}
+
+/// Index of an existing layer with the same operation, otherwise a new layer is
+/// pushed with that operation. Never removes memberships from other layers.
+pub(crate) fn ensure_operation_layer(doc: &mut Document, operation: Operation) -> usize {
+    if let Some(index) = doc
+        .layers
+        .iter()
+        .position(|l| l.operation.as_ref() == Some(&operation))
+    {
+        return index;
+    }
+    let label = operation.kind_name();
+    doc.layers
+        .push(stencilcraft_doc::Layer::new(label, Some(operation)));
+    doc.layers.len() - 1
+}
+
 /// Entry point from [`Engine::run`].
 pub(crate) fn run(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, EngineError> {
     if let Some(result) = query(engine, &command) {
@@ -514,17 +583,21 @@ fn selection(ids: Vec<u64>) -> Result<Effect, EngineError> {
 
 /// Shapes a selection may contain: on a visible, unlocked layer, not hidden or locked.
 fn selectable(engine: &Engine, include_templates: bool) -> Vec<(usize, u64)> {
-    engine
-        .doc
-        .layers
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.visible && !l.locked && (include_templates || !l.template))
-        .flat_map(|(i, l)| {
-            l.shapes
+    let doc = &engine.doc;
+    doc.shapes()
+        .filter(|s| !s.hidden && !s.locked)
+        .filter_map(|s| {
+            doc.layers
                 .iter()
-                .filter(|s| !s.hidden && !s.locked)
-                .map(move |s| (i, s.id))
+                .enumerate()
+                .find(|(_, l)| {
+                    l.visible
+                        && !l.locked
+                        && l.members.contains(&s.id)
+                        && (include_templates
+                            || !l.operation.as_ref().is_some_and(Operation::is_guide))
+                })
+                .map(|(i, _)| (i, s.id))
         })
         .collect()
 }
@@ -598,7 +671,12 @@ fn query(engine: &Engine, command: &DocumentCommand) -> Option<Result<Effect, En
         DocumentCommand::SelectByOperation { style } => selection(
             selectable(engine, false)
                 .into_iter()
-                .filter(|(_, id)| doc.get_shape(*id).is_some_and(|s| s.style == *style))
+                .filter(|(_, id)| {
+                    let wanted = op_of_style(*style);
+                    doc.layers
+                        .iter()
+                        .any(|l| l.members.contains(id) && l.operation.as_ref() == wanted.as_ref())
+                })
                 .map(|(_, id)| id)
                 .collect(),
         ),
@@ -686,7 +764,7 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             let ids = editable_ids(engine, &ids, "shapes.arrange")?;
             let selected: BTreeSet<u64> = ids.iter().copied().collect();
             for layer in &mut engine.doc.layers {
-                arrange(&mut layer.shapes, &selected, order);
+                arrange_members(&mut layer.members, &selected, order);
             }
             Ok(Effect::ShapesEdited { ids })
         }
@@ -700,20 +778,10 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
                 )));
             }
             let selected: BTreeSet<u64> = ids.iter().copied().collect();
-            let mut moved = Vec::new();
             for l in &mut doc.layers {
-                let (take, keep): (Vec<_>, Vec<_>) =
-                    l.shapes.drain(..).partition(|s| selected.contains(&s.id));
-                l.shapes = keep;
-                moved.extend(take);
+                l.members.retain(|m| !selected.contains(m));
             }
-            let Some(l) = doc.layers.get_mut(target) else {
-                return Err(EngineError::Internal("layer disappeared".to_string()));
-            };
-            for mut shape in moved {
-                shape.style = l.kind;
-                l.shapes.push(shape);
-            }
+            add_members(doc, target, &ids);
             Ok(Effect::ShapesStyled { ids })
         }
         DocumentCommand::LayerMove { from, to } => {
@@ -743,9 +811,47 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
         DocumentCommand::LayerSetTemplate { index, template } => {
             let index = layer_index(engine, index, "layer.set-template")?;
             if let Some(l) = engine.doc.layers.get_mut(index) {
-                l.template = template;
+                l.operation = template.then_some(Operation::Guide);
             }
             changed
+        }
+        DocumentCommand::LayerAddMembers { layer, ids } => {
+            let layer = layer_index(engine, layer, "layer.add-members")?;
+            let ids = editable_ids(engine, &ids, "layer.add-members")?;
+            if engine.doc.layers[layer].locked {
+                return Err(invalid(format!(
+                    "layer.add-members: layer {layer} is locked"
+                )));
+            }
+            add_members(&mut engine.doc, layer, &ids);
+            Ok(Effect::LayerMembersChanged { layer, ids })
+        }
+        DocumentCommand::LayerRemoveMembers { layer, ids } => {
+            let layer = layer_index(engine, layer, "layer.remove-members")?;
+            let ids = unique_ids(&ids, "layer.remove-members")?;
+            if engine.doc.layers[layer].locked {
+                return Err(invalid(format!(
+                    "layer.remove-members: layer {layer} is locked"
+                )));
+            }
+            remove_members(&mut engine.doc, layer, &ids);
+            Ok(Effect::LayerMembersChanged { layer, ids })
+        }
+        DocumentCommand::LayerSetOperation { index, operation } => {
+            let index = layer_index(engine, index, "layer.set-operation")?;
+            if engine.doc.layers[index].locked {
+                return Err(invalid(format!(
+                    "layer.set-operation: layer {index} is locked"
+                )));
+            }
+            if let Some(op) = &operation {
+                op.validate()
+                    .map_err(|e| invalid(format!("layer.set-operation: {e}")))?;
+            }
+            if let Some(l) = engine.doc.layers.get_mut(index) {
+                l.operation = operation;
+            }
+            Ok(Effect::LayerOperationChanged { index })
         }
         DocumentCommand::LayerSetColor { index, color } => {
             let index = layer_index(engine, index, "layer.set-color")?;
@@ -918,8 +1024,9 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             copy(engine, &ids, "clipboard.cut")?;
             let selected: BTreeSet<u64> = ids.iter().copied().collect();
             for layer in &mut engine.doc.layers {
-                layer.shapes.retain(|s| !selected.contains(&s.id));
+                layer.members.retain(|m| !selected.contains(m));
             }
+            engine.doc.shapes.retain(|s| !selected.contains(&s.id));
             Ok(Effect::ShapesRemoved { ids })
         }
         DocumentCommand::ClipboardPaste { mode, offset_mm } => paste(engine, mode, offset_mm),
@@ -1039,33 +1146,29 @@ fn group_create(
 }
 
 /// Reorders one layer's shapes; `selected` may name shapes of other layers.
-fn arrange(
-    shapes: &mut Vec<stencilcraft_doc::Shape>,
-    selected: &BTreeSet<u64>,
-    order: ArrangeOrder,
-) {
-    let picked = |s: &stencilcraft_doc::Shape| selected.contains(&s.id);
+/// Same stacking logic as [`arrange`], on a layer's member ids.
+fn arrange_members(members: &mut Vec<u64>, selected: &BTreeSet<u64>, order: ArrangeOrder) {
+    let picked = |id: &u64| selected.contains(id);
     match order {
         ArrangeOrder::Front | ArrangeOrder::Back => {
-            let (sel, rest): (Vec<_>, Vec<_>) = shapes.drain(..).partition(picked);
-            *shapes = if order == ArrangeOrder::Front {
+            let (sel, rest): (Vec<_>, Vec<_>) = members.drain(..).partition(picked);
+            *members = if order == ArrangeOrder::Front {
                 rest.into_iter().chain(sel).collect()
             } else {
                 sel.into_iter().chain(rest).collect()
             };
         }
-        // One step past the nearest unselected neighbour; a selected block moves as one.
         ArrangeOrder::Forward => {
-            for i in (0..shapes.len().saturating_sub(1)).rev() {
-                if picked(&shapes[i]) && !picked(&shapes[i + 1]) {
-                    shapes.swap(i, i + 1);
+            for i in (0..members.len().saturating_sub(1)).rev() {
+                if picked(&members[i]) && !picked(&members[i + 1]) {
+                    members.swap(i, i + 1);
                 }
             }
         }
         ArrangeOrder::Backward => {
-            for i in 1..shapes.len() {
-                if picked(&shapes[i]) && !picked(&shapes[i - 1]) {
-                    shapes.swap(i, i - 1);
+            for i in 1..members.len() {
+                if picked(&members[i]) && !picked(&members[i - 1]) {
+                    members.swap(i, i - 1);
                 }
             }
         }
@@ -1080,7 +1183,11 @@ fn color_sync(engine: &mut Engine, tolerance: f64, merge: bool) -> Result<Effect
     }
     let doc = &mut engine.doc;
     let mut representatives: Vec<[u8; 3]> = Vec::new();
-    for layer in doc.layers.iter_mut().filter(|l| !l.template) {
+    for layer in doc
+        .layers
+        .iter_mut()
+        .filter(|l| !l.operation.as_ref().is_some_and(Operation::is_guide))
+    {
         let Some(rgb) = layer.color.as_deref().and_then(parse_hex_color) else {
             continue;
         };
@@ -1096,7 +1203,10 @@ fn color_sync(engine: &mut Engine, tolerance: f64, merge: bool) -> Result<Effect
         let mut i = 0;
         while i < doc.layers.len() {
             let key = |l: &stencilcraft_doc::Layer| {
-                (!l.template && !l.locked && l.color.is_some()).then(|| (l.color.clone(), l.kind))
+                (!l.operation.as_ref().is_some_and(Operation::is_guide)
+                    && !l.locked
+                    && l.color.is_some())
+                .then(|| (l.color.clone(), l.operation.clone()))
             };
             let Some(target) = doc.layers.get(i).and_then(key) else {
                 i += 1;
@@ -1107,7 +1217,11 @@ fn color_sync(engine: &mut Engine, tolerance: f64, merge: bool) -> Result<Effect
                 if doc.layers.get(j).and_then(key) == Some(target.clone()) {
                     let merged = doc.layers.remove(j);
                     if let Some(into) = doc.layers.get_mut(i) {
-                        into.shapes.extend(merged.shapes);
+                        for m in &merged.members {
+                            if !into.members.contains(m) {
+                                into.members.push(*m);
+                            }
+                        }
                         into.visible |= merged.visible;
                     }
                 } else {
@@ -1231,8 +1345,9 @@ fn guide_make(engine: &mut Engine, ids: &[u64]) -> Result<Effect, EngineError> {
     }
     let selected: BTreeSet<u64> = ids.iter().copied().collect();
     for layer in &mut engine.doc.layers {
-        layer.shapes.retain(|s| !selected.contains(&s.id));
+        layer.members.retain(|m| !selected.contains(m));
     }
+    engine.doc.shapes.retain(|s| !selected.contains(&s.id));
     Ok(Effect::ShapesRemoved { ids })
 }
 
@@ -1257,7 +1372,7 @@ fn guide_release(engine: &mut Engine) -> Result<Effect, EngineError> {
         path.line_to(b);
         let shape = engine
             .doc
-            .push_shape(0, path, CutStyle::Cut)
+            .push_shape(0, path)
             .map_err(|e| invalid(format!("guide.release: {e}")))?;
         ids.push(shape.id);
     }
@@ -1299,12 +1414,9 @@ fn copy(engine: &mut Engine, ids: &[u64], command: &str) -> Result<usize, Engine
     }
     let selected: BTreeSet<u64> = ids.iter().copied().collect();
     let shapes: Vec<_> = doc
-        .layers
-        .iter()
-        .enumerate()
-        .flat_map(|(li, l)| l.shapes.iter().map(move |s| (li, s)))
-        .filter(|(_, s)| selected.contains(&s.id))
-        .map(|(li, s)| (li, s.clone()))
+        .shapes()
+        .filter(|s| selected.contains(&s.id))
+        .map(|s| (doc.layer_of_shape(s.id).unwrap_or(0), s.clone()))
         .collect();
     let whole: BTreeSet<u64> = doc
         .groups
@@ -1356,11 +1468,6 @@ fn paste(engine: &mut Engine, mode: PasteMode, offset_mm: f64) -> Result<Effect,
             .get(*layer)
             .filter(|l| !l.locked)
             .map(|_| *layer)
-            .or_else(|| {
-                doc.layers
-                    .iter()
-                    .rposition(|l| l.takes_new_shapes() && l.kind == shape.style)
-            })
             .or_else(|| doc.layers.iter().rposition(|l| l.takes_new_shapes()))
             .ok_or_else(|| invalid(format!("{NAME}: no unlocked layer to paste into")))?;
         let id = doc.next_shape_id;
@@ -1369,29 +1476,37 @@ fn paste(engine: &mut Engine, mode: PasteMode, offset_mm: f64) -> Result<Effect,
             .ok_or_else(|| EngineError::Internal("shape ids exhausted".to_string()))?;
         let path = transform_path(&shape.path, shift);
         check_finite_path(&path, NAME)?;
-        let Some(l) = doc.layers.get_mut(target) else {
-            return Err(EngineError::Internal("layer disappeared".to_string()));
-        };
         let mut copy = shape.clone();
         copy.id = id;
         copy.path = path;
-        copy.style = l.kind;
         copy.locked = false;
-        let above = (mode == PasteMode::InFront)
-            .then(|| l.shapes.iter().position(|s| s.id == shape.id))
-            .flatten();
-        match above {
+        doc.shapes.push(copy);
+        let at = if mode == PasteMode::InFront {
+            doc.layers
+                .get(target)
+                .and_then(|l| l.members.iter().position(|m| *m == shape.id))
+                .map(|at| {
+                    let l = doc.layers.get(target).map(|l| &l.members);
+                    at + 1
+                        + l.map_or(0, |ms| {
+                            ms[at + 1..]
+                                .iter()
+                                .take_while(|m| remap.values().any(|v| *v == **m))
+                                .count()
+                        })
+                })
+        } else {
+            None
+        };
+        match at {
             // Directly above the original, after copies already placed there.
             Some(at) => {
-                let at = l.shapes[at + 1..]
-                    .iter()
-                    .take_while(|s| remap.values().any(|v| *v == s.id))
-                    .count()
-                    + at
-                    + 1;
-                l.shapes.insert(at, copy);
+                let at = at.min(doc.layers.get(target).map_or(0, |l| l.members.len()));
+                if let Some(l) = doc.layers.get_mut(target) {
+                    l.members.insert(at, id);
+                }
             }
-            None => l.shapes.push(copy),
+            None => add_members(doc, target, &[id]),
         }
         remap.insert(shape.id, id);
         new_ids.push(id);
@@ -1685,7 +1800,7 @@ pub fn snap(
         .layers
         .iter()
         .filter(|l| l.visible)
-        .flat_map(|l| &l.shapes)
+        .flat_map(|l| l.members.iter().filter_map(|id| doc.get_shape(*id)))
         .filter(|s| !s.hidden && !exclude.contains(&s.id))
         .collect();
     let others: Vec<Rect> = other_shapes.iter().filter_map(|s| s.bounds()).collect();
@@ -1941,8 +2056,7 @@ mod tests {
     fn three() -> Engine {
         let mut doc = Document::default();
         for x in [0.0, 20.0, 40.0] {
-            doc.push_shape(0, rect(x, 0.0, 10.0, 10.0), CutStyle::Cut)
-                .unwrap();
+            doc.push_shape(0, rect(x, 0.0, 10.0, 10.0)).unwrap();
         }
         Engine::new(doc)
     }
@@ -1956,7 +2070,7 @@ mod tests {
     }
 
     fn order(engine: &Engine) -> Vec<u64> {
-        engine.doc.layers[0].shapes.iter().map(|s| s.id).collect()
+        engine.doc.layers[0].members.clone()
     }
 
     #[test]
@@ -1997,6 +2111,18 @@ mod tests {
                 ids: vec![1],
                 degrees: 20.0,
                 axis: DistributionAxis::Vertical,
+            },
+            DocumentCommand::LayerAddMembers {
+                layer: 0,
+                ids: vec![1, 2],
+            },
+            DocumentCommand::LayerRemoveMembers {
+                layer: 0,
+                ids: vec![2],
+            },
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: Some(Operation::Cut(OperationSettings::default())),
             },
         ];
         for command in samples {
@@ -2121,7 +2247,7 @@ mod tests {
         let mut e = three();
         e.run(Command::LayerAdd {
             name: "score".to_string(),
-            kind: CutStyle::Engrave,
+            operation: op_of_style(CutStyle::Engrave),
         })
         .unwrap();
         run(
@@ -2131,8 +2257,8 @@ mod tests {
                 layer: 1,
             },
         );
-        assert_eq!(e.doc.layers[1].shapes[0].id, 2);
-        assert_eq!(e.doc.layers[1].shapes[0].style, CutStyle::Engrave);
+        assert_eq!(e.doc.layers[1].members, vec![2]);
+        assert_eq!(e.doc.layers[1].operation, op_of_style(CutStyle::Engrave));
         run(&mut e, DocumentCommand::LayerMove { from: 1, to: 0 });
         assert_eq!(e.doc.layers[0].name, "score");
         run(
@@ -2208,9 +2334,16 @@ mod tests {
     #[test]
     fn templates_are_not_exported() {
         let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: op_of_style(CutStyle::Cut),
+            },
+        );
         e.run(Command::LayerAdd {
             name: "template".to_string(),
-            kind: CutStyle::Cut,
+            operation: op_of_style(CutStyle::Cut),
         })
         .unwrap();
         run(
@@ -2229,7 +2362,7 @@ mod tests {
         );
         assert!(!e.doc.layers[1].is_output());
         let back = Document::load_json(&e.doc.save_json().unwrap()).unwrap();
-        assert!(back.layers[1].template);
+        assert_eq!(back.layers[1].operation, Some(Operation::Guide));
         let thumb = back.render_thumbnail(64 * 1024);
         assert_eq!(thumb.matches("<path").count(), 2);
     }
@@ -2237,10 +2370,17 @@ mod tests {
     #[test]
     fn color_sync_merges_similar_colours() {
         let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: op_of_style(CutStyle::Cut),
+            },
+        );
         for (name, color) in [("b", "#ff0505"), ("c", "#0000ff"), ("d", "#fa0000")] {
             e.run(Command::LayerAdd {
                 name: name.to_string(),
-                kind: CutStyle::Cut,
+                operation: op_of_style(CutStyle::Cut),
             })
             .unwrap();
             let index = e.doc.layers.len() - 1;
@@ -2300,7 +2440,7 @@ mod tests {
             },
         );
         assert_eq!(e.doc.layers.len(), 2);
-        assert_eq!(e.doc.layers[0].shapes.len(), 3);
+        assert_eq!(e.doc.layers[0].members.len(), 3);
         assert!(
             e.run(Command::Document(DocumentCommand::LayerColorSync {
                 tolerance: f64::NAN,
@@ -2627,7 +2767,7 @@ mod tests {
     #[test]
     fn smart_guides_offer_equal_spacing() {
         let mut doc = three().doc;
-        doc.layers[0].shapes.truncate(2); // squares at 0..10 and 20..30: gap 10
+        doc.layers[0].members.truncate(2); // squares at 0..10 and 20..30: gap 10
         doc.snap.objects = false;
         // A 10 mm box dropped near x = 41 snaps to x = 40, repeating the 10 mm gap.
         let r = snap_at(&doc, 41.2, 0.0, 10.0, 10.0, vec![]);
@@ -3021,6 +3161,13 @@ mod tests {
         let mut e = three();
         run(
             &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: op_of_style(CutStyle::Cut),
+            },
+        );
+        run(
+            &mut e,
             DocumentCommand::DocumentSetMeta {
                 title: Some("Birthday card".to_string()),
                 notes: Some("12x12 cardstock".to_string()),
@@ -3042,5 +3189,268 @@ mod tests {
         e.run(Command::Undo).unwrap();
         e.run(Command::Undo).unwrap();
         assert!(e.doc.meta.is_empty());
+    }
+
+    #[test]
+    fn layer_add_is_operationless() {
+        let mut e = three();
+        e.run(Command::LayerAdd {
+            name: "notes".to_string(),
+            operation: None,
+        })
+        .unwrap();
+        let layer = &e.doc.layers[1];
+        assert_eq!(layer.name, "notes");
+        assert_eq!(layer.operation, None);
+        assert!(!layer.produces());
+    }
+
+    #[test]
+    fn document_new_has_no_cut() {
+        let mut e = three();
+        e.run(Command::DocumentNew {
+            width_mm: 100.0,
+            height_mm: 50.0,
+        })
+        .unwrap();
+        assert_eq!(e.doc.layers.len(), 1);
+        assert_eq!(e.doc.layers[0].name, "base");
+        assert_eq!(e.doc.layers[0].operation, None);
+        assert_eq!(e.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn assign_preserves_geometry() {
+        let mut e = three();
+        let before: Vec<(u64, kurbo::BezPath, Option<kurbo::Rect>)> = e
+            .doc
+            .shapes()
+            .map(|s| (s.id, s.path.clone(), s.bounds()))
+            .collect();
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: 0,
+                ids: vec![1, 2],
+            },
+        );
+        let after: Vec<(u64, kurbo::BezPath, Option<kurbo::Rect>)> = e
+            .doc
+            .shapes()
+            .map(|s| (s.id, s.path.clone(), s.bounds()))
+            .collect();
+        assert_eq!(before, after, "membership must not move geometry");
+    }
+
+    #[test]
+    fn assign_is_additive_and_idempotent() {
+        let mut e = three();
+        e.run(Command::LayerAdd {
+            name: "cut".to_string(),
+            operation: op_of_style(CutStyle::Cut),
+        })
+        .unwrap();
+        let cut = e.doc.layers.len() - 1;
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: cut,
+                ids: vec![1, 2],
+            },
+        );
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: cut,
+                ids: vec![2, 3],
+            },
+        );
+        assert_eq!(e.doc.layers[cut].members, vec![1, 2, 3]);
+        // Shape 2 is still a member of the base layer too: additive, never exclusive.
+        assert!(e.doc.layers[0].members.contains(&2));
+        assert_eq!(e.doc.shape_count(), 3, "membership never duplicates shapes");
+    }
+
+    #[test]
+    fn remove_is_noop_when_absent() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerRemoveMembers {
+                layer: 0,
+                ids: vec![2],
+            },
+        );
+        assert_eq!(e.doc.layers[0].members, vec![1, 3]);
+        run(
+            &mut e,
+            DocumentCommand::LayerRemoveMembers {
+                layer: 0,
+                ids: vec![2],
+            },
+        );
+        assert_eq!(e.doc.layers[0].members, vec![1, 3]);
+        assert_eq!(e.doc.shape_count(), 3, "removal never deletes geometry");
+    }
+
+    #[test]
+    fn assign_rejects_locked_layer() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerSetLocked {
+                index: 0,
+                locked: true,
+            },
+        );
+        assert!(
+            e.run(Command::Document(DocumentCommand::LayerAddMembers {
+                layer: 0,
+                ids: vec![1],
+            }))
+            .is_err()
+        );
+        assert!(
+            e.run(Command::Document(DocumentCommand::LayerRemoveMembers {
+                layer: 0,
+                ids: vec![1],
+            }))
+            .is_err()
+        );
+        assert!(
+            e.run(Command::Document(DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: op_of_style(CutStyle::Cut),
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn set_operation_validates_and_clears() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: Some(Operation::Cut(OperationSettings::default())),
+            },
+        );
+        assert_eq!(
+            e.doc.layers[0].operation,
+            Some(Operation::Cut(OperationSettings::default()))
+        );
+        run(
+            &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: None,
+            },
+        );
+        assert_eq!(e.doc.layers[0].operation, None);
+        // An invalid operation (non-finite power) is rejected.
+        let bad = OperationSettings {
+            power: f64::NAN,
+            ..OperationSettings::default()
+        };
+        assert!(
+            e.run(Command::Document(DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: Some(Operation::Cut(bad)),
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reorder_changes_pass_order() {
+        let mut e = three();
+        e.run(Command::LayerAdd {
+            name: "cut".to_string(),
+            operation: op_of_style(CutStyle::Cut),
+        })
+        .unwrap();
+        e.run(Command::LayerAdd {
+            name: "engrave".to_string(),
+            operation: op_of_style(CutStyle::Engrave),
+        })
+        .unwrap();
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: 1,
+                ids: vec![1],
+            },
+        );
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: 2,
+                ids: vec![2],
+            },
+        );
+        let before: Vec<&str> = e
+            .doc
+            .production_sequence()
+            .map(|(l, _)| l.name.as_str())
+            .collect();
+        assert_eq!(before, ["cut", "engrave"]);
+        run(&mut e, DocumentCommand::LayerMove { from: 2, to: 1 });
+        let after: Vec<&str> = e
+            .doc
+            .production_sequence()
+            .map(|(l, _)| l.name.as_str())
+            .collect();
+        assert_eq!(
+            after,
+            ["engrave", "cut"],
+            "Pass N is derived from layer order"
+        );
+    }
+
+    #[test]
+    fn layer_properties_roundtrip() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::LayerAddMembers {
+                layer: 0,
+                ids: vec![1, 3],
+            },
+        );
+        run(
+            &mut e,
+            DocumentCommand::LayerSetOperation {
+                index: 0,
+                operation: Some(Operation::Engrave(OperationSettings::default())),
+            },
+        );
+        let json = serde_json::to_value(Command::Document(DocumentCommand::LayerAddMembers {
+            layer: 0,
+            ids: vec![2],
+        }))
+        .unwrap();
+        assert_eq!(json["command"], "layer.add-members");
+        let back: Command = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            back,
+            Command::Document(DocumentCommand::LayerAddMembers { .. })
+        ));
+        let json = serde_json::to_value(Command::Document(DocumentCommand::LayerRemoveMembers {
+            layer: 0,
+            ids: vec![3],
+        }))
+        .unwrap();
+        assert_eq!(json["command"], "layer.remove-members");
+        let json = serde_json::to_value(Command::Document(DocumentCommand::LayerSetOperation {
+            index: 0,
+            operation: None,
+        }))
+        .unwrap();
+        assert_eq!(json["command"], "layer.set-operation");
+        // The document itself round-trips through its own serde form.
+        let saved = e.doc.save_json().unwrap();
+        let loaded = Document::load_json(&saved).unwrap();
+        assert_eq!(loaded, e.doc);
     }
 }

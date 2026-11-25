@@ -1,6 +1,6 @@
 //! StencilCraft G-code job policy mapped onto the shared Craft-Libs G-code writer.
 
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::{Document, Operation};
 use stencilcraft_geom::path_to_polylines;
 
 pub use craft_gcode::LaserMode;
@@ -84,19 +84,23 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
     );
     let mut writer = craft_gcode::Writer::new(settings.shared(), &banner)
         .map_err(|e| GcodeError::Invalid(e.to_string()))?;
-    for layer in doc.layers.iter().filter(|layer| !layer.template) {
-        let kind = match layer.kind {
-            CutStyle::Cut => "cut",
-            CutStyle::Engrave => "engrave",
-        };
+    for layer in doc
+        .layers
+        .iter()
+        .filter(|layer| !matches!(layer.operation, Some(Operation::Guide)))
+    {
+        let kind = layer
+            .operation
+            .as_ref()
+            .map_or("none", Operation::kind_name);
         writer.comment(&format!("layer {} ({kind})", layer.name));
         if !layer.visible {
             writer.comment("(layer hidden, skipped)");
             continue;
         }
-        let power = match layer.kind {
-            CutStyle::Cut => settings.power,
-            CutStyle::Engrave => settings.engrave_power.unwrap_or(settings.power),
+        let power = match layer.operation {
+            Some(Operation::Engrave(_)) => settings.engrave_power.unwrap_or(settings.power),
+            _ => settings.power,
         };
         if settings.passes > 1 {
             writer.comment(&format!(
@@ -105,7 +109,10 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
                 if settings.ramp_power { ", ramped" } else { "" }
             ));
         }
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+        for id in &layer.members {
+            let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
+                continue;
+            };
             for polyline in
                 path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
             {
@@ -134,7 +141,7 @@ mod tests {
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
         p.line_to(Point::new(10.0, 0.0));
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+        doc.push_shape(0, p).unwrap();
         doc
     }
 
@@ -164,7 +171,7 @@ mod tests {
             let mut p = kurbo::BezPath::new();
             p.move_to(Point::new(x, 0.0));
             p.line_to(Point::new(x + 10.0, 0.0));
-            doc.push_shape(0, p, CutStyle::Cut).unwrap();
+            doc.push_shape(0, p).unwrap();
         }
         let g = export(&doc, &GcodeSettings::default()).unwrap();
         let mut beam_on = false;
@@ -197,22 +204,20 @@ mod tests {
     #[test]
     fn engraved_layers_take_their_own_power() {
         let mut doc = Document::default();
-        doc.layers
-            .push(stencilcraft_doc::Layer::new("score", CutStyle::Engrave));
+        doc.layers.push(stencilcraft_doc::Layer::new(
+            "score",
+            Some(Operation::Engrave(Default::default())),
+        ));
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
         p.line_to(Point::new(5.0, 0.0));
-        doc.push_shape(1, p, CutStyle::Engrave).unwrap();
-        doc.push_shape(
-            0,
-            {
-                let mut cut = kurbo::BezPath::new();
-                cut.move_to(Point::new(0.0, 20.0));
-                cut.line_to(Point::new(5.0, 20.0));
-                cut
-            },
-            CutStyle::Cut,
-        )
+        doc.push_shape(1, p).unwrap();
+        doc.push_shape(0, {
+            let mut cut = kurbo::BezPath::new();
+            cut.move_to(Point::new(0.0, 20.0));
+            cut.line_to(Point::new(5.0, 20.0));
+            cut
+        })
         .unwrap();
         let g = export(
             &doc,
@@ -277,7 +282,7 @@ mod tests {
         p.line_to(Point::new(10.0, 0.0));
         p.line_to(Point::new(10.0, 10.0));
         p.close_path();
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+        doc.push_shape(0, p).unwrap();
         let g = export(&doc, &GcodeSettings::default()).unwrap();
         let last_y10 = g.matches("Y0.0000").count();
         assert!(last_y10 >= 2, "must return to start on a closed loop:\n{g}");

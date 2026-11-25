@@ -9,10 +9,13 @@ use std::collections::BTreeSet;
 
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{CombineOp, Document, GroupKind, Operation, SendAssign, Shape, SourceGroup};
+use stencilcraft_doc::{
+    CombineOp, Document, GroupKind, Operation, OperationSettings, SendAssign, Shape, SourceGroup,
+};
 use stencilcraft_layout as layout;
 use vectorcraft_geom::{FillRule, PathData};
 
+use crate::document::{add_members, ensure_operation_layer, remove_members};
 use crate::{Effect, EngineError};
 
 const MAX_IDS: usize = 10_000;
@@ -215,12 +218,17 @@ pub(crate) fn execute(
                 return bad("shapes.detach", "none of the shapes is attached");
             }
             let mut edited = Vec::new();
-            for layer in &mut doc.layers {
-                for s in &mut layer.shapes {
-                    if s.production.attach.is_some_and(|g| groups.contains(&g)) {
-                        s.production.attach = None;
-                        edited.push(s.id);
-                    }
+            let member_ids: Vec<u64> = doc
+                .layers
+                .iter()
+                .flat_map(|l| l.members.iter().copied())
+                .collect();
+            for id in member_ids {
+                if let Some(s) = doc.get_shape_mut(id)
+                    && s.production.attach.is_some_and(|g| groups.contains(&g))
+                {
+                    s.production.attach = None;
+                    edited.push(id);
                 }
             }
             Ok(Effect::ShapesEdited { ids: edited })
@@ -233,9 +241,14 @@ pub(crate) fn execute(
             let outline = combine_paths(&members, CombineOp::Unite, name)?;
             let template = members.first().cloned();
             let id = group_shape(doc, at, template, outline, GroupKind::Flatten, members)?;
-            if let Some(s) = doc.get_shape_mut(id) {
-                s.production.operation = Some(Operation::PrintThenCut);
+            for li in 0..doc.layers.len() {
+                if doc.layers[li].operation.is_some() {
+                    remove_members(doc, li, &[id]);
+                }
             }
+            let li =
+                ensure_operation_layer(doc, Operation::PrintThenCut(OperationSettings::default()));
+            add_members(doc, li, &[id]);
             Ok(Effect::ShapeAdded { id })
         }
         ProductionCommand::Unflatten { id } => {
@@ -353,12 +366,17 @@ pub(crate) fn execute(
             }
             let template = members.first().cloned();
             let id = group_shape(doc, at, template, outline, GroupKind::Flatten, members)?;
-            if let Some(s) = doc.get_shape_mut(id) {
-                s.production.operation = Some(match cut {
-                    StickerCut::KissCut => Operation::KissCut,
-                    StickerCut::DieCut => Operation::DieCut,
-                });
+            let op = match cut {
+                StickerCut::KissCut => Operation::KissCut(OperationSettings::default()),
+                StickerCut::DieCut => Operation::DieCut(OperationSettings::default()),
+            };
+            for li in 0..doc.layers.len() {
+                if doc.layers[li].operation.is_some() {
+                    remove_members(doc, li, &[id]);
+                }
             }
+            let li = ensure_operation_layer(doc, op);
+            add_members(doc, li, &[id]);
             Ok(Effect::ShapeAdded { id })
         }
         ProductionCommand::SetProduction {
@@ -389,20 +407,37 @@ pub(crate) fn execute(
                 return bad(name, "material must be 1–100 characters");
             }
             for id in &ids {
+                // The operation lives on layers in v2: clear removes the shape from
+                // every operation layer, a set moves it to the matching layer.
+                if clear.contains(&ProductionField::Operation) || operation.is_some() {
+                    let op_layers: Vec<usize> = doc
+                        .layers
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| l.operation.is_some())
+                        .map(|(i, _)| i)
+                        .collect();
+                    for li in op_layers {
+                        remove_members(doc, li, &[*id]);
+                    }
+                    if let Some(op) = &operation {
+                        let li = ensure_operation_layer(doc, op.clone());
+                        add_members(doc, li, &[*id]);
+                    }
+                }
                 let Some(s) = doc.get_shape_mut(*id) else {
                     continue;
                 };
                 let p = &mut s.production;
                 for f in &clear {
                     match f {
-                        ProductionField::Operation => p.operation = None,
+                        ProductionField::Operation => {}
                         ProductionField::LineColor => p.line_color = None,
                         ProductionField::FillColor => p.fill_color = None,
                         ProductionField::Material => p.material = None,
                         ProductionField::Send => p.send = None,
                     }
                 }
-                p.operation = operation.or(p.operation);
                 p.line_color = line_color.clone().or(p.line_color.take());
                 p.fill_color = fill_color.clone().or(p.fill_color.take());
                 p.material = material.clone().or(p.material.take());
@@ -447,29 +482,35 @@ fn checked(doc: &Document, ids: &[u64], name: &str, min: usize) -> Result<Vec<u6
     }
     Ok(doc
         .shapes()
-        .filter(|(_, s)| set.contains(&s.id))
-        .map(|(_, s)| s.id)
+        .filter(|s| set.contains(&s.id))
+        .map(|s| s.id)
         .collect())
 }
 
-/// Removes the shapes, returning where the first one was `(layer, index)` and the shapes.
+/// Removes the memberships and the shapes, returning where the first one was
+/// `(layer, shape index in Document::shapes)` plus the taken shapes.
 fn take(doc: &mut Document, ids: &[u64]) -> Result<((usize, usize), Vec<Shape>), EngineError> {
-    let mut at = None;
-    let mut taken = Vec::new();
+    let id_set: BTreeSet<u64> = ids.iter().copied().collect();
+    let mut layer_at = None;
     for (li, layer) in doc.layers.iter_mut().enumerate() {
-        let mut i = 0;
-        while i < layer.shapes.len() {
-            if layer.shapes.get(i).is_some_and(|s| ids.contains(&s.id)) {
-                at.get_or_insert((li, i));
-                taken.push(layer.shapes.remove(i));
-            } else {
-                i += 1;
-            }
+        if layer.members.iter().any(|m| id_set.contains(m)) {
+            layer_at.get_or_insert(li);
+        }
+        layer.members.retain(|m| !id_set.contains(m));
+    }
+    let shape_at = doc.shapes.iter().position(|s| id_set.contains(&s.id));
+    let mut taken = Vec::new();
+    let mut i = 0;
+    while i < doc.shapes.len() {
+        if id_set.contains(&doc.shapes[i].id) {
+            taken.push(doc.shapes.remove(i));
+        } else {
+            i += 1;
         }
     }
-    match at {
-        Some(at) => Ok((at, taken)),
-        None => Err(EngineError::Internal(
+    match (layer_at, shape_at) {
+        (Some(li), Some(si)) => Ok(((li, si), taken)),
+        _ => Err(EngineError::Internal(
             "production: no shapes to take".to_string(),
         )),
     }
@@ -488,13 +529,15 @@ fn insert(
     (layer, index): (usize, usize),
     shapes: Vec<Shape>,
 ) -> Result<(), EngineError> {
-    let Some(layer) = doc.layers.get_mut(layer) else {
+    if doc.layers.get(layer).is_none() {
         return Err(EngineError::Internal(
             "production: layer vanished".to_string(),
         ));
-    };
-    let index = index.min(layer.shapes.len());
-    layer.shapes.splice(index..index, shapes);
+    }
+    let index = index.min(doc.shapes.len());
+    let ids: Vec<u64> = shapes.iter().map(|s| s.id).collect();
+    doc.shapes.splice(index..index, shapes);
+    add_members(doc, layer, &ids);
     Ok(())
 }
 
@@ -562,7 +605,7 @@ fn ungroup(
     let mut members = group.members_now(&shape.path);
     let (at, _) = take(doc, &[id])?;
     // Ids may be taken meanwhile (a duplicated group restores twice): give those fresh ones.
-    let mut used: BTreeSet<u64> = doc.shapes().map(|(_, s)| s.id).collect();
+    let mut used: BTreeSet<u64> = doc.shapes().map(|s| s.id).collect();
     for m in &mut members {
         if !used.insert(m.id) {
             m.id = alloc_id(doc)?;

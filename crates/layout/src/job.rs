@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use kurbo::{Affine, BezPath, ParamCurve, ParamCurveArclen, PathSeg, Point, Rect};
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{Document, Operation, SendAssign, Shape};
+use stencilcraft_doc::{Document, Operation, OperationSettings, SendAssign, Shape};
 
 use crate::machines::{MarkStyle, machine};
 use crate::mats::{MatOptions, MatPlan, layout_mats};
@@ -186,7 +186,7 @@ pub struct CutOp {
     pub copy: u32,
     pub contour: usize,
     pub group: String,
-    pub operation: Operation,
+    pub operation: Option<Operation>,
     pub tool: u8,
     pub passes: u32,
     /// The contour is closed (an overcut path still counts as closed).
@@ -226,22 +226,12 @@ pub struct CutJob {
     pub mats: Vec<MatJob>,
 }
 
-fn operation_name(op: Operation) -> &'static str {
-    match op {
-        Operation::Cut => "cut",
-        Operation::KissCut => "kiss-cut",
-        Operation::DieCut => "die-cut",
-        Operation::Draw => "draw",
-        Operation::Score => "score",
-        Operation::Engrave => "engrave",
-        Operation::Perforate => "perforate",
-        Operation::PrintThenCut => "print-then-cut",
-        Operation::Guide => "guide",
-    }
+fn operation_name(op: &Operation) -> &'static str {
+    op.kind_name()
 }
 
-fn group_key(by: CutBy, shape: &Shape, layer: usize) -> String {
-    let style = || operation_name(shape.operation()).to_string();
+fn group_key(by: CutBy, shape: &Shape, layer: usize, op: Option<&Operation>) -> String {
+    let style = || op.map_or("none", operation_name).to_string();
     match by {
         CutBy::Operation => style(),
         CutBy::LineColor => shape.production.line_color.clone().unwrap_or_else(style),
@@ -294,7 +284,7 @@ pub fn build_job(doc: &Document, options: &JobOptions) -> Result<CutJob> {
         .layers
         .iter()
         .enumerate()
-        .flat_map(|(li, l)| l.shapes.iter().map(move |s| (s.id, li)))
+        .flat_map(|(li, l)| l.members.iter().map(move |id| (*id, li)))
         .collect();
     let mut mats = Vec::new();
     for mat in &layout.mats {
@@ -395,7 +385,8 @@ fn mat_ops(
                 continue;
             };
             let layer = layers.get(id).copied().unwrap_or_default();
-            let group = group_key(options.cut_by, shape, layer);
+            let op = doc.layers.get(layer).and_then(|l| l.operation.as_ref());
+            let group = group_key(options.cut_by, shape, layer, op);
             let setting = options.groups.iter().find(|g| g.key == group);
             let assign = shape.production.send;
             if setting.is_some_and(|g| !g.enabled) || assign == Some(SendAssign::Ignore) {
@@ -425,7 +416,7 @@ fn mat_ops(
                     copy: placement.copy,
                     contour,
                     group: group.clone(),
-                    operation: shape.operation(),
+                    operation: op.cloned(),
                     tool,
                     passes: setting.and_then(|g| g.passes).unwrap_or(options.passes),
                     closed: is_closed(&path),
@@ -610,7 +601,7 @@ fn line_op(path: BezPath, closed: bool, passes: u32) -> CutOp {
         copy: 0,
         contour: 0,
         group: "weed".to_string(),
-        operation: Operation::Cut,
+        operation: Some(Operation::Cut(OperationSettings::default())),
         tool: 1,
         passes,
         closed,
@@ -737,16 +728,14 @@ fn origin_map(origin: Origin, feed: Feed, w: f64, l: f64) -> Affine {
 mod tests {
     use super::*;
     use crate::tests::rect;
-    use stencilcraft_doc::CutStyle;
 
     fn ring_doc() -> Document {
         let mut doc = Document::default();
         // A letter "O": outline first in the path, counter second.
         let mut o = rect(0.0, 0.0, 30.0, 30.0);
         o.extend(rect(10.0, 10.0, 10.0, 10.0).iter());
-        doc.push_shape(0, o, CutStyle::Cut).unwrap();
-        doc.push_shape(0, rect(100.0, 0.0, 5.0, 5.0), CutStyle::Engrave)
-            .unwrap();
+        doc.push_shape(0, o).unwrap();
+        doc.push_shape(0, rect(100.0, 0.0, 5.0, 5.0)).unwrap();
         doc
     }
 
@@ -821,8 +810,14 @@ mod tests {
     #[test]
     fn send_assignment_and_stipple() {
         let mut doc = ring_doc();
-        doc.layers[0].shapes[0].production.send = Some(SendAssign::Tool2Outline);
-        doc.layers[0].shapes[1].production.send = Some(SendAssign::Ignore);
+        doc.get_shape_mut(doc.layers[0].members[0])
+            .unwrap()
+            .production
+            .send = Some(SendAssign::Tool2Outline);
+        doc.get_shape_mut(doc.layers[0].members[1])
+            .unwrap()
+            .production
+            .send = Some(SendAssign::Ignore);
         let job = build_job(&doc, &JobOptions::default()).unwrap();
         let ops = &job.mats[0].ops;
         assert_eq!(ops.len(), 1, "outline only, the ignored shape left out");
@@ -831,13 +826,12 @@ mod tests {
 
         let mut dots = Document::default();
         for x in [0.0, 10.0, 20.0] {
-            dots.push_shape(0, rect(x, 0.0, 0.2, 0.2), CutStyle::Cut)
-                .unwrap();
+            dots.push_shape(0, rect(x, 0.0, 0.2, 0.2)).unwrap();
         }
-        dots.layers[0]
-            .shapes
-            .iter_mut()
-            .for_each(|s| s.production.attach = Some(1));
+        let ids = dots.layers[0].members.clone();
+        for id in ids {
+            dots.get_shape_mut(id).unwrap().production.attach = Some(1);
+        }
         let job = build_job(
             &dots,
             &JobOptions {
@@ -860,8 +854,7 @@ mod tests {
     fn shortest_travel_and_by_layer() {
         let mut doc = Document::default();
         for x in [200.0, 0.0, 100.0] {
-            doc.push_shape(0, rect(x, 0.0, 5.0, 5.0), CutStyle::Cut)
-                .unwrap();
+            doc.push_shape(0, rect(x, 0.0, 5.0, 5.0)).unwrap();
         }
         let options = JobOptions {
             order: CutOrder::ShortestTravel,

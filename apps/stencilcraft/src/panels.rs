@@ -386,8 +386,8 @@ impl StencilApp {
                     .engine
                     .doc
                     .shapes()
-                    .filter(|(_, s)| if lock { s.locked } else { s.hidden })
-                    .map(|(_, s)| s.id)
+                    .filter(|s| if lock { s.locked } else { s.hidden })
+                    .map(|s| s.id)
                     .collect();
                 if flagged.is_empty() {
                     self.status = "nothing to change".to_string();

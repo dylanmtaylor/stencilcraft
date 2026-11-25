@@ -548,7 +548,14 @@ fn trace_image_cli_imports_png_to_native_document() {
     let native_path = native.to_string_lossy();
     let doc = stencilcraft_doc::load_from(&native_path).expect("native document written");
     assert_eq!(doc.shape_count(), 1);
-    assert!(doc.layers[0].shapes[0].path.elements().len() >= 4);
+    assert!(
+        doc.get_shape(doc.layers[0].members[0])
+            .unwrap()
+            .path
+            .elements()
+            .len()
+            >= 4
+    );
 }
 
 #[test]

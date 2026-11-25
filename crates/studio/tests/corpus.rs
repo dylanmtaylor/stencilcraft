@@ -77,7 +77,7 @@ const RECT: &[(f32, f32)] = &[
 
 fn bounds(bytes: &[u8]) -> (f64, f64, f64, f64) {
     let doc = import(bytes, "t").unwrap().doc;
-    let r = doc.layers[0].bounds().unwrap();
+    let r = doc.layer_bounds(0).unwrap();
     (r.x0, r.y0, r.x1, r.y1)
 }
 
@@ -114,7 +114,11 @@ fn open_paths_stay_open_and_compound_contours_stay_one_shape() {
         .unwrap()
         .doc;
     assert_eq!(doc.shape_count(), 2);
-    let shapes = &doc.layers[0].shapes;
+    let shapes: Vec<_> = doc.layers[0]
+        .members
+        .iter()
+        .map(|id| doc.get_shape(*id).unwrap())
+        .collect();
     let closes = |i: usize| {
         shapes[i]
             .path
@@ -157,7 +161,7 @@ fn line_colours_become_one_layer_each() {
     let layers: Vec<_> = doc
         .layers
         .iter()
-        .map(|l| (l.color.clone().unwrap_or_default(), l.shapes.len()))
+        .map(|l| (l.color.clone().unwrap_or_default(), l.members.len()))
         .collect();
     assert_eq!(
         layers,
@@ -335,7 +339,7 @@ fn rect_1in_at_1_1_is_one_inch_from_the_page_top_in_y_up() {
         return;
     };
     let doc = import(&bytes, "rect").unwrap().doc;
-    let r = doc.layers[0].bounds().unwrap();
+    let r = doc.layer_bounds(0).unwrap();
     assert!((r.x0 - 25.4).abs() < 0.05, "{r:?}");
     assert!((r.y1 - (304.8 - 25.4)).abs() < 0.05, "top edge {r:?}");
     assert!((r.y0 - (304.8 - 50.8)).abs() < 0.05, "bottom edge {r:?}");
@@ -373,7 +377,7 @@ fn real_samples_decode_when_present() {
                     .collect();
                 assert_eq!(colours, [format!("#{hex}")], "{name}");
             }
-            let (Some([x, y, w, h]), Some(r)) = (bounds, got.doc.layers[0].bounds()) else {
+            let (Some([x, y, w, h]), Some(r)) = (bounds, got.doc.layer_bounds(0)) else {
                 continue;
             };
             // Documents are y-up: Silhouette's Y (from the page top) is page height - y1.

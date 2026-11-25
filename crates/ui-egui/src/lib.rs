@@ -5,6 +5,8 @@
 //! depends on the app crate; the app depends on this crate and calls
 //! [`paint_document`] with an [`egui::Painter`].
 
+pub mod layers;
+
 /// Theme selection shared by the workspace chrome and canvas renderer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ColorTheme {
@@ -529,9 +531,31 @@ fn tick_style(index: f64, palette: Palette) -> (f32, egui::Color32) {
     }
 }
 
-/// Colour and stroke weight for one shape, given its production style and the view.
+/// Colour and stroke weight for one shape, given its owning layer and the view.
+/// The layer's material colour overrides the operation token when set (and
+/// parseable); an unparseable colour falls back to the token, never panics.
+/// The colour a layer row's swatch shows: the layer's stored colour when it
+/// parses, else the operation's token colour — the same fallback the canvas
+/// paint uses in [`shape_visual`].
+pub fn layer_swatch_color(layer: &stencilcraft_doc::Layer, theme: ColorTheme) -> egui::Color32 {
+    let palette = Palette::for_theme(theme);
+    if let Some([r, g, b]) = layer
+        .color
+        .as_deref()
+        .and_then(stencilcraft_doc::canvas::parse_hex_color)
+    {
+        egui::Color32::from_rgb(r, g, b)
+    } else {
+        match layer.operation.as_ref() {
+            Some(stencilcraft_doc::Operation::Cut(_)) => palette.cut_line,
+            Some(stencilcraft_doc::Operation::Engrave(_)) => palette.engrave_line,
+            _ => palette.text,
+        }
+    }
+}
+
 fn shape_visual(
-    shape: &stencilcraft_doc::Shape,
+    layer: &stencilcraft_doc::Layer,
     view: &View,
     kerf_preview: bool,
     palette: Palette,
@@ -540,10 +564,17 @@ fn shape_visual(
         // The compensated-contours preview: a different line colour so a user can
         // tell what the machine will actually trace.
         palette.kerf_line
+    } else if let Some([r, g, b]) = layer
+        .color
+        .as_deref()
+        .and_then(stencilcraft_doc::canvas::parse_hex_color)
+    {
+        egui::Color32::from_rgb(r, g, b)
     } else {
-        match shape.style {
-            stencilcraft_doc::CutStyle::Cut => palette.cut_line,
-            stencilcraft_doc::CutStyle::Engrave => palette.engrave_line,
+        match layer.operation.as_ref() {
+            Some(stencilcraft_doc::Operation::Cut(_)) => palette.cut_line,
+            Some(stencilcraft_doc::Operation::Engrave(_)) => palette.engrave_line,
+            _ => palette.text,
         }
     };
     (line_color, 1.5_f32.max(0.4 * view.zoom))
@@ -623,8 +654,13 @@ pub fn paint_document(
         if !layer.visible {
             continue;
         }
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
-            let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
+        for shape in layer
+            .members
+            .iter()
+            .filter_map(|id| doc.get_shape(*id))
+            .filter(|shape| !shape.hidden)
+        {
+            let (mut color, mut width) = shape_visual(layer, view, options.kerf_preview, palette);
             if selection.selected_shapes.contains(&shape.id) {
                 color = palette.selection;
                 width = width.max(2.5);
@@ -993,7 +1029,7 @@ pub fn select_shapes_in_rect(
     doc.layers
         .iter()
         .filter(|layer| layer.visible)
-        .flat_map(|layer| layer.shapes.iter())
+        .flat_map(|layer| layer.members.iter().filter_map(|id| doc.get_shape(*id)))
         .filter(|shape| is_selectable(shape))
         .filter(|shape| {
             let Some(bounds) = shape.bounds() else {
@@ -1246,9 +1282,10 @@ pub fn hit_test_shape(
     let tolerance_sq = tolerance_px.max(0.0).powi(2);
     for layer in doc.layers.iter().rev().filter(|layer| layer.visible) {
         for shape in layer
-            .shapes
+            .members
             .iter()
             .rev()
+            .filter_map(|id| doc.get_shape(*id))
             .filter(|shape| is_selectable(shape))
         {
             let polylines = stencilcraft_geom::path_to_polylines(
@@ -1515,8 +1552,9 @@ mod tests {
     #[test]
     fn hit_test_selects_topmost_visible_outline_in_screen_space() {
         let mut doc = simple_square();
-        let first = doc.layers[0].shapes[0].clone();
-        doc.push_shape(0, first.path, first.style).unwrap();
+        let first = doc.layers[0].members[0];
+        let path = doc.get_shape(first).unwrap().path.clone();
+        doc.push_shape(0, path).unwrap();
         let view = View {
             zoom: 2.0,
             pan_mm: egui::Vec2::ZERO,
@@ -1528,14 +1566,14 @@ mod tests {
         assert_eq!(hit_test_shape(&doc, &view, interior, 3.0), None);
         assert_eq!(hit_test_shape(&doc, &view, edge, f32::NAN), None);
         // Locked and hidden shapes fall through to the one below, and box selection skips them.
-        doc.layers[0].shapes[1].locked = true;
+        doc.get_shape_mut(doc.layers[0].members[1]).unwrap().locked = true;
         assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), Some(1));
-        doc.layers[0].shapes[0].hidden = true;
+        doc.get_shape_mut(doc.layers[0].members[0]).unwrap().hidden = true;
         assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), None);
         let all = egui::Rect::from_min_max(egui::pos2(-1e4, -1e4), egui::pos2(1e4, 1e4));
         assert!(select_shapes_in_rect(&doc, &view, all, SelectionMode::Intersect).is_empty());
-        doc.layers[0].shapes[0].hidden = false;
-        doc.layers[0].shapes[1].locked = false;
+        doc.get_shape_mut(doc.layers[0].members[0]).unwrap().hidden = false;
+        doc.get_shape_mut(doc.layers[0].members[1]).unwrap().locked = false;
         doc.layers[0].visible = false;
         assert_eq!(hit_test_shape(&doc, &view, edge, 3.0), None);
     }
@@ -1543,12 +1581,139 @@ mod tests {
     #[test]
     fn kerf_preview_changes_visuals() {
         let doc = simple_square();
-        let shape = &doc.layers[0].shapes[0];
         let view = View::default();
         let palette = Palette::for_theme(ColorTheme::Dark);
-        let (plain_col, _) = shape_visual(shape, &view, false, palette);
-        let (kerf_col, _) = shape_visual(shape, &view, true, palette);
+        let (plain_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
+        let (kerf_col, _) = shape_visual(&doc.layers[0], &view, true, palette);
         assert_ne!(plain_col, kerf_col);
+    }
+
+    #[test]
+    fn layer_colour_affects_visual() {
+        let mut doc = simple_square();
+        let view = View::default();
+        let palette = Palette::for_theme(ColorTheme::Dark);
+        let (op_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
+        assert_eq!(op_col, palette.cut_line, "operation token is the default");
+
+        doc.layers[0].color = Some("#ff0000".to_string());
+        let (layer_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
+        assert_eq!(layer_col, egui::Color32::from_rgb(255, 0, 0));
+        assert_ne!(layer_col, op_col);
+
+        doc.layers[0].color = Some("red".to_string());
+        let (fallback_col, _) = shape_visual(&doc.layers[0], &view, false, palette);
+        assert_eq!(
+            fallback_col, op_col,
+            "unparseable colour falls back to the token"
+        );
+
+        let (kerf_col, _) = shape_visual(&doc.layers[0], &view, true, palette);
+        assert_eq!(
+            kerf_col, palette.kerf_line,
+            "kerf preview wins over layer colour"
+        );
+    }
+
+    #[test]
+    fn hidden_layer_shapes_are_skipped_by_the_paint() {
+        let mut doc = simple_square();
+        let view = View::default();
+        let clip =
+            egui::Rect::from_min_size(egui::pos2(-500.0, -500.0), egui::vec2(1000.0, 1000.0));
+        let token_shapes = |doc: &stencilcraft_doc::Document| {
+            let palette = Palette::for_theme(ColorTheme::Dark);
+            painted(|p| {
+                paint_document(
+                    p,
+                    clip,
+                    doc,
+                    &view,
+                    None,
+                    CanvasOptions::default(),
+                    &SelectionState::default(),
+                )
+            })
+            .into_iter()
+            .filter(|s| match s {
+                egui::Shape::Path(p) => {
+                    p.stroke.color == egui::epaint::ColorMode::Solid(palette.cut_line)
+                }
+                egui::Shape::LineSegment { stroke, .. } => stroke.color == palette.cut_line,
+                _ => false,
+            })
+            .count()
+        };
+        assert!(
+            token_shapes(&doc) > 0,
+            "a visible layer paints its outline in the operation token colour"
+        );
+        doc.layers[0].visible = false;
+        assert_eq!(
+            token_shapes(&doc),
+            0,
+            "a hidden layer's shapes are skipped by the paint"
+        );
+    }
+
+    #[test]
+    fn unassigned_rows() {
+        let mut doc = simple_square();
+        doc.layers.push(stencilcraft_doc::Layer::new("base", None));
+        let lone = doc
+            .push_shape(1, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
+            .unwrap();
+        let open: std::collections::BTreeSet<usize> =
+            [0, layers::UNASSIGNED_GROUP].into_iter().collect();
+        let rows = layers::build_layer_rows(&doc, &open);
+        assert_eq!(
+            rows,
+            vec![
+                layers::LayerRow::Layer { index: 0 },
+                layers::LayerRow::Member {
+                    layer: 0,
+                    shape: doc.layers[0].members[0]
+                },
+                layers::LayerRow::Layer { index: 1 },
+                layers::LayerRow::UnassignedGroup,
+                layers::LayerRow::UnassignedMember { shape: lone.id },
+            ]
+        );
+        assert_eq!(
+            doc.layers.len(),
+            2,
+            "Unassigned stays derived, never persisted"
+        );
+    }
+
+    #[test]
+    fn effective_operation() {
+        let mut doc = simple_square();
+        let member = doc.layers[0].members[0];
+        let (op, source) = layers::effective_operation(&doc, member).unwrap();
+        assert!(matches!(op, stencilcraft_doc::Operation::Cut(_)));
+        assert_eq!(source, "cut");
+
+        doc.layers.push(stencilcraft_doc::Layer::new("base", None));
+        let lone = doc
+            .push_shape(1, stencilcraft_testkit::rect_path(60.0, 60.0, 10.0, 10.0))
+            .unwrap();
+        assert_eq!(layers::effective_operation(&doc, lone.id), None);
+    }
+
+    #[test]
+    fn pass_number_skips_container_layers() {
+        let mut doc = simple_square();
+        doc.layers
+            .insert(0, stencilcraft_doc::Layer::new("base", None));
+        doc.layers.push(stencilcraft_doc::Layer::new(
+            "guide",
+            Some(stencilcraft_doc::Operation::Guide),
+        ));
+        assert_eq!(layers::pass_number(&doc, 0), None, "container: no badge");
+        assert_eq!(layers::pass_number(&doc, 1), Some(1));
+        assert_eq!(layers::pass_number(&doc, 2), None, "Guide: no badge (D-12)");
+        assert_eq!(layers::pass_number(&doc, 3), None, "out of range");
     }
 
     #[test]
@@ -1569,7 +1734,7 @@ mod tests {
         assert!((view.zoom - 3.5).abs() < 1e-5);
 
         let doc = simple_square();
-        let orig = &doc.layers[0].shapes[0].path;
+        let orig = &doc.get_shape(doc.layers[0].members[0]).unwrap().path;
         let mut subs = bezpath_to_edit_subpaths(orig);
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].knots.len(), 4);

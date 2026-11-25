@@ -179,21 +179,24 @@ fn push_text(
     style: CutStyle,
     spec: Option<TextSpec>,
 ) -> Result<u64, EngineError> {
-    let layer = match engine.doc.layers.iter().rposition(|l| l.kind == style) {
+    let operation =
+        crate::document::op_of_style(style).ok_or_else(|| invalid("text", "unknown style"))?;
+    let layer = match engine
+        .doc
+        .layers
+        .iter()
+        .rposition(|l| l.operation.as_ref() == Some(&operation))
+    {
         Some(index) => index,
         None => {
-            let name = match style {
-                CutStyle::Cut => "cut",
-                CutStyle::Engrave => "engrave",
-            };
-            engine
-                .doc
-                .layers
-                .push(stencilcraft_doc::Layer::new(name, style));
+            engine.doc.layers.push(stencilcraft_doc::Layer::new(
+                operation.kind_name(),
+                Some(operation),
+            ));
             engine.doc.layers.len() - 1
         }
     };
-    let id = engine.doc.push_shape(layer, path, style)?.id;
+    let id = engine.doc.push_shape(layer, path)?.id;
     if let Some(shape) = engine.doc.get_shape_mut(id) {
         shape.text = spec.map(Box::new);
     }
@@ -980,13 +983,13 @@ fn ungroup(engine: &mut Engine, id: u64, to: UngroupTo) -> Result<Effect, Engine
     let (layer, index) = engine
         .doc
         .layers
-        .iter_mut()
-        .find_map(|l| Some((l.shapes.iter().position(|s| s.id == id)?, l)))
-        .map(|(i, l)| (l, i))
+        .iter()
+        .enumerate()
+        .find_map(|(li, l)| Some((li, l.members.iter().position(|m| *m == id)?)))
         .ok_or_else(|| invalid(NAME, format!("no shape has id {id}")))?;
-    let template = layer
-        .shapes
-        .get(index)
+    let template = engine
+        .doc
+        .get_shape(id)
         .cloned()
         .ok_or_else(|| EngineError::Internal(format!("{NAME}: shape {id} vanished")))?;
     let mut ids = Vec::with_capacity(laid.len());
@@ -1009,7 +1012,17 @@ fn ungroup(engine: &mut Engine, id: u64, to: UngroupTo) -> Result<Effect, Engine
             ..template.clone()
         });
     }
-    layer.shapes.splice(index..=index, shapes);
+    let shape_index = engine
+        .doc
+        .shapes
+        .iter()
+        .position(|s| s.id == id)
+        .ok_or_else(|| invalid(NAME, format!("no shape has id {id}")))?;
+    let member_ids: Vec<u64> = shapes.iter().map(|s| s.id).collect();
+    engine.doc.shapes.splice(shape_index..=shape_index, shapes);
+    if let Some(layer) = engine.doc.layers.get_mut(layer) {
+        layer.members.splice(index..=index, member_ids);
+    }
     engine.doc.next_shape_id = next_id;
     Ok(Effect::ShapesAdded { ids })
 }

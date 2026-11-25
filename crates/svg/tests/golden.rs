@@ -4,7 +4,16 @@
 
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fail loudly, like tests
 
-use stencilcraft_doc::{CutStyle, Document, Group, GroupChild, Layer};
+use stencilcraft_doc::{Document, Group, GroupChild, Layer, Operation, OperationSettings};
+
+/// The production pass a golden fixture layer name maps to.
+fn op(name: &str) -> Option<Operation> {
+    match name {
+        "engrave" => Some(Operation::Engrave(OperationSettings::default())),
+        "guide" => Some(Operation::Guide),
+        _ => Some(Operation::Cut(OperationSettings::default())),
+    }
+}
 use stencilcraft_svg::{TilePreviewOptions, export, export_print_and_cut, export_tile_preview};
 use stencilcraft_testkit::{line_path, rect_path, starter};
 
@@ -12,42 +21,40 @@ use stencilcraft_testkit::{line_path, rect_path, starter};
 /// and a template layer.
 fn grouped() -> Document {
     let mut doc = Document::default();
-    doc.layers.push(Layer::new("engrave", CutStyle::Engrave));
-    doc.layers.push(Layer::new("hidden", CutStyle::Cut));
-    doc.layers.push(Layer::new("guide", CutStyle::Cut));
+    doc.layers.push(Layer::new("engrave", op("engrave")));
+    doc.layers.push(Layer::new("hidden", op("hidden")));
+    doc.layers.push(Layer::new("guide", op("guide")));
     doc.layers[2].visible = false;
-    doc.layers[3].template = true;
+    doc.layers[3].operation = Some(Operation::Guide);
     let mut curve = kurbo::BezPath::new();
     curve.move_to((5.0, 5.0));
     curve.curve_to((10.5, 0.125), (20.0, 1.0 / 3.0), (25.0, 5.0));
     curve.quad_to((30.0, 12.0), (5.0, 5.0));
     curve.close_path();
     let a = doc
-        .push_shape(0, rect_path(10.0, 10.0, 20.0, 20.0), CutStyle::Cut)
+        .push_shape(0, rect_path(10.0, 10.0, 20.0, 20.0))
         .unwrap()
         .id;
-    let b = doc.push_shape(0, curve, CutStyle::Cut).unwrap().id;
+    let b = doc.push_shape(0, curve).unwrap().id;
     let c = doc
-        .push_shape(0, rect_path(40.0, 40.0, 5.0, 5.0), CutStyle::Cut)
+        .push_shape(0, rect_path(40.0, 40.0, 5.0, 5.0))
         .unwrap()
         .id;
     let d = doc
-        .push_shape(0, rect_path(-12.5, 60.0, 5.0, 5.0), CutStyle::Engrave)
+        .push_shape(0, rect_path(-12.5, 60.0, 5.0, 5.0))
         .unwrap()
         .id;
     let hidden = doc
-        .push_shape(0, rect_path(50.0, 50.0, 5.0, 5.0), CutStyle::Cut)
+        .push_shape(0, rect_path(50.0, 50.0, 5.0, 5.0))
         .unwrap()
         .id;
-    doc.layers[0]
-        .shapes
-        .iter_mut()
-        .for_each(|s| s.hidden = s.id == hidden);
-    doc.push_shape(1, line_path(5.0, 90.0, 95.0, 90.0), CutStyle::Engrave)
-        .unwrap();
-    doc.push_shape(2, rect_path(1.0, 1.0, 2.0, 2.0), CutStyle::Cut)
-        .unwrap();
-    doc.push_shape(3, rect_path(0.0, 0.0, 300.0, 300.0), CutStyle::Cut)
+    let members = doc.layers[0].members.clone();
+    for id in members {
+        doc.get_shape_mut(id).unwrap().hidden = id == hidden;
+    }
+    doc.push_shape(1, line_path(5.0, 90.0, 95.0, 90.0)).unwrap();
+    doc.push_shape(2, rect_path(1.0, 1.0, 2.0, 2.0)).unwrap();
+    doc.push_shape(3, rect_path(0.0, 0.0, 300.0, 300.0))
         .unwrap();
     doc.groups = vec![
         Group {

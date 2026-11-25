@@ -362,7 +362,17 @@ impl Session {
                 let shapes: Vec<_> = imported
                     .layers
                     .iter()
-                    .flat_map(|l| l.shapes.iter().map(|s| (s.path.clone(), s.style)))
+                    .flat_map(|l| {
+                        l.members
+                            .iter()
+                            .filter_map(|id| imported.get_shape(*id))
+                            .map(|s| {
+                                (
+                                    s.path.clone(),
+                                    stencilcraft_engine::document::style_of_shape(&imported, s.id),
+                                )
+                            })
+                    })
                     .collect();
                 let mut shape_ids = Vec::new();
                 if !shapes.is_empty() {
@@ -1816,7 +1826,7 @@ fn machine_dry_run(
     let mut layers = Vec::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
         let mut paths = Vec::new();
-        for shape in &layer.shapes {
+        for shape in layer.members.iter().filter_map(|id| doc.get_shape(*id)) {
             let pl = stencilcraft_geom::path_to_polylines(
                 &shape.path,
                 stencilcraft_geom::DEFAULT_FLATTEN_STEPS,

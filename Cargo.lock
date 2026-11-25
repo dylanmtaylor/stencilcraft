@@ -270,7 +270,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -1030,15 +1030,15 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
+source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
 dependencies = [
  "rustix 1.1.6",
 ]
 
 [[package]]
 name = "craft-atomic"
-version = "0.1.0"
-source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1057,6 +1057,11 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 
 [[package]]
+name = "craft-codepage"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+
+[[package]]
 name = "craft-color"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1070,6 +1075,14 @@ dependencies = [
  "craft-ui",
  "egui",
  "serde",
+]
+
+[[package]]
+name = "craft-dds"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "rayon",
 ]
 
 [[package]]
@@ -1106,7 +1119,19 @@ name = "craft-dxf"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
- "craft-codepage",
+ "craft-codepage 0.1.0",
+ "encoding_rs",
+ "kurbo 0.13.1",
+ "log",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-dxf"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "craft-codepage 0.2.0",
  "encoding_rs",
  "kurbo 0.13.1",
  "log",
@@ -1142,11 +1167,11 @@ name = "craft-file-import"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
- "craft-dxf",
+ "craft-dxf 0.1.0",
  "craft-eps",
  "craft-file-formats",
  "craft-pdf 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.1.0",
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
  "kurbo 0.13.1",
  "thiserror 2.0.21",
@@ -1158,6 +1183,7 @@ name = "craft-font-catalog"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
 dependencies = [
+ "fontique",
  "skrifa 0.47.0",
  "thiserror 2.0.21",
  "windows-registry",
@@ -1230,8 +1256,35 @@ name = "craft-image-codecs"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569#25c7a8959cf70cf8c3f076d05baadb0990710569"
 dependencies = [
- "craft-jpeg",
- "craft-metadata",
+ "craft-jpeg 0.1.0",
+ "craft-metadata 0.1.0",
+ "crc32fast",
+ "exr",
+ "flate2",
+ "half",
+ "hayro-jpeg2000",
+ "image",
+ "image-webp",
+ "jpeg-encoder",
+ "png 0.18.1",
+ "rayon",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiff",
+ "zune-core",
+ "zune-jpeg",
+ "zune-jpegxl",
+]
+
+[[package]]
+name = "craft-image-codecs"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "craft-dds",
+ "craft-jpeg 0.2.0",
+ "craft-metadata 0.2.0",
+ "craft-tiff 0.2.0",
  "crc32fast",
  "exr",
  "flate2",
@@ -1254,6 +1307,14 @@ dependencies = [
 name = "craft-jpeg"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569#25c7a8959cf70cf8c3f076d05baadb0990710569"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-jpeg"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1282,7 +1343,19 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3
 dependencies = [
  "brotli-decompressor 6.3.1",
  "chrono",
- "craft-tiff",
+ "craft-tiff 0.1.0",
+ "quick-xml",
+ "serde",
+]
+
+[[package]]
+name = "craft-metadata"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "brotli-decompressor 6.3.1",
+ "chrono",
+ "craft-tiff 0.2.0",
  "quick-xml",
  "serde",
 ]
@@ -1325,7 +1398,7 @@ source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59ba
 dependencies = [
  "async-io",
  "core-graphics2",
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0",
  "craft-docpath 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
  "craft-host",
  "craft-theme",
@@ -1370,11 +1443,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-raster-codecs"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "base64 0.23.1",
+ "craft-dds",
+ "craft-image-codecs 0.2.0",
+ "image",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-settings"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0",
  "craft-host",
  "dirs",
  "serde",
@@ -1394,12 +1479,12 @@ dependencies = [
 
 [[package]]
 name = "craft-stencilcraft-document"
-version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
+ "craft-atomic 0.2.0",
  "craft-stencilcraft-format",
- "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0)",
+ "craft-svg 0.2.0",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -1408,8 +1493,8 @@ dependencies = [
 
 [[package]]
 name = "craft-stencilcraft-format"
-version = "0.1.0"
-source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
 dependencies = [
  "serde",
  "serde_json",
@@ -1421,7 +1506,7 @@ name = "craft-svg"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569#25c7a8959cf70cf8c3f076d05baadb0990710569"
 dependencies = [
- "craft-image-codecs",
+ "craft-image-codecs 0.1.0",
  "craft-xml 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569)",
  "flate2",
  "kurbo 0.13.1",
@@ -1446,6 +1531,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-svg"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "craft-xml 0.2.0",
+ "flate2",
+ "kurbo 0.13.1",
+ "quick-xml",
+ "roxmltree 0.21.2",
+ "thiserror 2.0.21",
+ "vectorcraft-geom",
+ "vectorcraft-pathops",
+]
+
+[[package]]
 name = "craft-theme"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
@@ -1463,6 +1563,16 @@ source = "git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-tiff"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+ "tiff",
 ]
 
 [[package]]
@@ -1518,7 +1628,7 @@ name = "craft-window"
 version = "0.1.0"
 source = "git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50#8504e84805049d3af59baacf5239315eaaa74e50"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0",
  "craft-settings",
  "egui",
  "objc2 0.6.5",
@@ -1545,6 +1655,16 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs.git?rev=75c70fa6a786240eb853e6267e25fc445f510cd0#75c70fa6a786240eb853e6267e25fc445f510cd0"
 dependencies = [
  "quick-xml",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "craft-xml"
+version = "0.2.0"
+source = "git+file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs?rev=4a2fada7cdc3c13d8db974752fae65419f36e920#4a2fada7cdc3c13d8db974752fae65419f36e920"
+dependencies = [
+ "quick-xml",
+ "serde",
  "thiserror 2.0.21",
 ]
 
@@ -1993,6 +2113,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_kittest"
+version = "0.37.0"
+source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
+dependencies = [
+ "egui",
+ "kittest",
+ "log",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "egui_system_font_provider"
 version = "0.37.0"
 source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
@@ -2130,7 +2262,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3371,6 +3503,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "kittest"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bb81a721ba76aa095b7f45deb180504f786904e56ca4b8e141f66eb89a78b75"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+]
+
+[[package]]
 name = "krilla"
 version = "0.8.2"
 source = "git+https://github.com/storytold/craft-libs?rev=92afb23de#92afb23de7d1feb66d15ae0ce777155fd813ae26"
@@ -4449,7 +4591,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5191,7 +5333,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5585,15 +5727,16 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stencilcraft"
 version = "0.1.0"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0",
  "craft-draw",
  "craft-jsonrpc",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "craft-settings",
  "craft-theme",
  "craft-ui",
  "craft-window",
  "eframe",
+ "egui_kittest",
  "rfd",
  "serde",
  "serde_json",
@@ -5617,7 +5760,7 @@ version = "0.1.0"
 dependencies = [
  "craft-file-formats",
  "craft-jsonrpc",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569)",
  "serde_json",
  "stencilcraft-doc",
@@ -5642,7 +5785,7 @@ dependencies = [
 name = "stencilcraft-doc"
 version = "0.1.0"
 dependencies = [
- "craft-atomic 0.1.0 (git+https://github.com/aiongg/craft-libs.git?rev=8504e84805049d3af59baacf5239315eaaa74e50)",
+ "craft-atomic 0.1.0",
  "craft-file-formats",
  "craft-stencilcraft-document",
  "craft-stencilcraft-format",
@@ -5655,7 +5798,7 @@ dependencies = [
 name = "stencilcraft-dxf"
 version = "0.1.0"
 dependencies = [
- "craft-dxf",
+ "craft-dxf 0.2.0",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-geom",
@@ -5666,7 +5809,7 @@ dependencies = [
 name = "stencilcraft-engine"
 version = "0.1.0"
 dependencies = [
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "craft-svg 0.1.0 (git+https://github.com/storytold/craft-libs.git?rev=25c7a8959cf70cf8c3f076d05baadb0990710569)",
  "kurbo 0.13.1",
  "serde",
@@ -5722,7 +5865,7 @@ name = "stencilcraft-import"
 version = "0.1.0"
 dependencies = [
  "craft-file-import",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "kurbo 0.13.1",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5750,7 +5893,7 @@ name = "stencilcraft-layout"
 version = "0.1.0"
 dependencies = [
  "craft-file-import",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "kurbo 0.13.1",
  "serde",
  "serde_json",
@@ -5787,7 +5930,7 @@ dependencies = [
  "craft-file-formats",
  "craft-jsonrpc",
  "craft-mcp",
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "serde_json",
  "stencilcraft-doc",
  "stencilcraft-dxf",
@@ -5822,7 +5965,7 @@ dependencies = [
 name = "stencilcraft-raster"
 version = "0.1.0"
 dependencies = [
- "craft-raster-codecs",
+ "craft-raster-codecs 0.2.0",
  "kurbo 0.13.1",
  "serde",
  "stencilcraft-doc",
@@ -6065,10 +6208,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7443,7 +7586,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8243,10 +8386,5 @@ source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566
 
 [[patch.unused]]
 name = "egui_inspection"
-version = "0.37.0"
-source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"
-
-[[patch.unused]]
-name = "egui_kittest"
 version = "0.37.0"
 source = "git+https://github.com/storytold/egui.git?rev=35a72e6b786d65ba92532566251947d4b80c4611#35a72e6b786d65ba92532566251947d4b80c4611"

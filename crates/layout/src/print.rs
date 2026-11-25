@@ -315,14 +315,16 @@ pub fn sheet_to_png(sheet: &PrintSheet, dpi: f64) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::tests::rect;
-    use stencilcraft_doc::{CutStyle, Operation};
+    use stencilcraft_doc::Operation;
 
     fn ptc_doc() -> Document {
         let mut doc = Document::default();
-        doc.push_shape(0, rect(0.0, 0.0, 40.0, 30.0), CutStyle::Cut)
-            .unwrap();
-        let s = &mut doc.layers[0].shapes[0].production;
-        s.operation = Some(Operation::PrintThenCut);
+        doc.push_shape(0, rect(0.0, 0.0, 40.0, 30.0)).unwrap();
+        doc.layers[0].operation = Some(Operation::PrintThenCut(Default::default()));
+        let s = &mut doc
+            .get_shape_mut(doc.layers[0].members[0])
+            .unwrap()
+            .production;
         s.fill_color = Some("#ff8800".to_string());
         doc
     }
@@ -378,7 +380,10 @@ mod tests {
         }
         // The Joy 2 prints at most 10.62 × 3.07 in; a taller image is refused.
         let mut doc = ptc_doc();
-        doc.layers[0].shapes[0].path = rect(0.0, 0.0, 40.0, 200.0);
+        {
+            let id = doc.layers[0].members[0];
+            doc.get_shape_mut(id).unwrap().path = rect(0.0, 0.0, 40.0, 200.0);
+        }
         let joy = PrintOptions {
             mats: MatOptions {
                 machine: "cricut-joy".to_string(),

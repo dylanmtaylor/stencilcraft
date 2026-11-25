@@ -2,7 +2,7 @@
 //! lines red and engrave lines blue (the SVG exporter's colours), hairlines 0.25 mm.
 
 use craft_raster_codecs::common::Pixels as RgbaImage;
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::{Document, Operation};
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 use stencilcraft_raster::{RasterError, image_pixels};
@@ -92,14 +92,19 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
         ..Stroke::default()
     };
     for layer in doc.layers.iter().filter(|layer| layer.visible) {
-        for shape in &layer.shapes {
+        let engrave = matches!(layer.operation, Some(Operation::Engrave(_)));
+        for id in &layer.members {
+            let Some(shape) = doc.get_shape(*id) else {
+                continue;
+            };
             let mut paint = Paint {
                 anti_alias: true,
                 ..Paint::default()
             };
-            match shape.style {
-                CutStyle::Cut => paint.set_color_rgba8(0xc0, 0x39, 0x2b, 0xff),
-                CutStyle::Engrave => paint.set_color_rgba8(0x2d, 0x6c, 0xdf, 0xff),
+            if engrave {
+                paint.set_color_rgba8(0x2d, 0x6c, 0xdf, 0xff);
+            } else {
+                paint.set_color_rgba8(0xc0, 0x39, 0x2b, 0xff);
             }
             let Some(path) = skia_path(&shape.path, scale) else {
                 continue;
@@ -184,7 +189,7 @@ mod tests {
         path.line_to((20.0, 5.0));
         path.line_to((20.0, 20.0));
         path.close_path();
-        doc.push_shape(0, path, CutStyle::Cut).unwrap();
+        doc.push_shape(0, path).unwrap();
         let img = render(&doc, 300.0).unwrap();
         assert_eq!(img.dimensions(), (300, 300));
         let red = img.pixels().filter(|p| p[0] > 150 && p[1] < 100).count();

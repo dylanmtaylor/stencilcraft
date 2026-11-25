@@ -214,8 +214,15 @@ pub fn tile_document_with(
             if !layer.is_output() {
                 continue;
             }
-            let mut piece_layer = stencilcraft_doc::Layer::new(layer.name.clone(), layer.kind);
-            for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+            let layer_index = piece.layers.len();
+            piece.layers.push(stencilcraft_doc::Layer::new(
+                layer.name.clone(),
+                layer.operation.clone(),
+            ));
+            for id in &layer.members {
+                let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
+                    continue;
+                };
                 let cut = shape.cut_path();
                 let Some(b) = bounds_of_shape(&cut) else {
                     continue;
@@ -245,10 +252,13 @@ pub fn tile_document_with(
                     source,
                     kurbo::Affine::translate((-tile.rect.x0, -tile.rect.y0)),
                 );
-                piece_layer.shapes.push(translated);
+                translated.id = piece.next_shape_id;
+                piece.next_shape_id += 1;
+                piece.layers[layer_index].members.push(translated.id);
+                piece.shapes.push(translated);
             }
-            if !piece_layer.shapes.is_empty() {
-                piece.layers.push(piece_layer);
+            if piece.layers[layer_index].members.is_empty() {
+                piece.layers.pop();
             }
         }
         // A tile the artwork never reaches needs no material: skip the sheet rather
@@ -281,7 +291,12 @@ pub fn tile_shape_counts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stencilcraft_doc::{Board, CutStyle, Layer};
+    use stencilcraft_doc::{Board, Layer};
+
+    /// The `i`-th member shape of `layer` in `doc`.
+    fn member(doc: &Document, layer: usize, i: usize) -> &stencilcraft_doc::Shape {
+        doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
     use stencilcraft_geom::Point;
 
     fn cross_doc(board_w: f64, board_h: f64) -> Document {
@@ -291,7 +306,10 @@ mod tests {
                 height_mm: board_h,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![Layer::new(
+                "cut",
+                Some(stencilcraft_doc::Operation::Cut(Default::default())),
+            )],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -300,7 +318,7 @@ mod tests {
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(1.0, 1.0));
         p.line_to(Point::new(board_w - 1.0, board_h - 1.0));
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+        doc.push_shape(0, p).unwrap();
         doc
     }
 
@@ -395,7 +413,10 @@ mod tests {
         assert_eq!(pieces.len(), 3);
         for piece in &pieces {
             assert_eq!(piece.shape_count(), 1);
-            assert_eq!(piece.layers[0].kind, CutStyle::Cut);
+            assert!(matches!(
+                piece.layers[0].operation,
+                Some(stencilcraft_doc::Operation::Cut(_))
+            ));
             // Kerf settings travel with each sheet.
             assert_eq!(piece.kerf, doc.kerf);
         }
@@ -411,7 +432,10 @@ mod tests {
                 height_mm: 600.0,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![Layer::new(
+                "cut",
+                Some(stencilcraft_doc::Operation::Cut(Default::default())),
+            )],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -421,7 +445,7 @@ mod tests {
         p.line_to(Point::new(595.0, 595.0));
         p.line_to(Point::new(5.0, 595.0));
         p.close_path();
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+        doc.push_shape(0, p).unwrap();
 
         // 3 × 3 sheets cover the board, but the middle one holds nothing of the
         // outline and must not be exported.
@@ -430,7 +454,7 @@ mod tests {
         assert_eq!(pieces.len(), 8, "the middle sheet is empty and skipped");
         for piece in &pieces {
             assert_eq!(piece.shape_count(), 1);
-            let b = bounds_of_shape(&piece.layers[0].shapes[0].path).unwrap();
+            let b = bounds_of_shape(&member(piece, 0, 0).path).unwrap();
             assert!(b.x0 >= -1e-6 && b.y0 >= -1e-6, "off the sheet: {b:?}");
             assert!(
                 b.x1 <= piece.board.width_mm + 1e-6 && b.y1 <= piece.board.height_mm + 1e-6,
@@ -549,7 +573,10 @@ mod tests {
                 height_mm: 310.0,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![DocLayer::new("cut", CutStyle::Cut)],
+            layers: vec![DocLayer::new(
+                "cut",
+                Some(stencilcraft_doc::Operation::Cut(Default::default())),
+            )],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -561,11 +588,11 @@ mod tests {
         border.line_to(Point::new(417.0, 307.0));
         border.line_to(Point::new(3.0, 307.0));
         border.close_path();
-        doc.push_shape(0, border, CutStyle::Cut).unwrap();
+        doc.push_shape(0, border).unwrap();
         let mut diagonal = kurbo::BezPath::new();
         diagonal.move_to(Point::new(0.0, 0.0));
         diagonal.line_to(Point::new(420.0, 310.0));
-        doc.push_shape(0, diagonal, CutStyle::Cut).unwrap();
+        doc.push_shape(0, diagonal).unwrap();
         let mut curve = kurbo::BezPath::new();
         curve.move_to(Point::new(30.0, 300.0));
         curve.curve_to(
@@ -573,7 +600,7 @@ mod tests {
             Point::new(280.0, 330.0),
             Point::new(400.0, 40.0),
         );
-        doc.push_shape(0, curve, CutStyle::Cut).unwrap();
+        doc.push_shape(0, curve).unwrap();
 
         for (sheet_w, sheet_h, overlap) in [
             (300.0, 300.0, 0.0),
@@ -584,7 +611,7 @@ mod tests {
             assert!(!pieces.is_empty());
             for piece in &pieces {
                 let (w, h) = (piece.board.width_mm, piece.board.height_mm);
-                for (_, shape) in piece.shapes() {
+                for shape in piece.shapes() {
                     let b = shape.bounds().unwrap();
                     assert!(
                         b.x0 >= -1e-6 && b.y0 >= -1e-6 && b.x1 <= w + 1e-6 && b.y1 <= h + 1e-6,
@@ -612,9 +639,13 @@ mod tests {
                 .iter()
                 .find(|l| l.name == MARKS_LAYER)
                 .expect("marks layer on every sheet");
-            assert_eq!(marks.kind, CutStyle::Engrave);
-            assert!(!marks.shapes.is_empty());
-            for shape in &marks.shapes {
+            assert!(matches!(
+                marks.operation,
+                Some(stencilcraft_doc::Operation::Engrave(_))
+            ));
+            assert!(!marks.members.is_empty());
+            for id in &marks.members {
+                let shape = piece.get_shape(*id).unwrap();
                 let b = shape.bounds().unwrap();
                 assert!(b.x0 >= -1e-9 && b.y0 >= -1e-9, "mark off the sheet: {b:?}");
                 assert!(
@@ -667,7 +698,7 @@ mod tests {
         // (363, 290) to (499, 399), i.e. roughly (73, 0) to (209, 109) in sheet space.
         let top_right = pieces.last().expect("sheets are never empty");
         assert_eq!(top_right.board.width_mm, 210.0);
-        let b = bounds_of_shape(&top_right.layers[0].shapes[0].path).unwrap();
+        let b = bounds_of_shape(&member(top_right, 0, 0).path).unwrap();
         assert!((b.x0 - 72.6).abs() < 1.0, "shape origin: {b:?}");
         assert!(
             b.y0.abs() < 1.0,

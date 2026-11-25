@@ -7,7 +7,6 @@
 use craft_ui::controls::Kbd;
 use craft_ui::menu::{MenuEntry, MenuItem};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
-use stencilcraft_doc::CutStyle;
 use stencilcraft_engine::{Alignment, BooleanOperation, DistributionAxis, NodeAxis};
 
 use crate::panels::{EditAction as E, ScreenSide};
@@ -213,6 +212,25 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
     let nodes = !app.path_selection.anchors.is_empty();
     let pathfinder = |label: &str, op: BooleanOperation| when(label, A::Pathfinder(op), many);
     let align = |label: &str, a: Alignment| when(label, A::Align(a), many);
+    // Send to Layer… (D-05/D-06): one assign and one remove entry per real layer,
+    // never a synthetic Unassigned entry; locked layers are disabled (T-02-13).
+    let send_to_layer = {
+        let mut children: Vec<MenuEntry<A>> = Vec::with_capacity(app.engine.doc.layers.len() * 2);
+        for (i, layer) in app.engine.doc.layers.iter().enumerate() {
+            let enabled = any && !layer.locked;
+            children.push(when(
+                layer.name.as_str(),
+                A::AssignToLayer { layer: i },
+                enabled,
+            ));
+            children.push(when(
+                &format!("Remove from {}", layer.name),
+                A::RemoveFromLayer { layer: i },
+                enabled,
+            ));
+        }
+        sub("Send to Layer…", children)
+    };
     vec![
         sub(
             "Mirror",
@@ -233,7 +251,7 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 todo_key("Send Backward", CMD, Key::OpenBracket),
                 todo_key("Send to Back", cmd_shift(), Key::OpenBracket),
                 SEP,
-                todo("Send to Layer…"),
+                send_to_layer,
             ],
         ),
         sub(
@@ -350,16 +368,6 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("Modify Panel…", A::ShowPanel(P::Modify)).into(),
             ],
         ),
-        sub(
-            "Line Style",
-            vec![
-                item("Cut", A::SetStyle(CutStyle::Cut)).enabled(any).into(),
-                item("Engrave / Score", A::SetStyle(CutStyle::Engrave))
-                    .enabled(any)
-                    .into(),
-            ],
-        ),
-        SEP,
         todo_key("Group", CMD, Key::G),
         todo_key("Ungroup", cmd_shift(), Key::G),
         todo("Attach / Detach"),

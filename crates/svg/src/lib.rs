@@ -3,7 +3,15 @@
 use std::collections::HashMap;
 
 use kurbo::BezPath;
-use stencilcraft_doc::{CutStyle, Document, Layer};
+use stencilcraft_doc::{CutStyle, Document, Layer, Operation, OperationSettings};
+
+/// The production pass a legacy `CutStyle` maps to.
+fn op_of(style: CutStyle) -> Option<Operation> {
+    Some(match style {
+        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
+        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+    })
+}
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
 use craft_svg::write::{Attribute as SvgAttribute, Element as SvgElement, Scene as SvgScene};
@@ -34,17 +42,16 @@ impl Default for TilePreviewOptions {
 pub const TILE_PREVIEW_GAP_MM: f64 = 6.0;
 pub const TILE_PREVIEW_MAX_MM: f64 = 100_000.0;
 
-fn class_for(style: CutStyle) -> &'static str {
-    match style {
-        CutStyle::Cut => "stencilcraft-cut",
-        CutStyle::Engrave => "stencilcraft-engrave",
+fn class_for(operation: Option<&Operation>) -> &'static str {
+    match operation {
+        Some(Operation::Engrave(_)) => "stencilcraft-engrave",
+        _ => "stencilcraft-cut",
     }
 }
 fn view_bounds(doc: &Document) -> kurbo::Rect {
-    doc.layers
-        .iter()
-        .filter(|layer| !layer.template)
-        .filter_map(Layer::bounds)
+    (0..doc.layers.len())
+        .filter(|&i| !matches!(doc.layers[i].operation, Some(Operation::Guide)))
+        .filter_map(|i| doc.layer_bounds(i))
         .fold(
             kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm),
             |bounds, layer| bounds.union(layer),
@@ -89,32 +96,41 @@ fn document_elements(
         if output_layers_only {
             layer.is_output()
         } else {
-            !layer.template
+            !matches!(layer.operation, Some(Operation::Guide))
         }
     }) {
         let mut children = Vec::new();
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+        for id in &layer.members {
+            let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
+                continue;
+            };
             let chain = stencilcraft_doc::canvas::group_chain_in(
                 &parents,
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
             let element = SvgElement::Path {
-                attributes: vec![SvgAttribute::text("class", class_for(shape.style))],
+                attributes: vec![SvgAttribute::text(
+                    "class",
+                    class_for(layer.operation.as_ref()),
+                )],
                 path: shape.cut_path().into_owned(),
             };
             append_grouped(&mut children, &chain, element);
         }
         let mut attributes = Vec::new();
         if !output_layers_only {
-            attributes.push(SvgAttribute::text("class", class_for(layer.kind)));
+            attributes.push(SvgAttribute::text(
+                "class",
+                class_for(layer.operation.as_ref()),
+            ));
         }
         attributes.extend([
             SvgAttribute::text(
                 "data-kind",
-                match layer.kind {
-                    CutStyle::Cut => "cut",
-                    CutStyle::Engrave => "engrave",
-                },
+                layer
+                    .operation
+                    .as_ref()
+                    .map_or("none", Operation::kind_name),
             ),
             SvgAttribute::text(
                 "style",
@@ -452,21 +468,21 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
         let index = if let Some(index) = layers.get(&key) {
             *index
         } else {
-            let mut layer = Layer::new(layer_name, style);
+            let mut layer = Layer::new(layer_name, op_of(style));
             layer.color = color;
             doc.layers.push(layer);
             let i = doc.layers.len() - 1;
             layers.insert(key, i);
             i
         };
-        doc.push_shape(index, path, style)
+        doc.push_shape(index, path)
             .map_err(|e| SvgError::Model(e.to_string()))?;
     }
     if dropped > 0 {
         warnings.push(format!("{dropped} more SVG warnings omitted"));
     }
-    for layer in &doc.layers {
-        if let Some(bounds) = layer.bounds() {
+    for i in 0..doc.layers.len() {
+        if let Some(bounds) = doc.layer_bounds(i) {
             doc.board.width_mm = doc.board.width_mm.max(bounds.x1);
             doc.board.height_mm = doc.board.height_mm.max(bounds.y1);
         }
@@ -499,6 +515,12 @@ mod tests_group_walk {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use stencilcraft_doc::Shape as DocShape;
+
+    /// The `i`-th member shape of `layer` in `doc`.
+    fn member(doc: &Document, layer: usize, i: usize) -> &DocShape {
+        doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
     use craft_svg::paths::{
         MAX_CSS_BYTES, MAX_SVG_BYTES, MAX_SVG_DEPTH, MAX_SVG_NODES, MAX_SVG_WARNINGS,
     };
@@ -529,8 +551,7 @@ mod tests {
     #[test]
     fn export_shapes_as_paths() {
         let mut doc = Document::default();
-        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0), CutStyle::Cut)
-            .unwrap();
+        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0)).unwrap();
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(svg.contains("class=\"stencilcraft-cut\""));
@@ -539,11 +560,9 @@ mod tests {
     #[test]
     fn hidden_shapes_are_not_exported() {
         let mut doc = Document::default();
-        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0), CutStyle::Cut)
-            .unwrap();
-        doc.push_shape(0, rect(50.0, 50.0, 5.0, 5.0), CutStyle::Cut)
-            .unwrap();
-        doc.layers[0].shapes[1].hidden = true;
+        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0)).unwrap();
+        doc.push_shape(0, rect(50.0, 50.0, 5.0, 5.0)).unwrap();
+        doc.get_shape_mut(doc.layers[0].members[1]).unwrap().hidden = true;
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(!svg.contains("d=\"M50"), "{svg}");
@@ -558,8 +577,9 @@ mod tests {
             ..Document::default()
         };
         doc.layers.clear();
-        doc.layers.push(stencilcraft_doc::Layer::new("cut", style));
-        doc.push_shape(0, rect(0.0, 0.0, w, h), style).unwrap();
+        doc.layers
+            .push(stencilcraft_doc::Layer::new("cut", op_of(style)));
+        doc.push_shape(0, rect(0.0, 0.0, w, h)).unwrap();
         doc
     }
 
@@ -667,14 +687,13 @@ mod tests {
     #[test]
     fn import_roundtrips_path_data() {
         let mut doc = Document::default();
-        doc.push_shape(0, rect(0.0, 0.0, 30.0, 40.0), CutStyle::Cut)
-            .unwrap();
+        doc.push_shape(0, rect(0.0, 0.0, 30.0, 40.0)).unwrap();
         let svg = export(&doc).unwrap();
         let back = import(&svg, "test.svg").unwrap();
         assert_eq!(back.shape_count(), 1);
         assert_eq!(
-            back.layers[0].shapes[0].path.to_svg(),
-            doc.layers[0].shapes[0].path.to_svg()
+            member(&back, 0, 0).path.to_svg(),
+            member(&doc, 0, 0).path.to_svg()
         );
     }
 
@@ -718,8 +737,8 @@ mod tests {
         </svg>"#;
         let doc = import(svg, "shapes.svg").unwrap();
         assert_eq!(doc.shape_count(), 7);
-        assert!(doc.layers[0].shapes[0].path.elements().len() >= 5);
-        assert!(doc.layers[0].shapes[1].path.elements().len() >= 6);
+        assert!(member(&doc, 0, 0).path.elements().len() >= 5);
+        assert!(member(&doc, 0, 1).path.elements().len() >= 6);
     }
 
     #[test]
@@ -734,8 +753,11 @@ mod tests {
         let doc = import(svg, "groups.svg").unwrap();
         assert_eq!(doc.shape_count(), 1);
         assert_eq!(doc.layers.len(), 2);
-        assert_eq!(doc.layers[1].kind, CutStyle::Engrave);
-        let b = doc.layers[1].shapes[0].bounds().unwrap();
+        assert!(matches!(
+            doc.layers[1].operation,
+            Some(Operation::Engrave(_))
+        ));
+        let b = member(&doc, 1, 0).bounds().unwrap();
         assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 6.0).abs() < 1e-9, "{b:?}");
@@ -759,21 +781,24 @@ mod tests {
         </svg>"##;
         let doc = import(svg, "use.svg").unwrap();
         assert_eq!(doc.shape_count(), 3);
-        assert_eq!(doc.layers[0].shapes.len(), 0);
-        assert_eq!(doc.layers[1].shapes.len(), 3);
-        let first = doc.layers[1].shapes[0].bounds().unwrap();
+        assert_eq!(doc.layers[0].members.len(), 0);
+        assert_eq!(doc.layers[1].members.len(), 3);
+        let first = member(&doc, 1, 0).bounds().unwrap();
         assert!((first.x0 - 17.0).abs() < 1e-9, "{first:?}");
         assert!((first.y0 - 24.0).abs() < 1e-9, "{first:?}");
         assert!((first.width() - 6.0).abs() < 1e-9, "{first:?}");
-        let second = doc.layers[1].shapes[1].bounds().unwrap();
+        let second = member(&doc, 1, 1).bounds().unwrap();
         assert!((second.x0 - 32.0).abs() < 1e-9, "{second:?}");
         assert!((second.y0 - 9.0).abs() < 1e-9, "{second:?}");
-        let badge = doc.layers[1].shapes[2].bounds().unwrap();
+        let badge = member(&doc, 1, 2).bounds().unwrap();
         assert!((badge.x0 - 50.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.y0 - 20.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.width() - 40.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.height() - 20.0).abs() < 1e-9, "{badge:?}");
-        assert_eq!(doc.layers[1].shapes[2].style, CutStyle::Engrave);
+        assert!(matches!(
+            doc.layers[1].operation,
+            Some(Operation::Engrave(_))
+        ));
     }
 
     #[test]
@@ -807,7 +832,7 @@ mod tests {
         let doc = import(svg, "viewbox.svg").unwrap();
         assert_eq!(doc.board.width_mm, 200.0);
         assert_eq!(doc.board.height_mm, 100.0);
-        let b = doc.layers[0].shapes[0].bounds().unwrap();
+        let b = member(&doc, 0, 0).bounds().unwrap();
         assert!((b.x0 - 20.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 20.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 10.0).abs() < 1e-9, "{b:?}");
@@ -826,7 +851,7 @@ mod tests {
         let doc = import(svg, "style.svg").unwrap();
         assert_eq!(doc.shape_count(), 1);
         assert_eq!(doc.layers.len(), 2);
-        assert_eq!(doc.layers[1].shapes.len(), 1);
+        assert_eq!(doc.layers[1].members.len(), 1);
     }
 
     #[test]
@@ -848,8 +873,8 @@ mod tests {
         </svg>"##;
         let doc = import(svg, "css.svg").unwrap();
         assert_eq!(doc.shape_count(), 1);
-        assert_eq!(doc.layers[0].shapes.len(), 1);
-        assert_eq!(doc.layers[0].shapes[0].bounds().unwrap().x0, 3.0);
+        assert_eq!(doc.layers[0].members.len(), 1);
+        assert_eq!(member(&doc, 0, 0).bounds().unwrap().x0, 3.0);
         assert_eq!(doc.layers.len(), 1);
     }
 
@@ -914,7 +939,7 @@ mod tests {
         let doc = import(svg, "px.svg").unwrap();
         assert!((doc.board.width_mm - 25.4).abs() < 1e-9);
         assert!((doc.board.height_mm - 12.7).abs() < 1e-9);
-        let b = doc.layers[0].shapes[0].bounds().unwrap();
+        let b = member(&doc, 0, 0).bounds().unwrap();
         assert!((b.x0 - 10.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 8.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
     }
@@ -1000,18 +1025,18 @@ mod tests {
         assert_eq!(doc.shape_count(), 10);
         assert_eq!(doc.layers[0].name, "cut");
         assert_eq!(doc.layers[0].color, None);
-        assert_eq!(doc.layers[0].shapes.len(), 3);
+        assert_eq!(doc.layers[0].members.len(), 3);
         let red = layer(&doc, "Line #ff0000");
-        assert_eq!(red.shapes.len(), 3);
+        assert_eq!(red.members.len(), 3);
         assert_eq!(red.color.as_deref(), Some("#ff0000"));
-        assert_eq!(red.kind, CutStyle::Cut);
-        assert_eq!(layer(&doc, "Line #0000ff").shapes.len(), 1);
-        assert_eq!(layer(&doc, "Line #008000").shapes.len(), 1);
-        assert_eq!(layer(&doc, "Line #6495ed").shapes.len(), 1);
+        assert!(matches!(red.operation, Some(Operation::Cut(_))));
+        assert_eq!(layer(&doc, "Line #0000ff").members.len(), 1);
+        assert_eq!(layer(&doc, "Line #008000").members.len(), 1);
+        assert_eq!(layer(&doc, "Line #6495ed").members.len(), 1);
         let engrave = layer(&doc, "engrave #008000");
-        assert_eq!(engrave.kind, CutStyle::Engrave);
+        assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
         assert_eq!(engrave.color.as_deref(), Some("#008000"));
-        assert_eq!(engrave.shapes[0].style, CutStyle::Engrave);
+        assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
         // The same document comes through the strict import unchanged.
         assert_eq!(
             import(svg, "colours.svg").unwrap().layers.len(),
@@ -1023,7 +1048,7 @@ mod tests {
     fn unreadable_stroke_colour_warns_and_strict_import_refuses() {
         let svg = r#"<svg><rect id="odd" width="1" height="1" stroke="color(srgb 1 0 0)"/></svg>"#;
         let imported = lenient(svg);
-        assert_eq!(imported.document.layers[0].shapes.len(), 1);
+        assert_eq!(imported.document.layers[0].members.len(), 1);
         assert_eq!(imported.warnings.len(), 1);
         assert!(
             imported.warnings[0].contains("<rect id=\"odd\">"),
@@ -1036,7 +1061,8 @@ mod tests {
     fn bounds_of(doc: &Document) -> Vec<kurbo::Rect> {
         doc.layers
             .iter()
-            .flat_map(|layer| layer.shapes.iter())
+            .flat_map(|layer| layer.members.iter())
+            .filter_map(|id| doc.get_shape(*id))
             .map(|shape| shape.bounds().unwrap())
             .collect()
     }
@@ -1078,7 +1104,7 @@ mod tests {
         // The clip region lives in the referencing element's user space.
         assert!(near(bounds[4], (0.0, 60.0, 10.0, 80.0)), "{bounds:?}");
         // The clipped closed shape stays closed (a cut contour, not an open run).
-        let first = &imported.document.layers[0].shapes[0].path;
+        let first = &member(&imported.document, 0, 0).path;
         assert!(matches!(
             first.elements().last(),
             Some(kurbo::PathEl::ClosePath)
@@ -1156,7 +1182,7 @@ mod tests {
             .document
             .layers
             .iter()
-            .map(|layer| (layer.name.as_str(), layer.shapes.len()))
+            .map(|layer| (layer.name.as_str(), layer.members.len()))
             .collect();
         for n in 1..=10 {
             let name = format!("Line #{n:06x}");
@@ -1168,7 +1194,7 @@ mod tests {
             );
         }
         // Unmatched: the anchor, and the last-but-one `.keep` rect (excluded by :not).
-        assert_eq!(imported.document.layers[0].shapes.len(), 2);
+        assert_eq!(imported.document.layers[0].members.len(), 2);
     }
 
     #[test]
@@ -1190,7 +1216,7 @@ mod tests {
         assert!(warnings.contains("rect:hover"), "{warnings}");
         assert!(warnings.contains("a::before"), "{warnings}");
         // The @media rule is not applied; the plain rule after it still is.
-        assert_eq!(layer(&imported.document, "Line #ff0000").shapes.len(), 1);
+        assert_eq!(layer(&imported.document, "Line #ff0000").members.len(), 1);
         assert!(import(svg, "media.svg").is_err());
         for broken in [
             "<svg><style>@media screen { rect { x: y; }</style></svg>",

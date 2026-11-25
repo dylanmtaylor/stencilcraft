@@ -298,7 +298,12 @@ pub fn layer_paths(doc: &Document) -> Vec<LayerPaths> {
             continue;
         }
         let mut paths = Vec::new();
-        for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
+        for shape in layer
+            .members
+            .iter()
+            .filter_map(|id| doc.get_shape(*id))
+            .filter(|shape| !shape.hidden)
+        {
             let polylines = geom::path_to_polylines(&shape.cut_path(), geom::DEFAULT_FLATTEN_STEPS);
             paths.extend(machine::paths_from_polylines(&polylines));
         }

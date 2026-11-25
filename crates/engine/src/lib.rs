@@ -28,7 +28,7 @@ use vectorcraft_geom::PathData as AnchorPath;
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::{CutStyle, Document, Operation};
 use stencilcraft_kerf::JoinStyle;
 use vectorcraft_engine::Session as VectorCraftSession;
 use vectorcraft_engine::doc::color::{Color, Paint};
@@ -229,9 +229,13 @@ pub enum Command {
         #[serde(default = "default_miter_limit")]
         miter_limit: f64,
     },
-    /// Add a layer with a name and a production kind.
+    /// Add a layer with a name and an optional operation (a plain add is operation-less).
     #[serde(rename = "layer.add")]
-    LayerAdd { name: String, kind: CutStyle },
+    LayerAdd {
+        name: String,
+        #[serde(default)]
+        operation: Option<Operation>,
+    },
     /// Set visibility of a layer by index.
     #[serde(rename = "layer.set-visible")]
     LayerSetVisible { index: usize, visible: bool },
@@ -548,6 +552,15 @@ pub enum Effect {
         visible: bool,
     },
     LayerRemoved {
+        index: usize,
+    },
+    /// A layer's membership changed (additive add or removal of member ids).
+    LayerMembersChanged {
+        layer: usize,
+        ids: Vec<u64>,
+    },
+    /// A layer's operation was set or cleared.
+    LayerOperationChanged {
         index: usize,
     },
     KerfSet {
@@ -1053,46 +1066,16 @@ impl Engine {
                         )));
                     }
                 }
-                let target_layer = self
-                    .doc
-                    .layers
-                    .iter()
-                    .rposition(|l| l.kind == style)
-                    .unwrap_or_else(|| {
-                        let name = match style {
-                            CutStyle::Cut => "cut",
-                            CutStyle::Engrave => "engrave",
-                        };
-                        self.doc
-                            .layers
-                            .push(stencilcraft_doc::Layer::new(name, style));
-                        self.doc.layers.len() - 1
-                    });
-                let requested: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
-                let mut moved = Vec::new();
-                for (li, layer) in self.doc.layers.iter_mut().enumerate() {
-                    if li == target_layer || layer.kind == style {
-                        for shape in &mut layer.shapes {
-                            if requested.contains(&shape.id) {
-                                shape.style = style;
-                            }
-                        }
-                    } else {
-                        let mut kept = Vec::with_capacity(layer.shapes.len());
-                        for mut shape in layer.shapes.drain(..) {
-                            if requested.contains(&shape.id) {
-                                shape.style = style;
-                                moved.push(shape);
-                            } else {
-                                kept.push(shape);
-                            }
-                        }
-                        layer.shapes = kept;
-                    }
+                // Legacy CutStyle input mapped to the owning layer's operation (D-16):
+                // the shapes leave every operation layer and join the target one.
+                let operation = document::op_of_style(style).ok_or_else(|| {
+                    EngineError::Invalid("shapes.set-style: unknown style".to_string())
+                })?;
+                for li in 0..self.doc.layers.len() {
+                    document::remove_members(&mut self.doc, li, &ids);
                 }
-                if let Some(layer) = self.doc.layers.get_mut(target_layer) {
-                    layer.shapes.extend(moved);
-                }
+                let target_layer = document::ensure_operation_layer(&mut self.doc, operation);
+                document::add_members(&mut self.doc, target_layer, &ids);
                 Ok(Effect::ShapesStyled { ids })
             }
             Command::ShapeAddPaths { shapes } => {
@@ -1140,7 +1123,7 @@ impl Engine {
                 let ordered_ids: Vec<u64> = self
                     .doc
                     .shapes()
-                    .filter_map(|(_, shape)| requested.contains(&shape.id).then_some(shape.id))
+                    .filter_map(|shape| requested.contains(&shape.id).then_some(shape.id))
                     .collect();
                 if ordered_ids.len() != ids.len() {
                     let missing = ids
@@ -1294,13 +1277,17 @@ impl Engine {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.add_replicas(&outlines, &[kurbo::Affine::IDENTITY], C)
             }
-            Command::LayerAdd { name, kind } => {
+            Command::LayerAdd { name, operation } => {
                 if name.trim().is_empty() {
                     return Err(EngineError::Invalid(
                         "layer.add: name cannot be empty".to_string(),
                     ));
                 }
-                self.add_vector_layer(&name, kind, "layer.add")?;
+                if let Some(op) = &operation {
+                    op.validate()
+                        .map_err(|e| EngineError::Invalid(format!("layer.add: {e}")))?;
+                }
+                self.add_vector_layer(&name, operation, "layer.add")?;
                 Ok(Effect::LayerAdded)
             }
             Command::LayerSetVisible { index, visible } => {
@@ -1375,7 +1362,7 @@ impl Engine {
                         height_mm,
                     },
                     kerf: self.doc.kerf.clone(),
-                    layers: vec![stencilcraft_doc::Layer::new("cut", CutStyle::Cut)],
+                    layers: vec![stencilcraft_doc::Layer::new("base", None)],
                     next_shape_id: 1,
                     ..Document::default()
                 };
@@ -1548,7 +1535,7 @@ impl Engine {
             Command::QueryNodeCount { ids } => {
                 let mut total = NodeCount::default();
                 if ids.is_empty() {
-                    for (_, shape) in self.doc.shapes() {
+                    for shape in self.doc.shapes() {
                         path_edit::count(&AnchorPath::from_bezpath(&shape.path), &mut total);
                     }
                 } else {
@@ -1581,7 +1568,8 @@ impl Engine {
                 let ids = self
                     .selectable_shapes()
                     .filter(|shape| {
-                        shape.style == reference.style
+                        document::style_of_shape(&self.doc, shape.id)
+                            == document::style_of_shape(&self.doc, reference.id)
                             && (!fill || filled(&shape.path) == filled(&reference.path))
                     })
                     .map(|shape| shape.id)
@@ -1611,7 +1599,8 @@ impl Engine {
             .layers
             .iter()
             .filter(|layer| layer.visible && !layer.locked)
-            .flat_map(|layer| &layer.shapes)
+            .flat_map(|layer| layer.members.iter())
+            .filter_map(|id| self.doc.get_shape(*id))
             .filter(|shape| !shape.hidden && !shape.locked)
     }
 
@@ -1715,8 +1704,9 @@ impl Engine {
             rest.subpaths.remove(b_contour);
             if rest.subpaths.is_empty() {
                 for layer in &mut self.doc.layers {
-                    layer.shapes.retain(|shape| shape.id != b);
+                    layer.members.retain(|m| *m != b);
                 }
+                self.doc.shapes.retain(|s| s.id != b);
             } else if let Some(shape) = self.doc.get_shape_mut(b) {
                 shape.path = rest.to_bezpath();
             }
@@ -1743,8 +1733,8 @@ impl Engine {
         let ordered: Vec<(u64, BezPath)> = self
             .doc
             .shapes()
-            .filter(|(_, shape)| requested.contains(&shape.id))
-            .map(|(_, shape)| (shape.id, shape.path.clone()))
+            .filter(|shape| requested.contains(&shape.id))
+            .map(|shape| (shape.id, shape.path.clone()))
             .collect();
         let Some(&(base, _)) = ordered.first() else {
             return Err(EngineError::Invalid(format!("{NAME}: nothing selected")));
@@ -1755,9 +1745,12 @@ impl Engine {
         }
         for layer in &mut self.doc.layers {
             layer
-                .shapes
-                .retain(|shape| shape.id == base || !requested.contains(&shape.id));
+                .members
+                .retain(|m| *m == base || !requested.contains(m));
         }
+        self.doc
+            .shapes
+            .retain(|s| s.id == base || !requested.contains(&s.id));
         if let Some(shape) = self.doc.get_shape_mut(base) {
             shape.path = combined;
         }
@@ -1802,26 +1795,35 @@ impl Engine {
         let (layer, si) = self
             .doc
             .layers
-            .iter_mut()
-            .find_map(|l| {
-                let si = l.shapes.iter().position(|s| s.id == id)?;
-                Some((l, si))
+            .iter()
+            .enumerate()
+            .find_map(|(li, l)| {
+                let si = l.members.iter().position(|m| *m == id)?;
+                Some((li, si))
             })
             .ok_or_else(|| EngineError::Invalid(format!("no shape has id {id}")))?;
+        let shape_index = self
+            .doc
+            .shapes
+            .iter()
+            .position(|s| s.id == id)
+            .ok_or_else(|| EngineError::Invalid(format!("no shape has id {id}")))?;
         let mut paths = paths.into_iter();
-        let (Some(first), Some(template)) = (paths.next(), layer.shapes.get_mut(si)) else {
+        let Some(first) = paths.next() else {
             return Err(EngineError::Internal(format!(
                 "shape {id}: nothing to replace it with"
             )));
         };
-        template.path = first;
+        let template = self.doc.shapes[shape_index].clone();
+        self.doc.shapes[shape_index].path = first;
         // The pieces are no longer the laid-out text.
-        template.text = None;
-        let template = template.clone();
+        self.doc.shapes[shape_index].text = None;
         let mut ids = vec![id];
         let mut extra = Vec::new();
+        let mut extra_members = Vec::new();
         for path in paths {
             ids.push(next_id);
+            extra_members.push(next_id);
             extra.push(stencilcraft_doc::Shape {
                 id: next_id,
                 path,
@@ -1831,7 +1833,12 @@ impl Engine {
                 .checked_add(1)
                 .ok_or_else(|| EngineError::Internal("shape ids exhausted".to_string()))?;
         }
-        layer.shapes.splice(si + 1..si + 1, extra);
+        self.doc
+            .shapes
+            .splice(shape_index + 1..shape_index + 1, extra);
+        if let Some(layer) = self.doc.layers.get_mut(layer) {
+            layer.members.splice(si + 1..si + 1, extra_members);
+        }
         self.doc.next_shape_id = next_id;
         Ok(ids)
     }
@@ -1872,20 +1879,19 @@ impl Engine {
             image.height_mm / f64::from(image.height_px),
         );
         let map = |p: kurbo::Point| kurbo::Point::new(image.x_mm + p.x * sx, image.y_mm + p.y * sy);
+        let operation = document::op_of_style(style)
+            .ok_or_else(|| EngineError::Invalid("image.trace: unknown style".to_string()))?;
         let layer = match self
             .doc
             .layers
             .iter()
-            .rposition(|layer| layer.kind == style)
+            .rposition(|layer| layer.operation.as_ref() == Some(&operation))
         {
             Some(index) => index,
             None => {
                 self.doc.layers.push(stencilcraft_doc::Layer::new(
-                    match style {
-                        CutStyle::Cut => "cut",
-                        CutStyle::Engrave => "engrave",
-                    },
-                    style,
+                    operation.kind_name(),
+                    Some(operation),
                 ));
                 self.doc.layers.len() - 1
             }
@@ -1893,7 +1899,7 @@ impl Engine {
         let mut ids = Vec::with_capacity(traced.contours.len());
         for contour in &traced.contours {
             let path = stencilcraft_raster::contour_path(contour, options.corner_threshold, map);
-            ids.push(self.doc.push_shape(layer, path, style)?.id);
+            ids.push(self.doc.push_shape(layer, path)?.id);
         }
         if let Some(detached) = traced.detached {
             let replaced = stencilcraft_raster::with_pixels(&image, &detached)
@@ -1959,7 +1965,7 @@ impl Engine {
                     .doc
                     .shapes()
                     .enumerate()
-                    .map(|(index, (_, shape))| (shape.id, index))
+                    .map(|(index, shape)| (shape.id, index))
                     .collect();
                 let a_is_front = ids.first().zip(ids.get(1)).is_some_and(|(a, b)| {
                     paint_order
@@ -2005,7 +2011,7 @@ impl Engine {
         let result_ids = self
             .doc
             .shapes()
-            .filter_map(|(_, shape)| {
+            .filter_map(|shape| {
                 (shape.id >= first_new_shape_id && !unique_ids.contains(&shape.id))
                     .then_some(shape.id)
             })
@@ -2092,8 +2098,13 @@ impl Engine {
         let shapes = self
             .doc
             .shapes()
-            .filter(|(_, shape)| requested.contains(&shape.id))
-            .map(|(_, shape)| (shape.path.clone(), shape.style))
+            .filter(|shape| requested.contains(&shape.id))
+            .map(|shape| {
+                (
+                    shape.path.clone(),
+                    document::style_of_shape(&self.doc, shape.id),
+                )
+            })
             .collect::<Vec<_>>();
         if shapes.len() != ids.len() {
             let missing = ids
@@ -2127,7 +2138,7 @@ impl Engine {
         let ordered_ids = self
             .doc
             .shapes()
-            .filter_map(|(_, shape)| ids.contains(&shape.id).then_some(shape.id))
+            .filter_map(|shape| ids.contains(&shape.id).then_some(shape.id))
             .collect::<Vec<_>>();
         let node_ids = ordered_ids
             .iter()
@@ -2281,7 +2292,7 @@ impl Engine {
     fn add_vector_layer(
         &mut self,
         name: &str,
-        kind: CutStyle,
+        operation: Option<Operation>,
         command: &str,
     ) -> Result<(), EngineError> {
         let created = self
@@ -2309,7 +2320,7 @@ impl Engine {
         }
         self.doc
             .layers
-            .insert(position, stencilcraft_doc::Layer::new(name, kind));
+            .insert(position, stencilcraft_doc::Layer::new(name, operation));
         self.layer_nodes.insert(position, NodeId(node_id));
         for layer_index in self.node_layers.values_mut() {
             if *layer_index >= position {
@@ -2331,11 +2342,15 @@ impl Engine {
         let first_shape_id = self.doc.next_shape_id;
         let mut node_ids = Vec::with_capacity(shapes.len());
         for (path, style) in shapes.iter().rev() {
+            let operation = document::op_of_style(*style)
+                .ok_or_else(|| EngineError::Internal(format!("{command}: unknown style")))?;
             let layer_index = self
                 .doc
                 .layers
                 .iter()
-                .rposition(|layer| layer.kind == *style && layer.takes_new_shapes())
+                .rposition(|layer| {
+                    layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
+                })
                 .ok_or_else(|| EngineError::Internal(format!("{command}: missing style layer")))?;
             let layer_id = self.layer_nodes.get(layer_index).copied().ok_or_else(|| {
                 EngineError::Internal(format!("{command}: missing VectorCraft layer mapping"))
@@ -2372,33 +2387,74 @@ impl Engine {
                 remapped_shapes.remove(old_id);
             }
         }
-        for (offset, (node_id, (path, _))) in node_ids.iter().zip(shapes.iter()).enumerate() {
-            let old_id = self.node_shapes.get(&node_id.0).copied().ok_or_else(|| {
-                EngineError::Internal(format!("{command}: created path was not synchronized"))
-            })?;
+        // Rename old ids to first_shape_id + offset in two phases so overlapping
+        // old/new id ranges cannot collide mid-rename.
+        const PHASE: u64 = 1 << 62;
+        let renames: Vec<(u64, u64, &BezPath)> = node_ids
+            .iter()
+            .zip(shapes.iter())
+            .enumerate()
+            .map(|(offset, (node_id, (path, _)))| {
+                let old_id = self.node_shapes.get(&node_id.0).copied().ok_or_else(|| {
+                    EngineError::Internal(format!("{command}: created path was not synchronized"))
+                })?;
+                Ok((old_id, first_shape_id + offset as u64, path))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+        for (old_id, new_id, path) in &renames {
             let shape = self
                 .doc
-                .layers
+                .shapes
                 .iter_mut()
-                .flat_map(|layer| &mut layer.shapes)
-                .find(|shape| shape.id == old_id)
+                .find(|shape| shape.id == *old_id)
                 .ok_or_else(|| {
                     EngineError::Internal(format!(
                         "{command}: synchronized shape {old_id} is missing"
                     ))
                 })?;
-            let id = first_shape_id + offset as u64;
-            shape.id = id;
-            shape.path = path.clone();
-            remapped_shapes.insert(id, node_id.0);
+            shape.id = PHASE + new_id;
+            shape.path = (*path).clone();
+        }
+        for (old_id, new_id, _) in &renames {
+            for layer in &mut self.doc.layers {
+                for m in &mut layer.members {
+                    if *m == *old_id {
+                        *m = PHASE + new_id;
+                    }
+                }
+            }
+        }
+        for shape in &mut self.doc.shapes {
+            if shape.id >= PHASE {
+                shape.id -= PHASE;
+            }
+        }
+        for layer in &mut self.doc.layers {
+            for m in &mut layer.members {
+                if *m >= PHASE {
+                    *m -= PHASE;
+                }
+            }
+        }
+        for (offset, (node_id, _)) in node_ids.iter().zip(shapes.iter()).enumerate() {
+            remapped_shapes.insert(first_shape_id + offset as u64, node_id.0);
         }
         self.shape_nodes = remapped_shapes.clone();
         self.node_shapes = remapped_shapes
             .into_iter()
             .map(|(shape_id, node_id)| (node_id, shape_id))
             .collect();
+        let order: std::collections::BTreeMap<u64, usize> = self
+            .doc
+            .shapes
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.id, i))
+            .collect();
         for layer in &mut self.doc.layers {
-            layer.shapes.sort_by_key(|shape| shape.id);
+            layer
+                .members
+                .sort_by_key(|id| order.get(id).copied().unwrap_or(usize::MAX));
         }
         node_ids
             .into_iter()
@@ -2439,12 +2495,15 @@ impl Engine {
         for (layer_index, layer) in self.doc.layers.iter().enumerate() {
             let layer_id = vdoc.add_layer(Some(&layer.name));
             self.layer_nodes.push(layer_id);
-            let mut layer_children = Vec::with_capacity(layer.shapes.len());
-            for shape in &layer.shapes {
+            let mut layer_children = Vec::with_capacity(layer.members.len());
+            for member in &layer.members {
+                let Some(shape) = self.doc.get_shape(*member) else {
+                    continue;
+                };
                 let node_id = vdoc.alloc_id();
-                let fill = FillLayer::new(Paint::solid(match shape.style {
-                    CutStyle::Cut => Color::BLACK,
-                    CutStyle::Engrave => Color::rgb8(0xc0, 0x20, 0x20),
+                let fill = FillLayer::new(Paint::solid(match layer.operation.as_ref() {
+                    Some(Operation::Engrave(_)) => Color::rgb8(0xc0, 0x20, 0x20),
+                    _ => Color::BLACK,
                 }));
                 let path = transform_path(&shape.path, kurbo::Affine::scale(POINTS_PER_MM));
                 let mut node = Node::path(
@@ -2487,21 +2546,17 @@ impl Engine {
         let old_shapes: BTreeMap<u64, stencilcraft_doc::Shape> = self
             .doc
             .shapes()
-            .map(|(_, shape)| (shape.id, shape.clone()))
+            .map(|shape| (shape.id, shape.clone()))
             .collect();
         let mut updated = self.doc.clone();
         for layer in &mut updated.layers {
-            layer.shapes.clear();
+            layer.members.clear();
         }
+        updated.shapes.clear();
         let mut active_nodes = BTreeMap::new();
         let mut new_shapes = Vec::with_capacity(paths.len());
         for (node_id, path, layer_index, inferred_style, source_name) in paths {
             let existing_shape_id = self.node_shapes.get(&node_id.0).copied();
-            let source_style = source_name
-                .as_deref()
-                .and_then(|name| name.strip_prefix("shape-"))
-                .and_then(|id| id.parse::<u64>().ok())
-                .and_then(|id| old_shapes.get(&id).map(|shape| shape.style));
             let source_shape = source_name
                 .as_deref()
                 .and_then(|name| name.strip_prefix("shape-"))
@@ -2509,15 +2564,13 @@ impl Engine {
                 .and_then(|id| old_shapes.get(&id))
                 .or_else(|| existing_shape_id.and_then(|id| old_shapes.get(&id)));
             let flags = source_shape.map_or((false, false), |shape| (shape.hidden, shape.locked));
-            let tool = source_shape.and_then(|shape| shape.tool.clone());
             let production = source_shape
                 .map(|shape| shape.production.clone())
                 .unwrap_or_default();
-            let style = source_style
-                .or_else(|| {
-                    existing_shape_id.and_then(|id| old_shapes.get(&id).map(|shape| shape.style))
-                })
+            let style = source_shape
+                .map(|shape| document::style_of_shape(&self.doc, shape.id))
                 .unwrap_or(inferred_style);
+            let operation = document::op_of_style(style);
             let shape_id =
                 if let Some(id) = existing_shape_id.filter(|id| old_shapes.contains_key(id)) {
                     id
@@ -2532,16 +2585,21 @@ impl Engine {
             let target_layer = updated
                 .layers
                 .get(layer_index)
-                .filter(|layer| layer.kind == style)
+                .filter(|layer| layer.operation == operation || layer.operation.is_none())
                 .map(|_| layer_index)
-                .or_else(|| updated.layers.iter().rposition(|layer| layer.kind == style))
+                .or_else(|| {
+                    updated
+                        .layers
+                        .iter()
+                        .rposition(|layer| layer.operation == operation)
+                })
                 .unwrap_or_else(|| {
                     updated.layers.push(stencilcraft_doc::Layer::new(
                         match style {
                             CutStyle::Cut => "cut",
                             CutStyle::Engrave => "engrave",
                         },
-                        style,
+                        operation,
                     ));
                     updated.layers.len() - 1
                 });
@@ -2550,14 +2608,12 @@ impl Engine {
                 stencilcraft_doc::Shape {
                     hidden: flags.0,
                     locked: flags.1,
-                    tool,
                     production,
                     id: shape_id,
                     path: snap_mm_path(&transform_path(
                         &path,
                         kurbo::Affine::scale(1.0 / POINTS_PER_MM),
                     )),
-                    style,
                     // Live text rides along; `text.edit` works out the edit made since.
                     text: source_shape.and_then(|shape| shape.text.clone()),
                 },
@@ -2566,7 +2622,9 @@ impl Engine {
             self.node_shapes.insert(node_id.0, shape_id);
         }
         for (layer_index, shape) in new_shapes {
-            updated.layers[layer_index].shapes.push(shape);
+            let id = shape.id;
+            document::add_members(&mut updated, layer_index, &[id]);
+            updated.shapes.push(shape);
         }
         self.shape_nodes = active_nodes
             .iter()
@@ -2578,8 +2636,8 @@ impl Engine {
             .collect();
         self.node_layers.clear();
         for (layer_index, layer) in updated.layers.iter().enumerate() {
-            for shape in &layer.shapes {
-                if let Some(node_id) = self.shape_nodes.get(&shape.id) {
+            for member in &layer.members {
+                if let Some(node_id) = self.shape_nodes.get(member) {
                     self.node_layers.insert(*node_id, layer_index);
                 }
             }
@@ -2593,23 +2651,21 @@ impl Engine {
         style: CutStyle,
         command: &str,
     ) -> Result<usize, EngineError> {
-        if let Some(index) = self
-            .doc
-            .layers
-            .iter()
-            .rposition(|layer| layer.kind == style && layer.takes_new_shapes())
-        {
+        let operation = document::op_of_style(style)
+            .ok_or_else(|| EngineError::Internal(format!("{command}: unknown style")))?;
+        if let Some(index) = self.doc.layers.iter().rposition(|layer| {
+            layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
+        }) {
             return Ok(index);
         }
-        let name = match style {
-            CutStyle::Cut => "cut",
-            CutStyle::Engrave => "engrave",
-        };
-        self.add_vector_layer(name, style, command)?;
+        let name = operation.kind_name();
+        self.add_vector_layer(name, Some(operation.clone()), command)?;
         self.doc
             .layers
             .iter()
-            .rposition(|layer| layer.kind == style && layer.takes_new_shapes())
+            .rposition(|layer| {
+                layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
+            })
             .ok_or_else(|| EngineError::Internal(format!("{command}: missing new style layer")))
     }
 
@@ -2999,8 +3055,14 @@ mod tests {
         assert_eq!(engine.doc.shape_count(), 4);
         assert_eq!(engine.doc.get_shape(3).unwrap().path, first);
         assert_eq!(engine.doc.get_shape(4).unwrap().path, second);
-        assert_eq!(engine.doc.get_shape(3).unwrap().style, CutStyle::Cut);
-        assert_eq!(engine.doc.get_shape(4).unwrap().style, CutStyle::Engrave);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 3),
+            CutStyle::Cut
+        );
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 4),
+            CutStyle::Engrave
+        );
         assert!(engine.undo());
         assert_eq!(engine.doc.shape_count(), 2);
         assert!(engine.redo());
@@ -3117,9 +3179,15 @@ mod tests {
                 style: CutStyle::Engrave,
             })
             .unwrap();
-        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Engrave);
-        assert_eq!(engine.doc.layers[0].kind, CutStyle::Cut);
-        assert_eq!(engine.doc.layers[1].kind, CutStyle::Engrave);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 1),
+            CutStyle::Engrave
+        );
+        assert_eq!(engine.doc.layers[0].operation, None);
+        assert_eq!(
+            engine.doc.layers[1].operation,
+            super::document::op_of_style(CutStyle::Engrave)
+        );
         assert!(engine.undo());
         assert_eq!(engine.doc.shape_count(), 0);
     }
@@ -3140,13 +3208,19 @@ mod tests {
 
         assert_eq!(engine.doc.get_shape(1).unwrap().path, first);
         assert_eq!(engine.doc.get_shape(2).unwrap().path, second);
-        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Cut);
-        assert_eq!(engine.doc.get_shape(2).unwrap().style, CutStyle::Engrave);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 1),
+            CutStyle::Cut
+        );
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 2),
+            CutStyle::Engrave
+        );
         assert_eq!(
             engine
                 .doc
                 .shapes()
-                .map(|(_, shape)| shape.id)
+                .map(|shape| shape.id)
                 .collect::<Vec<_>>(),
             vec![1, 2]
         );
@@ -3172,7 +3246,7 @@ mod tests {
         assert_eq!(engine.doc.shape_count(), 2);
         assert!(engine.undo());
         assert_eq!(engine.doc.shape_count(), 1);
-        assert_eq!(engine.doc.layers.len(), 1);
+        assert_eq!(engine.doc.layers.len(), 2);
         assert!(engine.redo());
         assert_eq!(engine.doc.shape_count(), 2);
         engine
@@ -3268,7 +3342,10 @@ mod tests {
             })
             .unwrap();
         assert_eq!(reversed.doc.shape_count(), 1);
-        assert_eq!(reversed.doc.get_shape(3).unwrap().style, CutStyle::Engrave);
+        assert_eq!(
+            super::document::style_of_shape(&reversed.doc, 3),
+            CutStyle::Engrave
+        );
         assert_eq!(
             reversed.doc.get_shape(3).unwrap().bounds(),
             Some(kurbo::Rect::new(20.0, 0.0, 30.0, 20.0))
@@ -3294,7 +3371,10 @@ mod tests {
             .unwrap();
         assert_eq!(engine.doc.shape_count(), 1);
         let result = engine.doc.get_shape(3).unwrap();
-        assert_eq!(result.style, CutStyle::Cut);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, result.id),
+            CutStyle::Cut
+        );
         assert_eq!(
             result.bounds(),
             Some(kurbo::Rect::new(0.0, 0.0, 10.0, 20.0))
@@ -3705,7 +3785,7 @@ mod tests {
         assert!(engine.redo());
         assert_eq!(engine.doc, branch);
         assert!(!engine.redo());
-        let id = branch.shapes().next().unwrap().1.id;
+        let id = branch.shapes().next().unwrap().id;
         engine
             .run(Command::ShapeMove {
                 id,
@@ -3977,7 +4057,10 @@ mod tests {
             ));
         }
         assert_eq!(engine.doc.shape_count(), 3);
-        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Cut);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 1),
+            CutStyle::Cut
+        );
         assert_eq!(
             engine.doc.get_shape(1).unwrap().bounds(),
             Some(kurbo::Rect::new(5.0, 8.0, 17.0, 14.0))
@@ -4069,7 +4152,7 @@ mod tests {
         assert!(matches!(
             engine.run(Command::LayerAdd {
                 name: "  ".to_string(),
-                kind: CutStyle::Cut
+                operation: None
             }),
             Err(EngineError::Invalid(_))
         ));
@@ -4138,8 +4221,11 @@ mod tests {
                 style: CutStyle::Engrave,
             })
             .unwrap();
-        assert_eq!(engine.doc.get_shape(1).unwrap().style, CutStyle::Engrave);
-        assert_eq!(engine.doc.layers.len(), 2);
+        assert_eq!(
+            super::document::style_of_shape(&engine.doc, 1),
+            CutStyle::Engrave
+        );
+        assert_eq!(engine.doc.layers.len(), 3);
 
         engine
             .run(Command::LayerSetVisible {
@@ -4150,6 +4236,9 @@ mod tests {
         assert!(!engine.doc.layers[1].visible);
 
         engine.run(Command::LayerRemove { index: 0 }).unwrap();
+        assert_eq!(engine.doc.layers.len(), 2);
+        // Two layers remain, so removing another one is allowed.
+        assert!(engine.run(Command::LayerRemove { index: 0 }).is_ok());
         assert_eq!(engine.doc.layers.len(), 1);
         assert!(engine.run(Command::LayerRemove { index: 0 }).is_err());
 
@@ -4348,7 +4437,7 @@ mod tests {
         let all = engine
             .doc
             .shapes()
-            .filter_map(|(_, shape)| shape.bounds())
+            .filter_map(|shape| shape.bounds())
             .reduce(|a, b| a.union(b))
             .unwrap();
         assert_rect(all, (0.0, 0.0, 200.0, 100.0));

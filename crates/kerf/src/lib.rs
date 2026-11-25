@@ -13,7 +13,7 @@
 
 use kurbo::Point;
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{CutStyle, Document};
+use stencilcraft_doc::{Document, Operation};
 use stencilcraft_geom::{Polyline, signed_area};
 
 #[derive(Debug, thiserror::Error)]
@@ -225,12 +225,15 @@ pub fn apply_with(doc: &Document, options: &OffsetOptions) -> Result<Document, K
     }
     let delta = doc.kerf.width_mm / 2.0;
     let mut out = doc.clone();
-    for layer in &mut out.layers {
-        for shape in &mut layer.shapes {
-            if shape.style != CutStyle::Cut {
-                continue;
+    for li in 0..out.layers.len() {
+        if !matches!(out.layers[li].operation, Some(Operation::Cut(_))) {
+            continue;
+        }
+        let members = out.layers[li].members.clone();
+        for id in members {
+            if let Some(shape) = out.get_shape_mut(id) {
+                shape.path = offset_shape_path(&shape.path, delta, options)?;
             }
-            shape.path = offset_shape_path(&shape.path, delta, options)?;
         }
     }
     Ok(out)
@@ -337,8 +340,24 @@ fn in_ring(p: &Point, ring: &[Point]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stencilcraft_doc::{Board, KerfSettings, Layer};
+    use stencilcraft_doc::{Board, KerfSettings, Layer, OperationSettings};
     use stencilcraft_geom::bounds_of_points;
+
+    /// A cut layer carrying the document's only operation pass.
+    fn cut_layer() -> Layer {
+        Layer::new("cut", Some(Operation::Cut(OperationSettings::default())))
+    }
+
+    /// The `i`-th member shape of `layer` in `doc`.
+    fn member(doc: &Document, layer: usize, i: usize) -> &stencilcraft_doc::Shape {
+        doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
+
+    /// Mutable variant of [`member`].
+    fn member_mut(doc: &mut Document, layer: usize, i: usize) -> &mut stencilcraft_doc::Shape {
+        let id = doc.layers[layer].members[i];
+        doc.get_shape_mut(id).unwrap()
+    }
 
     fn square(size: f64) -> Vec<Point> {
         vec![
@@ -419,14 +438,14 @@ mod tests {
                 width_mm: 0.2,
                 apply_to_exports: false,
             },
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![cut_layer()],
             next_shape_id: 1,
             ..Document::default()
         };
-        doc.push_shape(0, ccw_path(50.0), CutStyle::Cut).unwrap();
+        doc.push_shape(0, ccw_path(50.0)).unwrap();
         let out = apply(&doc, 4.0).unwrap();
-        let before = doc.layers[0].shapes[0].bounds().unwrap();
-        let after = out.layers[0].shapes[0].bounds().unwrap();
+        let before = member(&doc, 0, 0).bounds().unwrap();
+        let after = member(&out, 0, 0).bounds().unwrap();
         assert!((after.width() - before.width() - 0.2).abs() < 1e-6);
         assert!((after.height() - before.height() - 0.2).abs() < 1e-6);
     }
@@ -434,11 +453,11 @@ mod tests {
     #[test]
     fn engrave_shapes_untouched() {
         let mut doc = Document::default();
-        doc.push_shape(0, ccw_path(50.0), CutStyle::Engrave)
-            .unwrap();
-        let original = doc.layers[0].shapes[0].path.clone();
+        doc.layers[0].operation = Some(Operation::Engrave(OperationSettings::default()));
+        doc.push_shape(0, ccw_path(50.0)).unwrap();
+        let original = member(&doc, 0, 0).path.clone();
         let out = apply(&doc, 4.0).unwrap();
-        assert_eq!(out.layers[0].shapes[0].path, original);
+        assert_eq!(member(&out, 0, 0).path, original);
     }
 
     #[test]
@@ -452,11 +471,11 @@ mod tests {
                 width_mm: 0.4,
                 apply_to_exports: true,
             },
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![cut_layer()],
             next_shape_id: 1,
             ..Document::default()
         };
-        doc.push_shape(0, ccw_path(100.0), CutStyle::Cut).unwrap();
+        doc.push_shape(0, ccw_path(100.0)).unwrap();
         let mut counter = kurbo::BezPath::new();
         counter.move_to(Point::new(30.0, 30.0));
         counter.line_to(Point::new(70.0, 30.0));
@@ -467,9 +486,9 @@ mod tests {
         // inner one must move into the scrap rather than enlarge the hole.
         let mut compound = ccw_path(100.0);
         compound.extend(counter.elements().iter().copied());
-        doc.layers[0].shapes[0].path = compound;
+        member_mut(&mut doc, 0, 0).path = compound;
         let compensated = apply(&doc, 4.0).unwrap();
-        let polylines = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        let polylines = Polyline::from_path(&member(&compensated, 0, 0).path);
         assert_eq!(polylines.len(), 2);
         let outer = bounds_of_points(&polylines[0].points).unwrap();
         let inner = bounds_of_points(&polylines[1].points).unwrap();
@@ -500,17 +519,17 @@ mod tests {
                 width_mm: 0.4,
                 apply_to_exports: true,
             },
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![cut_layer()],
             next_shape_id: 1,
             ..Document::default()
         };
         let mut compound = box_at(0.0, 0.0, 100.0, 100.0);
         compound.extend(box_at(20.0, 20.0, 80.0, 80.0).elements().iter().copied());
         compound.extend(box_at(40.0, 40.0, 60.0, 60.0).elements().iter().copied());
-        doc.push_shape(0, compound, CutStyle::Cut).unwrap();
+        doc.push_shape(0, compound).unwrap();
 
         let compensated = apply(&doc, 4.0).unwrap();
-        let polylines = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        let polylines = Polyline::from_path(&member(&compensated, 0, 0).path);
         assert_eq!(polylines.len(), 3);
         let widths: Vec<f64> = polylines
             .iter()
@@ -559,15 +578,15 @@ mod tests {
                 width_mm: kerf_mm,
                 apply_to_exports: kerf_mm > 0.0,
             },
-            layers: vec![Layer::new("cut", CutStyle::Cut)],
+            layers: vec![cut_layer()],
             next_shape_id: 1,
             ..Document::default()
         };
         let source = Polyline::from_path(&path);
         let source_perimeter = perimeter(&source[0].points);
-        doc.push_shape(0, path, CutStyle::Cut).unwrap();
+        doc.push_shape(0, path).unwrap();
         let compensated = apply(&doc, 4.0).unwrap();
-        let out = Polyline::from_path(&compensated.layers[0].shapes[0].path);
+        let out = Polyline::from_path(&member(&compensated, 0, 0).path);
         assert_eq!(out.len(), 1, "one closed contour in, one out");
         assert!(out[0].closed);
         for point in &out[0].points {
@@ -634,14 +653,13 @@ mod tests {
                         width_mm: 0.8,
                         apply_to_exports: true,
                     },
-                    layers: vec![Layer::new("cut", CutStyle::Cut)],
+                    layers: vec![cut_layer()],
                     next_shape_id: 1,
                     ..Document::default()
                 };
-                doc.push_shape(0, regular_polygon(sides, radius), CutStyle::Cut)
-                    .unwrap();
+                doc.push_shape(0, regular_polygon(sides, radius)).unwrap();
                 let out = apply(&doc, 4.0).unwrap();
-                Polyline::from_path(&out.layers[0].shapes[0].path)
+                Polyline::from_path(&member(&out, 0, 0).path)
             };
             assert_eq!(compensated[0].points.len(), sides, "no vertices invented");
             for point in &compensated[0].points {

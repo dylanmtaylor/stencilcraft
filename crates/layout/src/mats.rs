@@ -184,8 +184,15 @@ fn collect_pieces(doc: &Document) -> Vec<Piece> {
     let mut pieces: Vec<Piece> = Vec::new();
     let mut attach_index: BTreeMap<u64, usize> = BTreeMap::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
-        for shape in &layer.shapes {
-            if shape.hidden || shape.operation() == Operation::Guide {
+        let op = layer.operation.as_ref();
+        if matches!(op, Some(Operation::Guide)) {
+            continue;
+        }
+        for id in &layer.members {
+            let Some(shape) = doc.get_shape(*id) else {
+                continue;
+            };
+            if shape.hidden {
                 continue;
             }
             let path = shape.cut_path().into_owned();
@@ -195,15 +202,15 @@ fn collect_pieces(doc: &Document) -> Vec<Piece> {
             if path.elements().is_empty() {
                 continue;
             }
-            let printed = shape.operation() == Operation::PrintThenCut
+            let printed = matches!(op, Some(Operation::PrintThenCut(_)))
                 || shape
                     .production
                     .group
                     .as_ref()
                     .is_some_and(|g| g.kind == GroupKind::Flatten);
             let leads = !matches!(
-                shape.operation(),
-                Operation::Draw | Operation::Score | Operation::Engrave
+                op,
+                Some(Operation::Draw(_) | Operation::Score(_) | Operation::Engrave(_))
             );
             let key = MatKey {
                 print_then_cut: printed,
@@ -731,12 +738,11 @@ pub fn layout_mats(doc: &Document, options: &MatOptions) -> Result<MatLayout> {
 mod tests {
     use super::*;
     use crate::tests::rect;
-    use stencilcraft_doc::CutStyle;
 
     fn doc_with(rects: &[(f64, f64, f64, f64)]) -> Document {
         let mut doc = Document::default();
         for &(x, y, w, h) in rects {
-            doc.push_shape(0, rect(x, y, w, h), CutStyle::Cut).unwrap();
+            doc.push_shape(0, rect(x, y, w, h)).unwrap();
         }
         doc
     }
@@ -782,7 +788,7 @@ mod tests {
         let doc = doc_with(&[(500.0, 500.0, 40.0, 20.0)]);
         let layout = layout_mats(&doc, &MatOptions::default()).unwrap();
         let p = &layout.mats[0].placements[0];
-        let mapped = p.affine() * doc.layers[0].shapes[0].path.clone();
+        let mapped = p.affine() * crate::tests::member(&doc, 0, 0).path.clone();
         let b = stencilcraft_geom::bounds_of_shape(&mapped).unwrap();
         assert!((b.x0 - p.bounds[0]).abs() < 1e-6 && (b.y1 - p.bounds[3]).abs() < 1e-6);
         assert_eq!(p.bounds, [0.0, 0.0, 40.0, 20.0]);
@@ -828,7 +834,7 @@ mod tests {
         p.line_to((-5.0, 5.0));
         p.close_path();
         let mut doc = Document::default();
-        doc.push_shape(0, p, CutStyle::Cut).unwrap();
+        doc.push_shape(0, p).unwrap();
         let options = MatOptions {
             machine: "cricut-joy".to_string(),
             mat_free: true,
@@ -852,9 +858,18 @@ mod tests {
             (50.0, 50.0, 10.0, 10.0),
             (0.0, 0.0, 5.0, 5.0),
         ]);
-        doc.layers[0].shapes[0].production.attach = Some(1);
-        doc.layers[0].shapes[1].production.attach = Some(1);
-        doc.layers[0].shapes[2].production.material = Some("Everyday Iron-On".to_string());
+        doc.get_shape_mut(doc.layers[0].members[0])
+            .unwrap()
+            .production
+            .attach = Some(1);
+        doc.get_shape_mut(doc.layers[0].members[1])
+            .unwrap()
+            .production
+            .attach = Some(1);
+        doc.get_shape_mut(doc.layers[0].members[2])
+            .unwrap()
+            .production
+            .material = Some("Everyday Iron-On".to_string());
         let layout = layout_mats(&doc, &MatOptions::default()).unwrap();
         assert_eq!(layout.mats.len(), 2);
         assert_eq!(layout.mats[0].placements.len(), 1);
@@ -876,11 +891,17 @@ mod tests {
     #[test]
     fn manual_mat_and_size_limits() {
         let mut doc = doc_with(&[(0.0, 0.0, 10.0, 10.0), (0.0, 0.0, 20.0, 20.0)]);
-        doc.layers[0].shapes[1].production.mat = Some(5);
+        doc.get_shape_mut(doc.layers[0].members[1])
+            .unwrap()
+            .production
+            .mat = Some(5);
         let layout = layout_mats(&doc, &MatOptions::default()).unwrap();
         assert_eq!(layout.mats.len(), 2);
         assert_eq!(layout.mats[1].manual, Some(5));
-        doc.layers[0].shapes[1].production.mat = Some(0);
+        doc.get_shape_mut(doc.layers[0].members[1])
+            .unwrap()
+            .production
+            .mat = Some(0);
         let layout = layout_mats(&doc, &MatOptions::default()).unwrap();
         assert_eq!(layout.mats.len(), 1);
         assert_eq!(layout.mats[0].placements.len(), 2);

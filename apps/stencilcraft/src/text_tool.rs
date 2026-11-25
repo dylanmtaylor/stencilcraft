@@ -632,6 +632,12 @@ impl StencilApp {
             .filter(|name| query.is_empty() || name.to_lowercase().contains(&query))
             .collect();
         let targets = self.text_style_targets().len();
+        let before_flow = self
+            .text_style_targets()
+            .first()
+            .and_then(|id| self.text_spec_of(*id))
+            .map(|spec| spec.flow);
+        let mut flow = before_flow.clone();
         let _ = Panel::new("stencilcraft-text-style-panel").show(ui, |ui| {
             let edit = TextField::new("text-font-search", "Find a font", style.query.as_str())
                 .char_limit(200)
@@ -695,6 +701,11 @@ impl StencilApp {
                 });
                 let _ = Checkbox::bool("Kerning", &mut style.kerning).show(ui);
             });
+            if let Some(flow) = flow.as_mut() {
+                let _ = SectionHeader::new("text-flow", "Flow").show(ui, |ui| {
+                    flow_controls(ui, flow, &numbers);
+                });
+            }
             hint(
                 ui,
                 if targets > 0 {
@@ -732,9 +743,127 @@ impl StencilApp {
             edit.kerning = Some(style.kerning);
             changed = true;
         }
+        if flow != before_flow
+            && let Some(flow) = flow
+        {
+            edit.flow = Some(flow);
+            changed = true;
+        }
         self.text_style = style;
         if changed {
             self.apply_text_style(edit);
+        }
+    }
+
+    /// Type › Type on a Path: the selected text follows the other selected shape's outline.
+    pub fn type_on_path(&mut self) {
+        let text = self.selected_text_ids().next();
+        let path = self
+            .selected_shapes
+            .iter()
+            .copied()
+            .find(|id| Some(*id) != text && self.text_spec_of(*id).is_none());
+        let (Some(text), Some(path)) = (text, path) else {
+            self.status = "select a text and the shape it should follow".to_string();
+            return;
+        };
+        let edit = TextEdit {
+            id: text,
+            flow: Some(stencilcraft_doc::TextFlow::OnPath {
+                path: BezPath::new(),
+                shape: Some(path),
+                start: 0.0,
+                offset_mm: 0.0,
+                flip: false,
+            }),
+            ..Default::default()
+        };
+        match self.engine.run(Command::TextEdit(edit)) {
+            Ok(_) => {
+                self.set_selection([text]);
+                self.pending_panel = Some(WorkspacePanel::TextStyle);
+                self.status = "text on path".to_string();
+            }
+            Err(e) => self.status = e.to_string(),
+        }
+    }
+
+    /// Type › Curve Text: bend the selected text into an arc about as wide as the text.
+    pub fn curve_text(&mut self) {
+        let ids: Vec<u64> = self.selected_text_ids().collect();
+        if ids.is_empty() {
+            self.status = "select text to curve".to_string();
+            return;
+        }
+        for id in ids {
+            let width = self
+                .engine
+                .doc
+                .get_shape(id)
+                .map_or(50.0, |s| s.path.bounding_box().width());
+            let diameter = (width * 1.2).max(10.0);
+            if let Err(e) = self.engine.run(Command::TextEdit(TextEdit {
+                id,
+                flow: Some(stencilcraft_doc::TextFlow::Curve {
+                    diameter_mm: diameter,
+                }),
+                ..Default::default()
+            })) {
+                self.status = e.to_string();
+            }
+        }
+        self.pending_panel = Some(WorkspacePanel::TextStyle);
+    }
+
+    /// Insert `glyph` (Type › Glyphs): into the text being typed, else at the end of the
+    /// selected text.
+    pub fn insert_glyph(&mut self, glyph: &str) {
+        if self.text_session.is_some() {
+            self.text_insert(glyph);
+            return;
+        }
+        let Some(id) = self.selected_text_ids().next() else {
+            self.status = "click the page with the Text tool, or select text, first".to_string();
+            return;
+        };
+        let Some(mut text) = self.text_spec_of(id).map(|s| s.text) else {
+            return;
+        };
+        text.push_str(glyph);
+        if let Err(e) = self.engine.run(Command::TextEdit(TextEdit {
+            id,
+            text: Some(text),
+            ..Default::default()
+        })) {
+            self.status = e.to_string();
+        }
+    }
+
+    /// The Glyphs panel: characters that are hard to type, a click inserts one.
+    pub fn glyphs_panel(&mut self, ui: &mut egui::Ui) {
+        let mut picked = None;
+        let _ = Panel::new("stencilcraft-glyphs-panel").show(ui, |ui| {
+            for (title, glyphs) in GLYPH_SETS {
+                ui.label(*title);
+                ui.horizontal_wrapped(|ui| {
+                    for glyph in glyphs.chars() {
+                        let s = glyph.to_string();
+                        if ui
+                            .add(craft_ui::controls::Button::new(&s).size(ControlSize::Sm))
+                            .clicked()
+                        {
+                            picked = Some(s);
+                        }
+                    }
+                });
+            }
+            hint(
+                ui,
+                "A click inserts the character into the text being typed or selected.",
+            );
+        });
+        if let Some(glyph) = picked {
+            self.insert_glyph(&glyph);
         }
     }
 
@@ -756,6 +885,95 @@ impl StencilApp {
         match first {
             Some(id) => self.begin_text_edit(id, None),
             None => self.status = "select a live text object to edit".to_string(),
+        }
+    }
+}
+
+/// The Glyphs panel's characters, by group.
+const GLYPH_SETS: &[(&str, &str)] = &[
+    ("Punctuation", "¡¿«»‹›‘’‚“”„–—…•·§¶†‡"),
+    ("Symbols", "©®™°±×÷µ¢£¥€¤ªº¹²³¼½¾"),
+    (
+        "Accented letters",
+        "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝßàáâãäåæçèéêëìíîïñòóôõöøùúûüýÿ",
+    ),
+    ("Shapes and arrows", "←↑→↓↔★☆♥♦♣♠✓✗♪♫☀☂☺"),
+];
+
+/// The Flow section: straight, curved (diameter; negative dips) or on a path (start,
+/// offset, flip).
+fn flow_controls(
+    ui: &mut egui::Ui,
+    flow: &mut stencilcraft_doc::TextFlow,
+    numbers: &craft_ui::localized::LocaleNumbers,
+) {
+    use stencilcraft_doc::TextFlow;
+    let mut kind = match flow {
+        TextFlow::Straight => 0u8,
+        TextFlow::Curve { .. } => 1,
+        TextFlow::OnPath { .. } => 2,
+    };
+    let was = kind;
+    let mut segmented = Segmented::new("text-flow-kind", "Flow", &mut kind)
+        .item(0, "Straight")
+        .item(1, "Curve");
+    if was == 2 {
+        segmented = segmented.item(2, "On Path");
+    }
+    let _ = segmented.size(ControlSize::Sm).show(ui);
+    if kind != was {
+        *flow = match kind {
+            1 => TextFlow::Curve { diameter_mm: 100.0 },
+            _ => TextFlow::Straight,
+        };
+    }
+    match flow {
+        TextFlow::Straight => {}
+        TextFlow::Curve { diameter_mm } => {
+            labelled(ui, "Diameter", |ui| {
+                number(
+                    ui,
+                    "text-curve-diameter",
+                    "Curve diameter",
+                    diameter_mm,
+                    -10_000.0..=10_000.0,
+                    "{n} mm",
+                    numbers,
+                );
+            });
+            hint(ui, "A negative diameter bends the text downwards.");
+        }
+        TextFlow::OnPath {
+            start,
+            offset_mm,
+            flip,
+            ..
+        } => {
+            let mut pct = *start * 100.0;
+            labelled(ui, "Start", |ui| {
+                number(
+                    ui,
+                    "text-path-start",
+                    "Start along the path",
+                    &mut pct,
+                    0.0..=100.0,
+                    "{n} %",
+                    numbers,
+                );
+            });
+            *start = pct / 100.0;
+            labelled(ui, "Offset", |ui| {
+                number(
+                    ui,
+                    "text-path-offset",
+                    "Offset from the path",
+                    offset_mm,
+                    -1000.0..=1000.0,
+                    "{n} mm",
+                    numbers,
+                );
+            });
+            let _ = Checkbox::bool("Flip to the other side", flip).show(ui);
         }
     }
 }
@@ -784,5 +1002,54 @@ mod tests {
         assert_eq!(line_end(text, 0), 3);
         assert_eq!(typed("a\u{7}b\n"), "ab");
         assert_eq!(pasted("a\r\nb\u{7}"), "a\nb");
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    use super::*;
+
+    #[test]
+    fn type_on_path_curve_and_glyphs() {
+        let mut app = StencilApp::new(None);
+        app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
+        app.begin_text_at(Point::new(10.0, 40.0));
+        app.text_insert("Path");
+        let text = app.text_session.as_ref().and_then(|s| s.id).expect("text");
+        app.insert_glyph("★");
+        assert_eq!(app.session_text(), "Path★");
+        app.end_text_session();
+        app.run_command(Command::ShapeAddEllipse {
+            x: 0.0,
+            y: 60.0,
+            width: 80.0,
+            height: 50.0,
+        });
+        let ellipse = app
+            .engine
+            .doc
+            .shapes()
+            .map(|(_, s)| s.id)
+            .find(|id| *id != text)
+            .expect("ellipse");
+        app.set_selection([text, ellipse]);
+        app.type_on_path();
+        let flow = app.text_spec_of(text).map(|s| s.flow);
+        assert!(
+            matches!(flow, Some(stencilcraft_doc::TextFlow::OnPath { .. })),
+            "{flow:?} {}",
+            app.status
+        );
+        app.set_selection([text]);
+        app.curve_text();
+        assert!(matches!(
+            app.text_spec_of(text).map(|s| s.flow),
+            Some(stencilcraft_doc::TextFlow::Curve { .. })
+        ));
+        app.insert_glyph("!");
+        assert_eq!(
+            app.text_spec_of(text).map(|s| s.text),
+            Some("Path★!".to_string())
+        );
     }
 }

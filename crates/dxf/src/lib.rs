@@ -1,6 +1,6 @@
 //! StencilCraft layer and operation mapping to the shared typed DXF writer.
 
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, OperationKind};
 use stencilcraft_geom::path_to_polylines;
 
 #[derive(Debug, thiserror::Error)]
@@ -11,9 +11,9 @@ pub enum DxfError {
     Model(String),
 }
 
-fn layer_color(operation: Option<&Operation>) -> i32 {
-    match operation {
-        Some(Operation::Engrave(_)) => 5,
+fn layer_color(kind: Option<&OperationKind>) -> i32 {
+    match kind {
+        Some(OperationKind::Engrave) => 5,
         _ => 1,
     }
 }
@@ -46,16 +46,12 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
     drawing.metric = true;
     drawing.extents = [0.0, 0.0, doc.board.width_mm, doc.board.height_mm];
     drawing.limits = drawing.extents;
-    for layer in doc
-        .layers
-        .iter()
-        .filter(|layer| !matches!(layer.operation, Some(Operation::Guide)))
-    {
+    for op in doc.operations.iter().filter(|op| !op.kind.is_guide()) {
         drawing.layers.push(craft_dxf::model::Layer {
             handle: None,
-            name: layer_name(&layer.name),
-            color: craft_dxf::model::Color::Index(layer_color(layer.operation.as_ref()) as u8),
-            on: layer.visible,
+            name: layer_name(&op.name),
+            color: craft_dxf::model::Color::Index(layer_color(Some(&op.kind)) as u8),
+            on: op.visible,
             frozen: false,
             vp_freeze_new: false,
             locked: false,
@@ -67,17 +63,13 @@ pub fn export(doc: &Document) -> Result<String, DxfError> {
             description: None,
         });
     }
-    for layer in doc
-        .layers
-        .iter()
-        .filter(|layer| !matches!(layer.operation, Some(Operation::Guide)))
-    {
-        let dxf_layer = layer_name(&layer.name);
-        for id in &layer.members {
+    for op in doc.operations.iter().filter(|op| !op.kind.is_guide()) {
+        let dxf_layer = layer_name(&op.name);
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
                 continue;
             };
-            let close_for_operation = matches!(layer.operation, Some(Operation::Cut(_)));
+            let close_for_operation = op.kind == OperationKind::Cut;
             for polyline in
                 path_to_polylines(&shape.cut_path(), stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
             {
@@ -178,8 +170,18 @@ mod tests {
     fn closed_shape_is_closed_polyline() {
         let mut doc = Document::default();
         doc.layers[0].name = "cut".to_string();
-        doc.layers[0].operation = Some(stencilcraft_doc::Operation::Cut(Default::default()));
         doc.push_shape(0, tri()).unwrap();
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![1],
+            icon: None,
+        });
         let dxf = export(&doc).unwrap();
         let entity = parsed_entities(&dxf).remove(0);
         assert_eq!(entity.common.layer, "STENCILCRAFT-CUT");
@@ -194,12 +196,30 @@ mod tests {
     fn layers_carry_operation_colours() {
         let mut doc = Document::default();
         doc.layers[0].name = "cut".to_string();
-        doc.layers[0].operation = Some(stencilcraft_doc::Operation::Cut(Default::default()));
-        doc.layers.push(stencilcraft_doc::Layer::new(
-            "score",
-            Some(stencilcraft_doc::Operation::Engrave(Default::default())),
-        ));
+        doc.layers.push(stencilcraft_doc::Layer::new("score"));
         doc.layers[1].visible = false;
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![],
+            icon: None,
+        });
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 2,
+            name: "score".to_string(),
+            kind: stencilcraft_doc::OperationKind::Engrave,
+            settings: Default::default(),
+            color: None,
+            visible: false,
+            locked: false,
+            members: vec![],
+            icon: None,
+        });
         let dxf = export(&doc).unwrap();
         let layers = parsed_layers(&dxf);
         let cut = layers
@@ -214,26 +234,44 @@ mod tests {
         assert!(cut.on);
         assert_eq!(score.color, craft_dxf::model::Color::Index(5));
         assert!(!score.on);
+        assert_eq!(layer_color(Some(&stencilcraft_doc::OperationKind::Cut)), 1);
         assert_eq!(
-            layer_color(Some(&stencilcraft_doc::Operation::Cut(Default::default()))),
-            1
-        );
-        assert_eq!(
-            layer_color(Some(&stencilcraft_doc::Operation::Engrave(
-                Default::default()
-            ))),
+            layer_color(Some(&stencilcraft_doc::OperationKind::Engrave)),
             5
         );
+    }
+
+    fn cut_op(
+        id: u64,
+        name: &str,
+        kind: stencilcraft_doc::OperationKind,
+        members: Vec<u64>,
+    ) -> stencilcraft_doc::Operation {
+        stencilcraft_doc::Operation {
+            id,
+            name: name.to_string(),
+            kind,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members,
+            icon: None,
+        }
     }
 
     #[test]
     fn engrave_layer_names_survive_sanitising() {
         let mut doc = Document::default();
-        doc.layers.push(stencilcraft_doc::Layer::new(
-            "scoring pass",
-            Some(stencilcraft_doc::Operation::Engrave(Default::default())),
-        ));
+        doc.layers
+            .push(stencilcraft_doc::Layer::new("scoring pass"));
         doc.push_shape(1, tri()).unwrap();
+        doc.operations.push(cut_op(
+            2,
+            "scoring pass",
+            stencilcraft_doc::OperationKind::Engrave,
+            vec![1],
+        ));
         let dxf = export(&doc).unwrap();
         let entity = parsed_entities(&dxf).remove(0);
         assert_eq!(entity.common.layer, "STENCILCRAFT-SCORING-PASS");
@@ -247,13 +285,18 @@ mod tests {
     fn export_flips_y_about_the_board_bottom_for_asymmetric_art() {
         let mut doc = Document::default();
         doc.board.height_mm = 100.0;
-        doc.layers[0].operation = Some(stencilcraft_doc::Operation::Cut(Default::default()));
         let mut path = kurbo::BezPath::new();
         path.move_to((10.0, 20.0));
         path.line_to((40.0, 20.0));
         path.line_to((10.0, 70.0));
         path.close_path();
-        doc.push_shape(0, path).unwrap();
+        let shape_id = doc.push_shape(0, path).unwrap().id;
+        doc.operations.push(cut_op(
+            1,
+            "cut",
+            stencilcraft_doc::OperationKind::Cut,
+            vec![shape_id],
+        ));
         let dxf = export(&doc).unwrap();
         let entity = parsed_entities(&dxf).remove(0);
         let craft_dxf::model::EntityKind::LwPolyline(polyline) = entity.kind else {
@@ -271,11 +314,16 @@ mod tests {
     fn rejects_coordinate_overflow_when_reflecting_y() {
         let mut doc = Document::default();
         doc.board.height_mm = f64::MAX;
-        doc.layers[0].operation = Some(stencilcraft_doc::Operation::Cut(Default::default()));
         let mut path = kurbo::BezPath::new();
         path.move_to((0.0, -f64::MAX));
         path.line_to((1.0, 0.0));
-        doc.push_shape(0, path).unwrap();
+        let shape_id = doc.push_shape(0, path).unwrap().id;
+        doc.operations.push(cut_op(
+            1,
+            "cut",
+            stencilcraft_doc::OperationKind::Cut,
+            vec![shape_id],
+        ));
         assert!(matches!(export(&doc), Err(DxfError::Write(_))));
     }
 

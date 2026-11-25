@@ -17,8 +17,8 @@ use stencilcraft_doc::templates::{
     ProjectTemplate, TemplateInfo, TemplateParams, list_templates, new_from_template,
 };
 use stencilcraft_doc::{
-    CutStyle, Document, Group, GroupChild, Guide, GuideAxis, Operation, OperationSettings,
-    Orientation, Page, PagePreset, PageSetup,
+    CutStyle, Document, Group, GroupChild, Guide, GuideAxis, Operation, OperationKind,
+    OperationSettings, Orientation, Page, PagePreset, PageSetup,
 };
 
 use super::{
@@ -90,24 +90,68 @@ pub enum DocumentCommand {
     #[serde(rename = "layer.remove-members")]
     LayerRemoveMembers { layer: usize, ids: Vec<u64> },
     /// Set or clear (`null`) a layer's operation.
+    /// Deprecated alias over `Document::operations` (kept for the UI this wave).
     #[serde(rename = "layer.set-operation")]
     LayerSetOperation {
         index: usize,
         #[serde(default)]
-        operation: Option<Operation>,
+        operation: Option<OperationKind>,
     },
     /// Set or clear (`null`) a layer's material colour, `#rrggbb`.
     #[serde(rename = "layer.set-color")]
     LayerSetColor { index: usize, color: Option<String> },
-    /// Color Sync: every coloured, non-template layer within `tolerance` (RGB distance,
-    /// 0-442) of an earlier one takes its colour. With `merge`, layers that then share
-    /// colour and operation are merged into the first.
+    /// Color Sync: every coloured, non-guide operation within `tolerance` (RGB distance,
+    /// 0-442) of an earlier one takes its colour. With `merge`, operations that then
+    /// share the same colour and kind are merged into the first.
+    /// Deprecated alias over `Document::operations` (kept for the UI this wave).
     #[serde(rename = "layer.color-sync")]
     LayerColorSync {
         tolerance: f64,
         #[serde(default)]
         merge: bool,
     },
+    /// Create a production operation (a pass). Undoable.
+    #[serde(rename = "operation.create")]
+    OperationCreate {
+        name: String,
+        kind: OperationKind,
+        #[serde(default)]
+        settings: OperationSettings,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+        #[serde(default)]
+        members: Vec<u64>,
+    },
+    /// Add shapes to an operation's membership: additive and idempotent (N:M).
+    #[serde(rename = "operation.add-members")]
+    OperationAddMembers { id: u64, ids: Vec<u64> },
+    /// Remove memberships from an operation; a no-op for shapes that are not members.
+    #[serde(rename = "operation.remove-members")]
+    OperationRemoveMembers { id: u64, ids: Vec<u64> },
+    #[serde(rename = "operation.set-kind")]
+    OperationSetKind { id: u64, kind: OperationKind },
+    #[serde(rename = "operation.set-settings")]
+    OperationSetSettings {
+        id: u64,
+        settings: OperationSettings,
+    },
+    /// Set or clear (`null`) an operation's material colour, `#rrggbb`.
+    #[serde(rename = "operation.set-color")]
+    OperationSetColor { id: u64, color: Option<String> },
+    #[serde(rename = "operation.set-visible")]
+    OperationSetVisible { id: u64, visible: bool },
+    /// Lock or unlock an operation: its shapes cannot be selected or edited while locked.
+    #[serde(rename = "operation.set-locked")]
+    OperationSetLocked { id: u64, locked: bool },
+    /// Move operation `from` to position `to` (both indices into `Document::operations`);
+    /// the pass order is the operations order.
+    #[serde(rename = "operation.move")]
+    OperationMove { from: usize, to: usize },
+    /// Delete an operation and its memberships; the shapes' geometry stays in `Document::shapes`.
+    #[serde(rename = "operation.delete")]
+    OperationDelete { id: u64 },
     /// Add a page beside the existing ones. Size comes from `preset`, or from `width_mm`
     /// and `height_mm` for `custom` (which also override a preset); `orientation` swaps
     /// sides. Answers the new page index.
@@ -486,22 +530,20 @@ fn invalid(message: String) -> EngineError {
     EngineError::Invalid(message)
 }
 
-/// Legacy `CutStyle` input mapped onto the v2 model (D-16): Cut/Engrave become the
-/// matching `Operation` with default settings; never a per-shape style.
-pub fn op_of_style(style: CutStyle) -> Option<Operation> {
+/// Legacy `CutStyle` input mapped onto the operation kinds (D-16): Cut/Engrave become
+/// the matching `OperationKind`; never a per-shape style.
+pub fn op_of_style(style: CutStyle) -> Option<OperationKind> {
     Some(match style {
-        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
-        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
+        CutStyle::Cut => OperationKind::Cut,
+        CutStyle::Engrave => OperationKind::Engrave,
     })
 }
 
-/// The legacy `CutStyle` a shape's owning layer operation maps back to.
+/// The legacy `CutStyle` a shape's owning operation maps back to.
 pub fn style_of_shape(doc: &Document, id: u64) -> CutStyle {
-    doc.layer_of_shape(id)
-        .and_then(|li| doc.layers.get(li))
-        .and_then(|l| l.operation.as_ref())
-        .map_or(CutStyle::Cut, |op| match op {
-            Operation::Engrave(_) => CutStyle::Engrave,
+    doc.operation_of_shape(id)
+        .map_or(CutStyle::Cut, |op| match op.kind {
+            OperationKind::Engrave => CutStyle::Engrave,
             _ => CutStyle::Cut,
         })
 }
@@ -524,20 +566,80 @@ pub(crate) fn remove_members(doc: &mut Document, layer_index: usize, ids: &[u64]
     }
 }
 
-/// Index of an existing layer with the same operation, otherwise a new layer is
-/// pushed with that operation. Never removes memberships from other layers.
-pub(crate) fn ensure_operation_layer(doc: &mut Document, operation: Operation) -> usize {
-    if let Some(index) = doc
-        .layers
+/// Id of an existing operation with the same kind and settings, otherwise a new
+/// operation is appended. Never removes memberships from other operations.
+pub(crate) fn ensure_operation(
+    doc: &mut Document,
+    kind: OperationKind,
+    settings: OperationSettings,
+) -> u64 {
+    if let Some(op) = doc
+        .operations
         .iter()
-        .position(|l| l.operation.as_ref() == Some(&operation))
+        .find(|o| o.kind == kind && o.settings == settings)
     {
-        return index;
+        return op.id;
     }
-    let label = operation.kind_name();
-    doc.layers
-        .push(stencilcraft_doc::Layer::new(label, Some(operation)));
-    doc.layers.len() - 1
+    let id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id,
+        name: kind.kind_name().to_string(),
+        kind,
+        settings,
+        color: None,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
+    id
+}
+
+/// Appends ids not already present to an operation; never touches `Document.shapes`.
+pub(crate) fn op_add_members(doc: &mut Document, op_id: u64, ids: &[u64]) {
+    if let Some(op) = doc.operations.iter_mut().find(|o| o.id == op_id) {
+        for id in ids {
+            if !op.members.contains(id) {
+                op.members.push(*id);
+            }
+        }
+    }
+}
+
+/// Retains ids not in the removal set; a no-op for absent members.
+pub(crate) fn op_remove_members(doc: &mut Document, op_id: u64, ids: &[u64]) {
+    if let Some(op) = doc.operations.iter_mut().find(|o| o.id == op_id) {
+        op.members.retain(|m| !ids.contains(m));
+    }
+}
+
+/// Position of operation `id`, with a calm error naming the command.
+fn op_index(engine: &Engine, id: u64, command: &str) -> Result<usize, EngineError> {
+    engine
+        .doc
+        .operations
+        .iter()
+        .position(|o| o.id == id)
+        .ok_or_else(|| {
+            invalid(format!(
+                "{command}: no operation has id {id} (document has {})",
+                engine.doc.operations.len()
+            ))
+        })
+}
+
+/// The operation belonging to a layer (deprecated Layer* alias): the one named after
+/// the layer with the same members, else the first with the same member set.
+fn layer_operation(doc: &Document, layer_index: usize) -> Option<usize> {
+    let layer = doc.layers.get(layer_index)?;
+    doc.operations
+        .iter()
+        .position(|o| o.name == layer.name && o.members == layer.members)
+        .or_else(|| {
+            doc.operations
+                .iter()
+                .position(|o| o.members == layer.members)
+        })
 }
 
 /// Entry point from [`Engine::run`].
@@ -584,19 +686,20 @@ fn selection(ids: Vec<u64>) -> Result<Effect, EngineError> {
 /// Shapes a selection may contain: on a visible, unlocked layer, not hidden or locked.
 fn selectable(engine: &Engine, include_templates: bool) -> Vec<(usize, u64)> {
     let doc = &engine.doc;
+    let guide: std::collections::BTreeSet<u64> = doc
+        .operations
+        .iter()
+        .filter(|o| o.kind.is_guide())
+        .flat_map(|o| o.members.iter().copied())
+        .collect();
     doc.shapes()
         .filter(|s| !s.hidden && !s.locked)
+        .filter(|s| include_templates || !guide.contains(&s.id))
         .filter_map(|s| {
             doc.layers
                 .iter()
                 .enumerate()
-                .find(|(_, l)| {
-                    l.visible
-                        && !l.locked
-                        && l.members.contains(&s.id)
-                        && (include_templates
-                            || !l.operation.as_ref().is_some_and(Operation::is_guide))
-                })
+                .find(|(_, l)| l.visible && !l.locked && l.members.contains(&s.id))
                 .map(|(i, _)| (i, s.id))
         })
         .collect()
@@ -653,17 +756,15 @@ fn query(engine: &Engine, command: &DocumentCommand) -> Option<Result<Effect, En
                     "select.by-color: tolerance must be 0-442".to_string(),
                 )));
             }
-            let near = |li: usize| {
-                doc.layers
-                    .get(li)
-                    .and_then(|l| l.color.as_deref())
-                    .and_then(parse_hex_color)
-                    .is_some_and(|c| color_distance(c, rgb) <= *tolerance)
-            };
             selection(
                 selectable(engine, false)
                     .into_iter()
-                    .filter(|(li, _)| near(*li))
+                    .filter(|(_, id)| {
+                        doc.operation_of_shape(*id)
+                            .and_then(|o| o.color.as_deref())
+                            .and_then(parse_hex_color)
+                            .is_some_and(|c| color_distance(c, rgb) <= *tolerance)
+                    })
                     .map(|(_, id)| id)
                     .collect(),
             )
@@ -673,9 +774,8 @@ fn query(engine: &Engine, command: &DocumentCommand) -> Option<Result<Effect, En
                 .into_iter()
                 .filter(|(_, id)| {
                     let wanted = op_of_style(*style);
-                    doc.layers
-                        .iter()
-                        .any(|l| l.members.contains(id) && l.operation.as_ref() == wanted.as_ref())
+                    doc.operation_of_shape(*id)
+                        .is_some_and(|o| Some(o.kind) == wanted)
                 })
                 .map(|(_, id)| id)
                 .collect(),
@@ -782,6 +882,15 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
                 l.members.retain(|m| !selected.contains(m));
             }
             add_members(doc, target, &ids);
+            // Production follows the move: shapes leave every operation and join the
+            // target layer's operation, if it has one.
+            for op in doc.operations.iter_mut() {
+                op.members.retain(|m| !selected.contains(m));
+            }
+            let name = doc.layers[target].name.clone();
+            if let Some(op_id) = doc.operations.iter().find(|o| o.name == name).map(|o| o.id) {
+                op_add_members(doc, op_id, &ids);
+            }
             Ok(Effect::ShapesStyled { ids })
         }
         DocumentCommand::LayerMove { from, to } => {
@@ -809,9 +918,39 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             changed
         }
         DocumentCommand::LayerSetTemplate { index, template } => {
+            // Deprecated alias: the layer's operation (the one covering exactly its
+            // members) becomes Guide, or is removed when unset.
             let index = layer_index(engine, index, "layer.set-template")?;
-            if let Some(l) = engine.doc.layers.get_mut(index) {
-                l.operation = template.then_some(Operation::Guide);
+            let members = engine.doc.layers[index].members.clone();
+            let pos = engine
+                .doc
+                .operations
+                .iter()
+                .position(|o| o.members == members);
+            match (template, pos) {
+                (true, Some(p)) => engine.doc.operations[p].kind = OperationKind::Guide,
+                (true, None) => {
+                    let id = engine.doc.next_operation_id();
+                    let (name, visible, locked) = {
+                        let l = &engine.doc.layers[index];
+                        (l.name.clone(), l.visible, l.locked)
+                    };
+                    engine.doc.operations.push(Operation {
+                        id,
+                        name,
+                        kind: OperationKind::Guide,
+                        settings: OperationSettings::default(),
+                        color: None,
+                        visible,
+                        locked,
+                        members,
+                        icon: None,
+                    });
+                }
+                (false, Some(p)) => {
+                    engine.doc.operations.remove(p);
+                }
+                (false, None) => {}
             }
             changed
         }
@@ -838,22 +977,45 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             Ok(Effect::LayerMembersChanged { layer, ids })
         }
         DocumentCommand::LayerSetOperation { index, operation } => {
+            // Deprecated alias: set/clear the operation covering exactly this layer's
+            // members, creating it with default settings when setting.
             let index = layer_index(engine, index, "layer.set-operation")?;
             if engine.doc.layers[index].locked {
                 return Err(invalid(format!(
                     "layer.set-operation: layer {index} is locked"
                 )));
             }
-            if let Some(op) = &operation {
-                op.validate()
-                    .map_err(|e| invalid(format!("layer.set-operation: {e}")))?;
-            }
-            if let Some(l) = engine.doc.layers.get_mut(index) {
-                l.operation = operation;
+            let members = engine.doc.layers[index].members.clone();
+            let pos = layer_operation(&engine.doc, index);
+            match (operation, pos) {
+                (Some(kind), Some(p)) => engine.doc.operations[p].kind = kind,
+                (Some(kind), None) => {
+                    let id = engine.doc.next_operation_id();
+                    let (name, visible, locked) = {
+                        let l = &engine.doc.layers[index];
+                        (l.name.clone(), l.visible, l.locked)
+                    };
+                    engine.doc.operations.push(Operation {
+                        id,
+                        name,
+                        kind,
+                        settings: OperationSettings::default(),
+                        color: None,
+                        visible,
+                        locked,
+                        members,
+                        icon: None,
+                    });
+                }
+                (None, Some(p)) => {
+                    engine.doc.operations.remove(p);
+                }
+                (None, None) => {}
             }
             Ok(Effect::LayerOperationChanged { index })
         }
         DocumentCommand::LayerSetColor { index, color } => {
+            // Deprecated alias: colour the operation covering exactly this layer's members.
             let index = layer_index(engine, index, "layer.set-color")?;
             let color = match color {
                 None => None,
@@ -861,13 +1023,133 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
                     || invalid("layer.set-color: color must be #rrggbb".to_string()),
                 )?)),
             };
-            if let Some(l) = engine.doc.layers.get_mut(index) {
-                l.color = color;
+            if let Some(p) = layer_operation(&engine.doc, index) {
+                engine.doc.operations[p].color = color;
             }
             changed
         }
         DocumentCommand::LayerColorSync { tolerance, merge } => {
             color_sync(engine, tolerance, merge)
+        }
+        DocumentCommand::OperationCreate {
+            name,
+            kind,
+            settings,
+            color,
+            icon,
+            members,
+        } => {
+            if name.trim().is_empty() {
+                return Err(invalid(
+                    "operation.create: name cannot be empty".to_string(),
+                ));
+            }
+            let color = match color {
+                None => None,
+                Some(text) => Some(format_hex_color(parse_hex_color(&text).ok_or_else(
+                    || invalid("operation.create: color must be #rrggbb".to_string()),
+                )?)),
+            };
+            let op = Operation {
+                id: engine.doc.next_operation_id(),
+                name,
+                kind,
+                settings,
+                color,
+                visible: true,
+                locked: false,
+                members: Vec::new(),
+                icon,
+            };
+            op.validate()
+                .map_err(|e| invalid(format!("operation.create: {e}")))?;
+            let ids = editable_ids(engine, &members, "operation.create")?;
+            let mut op = op;
+            op.members = ids;
+            engine.doc.operations.push(op);
+            changed
+        }
+        DocumentCommand::OperationAddMembers { id, ids } => {
+            let p = op_index(engine, id, "operation.add-members")?;
+            if engine.doc.operations[p].locked {
+                return Err(invalid(format!(
+                    "operation.add-members: operation {id} is locked"
+                )));
+            }
+            let ids = editable_ids(engine, &ids, "operation.add-members")?;
+            op_add_members(&mut engine.doc, id, &ids);
+            Ok(Effect::ShapesStyled { ids })
+        }
+        DocumentCommand::OperationRemoveMembers { id, ids } => {
+            let p = op_index(engine, id, "operation.remove-members")?;
+            if engine.doc.operations[p].locked {
+                return Err(invalid(format!(
+                    "operation.remove-members: operation {id} is locked"
+                )));
+            }
+            let ids = unique_ids(&ids, "operation.remove-members")?;
+            op_remove_members(&mut engine.doc, id, &ids);
+            Ok(Effect::ShapesStyled { ids })
+        }
+        DocumentCommand::OperationSetKind { id, kind } => {
+            let p = op_index(engine, id, "operation.set-kind")?;
+            engine.doc.operations[p].kind = kind;
+            changed
+        }
+        DocumentCommand::OperationSetSettings { id, settings } => {
+            let p = op_index(engine, id, "operation.set-settings")?;
+            let op = Operation {
+                id,
+                name: engine.doc.operations[p].name.clone(),
+                kind: engine.doc.operations[p].kind,
+                settings: settings.clone(),
+                color: engine.doc.operations[p].color.clone(),
+                visible: engine.doc.operations[p].visible,
+                locked: engine.doc.operations[p].locked,
+                members: engine.doc.operations[p].members.clone(),
+                icon: engine.doc.operations[p].icon.clone(),
+            };
+            op.validate()
+                .map_err(|e| invalid(format!("operation.set-settings: {e}")))?;
+            engine.doc.operations[p].settings = settings;
+            changed
+        }
+        DocumentCommand::OperationSetColor { id, color } => {
+            let p = op_index(engine, id, "operation.set-color")?;
+            let color = match &color {
+                None => None,
+                Some(text) => Some(format_hex_color(parse_hex_color(text).ok_or_else(
+                    || invalid("operation.set-color: color must be #rrggbb".to_string()),
+                )?)),
+            };
+            engine.doc.operations[p].color = color;
+            changed
+        }
+        DocumentCommand::OperationSetVisible { id, visible } => {
+            let p = op_index(engine, id, "operation.set-visible")?;
+            engine.doc.operations[p].visible = visible;
+            changed
+        }
+        DocumentCommand::OperationSetLocked { id, locked } => {
+            let p = op_index(engine, id, "operation.set-locked")?;
+            engine.doc.operations[p].locked = locked;
+            changed
+        }
+        DocumentCommand::OperationMove { from, to } => {
+            if from >= engine.doc.operations.len() || to >= engine.doc.operations.len() {
+                return Err(invalid(format!(
+                    "operation.move: no operation at {from} or {to} (document has {})",
+                    engine.doc.operations.len()
+                )));
+            }
+            let op = engine.doc.operations.remove(from);
+            engine.doc.operations.insert(to, op);
+            changed
+        }
+        DocumentCommand::OperationDelete { id } => {
+            let p = op_index(engine, id, "operation.delete")?;
+            engine.doc.operations.remove(p);
+            changed
         }
         DocumentCommand::PageAdd(request) => {
             if engine.doc.pages.len() + 1 >= canvas::MAX_PAGES {
@@ -1183,40 +1465,34 @@ fn color_sync(engine: &mut Engine, tolerance: f64, merge: bool) -> Result<Effect
     }
     let doc = &mut engine.doc;
     let mut representatives: Vec<[u8; 3]> = Vec::new();
-    for layer in doc
-        .layers
-        .iter_mut()
-        .filter(|l| !l.operation.as_ref().is_some_and(Operation::is_guide))
-    {
-        let Some(rgb) = layer.color.as_deref().and_then(parse_hex_color) else {
+    for op in doc.operations.iter_mut().filter(|o| !o.kind.is_guide()) {
+        let Some(rgb) = op.color.as_deref().and_then(parse_hex_color) else {
             continue;
         };
         match representatives
             .iter()
             .find(|r| color_distance(**r, rgb) <= tolerance)
         {
-            Some(r) => layer.color = Some(format_hex_color(*r)),
+            Some(r) => op.color = Some(format_hex_color(*r)),
             None => representatives.push(rgb),
         }
     }
     if merge {
         let mut i = 0;
-        while i < doc.layers.len() {
-            let key = |l: &stencilcraft_doc::Layer| {
-                (!l.operation.as_ref().is_some_and(Operation::is_guide)
-                    && !l.locked
-                    && l.color.is_some())
-                .then(|| (l.color.clone(), l.operation.clone()))
+        while i < doc.operations.len() {
+            let key = |o: &Operation| {
+                (!o.kind.is_guide() && !o.locked && o.color.is_some())
+                    .then(|| (o.color.clone(), o.kind))
             };
-            let Some(target) = doc.layers.get(i).and_then(key) else {
+            let Some(target) = doc.operations.get(i).and_then(key) else {
                 i += 1;
                 continue;
             };
             let mut j = i + 1;
-            while j < doc.layers.len() {
-                if doc.layers.get(j).and_then(key) == Some(target.clone()) {
-                    let merged = doc.layers.remove(j);
-                    if let Some(into) = doc.layers.get_mut(i) {
+            while j < doc.operations.len() {
+                if doc.operations.get(j).and_then(key) == Some(target.clone()) {
+                    let merged = doc.operations.remove(j);
+                    if let Some(into) = doc.operations.get_mut(i) {
                         for m in &merged.members {
                             if !into.members.contains(m) {
                                 into.members.push(*m);
@@ -2122,8 +2398,17 @@ mod tests {
             },
             DocumentCommand::LayerSetOperation {
                 index: 0,
-                operation: Some(Operation::Cut(OperationSettings::default())),
+                operation: Some(OperationKind::Cut),
             },
+            DocumentCommand::OperationCreate {
+                name: "cut".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![1, 2],
+            },
+            DocumentCommand::OperationMove { from: 0, to: 1 },
         ];
         for command in samples {
             let wrapped = Command::Document(command);
@@ -2258,7 +2543,12 @@ mod tests {
             },
         );
         assert_eq!(e.doc.layers[1].members, vec![2]);
-        assert_eq!(e.doc.layers[1].operation, op_of_style(CutStyle::Engrave));
+        assert!(
+            e.doc
+                .operations
+                .iter()
+                .any(|o| o.kind == OperationKind::Engrave)
+        );
         run(&mut e, DocumentCommand::LayerMove { from: 1, to: 0 });
         assert_eq!(e.doc.layers[0].name, "score");
         run(
@@ -2360,9 +2650,18 @@ mod tests {
                 template: true,
             },
         );
-        assert!(!e.doc.layers[1].is_output());
         let back = Document::load_json(&e.doc.save_json().unwrap()).unwrap();
-        assert_eq!(back.layers[1].operation, Some(Operation::Guide));
+        assert!(
+            back.operations
+                .iter()
+                .any(|o| o.kind == OperationKind::Guide)
+        );
+        assert!(
+            !back
+                .operations
+                .iter()
+                .any(|o| o.is_output() && o.members == back.layers[1].members)
+        );
         let thumb = back.render_thumbnail(64 * 1024);
         assert_eq!(thumb.matches("<path").count(), 2);
     }
@@ -2399,7 +2698,7 @@ mod tests {
                 color: Some("#FF0000".to_string()),
             },
         );
-        assert_eq!(e.doc.layers[0].color.as_deref(), Some("#ff0000"));
+        assert_eq!(e.doc.operations[0].color.as_deref(), Some("#ff0000"));
         run(
             &mut e,
             DocumentCommand::ShapesMoveToLayer {
@@ -2416,9 +2715,9 @@ mod tests {
         );
         let colors: Vec<_> = e
             .doc
-            .layers
+            .operations
             .iter()
-            .map(|l| l.color.clone().unwrap())
+            .map(|o| o.color.clone().unwrap())
             .collect();
         assert_eq!(colors, ["#ff0000", "#ff0000", "#0000ff", "#ff0000"]);
         let Effect::Selection { ids } = run(
@@ -2439,8 +2738,14 @@ mod tests {
                 merge: true,
             },
         );
-        assert_eq!(e.doc.layers.len(), 2);
-        assert_eq!(e.doc.layers[0].members.len(), 3);
+        // Merge folds operations, not geometry layers; shape 3 moved to layer 3.
+        assert_eq!(e.doc.layers.len(), 4);
+        assert_eq!(e.doc.layers[0].members.len(), 2);
+        assert_eq!(
+            e.doc.operations.len(),
+            2,
+            "base+b+d merged into one #ff0000 cut, c stays blue"
+        );
         assert!(
             e.run(Command::Document(DocumentCommand::LayerColorSync {
                 tolerance: f64::NAN,
@@ -2842,9 +3147,11 @@ mod tests {
             ),
             vec![2]
         );
+        // Geometry layers no longer separate styles; all three shapes stay on
+        // layer 0, and the Engrave operation selects shape 2 alone.
         assert_eq!(
             sel(&mut e, DocumentCommand::SelectByLayer { index: 0 }),
-            vec![1, 3]
+            vec![1, 2, 3]
         );
         assert_eq!(sel(&mut e, DocumentCommand::SelectAll {}).len(), 3);
         assert!(sel(&mut e, DocumentCommand::SelectNone {}).is_empty());
@@ -3201,8 +3508,10 @@ mod tests {
         .unwrap();
         let layer = &e.doc.layers[1];
         assert_eq!(layer.name, "notes");
-        assert_eq!(layer.operation, None);
-        assert!(!layer.produces());
+        assert!(
+            e.doc.operations.is_empty(),
+            "a plain layer add creates no operation"
+        );
     }
 
     #[test]
@@ -3215,7 +3524,7 @@ mod tests {
         .unwrap();
         assert_eq!(e.doc.layers.len(), 1);
         assert_eq!(e.doc.layers[0].name, "base");
-        assert_eq!(e.doc.layers[0].operation, None);
+        assert!(e.doc.operations.is_empty());
         assert_eq!(e.doc.shape_count(), 0);
     }
 
@@ -3333,13 +3642,12 @@ mod tests {
             &mut e,
             DocumentCommand::LayerSetOperation {
                 index: 0,
-                operation: Some(Operation::Cut(OperationSettings::default())),
+                operation: Some(OperationKind::Cut),
             },
         );
-        assert_eq!(
-            e.doc.layers[0].operation,
-            Some(Operation::Cut(OperationSettings::default()))
-        );
+        assert_eq!(e.doc.operations.len(), 1);
+        assert_eq!(e.doc.operations[0].kind, OperationKind::Cut);
+        assert_eq!(e.doc.operations[0].members, e.doc.layers[0].members);
         run(
             &mut e,
             DocumentCommand::LayerSetOperation {
@@ -3347,16 +3655,19 @@ mod tests {
                 operation: None,
             },
         );
-        assert_eq!(e.doc.layers[0].operation, None);
+        assert!(e.doc.operations.is_empty());
         // An invalid operation (non-finite power) is rejected.
-        let bad = OperationSettings {
-            power: f64::NAN,
-            ..OperationSettings::default()
-        };
         assert!(
-            e.run(Command::Document(DocumentCommand::LayerSetOperation {
-                index: 0,
-                operation: Some(Operation::Cut(bad)),
+            e.run(Command::Document(DocumentCommand::OperationCreate {
+                name: "bad".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings {
+                    power: f64::NAN,
+                    ..OperationSettings::default()
+                },
+                color: None,
+                icon: None,
+                members: vec![],
             }))
             .is_err()
         );
@@ -3365,46 +3676,139 @@ mod tests {
     #[test]
     fn reorder_changes_pass_order() {
         let mut e = three();
-        e.run(Command::LayerAdd {
-            name: "cut".to_string(),
-            operation: op_of_style(CutStyle::Cut),
-        })
-        .unwrap();
-        e.run(Command::LayerAdd {
-            name: "engrave".to_string(),
-            operation: op_of_style(CutStyle::Engrave),
-        })
-        .unwrap();
         run(
             &mut e,
-            DocumentCommand::LayerAddMembers {
-                layer: 1,
-                ids: vec![1],
+            DocumentCommand::OperationCreate {
+                name: "cut".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![1],
             },
         );
         run(
             &mut e,
-            DocumentCommand::LayerAddMembers {
-                layer: 2,
-                ids: vec![2],
+            DocumentCommand::OperationCreate {
+                name: "engrave".to_string(),
+                kind: OperationKind::Engrave,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![2],
             },
         );
         let before: Vec<&str> = e
             .doc
             .production_sequence()
-            .map(|(l, _)| l.name.as_str())
+            .map(|(o, _)| o.name.as_str())
             .collect();
         assert_eq!(before, ["cut", "engrave"]);
-        run(&mut e, DocumentCommand::LayerMove { from: 2, to: 1 });
+        run(&mut e, DocumentCommand::OperationMove { from: 1, to: 0 });
         let after: Vec<&str> = e
             .doc
             .production_sequence()
-            .map(|(l, _)| l.name.as_str())
+            .map(|(o, _)| o.name.as_str())
             .collect();
         assert_eq!(
             after,
             ["engrave", "cut"],
-            "Pass N is derived from layer order"
+            "Pass N is derived from operations order"
+        );
+    }
+
+    #[test]
+    fn operation_commands_cover_the_full_lifecycle_and_undo() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::OperationCreate {
+                name: "cut".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings {
+                    power: 80.0,
+                    ..OperationSettings::default()
+                },
+                color: Some("#ff0000".to_string()),
+                icon: Some("star".to_string()),
+                members: vec![1],
+            },
+        );
+        let id = e.doc.operations[0].id;
+        assert_eq!(e.doc.operations[0].kind, OperationKind::Cut);
+        run(
+            &mut e,
+            DocumentCommand::OperationAddMembers {
+                id,
+                ids: vec![2, 3],
+            },
+        );
+        assert_eq!(
+            e.doc.operations[0].members,
+            vec![1, 2, 3],
+            "additive and idempotent (N:M)"
+        );
+        run(
+            &mut e,
+            DocumentCommand::OperationRemoveMembers { id, ids: vec![2] },
+        );
+        assert_eq!(e.doc.operations[0].members, vec![1, 3]);
+        run(
+            &mut e,
+            DocumentCommand::OperationSetKind {
+                id,
+                kind: OperationKind::Engrave,
+            },
+        );
+        assert_eq!(e.doc.operations[0].kind, OperationKind::Engrave);
+        run(
+            &mut e,
+            DocumentCommand::OperationSetSettings {
+                id,
+                settings: OperationSettings {
+                    power: 10.0,
+                    ..OperationSettings::default()
+                },
+            },
+        );
+        assert_eq!(e.doc.operations[0].settings.power, 10.0);
+        run(
+            &mut e,
+            DocumentCommand::OperationSetColor {
+                id,
+                color: Some("#00ff00".to_string()),
+            },
+        );
+        assert_eq!(e.doc.operations[0].color.as_deref(), Some("#00ff00"));
+        run(
+            &mut e,
+            DocumentCommand::OperationSetVisible { id, visible: false },
+        );
+        assert!(!e.doc.operations[0].visible);
+        run(
+            &mut e,
+            DocumentCommand::OperationSetLocked { id, locked: true },
+        );
+        assert!(e.doc.operations[0].locked);
+        assert!(
+            e.doc.shape_locked(1),
+            "a locked operation locks its members"
+        );
+        // Undo restores the previous snapshot step by step.
+        e.run(Command::Undo).unwrap();
+        assert!(!e.doc.operations[0].locked);
+        // Delete removes memberships but never geometry.
+        run(&mut e, DocumentCommand::OperationDelete { id });
+        assert!(e.doc.operations.is_empty());
+        assert_eq!(
+            e.doc.shape_count(),
+            3,
+            "geometry survives operation deletion"
+        );
+        assert_eq!(e.doc.unassigned_shapes().count(), 3);
+        assert!(
+            e.run(Command::Document(DocumentCommand::OperationDelete { id }))
+                .is_err()
         );
     }
 
@@ -3422,7 +3826,7 @@ mod tests {
             &mut e,
             DocumentCommand::LayerSetOperation {
                 index: 0,
-                operation: Some(Operation::Engrave(OperationSettings::default())),
+                operation: Some(OperationKind::Engrave),
             },
         );
         let json = serde_json::to_value(Command::Document(DocumentCommand::LayerAddMembers {

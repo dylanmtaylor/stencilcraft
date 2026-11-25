@@ -22,6 +22,18 @@
     <text x="37.000" y="47.900" class="preview-label">sheet 2 of 3 · 100×150 mm</text>
     <rect x="37.000" y="49.500" width="25.000" height="37.500" class="preview-frame"/>
     <g transform="translate(37.000 87.000) scale(0.2500 -0.2500)">
+      <g data-kind="cut" style="display:visible">
+        <g class="group" data-group="1">
+          <path d="M10,10 L30,10 L30,30 L10,30 Z" class="stencilcraft-cut"/>
+          <g class="group" data-group="2">
+            <path d="M5,5 C10.5,0.125 20,0.3333333333333333 25,5 Q30,12 5,5 Z" class="stencilcraft-cut"/>
+          </g>
+        </g>
+        <path d="M40,40 L45,40 L45,45 L40,45 Z" class="stencilcraft-cut"/>
+        <g class="group" data-group="1">
+          <path d="M-12.5,60 L-7.5,60 L-7.5,65 L-12.5,65 Z" class="stencilcraft-cut"/>
+        </g>
+      </g>
       <g data-kind="engrave" style="display:visible">
         <path d="M5,90 L95,90" class="stencilcraft-engrave"/>
       </g>

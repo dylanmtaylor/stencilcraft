@@ -1,6 +1,6 @@
 //! StencilCraft G-code job policy mapped onto the shared Craft-Libs G-code writer.
 
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, OperationKind};
 use stencilcraft_geom::path_to_polylines;
 
 pub use craft_gcode::LaserMode;
@@ -84,22 +84,15 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
     );
     let mut writer = craft_gcode::Writer::new(settings.shared(), &banner)
         .map_err(|e| GcodeError::Invalid(e.to_string()))?;
-    for layer in doc
-        .layers
-        .iter()
-        .filter(|layer| !matches!(layer.operation, Some(Operation::Guide)))
-    {
-        let kind = layer
-            .operation
-            .as_ref()
-            .map_or("none", Operation::kind_name);
-        writer.comment(&format!("layer {} ({kind})", layer.name));
-        if !layer.visible {
-            writer.comment("(layer hidden, skipped)");
+    for op in doc.operations.iter().filter(|op| !op.kind.is_guide()) {
+        let kind = op.kind.kind_name();
+        writer.comment(&format!("operation {} ({kind})", op.name));
+        if !op.visible {
+            writer.comment("(operation hidden, skipped)");
             continue;
         }
-        let power = match layer.operation {
-            Some(Operation::Engrave(_)) => settings.engrave_power.unwrap_or(settings.power),
+        let power = match op.kind {
+            OperationKind::Engrave => settings.engrave_power.unwrap_or(settings.power),
             _ => settings.power,
         };
         if settings.passes > 1 {
@@ -109,7 +102,7 @@ pub fn export(doc: &Document, settings: &GcodeSettings) -> Result<String, GcodeE
                 if settings.ramp_power { ", ramped" } else { "" }
             ));
         }
-        for id in &layer.members {
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
                 continue;
             };
@@ -141,7 +134,18 @@ mod tests {
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
         p.line_to(Point::new(10.0, 0.0));
-        doc.push_shape(0, p).unwrap();
+        let id = doc.push_shape(0, p).unwrap().id;
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![id],
+            icon: None,
+        });
         doc
     }
 
@@ -204,21 +208,42 @@ mod tests {
     #[test]
     fn engraved_layers_take_their_own_power() {
         let mut doc = Document::default();
-        doc.layers.push(stencilcraft_doc::Layer::new(
-            "score",
-            Some(Operation::Engrave(Default::default())),
-        ));
+        doc.layers.push(stencilcraft_doc::Layer::new("score"));
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
         p.line_to(Point::new(5.0, 0.0));
-        doc.push_shape(1, p).unwrap();
-        doc.push_shape(0, {
-            let mut cut = kurbo::BezPath::new();
-            cut.move_to(Point::new(0.0, 20.0));
-            cut.line_to(Point::new(5.0, 20.0));
-            cut
-        })
-        .unwrap();
+        let sid = doc.push_shape(1, p).unwrap().id;
+        let cid = doc
+            .push_shape(0, {
+                let mut cut = kurbo::BezPath::new();
+                cut.move_to(Point::new(0.0, 20.0));
+                cut.line_to(Point::new(5.0, 20.0));
+                cut
+            })
+            .unwrap()
+            .id;
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![cid],
+            icon: None,
+        });
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 2,
+            name: "score".to_string(),
+            kind: stencilcraft_doc::OperationKind::Engrave,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![sid],
+            icon: None,
+        });
         let g = export(
             &doc,
             &GcodeSettings {
@@ -282,7 +307,18 @@ mod tests {
         p.line_to(Point::new(10.0, 0.0));
         p.line_to(Point::new(10.0, 10.0));
         p.close_path();
-        doc.push_shape(0, p).unwrap();
+        let id = doc.push_shape(0, p).unwrap().id;
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![id],
+            icon: None,
+        });
         let g = export(&doc, &GcodeSettings::default()).unwrap();
         let last_y10 = g.matches("Y0.0000").count();
         assert!(last_y10 >= 2, "must return to start on a closed loop:\n{g}");

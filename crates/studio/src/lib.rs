@@ -1,7 +1,7 @@
 //! Adapter from the shared Silhouette Studio reader to the StencilCraft document model.
 
 use kurbo::{Affine, BezPath};
-use stencilcraft_doc::{Document, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{Document, Layer, Operation, OperationKind, OperationSettings};
 
 pub const MAX_FILE_BYTES: usize = craft_silhouette_studio::MAX_FILE_BYTES;
 
@@ -72,17 +72,31 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
     for shape in parsed.shapes {
         let layer = layer_for(&mut doc, shape.line_color);
         let path: BezPath = to_doc * shape.path;
-        doc.push_shape(layer, path)
+        let id = doc
+            .push_shape(layer, path)
             .map_err(|e| StudioError::Malformed {
                 name: name.to_owned(),
                 what: e.to_string(),
-            })?;
+            })?
+            .id;
+        let layer_name = doc.layers[layer].name.clone();
+        if let Some(op) = doc.operations.iter_mut().find(|o| o.name == layer_name) {
+            op.members.push(id);
+        }
     }
     if doc.layers.is_empty() {
-        doc.layers.push(Layer::new(
-            "cut",
-            Some(Operation::Cut(OperationSettings::default())),
-        ));
+        doc.layers.push(Layer::new("cut"));
+        doc.operations.push(Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: OperationKind::Cut,
+            settings: OperationSettings::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: Vec::new(),
+            icon: None,
+        });
     }
     doc.validate().map_err(|e| StudioError::Malformed {
         name: name.to_owned(),
@@ -145,8 +159,18 @@ fn layer_for(doc: &mut Document, color: Option<[u8; 3]>) -> usize {
     if let Some(i) = doc.layers.iter().position(|l| l.name == name) {
         return i;
     }
-    let mut layer = Layer::new(name, Some(Operation::Cut(OperationSettings::default())));
-    layer.color = color;
-    doc.layers.push(layer);
+    doc.layers.push(Layer::new(name.clone()));
+    let op_id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id: op_id,
+        name,
+        kind: OperationKind::Cut,
+        settings: OperationSettings::default(),
+        color,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
     doc.layers.len() - 1
 }

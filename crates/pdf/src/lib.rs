@@ -2,7 +2,7 @@
 //! (cut red, engrave blue, 0.25 mm), for printing at 100 % or handing to a cutter's
 //! software. PDF serialization and drawing are delegated to the shared craft-pdf writer.
 
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::Document;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PdfError {
@@ -18,12 +18,16 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
         view_box: [0.0, 0.0, doc.board.width_mm, doc.board.height_mm],
         paths: Vec::new(),
     };
-    for layer in doc.layers.iter().filter(|layer| layer.visible) {
-        let color = match layer.operation {
-            Some(Operation::Engrave(_)) => [45, 108, 223],
+    for op in doc
+        .operations
+        .iter()
+        .filter(|op| op.visible && !op.kind.is_guide())
+    {
+        let color = match op.kind {
+            stencilcraft_doc::OperationKind::Engrave => [45, 108, 223],
             _ => [192, 57, 43],
         };
-        for id in &layer.members {
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id) else {
                 continue;
             };

@@ -13,7 +13,7 @@
 
 use kurbo::Point;
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, OperationKind};
 use stencilcraft_geom::{Polyline, signed_area};
 
 #[derive(Debug, thiserror::Error)]
@@ -225,11 +225,11 @@ pub fn apply_with(doc: &Document, options: &OffsetOptions) -> Result<Document, K
     }
     let delta = doc.kerf.width_mm / 2.0;
     let mut out = doc.clone();
-    for li in 0..out.layers.len() {
-        if !matches!(out.layers[li].operation, Some(Operation::Cut(_))) {
+    for oi in 0..out.operations.len() {
+        if out.operations[oi].kind != OperationKind::Cut {
             continue;
         }
-        let members = out.layers[li].members.clone();
+        let members = out.operations[oi].members.clone();
         for id in members {
             if let Some(shape) = out.get_shape_mut(id) {
                 shape.path = offset_shape_path(&shape.path, delta, options)?;
@@ -340,12 +340,27 @@ fn in_ring(p: &Point, ring: &[Point]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stencilcraft_doc::{Board, KerfSettings, Layer, OperationSettings};
+    use stencilcraft_doc::{Board, KerfSettings, Layer, Operation, OperationSettings};
     use stencilcraft_geom::bounds_of_points;
 
-    /// A cut layer carrying the document's only operation pass.
+    /// A cut layer.
     fn cut_layer() -> Layer {
-        Layer::new("cut", Some(Operation::Cut(OperationSettings::default())))
+        Layer::new("cut")
+    }
+
+    /// The document's only operation pass: a Cut over every base-layer member.
+    fn cut_op(doc: &Document) -> Operation {
+        Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: OperationKind::Cut,
+            settings: OperationSettings::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: doc.layers[0].members.clone(),
+            icon: None,
+        }
     }
 
     /// The `i`-th member shape of `layer` in `doc`.
@@ -443,6 +458,7 @@ mod tests {
             ..Document::default()
         };
         doc.push_shape(0, ccw_path(50.0)).unwrap();
+        doc.operations.push(cut_op(&doc));
         let out = apply(&doc, 4.0).unwrap();
         let before = member(&doc, 0, 0).bounds().unwrap();
         let after = member(&out, 0, 0).bounds().unwrap();
@@ -453,8 +469,19 @@ mod tests {
     #[test]
     fn engrave_shapes_untouched() {
         let mut doc = Document::default();
-        doc.layers[0].operation = Some(Operation::Engrave(OperationSettings::default()));
+        doc.operations.push(Operation {
+            id: 1,
+            name: "engrave".to_string(),
+            kind: OperationKind::Engrave,
+            settings: OperationSettings::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![1],
+            icon: None,
+        });
         doc.push_shape(0, ccw_path(50.0)).unwrap();
+        doc.operations.push(cut_op(&doc));
         let original = member(&doc, 0, 0).path.clone();
         let out = apply(&doc, 4.0).unwrap();
         assert_eq!(member(&out, 0, 0).path, original);
@@ -476,6 +503,7 @@ mod tests {
             ..Document::default()
         };
         doc.push_shape(0, ccw_path(100.0)).unwrap();
+        doc.operations.push(cut_op(&doc));
         let mut counter = kurbo::BezPath::new();
         counter.move_to(Point::new(30.0, 30.0));
         counter.line_to(Point::new(70.0, 30.0));
@@ -527,6 +555,7 @@ mod tests {
         compound.extend(box_at(20.0, 20.0, 80.0, 80.0).elements().iter().copied());
         compound.extend(box_at(40.0, 40.0, 60.0, 60.0).elements().iter().copied());
         doc.push_shape(0, compound).unwrap();
+        doc.operations.push(cut_op(&doc));
 
         let compensated = apply(&doc, 4.0).unwrap();
         let polylines = Polyline::from_path(&member(&compensated, 0, 0).path);
@@ -585,6 +614,7 @@ mod tests {
         let source = Polyline::from_path(&path);
         let source_perimeter = perimeter(&source[0].points);
         doc.push_shape(0, path).unwrap();
+        doc.operations.push(cut_op(&doc));
         let compensated = apply(&doc, 4.0).unwrap();
         let out = Polyline::from_path(&member(&compensated, 0, 0).path);
         assert_eq!(out.len(), 1, "one closed contour in, one out");
@@ -658,6 +688,7 @@ mod tests {
                     ..Document::default()
                 };
                 doc.push_shape(0, regular_polygon(sides, radius)).unwrap();
+                doc.operations.push(cut_op(&doc));
                 let out = apply(&doc, 4.0).unwrap();
                 Polyline::from_path(&member(&out, 0, 0).path)
             };

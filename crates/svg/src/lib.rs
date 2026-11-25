@@ -4,16 +4,45 @@ use std::collections::{BTreeSet, HashMap};
 
 use kurbo::BezPath;
 use stencilcraft_doc::{
-    CutStyle, Document, Group, GroupChild, Layer, Operation, OperationSettings, Shape,
-    ShapeProduction,
+    CutStyle, Document, Group, GroupChild, Layer, Operation, OperationKind, OperationSettings,
+    Shape, ShapeProduction,
 };
 
-/// The production pass a legacy `CutStyle` maps to.
-fn op_of(style: CutStyle) -> Option<Operation> {
-    Some(match style {
-        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
-        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
-    })
+/// The production pass kind a legacy `CutStyle` maps to.
+fn kind_of(style: CutStyle) -> OperationKind {
+    match style {
+        CutStyle::Cut => OperationKind::Cut,
+        CutStyle::Engrave => OperationKind::Engrave,
+    }
+}
+
+/// Finds the operation of `kind`, or creates it (named `name`) with the next free id.
+fn ensure_operation(
+    doc: &mut Document,
+    name: &str,
+    kind: OperationKind,
+    color: Option<String>,
+) -> u64 {
+    if let Some(op) = doc
+        .operations
+        .iter()
+        .find(|o| o.kind == kind && o.color == color)
+    {
+        return op.id;
+    }
+    let id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id,
+        name: name.to_string(),
+        kind,
+        settings: OperationSettings::default(),
+        color,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
+    id
 }
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
@@ -46,16 +75,22 @@ impl Default for TilePreviewOptions {
 pub const TILE_PREVIEW_GAP_MM: f64 = 6.0;
 pub const TILE_PREVIEW_MAX_MM: f64 = 100_000.0;
 
-fn class_for(operation: Option<&Operation>) -> &'static str {
-    match operation {
-        Some(Operation::Engrave(_)) => "stencilcraft-engrave",
+fn class_for(kind: Option<&OperationKind>) -> &'static str {
+    match kind {
+        Some(OperationKind::Engrave) => "stencilcraft-engrave",
         _ => "stencilcraft-cut",
     }
 }
 fn view_bounds(doc: &Document) -> kurbo::Rect {
-    (0..doc.layers.len())
-        .filter(|&i| !matches!(doc.layers[i].operation, Some(Operation::Guide)))
-        .filter_map(|i| doc.layer_bounds(i))
+    doc.operations
+        .iter()
+        .filter(|o| !o.kind.is_guide())
+        .flat_map(|o| {
+            o.members
+                .iter()
+                .filter_map(|id| doc.get_shape(*id))
+                .filter_map(|s| s.bounds())
+        })
         .fold(
             kurbo::Rect::new(0.0, 0.0, doc.board.width_mm, doc.board.height_mm),
             |bounds, layer| bounds.union(layer),
@@ -96,15 +131,15 @@ fn document_elements(
         )));
     }
     let parents = doc.group_parent_map();
-    for layer in doc.layers.iter().filter(|layer| {
+    for op in doc.operations.iter().filter(|op| {
         if output_layers_only {
-            layer.is_output()
+            op.is_output()
         } else {
-            !matches!(layer.operation, Some(Operation::Guide))
+            !op.kind.is_guide()
         }
     }) {
         let mut children = Vec::new();
-        for id in &layer.members {
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
                 continue;
             };
@@ -113,32 +148,20 @@ fn document_elements(
                 stencilcraft_doc::GroupChild::Shape(shape.id),
             );
             let element = SvgElement::Path {
-                attributes: vec![SvgAttribute::text(
-                    "class",
-                    class_for(layer.operation.as_ref()),
-                )],
+                attributes: vec![SvgAttribute::text("class", class_for(Some(&op.kind)))],
                 path: shape.cut_path().into_owned(),
             };
             append_grouped(&mut children, &chain, element);
         }
         let mut attributes = Vec::new();
         if !output_layers_only {
-            attributes.push(SvgAttribute::text(
-                "class",
-                class_for(layer.operation.as_ref()),
-            ));
+            attributes.push(SvgAttribute::text("class", class_for(Some(&op.kind))));
         }
         attributes.extend([
-            SvgAttribute::text(
-                "data-kind",
-                layer
-                    .operation
-                    .as_ref()
-                    .map_or("none", Operation::kind_name),
-            ),
+            SvgAttribute::text("data-kind", op.kind.kind_name()),
             SvgAttribute::text(
                 "style",
-                if layer.visible {
+                if op.visible {
                     "display:visible"
                 } else {
                     "display:hidden"
@@ -405,7 +428,7 @@ pub struct OperationHint {
     /// top-level shape.
     pub group_path: Vec<String>,
     /// The operation the element's `data-kind`/class suggests.
-    pub operation: Operation,
+    pub operation: OperationKind,
 }
 
 #[derive(Debug)]
@@ -558,13 +581,15 @@ pub fn import_with_warnings_policy(
 }
 
 /// The Phase-2 mapping, kept verbatim behind `ImportPolicy::legacy_style_operations`:
-/// one layer per (name, style, colour), shapes grouped into operation layers.
+/// one geometry layer per (name, style, colour), with one operation per layer carrying
+/// the style, colour and members.
 fn build_legacy_layers(
     doc: &mut Document,
     pending: &[Option<PendingShape>],
 ) -> Result<(), SvgError> {
     let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
-    doc.layers.push(Layer::new("cut", op_of(CutStyle::Cut)));
+    doc.layers.push(Layer::new("cut"));
+    ensure_operation(doc, "cut", kind_of(CutStyle::Cut), None);
     layers.insert(("cut".into(), false, None), 0);
     for item in pending {
         let Some(p) = item else { continue };
@@ -585,15 +610,19 @@ fn build_legacy_layers(
         let index = if let Some(index) = layers.get(&key) {
             *index
         } else {
-            let mut layer = Layer::new(layer_name, op_of(p.style));
-            layer.color = p.color.clone();
-            doc.layers.push(layer);
+            doc.layers.push(Layer::new(layer_name.clone()));
             let i = doc.layers.len() - 1;
             layers.insert(key, i);
             i
         };
-        doc.push_shape(index, p.path.clone())
-            .map_err(|e| SvgError::Model(e.to_string()))?;
+        let op_id = ensure_operation(doc, &layer_name, kind_of(p.style), p.color.clone());
+        let id = doc
+            .push_shape(index, p.path.clone())
+            .map_err(|e| SvgError::Model(e.to_string()))?
+            .id;
+        if let Some(op) = doc.operations.iter_mut().find(|o| o.id == op_id) {
+            op.members.push(id);
+        }
     }
     Ok(())
 }
@@ -887,16 +916,14 @@ fn attach_groups(doc: &mut Document, svg: &str, shape_ids: &[Option<u64>]) -> Ve
     let groups = &walk.groups;
     let mut hints = Vec::new();
     for (chain, kind) in &walk.hints {
-        if let Some(operation) = op_of(*kind) {
-            let group_path = chain
-                .iter()
-                .filter_map(|&i| groups.get(i).map(|g| g.name.clone()))
-                .collect();
-            hints.push(OperationHint {
-                group_path,
-                operation,
-            });
-        }
+        let group_path = chain
+            .iter()
+            .filter_map(|&i| groups.get(i).map(|g| g.name.clone()))
+            .collect();
+        hints.push(OperationHint {
+            group_path,
+            operation: kind_of(*kind),
+        });
     }
     let leaves = &walk.leaves;
     if leaves.len() != shape_ids.len() {
@@ -1002,10 +1029,7 @@ mod tests_group_walk {
         assert_eq!(doc.groups[0].children, vec![GroupChild::Shape(1)]);
         // The group's cut class is collected as a hint, never applied.
         assert_eq!(imported.operation_hints.len(), 1);
-        assert!(matches!(
-            imported.operation_hints[0].operation,
-            Operation::Cut(_)
-        ));
+        assert_eq!(imported.operation_hints[0].operation, OperationKind::Cut);
         assert_eq!(imported.operation_hints[0].group_path.len(), 1);
     }
 }
@@ -1051,23 +1075,46 @@ mod tests {
         p
     }
 
+    /// Adds one Cut operation holding every shape of the base layer (test helper).
+    fn cut_all(doc: &mut Document) {
+        let members = doc.layers[0].members.clone();
+        if members.is_empty() {
+            return;
+        }
+        let id = doc.next_operation_id();
+        doc.operations.push(Operation {
+            id,
+            name: "cut".to_string(),
+            kind: OperationKind::Cut,
+            settings: OperationSettings::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members,
+            icon: None,
+        });
+    }
+
     #[test]
     fn export_includes_board_size_in_viewbox() {
-        let doc = Document::default();
+        let mut doc = Document::default();
+        doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0)).unwrap();
+        cut_all(&mut doc);
         let svg = export(&doc).unwrap();
         assert!(
             svg.contains("viewBox=\"0.000 0.000 100.000 150.000\""),
             "{svg}"
         );
         assert!(svg.contains("width=\"100.000mm\""));
-        // The default base layer is operation-less, so no production kind is written.
-        assert!(svg.contains("data-kind=\"none\""));
+        // One cut operation writes the production kind.
+        assert!(svg.contains("data-kind=\"cut\""));
     }
 
     #[test]
     fn export_shapes_as_paths() {
         let mut doc = Document::default();
         doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0)).unwrap();
+        cut_all(&mut doc);
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(svg.contains("class=\"stencilcraft-cut\""));
@@ -1079,6 +1126,7 @@ mod tests {
         doc.push_shape(0, rect(10.0, 10.0, 20.0, 20.0)).unwrap();
         doc.push_shape(0, rect(50.0, 50.0, 5.0, 5.0)).unwrap();
         doc.get_shape_mut(doc.layers[0].members[1]).unwrap().hidden = true;
+        cut_all(&mut doc);
         let svg = export(&doc).unwrap();
         assert!(svg.contains("d=\"M10"), "{svg}");
         assert!(!svg.contains("d=\"M50"), "{svg}");
@@ -1093,9 +1141,15 @@ mod tests {
             ..Document::default()
         };
         doc.layers.clear();
-        doc.layers
-            .push(stencilcraft_doc::Layer::new("cut", op_of(style)));
-        doc.push_shape(0, rect(0.0, 0.0, w, h)).unwrap();
+        doc.layers.push(stencilcraft_doc::Layer::new("cut"));
+        let id = doc.push_shape(0, rect(0.0, 0.0, w, h)).unwrap().id;
+        let op_id = ensure_operation(&mut doc, "cut", kind_of(style), None);
+        doc.operations
+            .iter_mut()
+            .find(|o| o.id == op_id)
+            .unwrap()
+            .members
+            .push(id);
         doc
     }
 
@@ -1204,6 +1258,7 @@ mod tests {
     fn import_roundtrips_path_data() {
         let mut doc = Document::default();
         doc.push_shape(0, rect(0.0, 0.0, 30.0, 40.0)).unwrap();
+        cut_all(&mut doc);
         let svg = export(&doc).unwrap();
         let back = import(&svg, "test.svg").unwrap();
         assert_eq!(back.shape_count(), 1);
@@ -1281,10 +1336,10 @@ mod tests {
         assert_eq!(inner.children, vec![GroupChild::Shape(1)]);
         // The inherited engrave styling is a hint on the outer group, not a layer.
         assert_eq!(imported.operation_hints.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             imported.operation_hints[0].operation,
-            Operation::Engrave(_)
-        ));
+            OperationKind::Engrave
+        );
         assert_eq!(imported.operation_hints[0].group_path.len(), 1);
         let b = nth_shape(&doc, 0).bounds().unwrap();
         assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
@@ -1293,10 +1348,12 @@ mod tests {
         // Legacy branch: the old two-layer result (cut base + engrave layer).
         let legacy = legacy(svg).document;
         assert_eq!(legacy.layers.len(), 2);
-        assert!(matches!(
-            legacy.layers[1].operation,
-            Some(Operation::Engrave(_))
-        ));
+        assert!(
+            legacy
+                .operations
+                .iter()
+                .any(|o| o.kind == OperationKind::Engrave)
+        );
         let b = member(&legacy, 1, 0).bounds().unwrap();
         assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
@@ -1308,6 +1365,7 @@ mod tests {
         let mut doc = Document::default();
         let first = doc.push_shape(0, rect(0.0, 0.0, 5.0, 5.0)).unwrap().id;
         let second = doc.push_shape(0, rect(10.0, 10.0, 5.0, 5.0)).unwrap().id;
+        cut_all(&mut doc);
         let inner_id = 10;
         doc.groups.push(Group {
             id: inner_id,
@@ -1371,7 +1429,7 @@ mod tests {
             imported
                 .operation_hints
                 .iter()
-                .any(|hint| matches!(hint.operation, Operation::Engrave(_)))
+                .any(|hint| hint.operation == OperationKind::Engrave)
         );
     }
 
@@ -1432,10 +1490,10 @@ mod tests {
         assert_eq!(doc.groups[0].children.len(), 1);
         assert!(matches!(doc.groups[0].children[0], GroupChild::Shape(_)));
         assert_eq!(imported.operation_hints.len(), 1);
-        assert!(matches!(
+        assert_eq!(
             imported.operation_hints[0].operation,
-            Operation::Engrave(_)
-        ));
+            OperationKind::Engrave
+        );
     }
 
     #[test]
@@ -1611,19 +1669,20 @@ mod tests {
         let doc = imported.document;
         assert_eq!(doc.shape_count(), 10);
         assert_eq!(doc.layers[0].name, "cut");
-        assert_eq!(doc.layers[0].color, None);
         assert_eq!(doc.layers[0].members.len(), 3);
-        let red = layer(&doc, "Line #ff0000");
+        fn op<'a>(doc: &'a Document, name: &str) -> &'a Operation {
+            doc.operations.iter().find(|o| o.name == name).unwrap()
+        }
+        let red = op(&doc, "Line #ff0000");
         assert_eq!(red.members.len(), 3);
         assert_eq!(red.color.as_deref(), Some("#ff0000"));
-        assert!(matches!(red.operation, Some(Operation::Cut(_))));
-        assert_eq!(layer(&doc, "Line #0000ff").members.len(), 1);
-        assert_eq!(layer(&doc, "Line #008000").members.len(), 1);
-        assert_eq!(layer(&doc, "Line #6495ed").members.len(), 1);
-        let engrave = layer(&doc, "engrave #008000");
-        assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
+        assert_eq!(red.kind, OperationKind::Cut);
+        assert_eq!(op(&doc, "Line #0000ff").members.len(), 1);
+        assert_eq!(op(&doc, "Line #008000").members.len(), 1);
+        assert_eq!(op(&doc, "Line #6495ed").members.len(), 1);
+        let engrave = op(&doc, "engrave #008000");
+        assert_eq!(engrave.kind, OperationKind::Engrave);
         assert_eq!(engrave.color.as_deref(), Some("#008000"));
-        assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
         // The strict (new-semantics) import of the same file keeps every shape and
         // synthesizes no layers.
         let strict = import(svg, "colours.svg").unwrap();

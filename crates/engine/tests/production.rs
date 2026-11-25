@@ -331,7 +331,7 @@ fn production_metadata_survives_vectorcraft_edits_and_saves() {
     let a = add(&mut engine, rect_path(0.0, 0.0, 10.0, 10.0));
     run(
         &mut engine,
-        serde_json::json!({"command": "shapes.set-production", "params": {"ids": [a], "operation": {"kind": "score"}, "material": "Cardstock"}}),
+        serde_json::json!({"command": "shapes.set-production", "params": {"ids": [a], "operation": "score", "material": "Cardstock"}}),
     )
     .unwrap();
     engine
@@ -358,7 +358,7 @@ fn layer_membership_commands_round_trip_through_dot_named_json() {
     // layer.add with an operation creates a new operation layer on top.
     run(
         &mut engine,
-        serde_json::json!({"command": "layer.add", "params": {"name": "cut", "operation": {"kind": "cut"}}}),
+        serde_json::json!({"command": "layer.add", "params": {"name": "cut", "operation": "cut"}}),
     )
     .unwrap();
     let cut = engine.doc.layers.len() - 1;
@@ -402,21 +402,29 @@ fn layer_membership_commands_round_trip_through_dot_named_json() {
     // layer.set-operation sets, clears, and validates.
     run(
         &mut engine,
-        serde_json::json!({"command": "layer.set-operation", "params": {"index": 0, "operation": {"kind": "engrave"}}}),
+        serde_json::json!({"command": "layer.set-operation", "params": {"index": 0, "operation": "engrave"}}),
     )
     .unwrap();
     assert!(
-        engine.doc.layers[0]
-            .operation
-            .as_ref()
-            .is_some_and(|op| matches!(op, stencilcraft_doc::Operation::Engrave(_)))
+        engine
+            .doc
+            .operations
+            .iter()
+            .any(|o| o.kind == stencilcraft_doc::OperationKind::Engrave
+                && o.members == engine.doc.layers[0].members)
     );
     run(
         &mut engine,
         serde_json::json!({"command": "layer.set-operation", "params": {"index": 0, "operation": null}}),
     )
     .unwrap();
-    assert_eq!(engine.doc.layers[0].operation, None);
+    assert!(
+        engine
+            .doc
+            .operations
+            .iter()
+            .all(|o| o.members != engine.doc.layers[0].members)
+    );
     // Undo restores the previous memberships.
     let before_undo = engine.doc.clone();
     engine.run(Command::Undo).unwrap();
@@ -455,7 +463,7 @@ fn membership_commands_reject_locked_layers() {
     assert!(
         run(
             &mut engine,
-            serde_json::json!({"command": "layer.set-operation", "params": {"index": 0, "operation": {"kind": "cut"}}})
+            serde_json::json!({"command": "layer.set-operation", "params": {"index": 0, "operation": "cut"}})
         )
         .is_err()
     );
@@ -531,33 +539,47 @@ fn assignment_json_is_additive_idempotent_geometry_invariant_and_undoable() {
     // once it has a member; null clears it again. Undo restores each state.
     run(
         &mut engine,
-        serde_json::json!({"command": "layer.set-operation", "params": {"index": layer1, "operation": {"kind": "cut"}}}),
+        serde_json::json!({"command": "layer.set-operation", "params": {"index": layer1, "operation": "cut"}}),
     )
     .unwrap();
     assert!(
-        engine.doc.layers[layer1]
-            .operation
-            .as_ref()
-            .is_some_and(|op| matches!(op, stencilcraft_doc::Operation::Cut(_)))
+        engine
+            .doc
+            .operations
+            .iter()
+            .any(|o| o.kind == stencilcraft_doc::OperationKind::Cut && o.name == "pass2")
     );
     assert!(
         engine
             .doc
             .production_sequence()
-            .any(|(l, _)| l.name == "pass2"),
-        "a layer with a Cut operation is a production pass"
+            .any(|(o, _)| o.name == "pass2"),
+        "an operation named pass2 is a production pass"
     );
     run(
         &mut engine,
         serde_json::json!({"command": "layer.add-members", "params": {"layer": layer1, "ids": [a]}}),
     )
     .unwrap();
+    let pass2 = engine
+        .doc
+        .operations
+        .iter()
+        .find(|o| o.name == "pass2")
+        .unwrap()
+        .id;
+    run(
+        &mut engine,
+        serde_json::json!({"command": "operation.add-members", "params": {"id": pass2, "ids": [a]}}),
+    )
+    .unwrap();
     assert!(
         engine
             .doc
             .production_sequence()
-            .any(|(l, shapes)| l.name == "pass2" && shapes.iter().any(|s| s.id == a))
+            .any(|(o, shapes)| o.name == "pass2" && shapes.iter().any(|s| s.id == a))
     );
+    assert!(engine.undo());
     assert!(engine.undo());
     assert!(engine.undo());
     assert_eq!(engine.doc, before_doc);
@@ -566,7 +588,7 @@ fn assignment_json_is_additive_idempotent_geometry_invariant_and_undoable() {
         serde_json::json!({"command": "layer.set-operation", "params": {"index": layer1, "operation": null}}),
     )
     .unwrap();
-    assert_eq!(engine.doc.layers[layer1].operation, None);
+    assert!(engine.doc.operations.iter().all(|o| o.name != "pass2"));
     assert!(engine.undo());
     assert_eq!(engine.doc, before_doc);
 }

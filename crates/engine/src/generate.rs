@@ -7,7 +7,7 @@
 use kurbo::{Affine, BezPath, Shape as _};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stencilcraft_doc::{CutStyle, Operation, OperationSettings, Tip, ToolOp};
+use stencilcraft_doc::{CutStyle, OperationKind, OperationSettings, Tip, ToolOp};
 use stencilcraft_generate as generate;
 
 use crate::{Command, Effect, Engine, EngineError, POINTS_PER_MM, transform_path, unique_ids};
@@ -477,27 +477,19 @@ impl Engine {
                 "{name}: generated non-finite geometry"
             )));
         }
-        let tools: Vec<Option<Operation>> = paths
+        let tools: Vec<Option<(OperationKind, OperationSettings)>> = paths
             .iter()
             .map(|(_, _, t)| t.as_ref().map(operation_of_tool))
             .collect();
         let ids =
             self.vector_add_paths(paths.into_iter().map(|(p, s, _)| (p, s)).collect(), name)?;
         for (id, tool) in ids.iter().zip(tools) {
-            if let Some(op) = tool {
-                let op_layers: Vec<usize> = self
-                    .doc
-                    .layers
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, l)| l.operation.is_some())
-                    .map(|(i, _)| i)
-                    .collect();
-                for li in op_layers {
-                    crate::document::remove_members(&mut self.doc, li, &[*id]);
+            if let Some((kind, settings)) = tool {
+                for op in self.doc.operations.iter_mut() {
+                    op.members.retain(|m| *m != *id);
                 }
-                let li = crate::document::ensure_operation_layer(&mut self.doc, op);
-                crate::document::add_members(&mut self.doc, li, &[*id]);
+                let op_id = crate::document::ensure_operation(&mut self.doc, kind, settings);
+                crate::document::op_add_members(&mut self.doc, op_id, &[*id]);
             }
         }
         Ok(Effect::ShapesAdded { ids })
@@ -514,16 +506,15 @@ impl Engine {
                 "{name}: more than {MAX_COPIES} copies"
             )));
         }
-        // Copies inherit the source shapes' operation-layer memberships.
-        let memberships: Vec<Vec<usize>> = objects
+        // Copies inherit the source shapes' operation memberships.
+        let memberships: Vec<Vec<u64>> = objects
             .iter()
             .map(|(id, _, _)| {
                 self.doc
-                    .layers
+                    .operations
                     .iter()
-                    .enumerate()
-                    .filter(|(_, l)| l.operation.is_some() && l.members.contains(id))
-                    .map(|(i, _)| i)
+                    .filter(|o| o.members.contains(id))
+                    .map(|o| o.id)
                     .collect()
             })
             .collect();
@@ -537,9 +528,9 @@ impl Engine {
         let Effect::ShapesAdded { ids } = ids else {
             return Err(EngineError::Internal(format!("{name}: unexpected effect")));
         };
-        for (id, layers) in ids.iter().zip(memberships) {
-            for li in layers {
-                crate::document::add_members(&mut self.doc, li, &[*id]);
+        for (id, ops) in ids.iter().zip(memberships) {
+            for op_id in ops {
+                crate::document::op_add_members(&mut self.doc, op_id, &[*id]);
             }
         }
         Ok(Effect::ShapesAdded { ids })
@@ -615,13 +606,13 @@ fn invalid(name: &str, e: generate::GenError) -> EngineError {
 /// Score/emboss passes 1–10; punch diameter 0.5–20 mm.
 /// A v1 tool tag mapped to its v2 operation layer pass (same mapping as the model
 /// migration in craft-libs).
-fn operation_of_tool(tool: &ToolOp) -> Operation {
+fn operation_of_tool(tool: &ToolOp) -> (OperationKind, OperationSettings) {
     let mut s = OperationSettings::default();
-    match tool {
+    let kind = match tool {
         ToolOp::Score { tip, passes } => {
             s.tip = Some(*tip);
             s.passes = *passes;
-            Operation::Score(s)
+            OperationKind::Score
         }
         ToolOp::Emboss {
             tip,
@@ -631,14 +622,15 @@ fn operation_of_tool(tool: &ToolOp) -> Operation {
             s.tip = Some(*tip);
             s.passes = *passes;
             s.deboss = *deboss;
-            Operation::Engrave(s)
+            OperationKind::Engrave
         }
-        ToolOp::PowerEngrave | ToolOp::HeatPen => Operation::Engrave(s),
+        ToolOp::PowerEngrave | ToolOp::HeatPen => OperationKind::Engrave,
         ToolOp::Punch { diameter_mm } => {
             s.punch_diameter_mm = Some(*diameter_mm);
-            Operation::Punch(s)
+            OperationKind::Punch
         }
-    }
+    };
+    (kind, s)
 }
 
 fn check_tool(tool: &ToolOp, name: &str) -> Result<(), EngineError> {

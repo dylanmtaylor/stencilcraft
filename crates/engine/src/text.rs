@@ -179,24 +179,22 @@ fn push_text(
     style: CutStyle,
     spec: Option<TextSpec>,
 ) -> Result<u64, EngineError> {
-    let operation =
+    let kind =
         crate::document::op_of_style(style).ok_or_else(|| invalid("text", "unknown style"))?;
-    let layer = match engine
+    // New shapes land on the top unlocked geometry layer and join the matching operation.
+    let layer = engine
         .doc
         .layers
         .iter()
-        .rposition(|l| l.operation.as_ref() == Some(&operation))
-    {
-        Some(index) => index,
-        None => {
-            engine.doc.layers.push(stencilcraft_doc::Layer::new(
-                operation.kind_name(),
-                Some(operation),
-            ));
-            engine.doc.layers.len() - 1
-        }
-    };
+        .rposition(|l| l.takes_new_shapes())
+        .unwrap_or(0);
     let id = engine.doc.push_shape(layer, path)?.id;
+    let op_id = crate::document::ensure_operation(
+        &mut engine.doc,
+        kind,
+        stencilcraft_doc::OperationSettings::default(),
+    );
+    crate::document::op_add_members(&mut engine.doc, op_id, &[id]);
     if let Some(shape) = engine.doc.get_shape_mut(id) {
         shape.text = spec.map(Box::new);
     }

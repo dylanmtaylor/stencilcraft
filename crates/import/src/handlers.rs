@@ -1,6 +1,6 @@
 //! Stencil document adapters for the shared format registry.
 
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, OperationKind};
 
 use crate::{ImportError, bad};
 
@@ -50,9 +50,16 @@ fn output_scene(
             "board dimensions must be finite and positive",
         ));
     }
-    let svg_bounds = (0..doc.layers.len())
-        .filter(|&i| !matches!(doc.layers[i].operation, Some(Operation::Guide)))
-        .filter_map(|i| doc.layer_bounds(i))
+    let svg_bounds = doc
+        .operations
+        .iter()
+        .filter(|o| !o.kind.is_guide())
+        .flat_map(|o| {
+            o.members
+                .iter()
+                .filter_map(|id| doc.get_shape(*id))
+                .filter_map(|s| s.bounds())
+        })
         .fold(
             kurbo::Rect::new(0.0, 0.0, board.0, board.1),
             |bounds, layer| bounds.union(layer),
@@ -76,36 +83,36 @@ fn output_scene(
         (board.0, board.1, [0.0, 0.0, board.0, board.1])
     };
     let mut layers = Vec::new();
-    let mut mapped = vec![None; doc.layers.len()];
-    for (source_index, layer) in doc
-        .layers
+    let mut mapped = vec![None; doc.operations.len()];
+    for (source_index, op) in doc
+        .operations
         .iter()
         .enumerate()
-        .filter(|(_, layer)| !matches!(layer.operation, Some(Operation::Guide)))
+        .filter(|(_, op)| !op.kind.is_guide())
     {
-        let style = layer.operation.as_ref();
+        let style = Some(&op.kind);
         mapped[source_index] = Some(layers.len());
         layers.push(craft_file_import::write::OutputLayer {
-            name: layer.name.clone(),
-            dxf_name: layer_name(&layer.name),
-            visible: layer.visible,
+            name: op.name.clone(),
+            dxf_name: layer_name(&op.name),
+            visible: op.visible,
             dxf_color_index: layer_color(style) as u8,
             class: Some(class_for(style).into()),
-            data_kind: Some(style.map_or("none", Operation::kind_name).into()),
+            data_kind: Some(op.kind.kind_name().into()),
         });
     }
     let mut paths = Vec::new();
-    for (layer_index, layer) in doc
-        .layers
+    for (op_index, op) in doc
+        .operations
         .iter()
         .enumerate()
-        .filter(|(_, layer)| !matches!(layer.operation, Some(Operation::Guide)))
+        .filter(|(_, op)| !op.kind.is_guide())
     {
-        let Some(output_layer) = mapped.get(layer_index).copied().flatten() else {
+        let Some(output_layer) = mapped.get(op_index).copied().flatten() else {
             continue;
         };
-        let style = layer.operation.as_ref();
-        for id in &layer.members {
+        let style = Some(&op.kind);
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
                 continue;
             };
@@ -122,14 +129,14 @@ fn output_scene(
                 color_rgb,
                 stroke_width_mm: if pdf {
                     0.25
-                } else if matches!(style, Some(Operation::Cut(_))) {
+                } else if matches!(style, Some(OperationKind::Cut)) {
                     0.3
                 } else {
                     0.2
                 },
                 class: Some(class_for(style).into()),
-                data_kind: Some(style.map_or("none", Operation::kind_name).into()),
-                close_open_contours: dxf && matches!(style, Some(Operation::Cut(_))),
+                data_kind: Some(op.kind.kind_name().into()),
+                close_open_contours: dxf && matches!(style, Some(OperationKind::Cut)),
             });
         }
     }
@@ -142,23 +149,23 @@ fn output_scene(
     })
 }
 
-fn layer_color(operation: Option<&Operation>) -> i32 {
-    match operation {
-        Some(Operation::Engrave(_)) => 5,
+fn layer_color(kind: Option<&OperationKind>) -> i32 {
+    match kind {
+        Some(OperationKind::Engrave) => 5,
         _ => 1,
     }
 }
 
-fn class_for(operation: Option<&Operation>) -> &'static str {
-    match operation {
-        Some(Operation::Engrave(_)) => "stencilcraft-engrave",
+fn class_for(kind: Option<&OperationKind>) -> &'static str {
+    match kind {
+        Some(OperationKind::Engrave) => "stencilcraft-engrave",
         _ => "stencilcraft-cut",
     }
 }
 
-fn color_for(operation: Option<&Operation>) -> [u8; 3] {
-    match operation {
-        Some(Operation::Engrave(_)) => [45, 108, 223],
+fn color_for(kind: Option<&OperationKind>) -> [u8; 3] {
+    match kind {
+        Some(OperationKind::Engrave) => [45, 108, 223],
         _ => [192, 57, 43],
     }
 }

@@ -159,9 +159,9 @@ fn line_colours_become_one_layer_each() {
         .unwrap()
         .doc;
     let layers: Vec<_> = doc
-        .layers
+        .operations
         .iter()
-        .map(|l| (l.color.clone().unwrap_or_default(), l.members.len()))
+        .map(|o| (o.color.clone().unwrap_or_default(), o.members.len()))
         .collect();
     assert_eq!(
         layers,
@@ -371,9 +371,9 @@ fn real_samples_decode_when_present() {
             if let Some(hex) = stem.strip_prefix("rect-1in-line-").and_then(|s| s.get(..6)) {
                 let colours: Vec<_> = got
                     .doc
-                    .layers
+                    .operations
                     .iter()
-                    .filter_map(|l| l.color.clone())
+                    .filter_map(|o| o.color.clone())
                     .collect();
                 assert_eq!(colours, [format!("#{hex}")], "{name}");
             }

@@ -41,6 +41,10 @@ stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
 craft-raster-codecs = { workspace = true }
 
+[dev-dependencies]
+# The menu-label test reads labels with the pin's own mnemonic reader, which takes a Folder.
+craft-i18n = { workspace = true }
+
 [features]
 default = ["usb", "bluetooth"]
 usb = ["stencilcraft-engine/usb"]

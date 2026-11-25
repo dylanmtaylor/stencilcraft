@@ -142,6 +142,13 @@ impl<T> MenuItem<T> {
         &self.label
     }
 
+    /// The label as the pin's menu takes it: a `&` there marks the mnemonic and `&&` is a
+    /// literal ampersand (`craft_keymap::mnemonic::marked`), so every `&` of the app's words is
+    /// doubled ("Print & Cut" would show as "Print  Cut").
+    pub fn shown_label(&self) -> String {
+        self.label.replace('&', "&&")
+    }
+
     #[cfg(test)]
     pub fn is_enabled(&self) -> bool {
         self.enabled
@@ -164,7 +171,7 @@ pub fn show_bar<T: Copy>(ui: &mut egui::Ui, menus: &[MenuItem<T>]) -> Option<T> 
         .iter()
         .map(|menu| {
             let chosen = &chosen;
-            MenuTitle::new(menu.label.clone(), move |ui: &mut egui::Ui| {
+            MenuTitle::new(menu.shown_label(), move |ui: &mut egui::Ui| {
                 if let Some(command) = show_rows(ui, menu.children().unwrap_or_default()) {
                     chosen.set(Some(command));
                 }
@@ -185,13 +192,13 @@ fn show_rows<T: Copy>(ui: &mut egui::Ui, entries: &[MenuEntry<T>]) -> Option<T> 
         };
         if let Some(children) = &item.children {
             let mut inner = None;
-            Menu::submenu_row_enabled(ui, item.label.clone(), item.enabled, |ui, _| {
+            Menu::submenu_row_enabled(ui, item.shown_label(), item.enabled, |ui, _| {
                 inner = show_rows(ui, children);
             });
             picked = picked.or(inner);
             continue;
         }
-        let mut row = craft_ui::menu::MenuItem::new(item.label.clone()).enabled(item.enabled);
+        let mut row = craft_ui::menu::MenuItem::new(item.shown_label()).enabled(item.enabled);
         if let Some(shortcut) = &item.shortcut {
             row = row.shortcut(ui.ctx().format_shortcut(shortcut));
         }
@@ -1065,6 +1072,38 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every label of `entries`, submenus and their rows, depth first.
+    fn all_items<'a>(entries: &'a [MenuEntry<A>], out: &mut Vec<&'a MenuItem<A>>) {
+        for entry in entries {
+            if let Some(item) = entry.item() {
+                out.push(item);
+                if let Some(children) = item.children() {
+                    all_items(children, out);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn menu_labels_show_their_ampersands() {
+        // Regression: the pin's menu read the `&` of "Print & Cut" as a mnemonic marker and
+        // showed "Print  Cut" (Panels, File › Export).
+        let app = StencilApp::new(None);
+        let menus = build(&app);
+        let mut items: Vec<&MenuItem<A>> = menus.iter().collect();
+        for menu in &menus {
+            all_items(menu.children().unwrap_or_default(), &mut items);
+        }
+        let folder = craft_i18n::Folder::new("en");
+        let mut ampersands = 0;
+        for item in items {
+            let (shown, _) = craft_keymap::mnemonic::marked(&item.shown_label(), &folder);
+            assert_eq!(shown, item.label(), "the menu shows {:?}", item.label());
+            ampersands += usize::from(item.label().contains('&'));
+        }
+        assert!(ampersands >= 2, "Print & Cut is in Panels and File › Export");
     }
 
     #[test]

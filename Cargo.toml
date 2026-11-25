@@ -127,3 +127,7 @@ eframe = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f3048
 egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f304896f9658d239a7b29cf8af1564" }
 egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f304896f9658d239a7b29cf8af1564" }
 winit = { git = "https://github.com/storytold/winit", rev = "a517b3846ee8457d84ee4975110bfda6797c44dc" }
+
+[workspace.metadata.cl]
+selection = ["stencilcraft", "stencilcraft-ui-egui"]
+tracked = ["egui", "eframe"]

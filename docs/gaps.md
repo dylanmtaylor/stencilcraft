@@ -126,8 +126,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
     and draws smart guides. Drawing shapes, lines, arcs and knife cuts snaps too.
-    Missing: snapping while resizing, dragging nodes and the pen; a key to suspend
-    snapping (Alt draws from the centre, as in Silhouette); isometric grid and Smart Snap only
+    Resizing the selection box snaps its moving edges, and holding Ctrl (Cmd) suspends
+    snapping. Missing: snapping while dragging nodes and the pen; isometric grid and Smart Snap only
     within media (spacing, divisions, tolerance and the toggles are in Page Setup); live
     width/height callouts while drawing; display units other than mm. A move
     drag still records one undo step per frame.

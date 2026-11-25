@@ -930,6 +930,8 @@ pub struct StencilApp {
     pub drag_origin: Option<stencilcraft_geom::Rect>,
     /// Smart guides: the lines the last snap of a move drag found, in millimetres.
     pub snap_lines: Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
+    /// Holding Ctrl (Cmd on macOS) suspends snapping for this frame.
+    pub snap_suspended: bool,
     pub status: String,
     pub open_path: Option<String>,
     pub send_mode: bool,
@@ -1254,6 +1256,7 @@ impl StencilApp {
             guide_preview: None,
             drag_origin: None,
             snap_lines: Vec::new(),
+            snap_suspended: false,
             status,
             open_path: open_path.clone(),
             send_mode: false,
@@ -1951,9 +1954,89 @@ impl StencilApp {
     /// document's snap settings say). The snap's lines become the smart guides.
     /// `p` snapped to the grid, guides, objects and points the document's snap settings
     /// turn on (drawing snaps like moving); the smart-guide lines are kept for painting.
+    /// Resizing the selection box snaps its moving edges (Silhouette's snapping applies to
+    /// resizes too). Only plain scales snap; rotations pass through. A proportional (corner)
+    /// resize keeps its proportions: the axis that snapped sets the scale for both.
+    pub fn snap_box_scale(
+        &mut self,
+        bounds: stencilcraft_geom::Rect,
+        affine: craft_ui::canvas::kurbo::Affine,
+    ) -> craft_ui::canvas::kurbo::Affine {
+        use craft_ui::canvas::kurbo::Affine;
+        let [sx, b, c, sy, _, _] = affine.as_coeffs();
+        if b.abs() > 1e-9 || c.abs() > 1e-9 || !(sx > 0.0 && sy > 0.0) {
+            return affine;
+        }
+        let moved = affine.transform_rect_bbox(bounds);
+        let proportional = (sx - sy).abs() < 1e-9 && (sx - 1.0).abs() > 1e-12;
+        // The moving edge on each axis: the one that went further.
+        let x_moves = (moved.x0 - bounds.x0).abs() > 1e-9 || (moved.x1 - bounds.x1).abs() > 1e-9;
+        let y_moves = (moved.y0 - bounds.y0).abs() > 1e-9 || (moved.y1 - bounds.y1).abs() > 1e-9;
+        let left = (moved.x0 - bounds.x0).abs() > (moved.x1 - bounds.x1).abs();
+        let top = (moved.y0 - bounds.y0).abs() > (moved.y1 - bounds.y1).abs();
+        let (mx, my) = (
+            if left { moved.x0 } else { moved.x1 },
+            if top { moved.y0 } else { moved.y1 },
+        );
+        let snapped = self.snap_world_point(stencilcraft_geom::Point::new(mx, my));
+        let mut out = moved;
+        if x_moves {
+            if left {
+                out.x0 = snapped.x
+            } else {
+                out.x1 = snapped.x
+            }
+        }
+        if y_moves {
+            if top {
+                out.y0 = snapped.y
+            } else {
+                out.y1 = snapped.y
+            }
+        }
+        if proportional && out != moved {
+            // The axis that snapped (x first) sets one scale for both.
+            let scale = if (snapped.x - mx).abs() > 1e-12 {
+                out.width() / bounds.width()
+            } else {
+                out.height() / bounds.height()
+            };
+            let (w, h) = (bounds.width() * scale, bounds.height() * scale);
+            out = if left {
+                out.with_origin((moved.x1 - w, out.y0))
+                    .with_size((w, out.height()))
+            } else {
+                out.with_size((w, out.height()))
+            };
+            out = if top {
+                out.with_origin((out.x0, moved.y1 - h))
+                    .with_size((out.width(), h))
+            } else {
+                out.with_size((out.width(), h))
+            };
+        }
+        if !(out.width() > 1e-9 && out.height() > 1e-9) {
+            return affine;
+        }
+        let (nsx, nsy) = (out.width() / bounds.width(), out.height() / bounds.height());
+        let candidate = Affine::new([
+            nsx,
+            0.0,
+            0.0,
+            nsy,
+            out.x0 - bounds.x0 * nsx,
+            out.y0 - bounds.y0 * nsy,
+        ]);
+        if candidate.as_coeffs().iter().all(|v| v.is_finite()) {
+            candidate
+        } else {
+            affine
+        }
+    }
+
     pub fn snap_world_point(&mut self, p: stencilcraft_geom::Point) -> stencilcraft_geom::Point {
         let snap = &self.engine.doc.snap;
-        if !(snap.grid || snap.guides || snap.objects || snap.points) {
+        if self.snap_suspended || !(snap.grid || snap.guides || snap.objects || snap.points) {
             self.snap_lines.clear();
             return p;
         }
@@ -1996,7 +2079,9 @@ impl StencilApp {
         let (mut x, mut y) = (origin.x0 + d.x, origin.y0 + d.y);
         self.snap_lines.clear();
         let snap = &self.engine.doc.snap;
-        if snap.grid || snap.guides || snap.objects || snap.spacing || snap.points {
+        if !self.snap_suspended
+            && (snap.grid || snap.guides || snap.objects || snap.spacing || snap.points)
+        {
             let query = stencilcraft_engine::document::SnapQuery {
                 x,
                 y,
@@ -2528,6 +2613,7 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        self.snap_suspended = ctx.input(|input| input.modifiers.command);
         // Typing on the canvas takes every plain key; Cmd shortcuts other than undo still work.
         self.handle_text_session_keys(ctx);
         if self.handle_distort_keys(ctx)
@@ -5688,11 +5774,16 @@ impl StencilApp {
             match r.event {
                 Some(EditEvent::Begin { .. }) | None => {}
                 Some(EditEvent::Update { value, .. }) => {
-                    self.box_preview = value.affine_from(bounds);
+                    self.box_preview = value
+                        .affine_from(bounds)
+                        .map(|a| self.snap_box_scale(bounds, a));
                 }
                 Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) => {
                     self.box_preview = None;
-                    if let Some(affine) = value.affine_from(bounds)
+                    self.snap_lines.clear();
+                    if let Some(affine) = value
+                        .affine_from(bounds)
+                        .map(|a| self.snap_box_scale(bounds, a))
                         && affine != craft_ui::canvas::kurbo::Affine::IDENTITY
                     {
                         self.run_command(Command::ShapesAffine {
@@ -8353,6 +8444,45 @@ mod tests {
             (snapped.x - 10.0).abs() < 1e-9 && (snapped.y - 20.0).abs() < 1e-9,
             "{snapped:?}"
         );
+    }
+
+    #[test]
+    fn resizing_snaps_edges_and_ctrl_suspends_snapping() {
+        use craft_ui::canvas::kurbo::Affine;
+        let mut app = StencilApp::new(None);
+        app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
+        let bounds = stencilcraft_geom::Rect::new(0.0, 0.0, 20.0, 10.0);
+        // Stretch the right edge to 29.7: it snaps to the 30 mm grid line.
+        let stretch = Affine::new([29.7 / 20.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let snapped = app
+            .snap_box_scale(bounds, stretch)
+            .transform_rect_bbox(bounds);
+        assert!((snapped.x1 - 30.0).abs() < 1e-9, "{snapped:?}");
+        assert!(
+            (snapped.y1 - 10.0).abs() < 1e-9,
+            "height unchanged: {snapped:?}"
+        );
+        // A proportional corner resize keeps its proportions.
+        let corner = Affine::scale(1.49);
+        let snapped = app
+            .snap_box_scale(bounds, corner)
+            .transform_rect_bbox(bounds);
+        assert!(
+            (snapped.width() / snapped.height() - 2.0).abs() < 1e-9,
+            "{snapped:?}"
+        );
+        assert!((snapped.x1 - 30.0).abs() < 1e-9, "{snapped:?}");
+        // Rotations pass through.
+        let turn = Affine::rotate(0.3);
+        assert_eq!(app.snap_box_scale(bounds, turn), turn);
+        // Holding Ctrl suspends snapping.
+        app.snap_suspended = true;
+        let free = app
+            .snap_box_scale(bounds, stretch)
+            .transform_rect_bbox(bounds);
+        assert!((free.x1 - 29.7).abs() < 1e-9, "{free:?}");
+        let off = stencilcraft_geom::Point::new(10.4, 19.7);
+        assert_eq!(app.snap_world_point(off), off);
     }
 
     #[test]

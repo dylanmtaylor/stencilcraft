@@ -8779,66 +8779,51 @@ mod tests {
     }
 
     #[test]
-    fn text_style_segments_keep_their_whole_labels_in_a_narrow_panel() {
-        // Regression: in the default panel width the pin narrowed the Justification and
-        // Direction strips and elided their segments ("Ce…", "R…", "Horizo…", "Vert…").
+    fn text_style_justification_and_direction_pickers_fit_a_narrow_panel() {
+        // Regression: in the default panel width the pin elided the Justification and
+        // Direction segmented strips ("Ce…", "R…", "Horizo…"); they are pickers now.
         use egui::accesskit::Role;
-        let labels = [
-            "Left",
-            "Centre",
-            "Right",
-            "Justify",
-            "Horizontal",
-            "Vertical",
-        ];
-        let widths = |width: f32| {
-            let ctx = egui::Context::default();
-            ctx.enable_accesskit();
-            crate::framework::install_headless(&ctx).unwrap();
-            let mut app = StencilApp::new(None);
-            let mut out = None;
-            for pass in 0..3 {
-                let output = ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1000.0, 800.0),
-                        )),
-                        time: Some(f64::from(pass) * 0.5),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        ui.allocate_ui(egui::vec2(width, 800.0), |ui| {
-                            ui.set_max_width(width);
-                            app.text_style_panel(ui);
-                        });
-                    },
-                );
-                let mut output = output;
-                output.textures_delta.clear();
-                out = Some(output);
-            }
-            let out = out.unwrap();
-            let tree = out.platform_output.accesskit_update.as_ref().unwrap();
-            labels.map(|label| {
-                let node = &tree
-                    .nodes
-                    .iter()
-                    .find(|(_, node)| {
-                        node.role() == Role::RadioButton && node.label() == Some(label)
-                    })
-                    .unwrap_or_else(|| panic!("missing segment {label}"))
-                    .1;
-                let bounds = node.bounds().unwrap();
-                (bounds.x1 - bounds.x0) as f32
-            })
-        };
-        let wide = widths(900.0);
-        let narrow = widths(180.0);
-        for ((label, wide), narrow) in labels.iter().zip(wide).zip(narrow) {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::framework::install_headless(&ctx).unwrap();
+        let mut app = StencilApp::new(None);
+        // The dock's default panel width.
+        let width = 300.0;
+        let mut out = None;
+        for pass in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    time: Some(f64::from(pass) * 0.5),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.allocate_ui(egui::vec2(width, 800.0), |ui| {
+                        ui.set_max_width(width);
+                        app.text_style_panel(ui);
+                    });
+                },
+            );
+            output.textures_delta.clear();
+            out = Some(output);
+        }
+        let out = out.unwrap();
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        for (name, value) in [("Justification", "Left"), ("Direction", "Horizontal")] {
+            let node = &tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::ComboBox && node.label() == Some(name))
+                .unwrap_or_else(|| panic!("missing picker {name}"))
+                .1;
+            assert_eq!(node.value(), Some(value), "{name} shows its whole value");
+            let b = node.bounds().unwrap();
             assert!(
-                (narrow - wide).abs() < 0.5,
-                "{label}: {narrow} px in a narrow panel, {wide} px with room"
+                b.x1 <= f64::from(width) + 1.0,
+                "{name} fits the panel: {b:?}"
             );
         }
     }

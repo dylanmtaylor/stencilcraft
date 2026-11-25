@@ -506,6 +506,14 @@ pub(crate) fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egu
     });
 }
 
+/// `label` over the control `add` shows (for a control as wide as the panel).
+pub(crate) fn captioned(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.vertical(|ui| {
+        let _ = Text::new(label.to_owned()).role(TypeRole::Label).show(ui);
+        add(ui);
+    });
+}
+
 pub(crate) fn button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     Button::new(label.to_owned())
         .size(ControlSize::Sm)

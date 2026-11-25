@@ -135,6 +135,28 @@ impl StencilApp {
                         self.pending_style = Some(CutStyle::Engrave);
                     }
                 });
+                // Silhouette's perforated line style: the lines become dashes that cut.
+                let (mut cut, mut gap) = self.perforate;
+                ui.horizontal(|ui| {
+                    ui.label("Perforate: cut");
+                    ui.add(
+                        egui::DragValue::new(&mut cut)
+                            .range(0.2..=100.0)
+                            .speed(0.1)
+                            .suffix(" mm"),
+                    );
+                    ui.label("gap");
+                    ui.add(
+                        egui::DragValue::new(&mut gap)
+                            .range(0.2..=100.0)
+                            .speed(0.1)
+                            .suffix(" mm"),
+                    );
+                });
+                self.perforate = (cut, gap);
+                if button(ui, "Perforate Lines", any) {
+                    self.pending_perforate = true;
+                }
             }
             hint(
                 ui,
@@ -152,6 +174,26 @@ impl StencilApp {
         if let Some(style) = self.pending_style.take() {
             self.handle_menu_action(crate::TopMenuAction::SetStyle(style));
         }
+        if std::mem::take(&mut self.pending_perforate) {
+            self.perforate_selection();
+        }
+    }
+
+    /// Line Style › Perforate Lines: the selected lines become cut dashes (`generate.perforate`).
+    pub fn perforate_selection(&mut self) {
+        if self.selected_shapes.is_empty() {
+            return;
+        }
+        let (cut, gap) = self.perforate;
+        let ids = self.selected_shapes.clone();
+        self.run_command(Command::GeneratePerforate(
+            stencilcraft_engine::generate::PerforateArgs {
+                ids: ids.clone(),
+                cut_mm: cut,
+                gap_mm: gap,
+            },
+        ));
+        self.set_selection(ids);
     }
 
     pub fn fill_colour_panel(&mut self, ui: &mut egui::Ui) {
@@ -283,5 +325,58 @@ mod tests {
                 .and_then(|s| s.production.fill_color.clone()),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod perforate_tests {
+    use super::*;
+
+    #[test]
+    fn perforate_turns_lines_into_dashes() {
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 40.0,
+            height: 20.0,
+        });
+        let id = app
+            .engine
+            .doc
+            .shapes()
+            .map(|(_, s)| s.id)
+            .next()
+            .expect("rect");
+        app.set_selection([id]);
+        app.perforate = (3.0, 1.0);
+        app.perforate_selection();
+        let path = &app.engine.doc.get_shape(id).expect("shape").path;
+        let pieces = path
+            .elements()
+            .iter()
+            .filter(|el| matches!(el, craft_ui::canvas::kurbo::PathEl::MoveTo(_)))
+            .count();
+        assert!(pieces > 20, "{pieces} dashes along 120 mm at 4 mm pitch");
+        assert!(app.engine.undo());
+    }
+
+    #[test]
+    fn drawing_can_return_to_select() {
+        let mut app = StencilApp::new(None);
+        app.active_tool = crate::ActiveTool::Rect;
+        let (a, b) = (
+            stencilcraft_geom::Point::new(0.0, 0.0),
+            stencilcraft_geom::Point::new(20.0, 20.0),
+        );
+        app.commit_dragged_shape(a, b, crate::DragMods::default());
+        assert_eq!(
+            app.active_tool,
+            crate::ActiveTool::Rect,
+            "the tool stays by default"
+        );
+        app.prefs.select_after_drawing = true;
+        app.commit_dragged_shape(a, b, crate::DragMods::default());
+        assert_eq!(app.active_tool, crate::ActiveTool::Select);
     }
 }

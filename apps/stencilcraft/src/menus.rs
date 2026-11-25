@@ -610,7 +610,7 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 ),
             ],
         ),
-        todo("Lattice…"),
+        eff("Lattice…", M::Lattice),
         eff("Pop-up Card…", M::PopupCard),
         eff("Puzzle…", M::Puzzle),
         SEP,

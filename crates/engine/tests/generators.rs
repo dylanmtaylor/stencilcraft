@@ -502,3 +502,39 @@ fn distort_moves_corners_and_lattice_cells() {
         r#"{{"command":"shapes.distort","params":{{"ids":[{sq}],"rows":1,"columns":1,"points":[[0,0]]}}}}"#
     ))).is_err());
 }
+
+/// Lattice turns a shape into one shape full of holes, keeping its border.
+#[test]
+fn lattice_makes_holes_inside_the_border() {
+    let mut e = Engine::default();
+    let sq = square(&mut e, 0.0, 50.0);
+    for hole in ["square", "circle", "diamond", "hexagon"] {
+        let effect = undoable(
+            &mut e,
+            &format!(
+                r#"{{"command":"generate.lattice","params":{{"ids":[{sq}],"hole":"{hole}","hole_mm":5,"wall_mm":2,"border_mm":4}}}}"#
+            ),
+        );
+        assert!(matches!(effect, Effect::ShapesEdited { .. }), "{effect:?}");
+        let path = &e.doc.get_shape(sq).unwrap().path;
+        let contours = path
+            .elements()
+            .iter()
+            .filter(|el| matches!(el, kurbo::PathEl::MoveTo(_)))
+            .count();
+        assert!(contours > 10, "{hole}: {contours} contours");
+        let b = path.bounding_box();
+        assert!(
+            (b.width() - 50.0).abs() < 1e-6,
+            "the outline is kept: {b:?}"
+        );
+        e.run(Command::Undo).unwrap();
+    }
+    // Too large a border leaves no room.
+    assert!(
+        e.run(cmd(&format!(
+            r#"{{"command":"generate.lattice","params":{{"ids":[{sq}],"border_mm":30}}}}"#
+        )))
+        .is_err()
+    );
+}

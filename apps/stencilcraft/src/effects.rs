@@ -28,6 +28,7 @@ pub enum EffectKind {
     RemoveBackground,
     Bridges,
     ImageEffects,
+    Lattice,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -47,6 +48,7 @@ pub enum EffectMenu {
     RemoveBackground,
     Bridges,
     ImageEffects,
+    Lattice,
 }
 
 impl EffectMenu {
@@ -70,6 +72,7 @@ impl EffectMenu {
             Self::RemoveBackground => (EffectKind::RemoveBackground, Vec::new()),
             Self::Bridges => (EffectKind::Bridges, Vec::new()),
             Self::ImageEffects => (EffectKind::ImageEffects, Vec::new()),
+            Self::Lattice => (EffectKind::Lattice, Vec::new()),
         }
     }
 }
@@ -188,6 +191,12 @@ const WARP_STYLES: &[(&str, &str)] = &[
     ("twist", "Twist"),
     ("none", "Perspective (distort only)"),
 ];
+const LATTICE_HOLES: &[(&str, &str)] = &[
+    ("square", "Squares"),
+    ("circle", "Circles"),
+    ("diamond", "Diamonds"),
+    ("hexagon", "Hexagons"),
+];
 const BRIDGE_DIRECTIONS: &[(&str, &str)] = &[
     ("vertical", "Above and below"),
     ("horizontal", "Left and right"),
@@ -208,6 +217,18 @@ struct EffectDef {
 }
 
 const EFFECTS: &[EffectDef] = &[
+    EffectDef {
+        kind: EffectKind::Lattice,
+        title: "Lattice",
+        command: "generate.lattice",
+        target: Target::Shapes,
+        fields: &[
+            choice("hole", "Holes", LATTICE_HOLES),
+            num("hole_mm", "Hole size", 0.2, 500.0, "mm"),
+            num("wall_mm", "Wall", 0.1, 500.0, "mm"),
+            num("border_mm", "Border", 0.0, 500.0, "mm"),
+        ],
+    },
     EffectDef {
         kind: EffectKind::ImageEffects,
         title: "Image Effects",
@@ -394,6 +415,9 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
         }
         EffectKind::RemoveBackground => Ok(json!({"tolerance": 10.0})),
         EffectKind::Bridges => Ok(json!({"width_mm": 1.5, "direction": "vertical"})),
+        EffectKind::Lattice => {
+            Ok(json!({"hole": "square", "hole_mm": 5.0, "wall_mm": 1.5, "border_mm": 3.0}))
+        }
         EffectKind::ImageEffects => serde_json::to_value(stencilcraft_raster::Adjust::default()),
     };
     match value {

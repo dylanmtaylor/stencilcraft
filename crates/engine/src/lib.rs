@@ -475,6 +475,9 @@ pub enum Command {
     GenerateRegistration(generate::RegistrationArgs),
     #[serde(rename = "generate.warp")]
     GenerateWarp(generate::WarpArgs),
+    /// Lattice: turn closed shapes into a grid of holes inside a border.
+    #[serde(rename = "generate.lattice")]
+    GenerateLattice(generate::LatticeArgs),
     /// Free Distort / Lattice: move the corners of a grid over the shapes.
     #[serde(rename = "shapes.distort")]
     GenerateDistort(generate::DistortArgs),
@@ -1673,6 +1676,7 @@ impl Engine {
             | Command::GenerateRegistration(_)
             | Command::GenerateWarp(_)
             | Command::GenerateDistort(_)
+            | Command::GenerateLattice(_)
             | Command::GeneratePerforate(_)
             | Command::GenerateWavy(_)
             | Command::GenerateObjectOnPath(_)

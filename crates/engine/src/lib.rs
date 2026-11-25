@@ -741,6 +741,9 @@ impl History {
 pub struct Engine {
     pub doc: Document,
     history: History,
+    /// While set, every successful undoable command is recorded here as JSON (an action
+    /// being recorded for replay).
+    pub recorder: Option<Vec<serde_json::Value>>,
     session: VectorCraftSession,
     shape_nodes: BTreeMap<u64, u64>,
     node_shapes: BTreeMap<u64, u64>,
@@ -760,6 +763,7 @@ impl Engine {
         let mut engine = Self {
             doc,
             history: History::new(100),
+            recorder: None,
             session: VectorCraftSession::new(),
             shape_nodes: BTreeMap::new(),
             node_shapes: BTreeMap::new(),
@@ -804,6 +808,11 @@ impl Engine {
         }
 
         let label = command_label(&command);
+        let recorded = self
+            .recorder
+            .is_some()
+            .then(|| serde_json::to_value(&command).ok())
+            .flatten();
         let rebuild_session = matches!(
             command,
             Command::DocumentNew { .. }
@@ -879,6 +888,9 @@ impl Engine {
                     label,
                     ..before
                 });
+                if let (Some(recorder), Some(value)) = (self.recorder.as_mut(), recorded) {
+                    recorder.push(value);
+                }
                 Ok(effect)
             }
             Err(error) => {

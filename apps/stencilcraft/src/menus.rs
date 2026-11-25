@@ -773,7 +773,11 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
 fn machine(app: &StencilApp) -> Vec<MenuEntry<A>> {
     vec![
         item("Send…", A::ShowSend).shortcut(kbd(CMD, Key::L)).into(),
-        todo("Connect / Rescan Devices"),
+        item(
+            "Connect / Rescan Devices",
+            A::Machine(crate::machine_menu::MachineAction::Rescan),
+        )
+        .into(),
         sub(
             "Send Mode",
             vec![
@@ -783,18 +787,35 @@ fn machine(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 todo("By Layer"),
             ],
         ),
-        todo("Tool Holders…"),
+        item("Tool Holders…", A::ShowSend).into(),
         item("Material Settings…", A::ShowSend).into(),
-        todo("Mat Preview"),
-        todo("Mirror on Mat"),
+        item("Mat Preview", A::ToggleMatPreview)
+            .check(app.prefs.mat_preview)
+            .into(),
+        item("Mirror on Mat", A::ToggleMirror)
+            .check(app.send.mirror)
+            .into(),
         sub(
             "Load Type",
-            vec![todo("On Mat"), todo("Without Mat"), todo("Roll")],
+            vec![
+                item("On Mat", A::LoadOnMat(true))
+                    .radio(app.mat != stencilcraft_machine::Mat::None)
+                    .into(),
+                item("Without Mat / Roll", A::LoadOnMat(false))
+                    .radio(app.mat == stencilcraft_machine::Mat::None)
+                    .into(),
+            ],
         ),
         SEP,
-        todo("Test Cut"),
+        item(
+            "Test Cut",
+            A::Machine(crate::machine_menu::MachineAction::TestCut),
+        )
+        .into(),
         when("Dry Run", A::DryRun, app.engine.doc.shape_count() > 0),
-        todo("Cut"),
+        item("Cut", A::Machine(crate::machine_menu::MachineAction::Cut))
+            .enabled(app.engine.doc.shape_count() > 0)
+            .into(),
         todo("Pause"),
         todo("Cancel"),
         SEP,

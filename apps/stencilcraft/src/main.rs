@@ -1830,6 +1830,45 @@ impl StencilApp {
     /// Move the dragged selection so its bounds sit `total_screen` from where the drag
     /// began, snapped by `snap.point` (grid, guides, objects, spacing, points as the
     /// document's snap settings say). The snap's lines become the smart guides.
+    /// `p` snapped to the grid, guides, objects and points the document's snap settings
+    /// turn on (drawing snaps like moving); the smart-guide lines are kept for painting.
+    pub fn snap_world_point(&mut self, p: stencilcraft_geom::Point) -> stencilcraft_geom::Point {
+        let snap = &self.engine.doc.snap;
+        if !(snap.grid || snap.guides || snap.objects || snap.points) {
+            self.snap_lines.clear();
+            return p;
+        }
+        let query = stencilcraft_engine::document::SnapQuery {
+            x: p.x,
+            y: p.y,
+            width: 0.0,
+            height: 0.0,
+            exclude: Vec::new(),
+            tolerance_mm: None,
+        };
+        match self
+            .engine
+            .run(Command::Document(DocumentCommand::SnapPoint(query)))
+        {
+            Ok(stencilcraft_engine::Effect::Document(
+                stencilcraft_engine::document::DocumentEffect::Snap(r),
+            )) if r.x.is_finite() && r.y.is_finite() => {
+                self.snap_lines = r
+                    .lines
+                    .iter()
+                    .map(|l| {
+                        (
+                            stencilcraft_geom::Point::new(l.from[0], l.from[1]),
+                            stencilcraft_geom::Point::new(l.to[0], l.to[1]),
+                        )
+                    })
+                    .collect();
+                stencilcraft_geom::Point::new(r.x, r.y)
+            }
+            _ => p,
+        }
+    }
+
     pub fn drag_selection_to(&mut self, id: u64, total_screen: egui::Vec2) {
         let Some(origin) = self.drag_origin else {
             return;
@@ -5540,9 +5579,12 @@ impl StencilApp {
                 }
             } else if !overlay_claimed {
                 if response.drag_started()
-                    && let Some(pointer) = response.interact_pointer_pos()
+                    && let Some(press) = ui
+                        .input(|input| input.pointer.press_origin())
+                        .or(response.interact_pointer_pos())
                 {
-                    let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                    let world_pt =
+                        self.snap_world_point(self.view.screen_to_world(press.to_vec2()));
                     self.shape_drag_start = Some(world_pt);
                     self.shape_drag_current = Some(world_pt);
                 }
@@ -5550,7 +5592,8 @@ impl StencilApp {
                     && let (Some(start), Some(pointer)) =
                         (self.shape_drag_start, response.interact_pointer_pos())
                 {
-                    let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                    let world_pt =
+                        self.snap_world_point(self.view.screen_to_world(pointer.to_vec2()));
                     self.shape_drag_current = Some(world_pt);
                     let mut radius = stencilcraft_geom::BezPath::new();
                     radius.move_to(start);
@@ -5639,14 +5682,15 @@ impl StencilApp {
             if response.drag_started()
                 && let Some(press) = ui.input(|input| input.pointer.press_origin())
             {
-                let world_pt = self.view.screen_to_world(press.to_vec2());
+                let world_pt = self.snap_world_point(self.view.screen_to_world(press.to_vec2()));
                 self.shape_drag_start = Some(world_pt);
                 self.shape_drag_current = Some(world_pt);
             }
             if response.dragged()
                 && let Some(pointer) = response.interact_pointer_pos()
             {
-                self.shape_drag_current = Some(self.view.screen_to_world(pointer.to_vec2()));
+                let world_pt = self.snap_world_point(self.view.screen_to_world(pointer.to_vec2()));
+                self.shape_drag_current = Some(world_pt);
             }
             if let (Some(start), Some(current)) = (self.shape_drag_start, self.shape_drag_current) {
                 let end = line_end(start, current, mods);
@@ -5737,9 +5781,11 @@ impl StencilApp {
         // Live shape creation via drag
         if self.active_tool.is_shape_creator() && !overlay_claimed {
             if response.drag_started()
-                && let Some(pointer) = response.interact_pointer_pos()
+                && let Some(press) = ui
+                    .input(|input| input.pointer.press_origin())
+                    .or(response.interact_pointer_pos())
             {
-                let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                let world_pt = self.snap_world_point(self.view.screen_to_world(press.to_vec2()));
                 self.shape_drag_start = Some(world_pt);
                 self.shape_drag_current = Some(world_pt);
             }
@@ -5747,7 +5793,7 @@ impl StencilApp {
             if response.dragged()
                 && let Some(pointer) = response.interact_pointer_pos()
             {
-                let world_pt = self.view.screen_to_world(pointer.to_vec2());
+                let world_pt = self.snap_world_point(self.view.screen_to_world(pointer.to_vec2()));
                 self.shape_drag_current = Some(world_pt);
                 if let Some(start) = self.shape_drag_start {
                     if self.active_tool == ActiveTool::Line {
@@ -6041,6 +6087,9 @@ impl StencilApp {
                 self.drag_origin = None;
                 self.snap_lines.clear();
             }
+        }
+        if response.drag_stopped() {
+            self.snap_lines.clear();
         }
         if self.prefs.smart_guides && !self.snap_lines.is_empty() {
             let color = craft_ui::canvas::Guides::style(&tokens).smart;
@@ -8050,6 +8099,23 @@ mod tests {
             StencilApp::send_tab,
         );
         assert_eq!(app.send.pressure_override, 10);
+    }
+
+    #[test]
+    fn drawing_snaps_to_the_grid_when_snap_to_grid_is_on() {
+        let mut app = StencilApp::new(None);
+        let off = stencilcraft_geom::Point::new(10.4, 19.7);
+        assert_eq!(
+            app.snap_world_point(off),
+            off,
+            "no snapping by default for the grid"
+        );
+        app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
+        let snapped = app.snap_world_point(off);
+        assert!(
+            (snapped.x - 10.0).abs() < 1e-9 && (snapped.y - 20.0).abs() < 1e-9,
+            "{snapped:?}"
+        );
     }
 
     #[test]

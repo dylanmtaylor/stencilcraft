@@ -25,8 +25,13 @@ use craft_ui::buttons::IconButton;
 use craft_ui::contract::{Props as _, Show as _};
 use craft_ui::display::Divider;
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
-use craft_behavior::dock::{Column, DockEdge, Group, Layout, Node, Permissions};
-use craft_ui::docking::{DockArea, DockContent, DockStyle};
+use std::sync::Arc;
+
+use craft_behavior::dock::{Column, DockEdge, Group, Layout, Node, Permissions, Workspace};
+use craft_ui::contract::{Bind, BodyCx, Tracked};
+use craft_ui::docking::{DockConfig, DockPanels, GroupAt, PanelSpec, PanelSpecs};
+use craft_ui::patterns::dock::DockArea;
+use craft_window::policy::WindowKind;
 use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_behavior::flow::Axis;
@@ -868,8 +873,58 @@ struct WorkspaceContent<'a> {
     app: &'a mut StencilApp,
 }
 
-impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
-    fn body(&mut self, ui: &mut egui::Ui, panel: &WorkspacePanel) {
+/// What the dock reads of each panel: its tab label, the canvas as the document group, and
+/// every body the app's own egui code.
+#[derive(Clone, Copy, Debug, Default, PartialEq, craft_ui::contract::PlainData)]
+struct WorkspaceSpecs;
+
+impl PanelSpecs<WorkspacePanel> for WorkspaceSpecs {
+    fn spec(&self, panel: &WorkspacePanel) -> PanelSpec {
+        let spec = PanelSpec::new(panel_label(*panel)).host_body();
+        if *panel == WorkspacePanel::Canvas {
+            spec.canvas().window_kind(WindowKind::Document)
+        } else {
+            spec
+        }
+    }
+
+    fn permissions(&self, panel: &WorkspacePanel) -> Permissions {
+        panel_permissions(panel)
+    }
+}
+
+fn panel_permissions(panel: &WorkspacePanel) -> Permissions {
+    if *panel == WorkspacePanel::Canvas {
+        Permissions::PROTECTED
+    } else {
+        Permissions::default()
+    }
+}
+
+impl DockPanels<WorkspacePanel> for WorkspaceContent<'_> {
+    /// The canvas group is the app's canvas, drawn in the group's room with no tab strip.
+    fn group_view(
+        &mut self,
+        panels: &[WorkspacePanel],
+        _active: usize,
+        ui: &mut egui::Ui,
+        at: GroupAt,
+        _cx: &mut BodyCx<'_>,
+    ) -> Option<f32> {
+        if !panels.contains(&WorkspacePanel::Canvas) {
+            return None;
+        }
+        match at {
+            GroupAt::Measure(_) => Some(0.0),
+            GroupAt::Show(rect) => {
+                framework::app_style(ui);
+                self.app.canvas_body(ui);
+                Some(rect.height())
+            }
+        }
+    }
+
+    fn body(&mut self, panel: &WorkspacePanel, ui: &mut egui::Ui, _cx: &mut BodyCx<'_>) {
         match panel {
             WorkspacePanel::Canvas => self.app.canvas_body(ui),
             WorkspacePanel::Tools => self.app.tools_panel(ui),
@@ -900,9 +955,11 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::PrintCut => self.app.print_cut_panel(ui),
         }
     }
+}
 
-    fn logical_label(&self, panel: &WorkspacePanel) -> String {
-        match panel {
+/// A panel's tab label.
+fn panel_label(panel: WorkspacePanel) -> &'static str {
+    match panel {
             WorkspacePanel::Canvas => "Canvas",
             WorkspacePanel::Tools => "Tools",
             WorkspacePanel::Inspector => "Properties",
@@ -930,16 +987,6 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Actions => "Actions",
             WorkspacePanel::PixScan => "PixScan",
             WorkspacePanel::PrintCut => "Print & Cut",
-        }
-        .to_owned()
-    }
-
-    fn permissions(&self, panel: &WorkspacePanel) -> Permissions {
-        if *panel == WorkspacePanel::Canvas {
-            Permissions::PROTECTED
-        } else {
-            Permissions::default()
-        }
     }
 }
 
@@ -956,7 +1003,10 @@ pub enum CanvasViewCommand {
 }
 
 pub struct StencilApp {
-    pub workspace: Layout<WorkspacePanel>,
+    /// The panel arrangement the dock shows and edits.
+    pub workspace: Arc<Workspace<WorkspacePanel>>,
+    /// The dock's panel specs; one value across frames, so the dock reads them once.
+    panel_specs: Tracked<WorkspaceSpecs>,
     pub engine: stencilcraft_engine::Engine,
     pub view: stencilcraft_ui_egui::View,
     pub pending_view_command: Option<CanvasViewCommand>,
@@ -1182,7 +1232,7 @@ impl Default for SendTab {
     }
 }
 
-pub fn default_workspace() -> Layout<WorkspacePanel> {
+pub fn default_workspace() -> Arc<Workspace<WorkspacePanel>> {
     workspace_with(FULL_PANELS.to_vec())
 }
 
@@ -1225,33 +1275,28 @@ const STARTER_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::TextStyle,
 ];
 
-pub fn starter_workspace() -> Layout<WorkspacePanel> {
+pub fn starter_workspace() -> Arc<Workspace<WorkspacePanel>> {
     workspace_with(STARTER_PANELS.to_vec())
 }
 
-fn workspace_with(strip: Vec<WorkspacePanel>) -> Layout<WorkspacePanel> {
-    Layout {
-        root: Some(Node::Split {
-            axis: Axis::X,
-            size: SplitSize::Ratio(0.78),
-            first: Box::new(Node::Tabs {
-                panels: vec![WorkspacePanel::Canvas],
-                active: 0,
-            }),
-            second: Box::new(Node::Dock {
-                side: DockEdge::End,
-                columns: vec![Column::new(
-                    vec![
-                        Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Layers], 0),
-                        // Silhouette's right-hand panel strip.
-                        Group::new(strip, 0),
-                    ],
-                    300.0,
-                )],
-            }),
-        }),
-        floating: Vec::new(),
-    }
+fn workspace_with(strip: Vec<WorkspacePanel>) -> Arc<Workspace<WorkspacePanel>> {
+    let root = Node::split(
+        Axis::X,
+        SplitSize::Ratio(0.78),
+        Node::tabs(vec![WorkspacePanel::Canvas], 0),
+        Node::dock(
+            DockEdge::End,
+            vec![
+                Column::new(vec![
+                    Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Layers], 0),
+                    // Silhouette's right-hand panel strip.
+                    Group::new(strip, 0),
+                ])
+                .with_width(300.0),
+            ],
+        ),
+    );
+    Arc::new(Workspace::new(Layout::new(Some(root), Vec::new())))
 }
 
 fn machine_index_of_media(id: u16) -> usize {
@@ -1285,6 +1330,7 @@ impl StencilApp {
         let saved_document = engine.doc.clone();
         Self {
             workspace: default_workspace(),
+            panel_specs: Tracked::new(WorkspaceSpecs),
             engine,
             view: stencilcraft_ui_egui::View::default(),
             pending_view_command: None,
@@ -3649,15 +3695,14 @@ impl StencilApp {
             TopMenuAction::ShowDesign => self.send_mode = false,
             TopMenuAction::ShowSend => self.send_mode = true,
             TopMenuAction::ShowPanel(panel) => {
-                let action = if self.workspace.contains(&panel) {
-                    craft_behavior::dock::Action::Activate { panel }
+                let action = if self.workspace.layout().contains(&panel) {
+                    craft_behavior::dock::Action::activate(panel)
                 } else {
-                    craft_behavior::dock::Action::Open {
-                        panel,
-                        anchor: None,
-                    }
+                    craft_behavior::dock::Action::open(panel, None)
                 };
-                if let Err(error) = self.workspace.apply(action) {
+                if let Err(error) =
+                    Arc::make_mut(&mut self.workspace).apply(action, false, panel_permissions)
+                {
                     self.status = format!("could not show panel: {error}");
                 }
             }
@@ -5394,6 +5439,7 @@ impl StencilApp {
         }
 
         let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
+        framework::host_canvas(ui.ctx(), response.id);
         let preview_updated = self.kerf_preview && self.update_kerf_preview_cache(&doc);
         if preview_updated
             && let Some(Err(error)) = self.kerf_preview_cache.as_ref().map(|cache| &cache.preview)
@@ -6827,27 +6873,25 @@ impl eframe::App for StencilApp {
             self.save_prefs();
         }
 
-        let style = DockStyle::from_ui(ui);
+        let mut workspace = Arc::clone(&self.workspace);
+        let specs = std::mem::take(&mut self.panel_specs);
         let mut content = WorkspaceContent { app: self };
-        let mut workspace = std::mem::take(&mut content.app.workspace);
-        let output = DockArea::new(ui.scope_id().with("stencilcraft-workspace")).show_content(
-            ui,
-            &workspace,
-            &style,
+        let output = DockArea::new(
+            "StencilCraft workspace",
+            Bind::bound(&mut workspace),
+            &specs,
             &mut content,
-        );
-        if !output.actions.is_empty()
-            && let Err(error) = workspace.apply_all(output.actions, |panel| {
-                if *panel == WorkspacePanel::Canvas {
-                    Permissions::PROTECTED
-                } else {
-                    Permissions::default()
-                }
-            })
+            DockConfig::default(),
+        )
+        .show(ui);
+        if !output.requested.is_empty()
+            && let Err(error) =
+                Arc::make_mut(&mut workspace).apply_all(output.requested, false, panel_permissions)
         {
             content.app.status = format!("workspace layout rejected: {error}");
         }
         content.app.workspace = workspace;
+        content.app.panel_specs = specs;
         if let Some(panel) = content.app.pending_panel.take() {
             content
                 .app
@@ -6960,46 +7004,18 @@ mod tests {
     }
 
     #[test]
-    fn workspace_dock_identity_is_stable_across_frames() {
-        let ctx = egui::Context::default();
-        let mut ids = Vec::new();
-        for _ in 0..2 {
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(800.0, 600.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| ids.push(ui.scope_id().with("stencilcraft-workspace")),
-            );
-            output.textures_delta.clear();
-        }
-        assert_eq!(ids[0], ids[1]);
-    }
-
-    #[test]
     fn reset_panels_restores_the_default_docking_positions() {
         let mut app = StencilApp::new(None);
         let default = default_workspace();
-        app.workspace
+        Arc::make_mut(&mut app.workspace)
             .apply_all(
-                [Action::Move {
-                    panel: WorkspacePanel::Layers,
-                    anchor: WorkspacePanel::Inspector,
-                    placement: DockPlacement::Group {
-                        below: true,
-                        height: None,
-                    },
-                }],
-                |panel| {
-                    if *panel == WorkspacePanel::Canvas {
-                        Permissions::PROTECTED
-                    } else {
-                        Permissions::default()
-                    }
-                },
+                [Action::move_beside(
+                    WorkspacePanel::Layers,
+                    WorkspacePanel::Inspector,
+                    DockPlacement::group(true, None),
+                )],
+                false,
+                panel_permissions,
             )
             .unwrap();
         assert_ne!(app.workspace, default);

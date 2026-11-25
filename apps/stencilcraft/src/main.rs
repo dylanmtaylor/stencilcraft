@@ -5832,7 +5832,47 @@ impl StencilApp {
         let shown = canvas.show_at(ui, full_rect, |ui, body| {
             // The measuring run has no tool pass: the app's canvas runs once, in the real run.
             let pass = tool_pass(&body.env)?;
-            let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
+            // The node overlay's points, handles and lines take their own presses: the app's
+            // canvas widget below them is an egui widget, which the pin gives every press over
+            // it, so it only hovers there (and for as long as a press that began there lasts).
+            let over_node_part = matches!(
+                self.active_tool,
+                ActiveTool::DirectSelect | ActiveTool::ConvertPoint
+            ) && {
+                let paths: Vec<EditPath> = self
+                    .selected_shapes
+                    .iter()
+                    .filter_map(|&id| {
+                        let shape = self.engine.doc.get_shape(id)?;
+                        let subpaths = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
+                        Some(EditPath::new(id, subpaths))
+                    })
+                    .collect();
+                let at = ui.input(|input| {
+                    input
+                        .pointer
+                        .press_origin()
+                        .filter(|_| input.pointer.any_down())
+                        .or(input.pointer.hover_pos())
+                });
+                at.and_then(|at| {
+                    BezierOverlay::hit_test(
+                        &paths,
+                        &self.path_selection,
+                        self.handles_shown,
+                        &canvas_view,
+                        at,
+                        8.0,
+                    )
+                })
+                .is_some()
+            };
+            let sense = if over_node_part {
+                egui::Sense::hover()
+            } else {
+                egui::Sense::click_and_drag()
+            };
+            let response = ui.allocate_rect(clip, sense);
             framework::host_canvas(ui.ctx(), response.id);
             let preview_updated = self.kerf_preview && self.update_kerf_preview_cache(&doc);
             if preview_updated
@@ -6018,9 +6058,8 @@ impl StencilApp {
                         )
                     })
                     .is_some();
-                overlay_claimed = b_resp.hover.is_some()
-                    || !b_resp.edit.events.is_empty()
-                    || press_on_part;
+                overlay_claimed =
+                    b_resp.hover.is_some() || !b_resp.edit.events.is_empty() || press_on_part;
                 if let Some(sel) = b_resp.select.clone() {
                     if let Some(pid) = sel.path {
                         self.selected_shape = Some(pid);
@@ -8489,13 +8528,22 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(corner)], canvas);
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(corner)],
+            canvas,
+        );
         frame(&ctx, &mut app, vec![button(corner, true)], canvas);
         let mut at = corner;
         for _ in 0..4 {
             at += egui::vec2(10.0, 8.0);
             frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], canvas);
-            assert_eq!(app.selected_shapes, vec![1], "the dragged path stays selected");
+            assert_eq!(
+                app.selected_shapes,
+                vec![1],
+                "the dragged path stays selected"
+            );
         }
         assert_eq!(
             app.engine.doc.get_shape(1).unwrap().path,
@@ -8521,7 +8569,14 @@ mod tests {
         // Regression: in the default panel width the pin narrowed the Justification and
         // Direction strips and elided their segments ("Ce…", "R…", "Horizo…", "Vert…").
         use egui::accesskit::Role;
-        let labels = ["Left", "Centre", "Right", "Justify", "Horizontal", "Vertical"];
+        let labels = [
+            "Left",
+            "Centre",
+            "Right",
+            "Justify",
+            "Horizontal",
+            "Vertical",
+        ];
         let widths = |width: f32| {
             let ctx = egui::Context::default();
             ctx.enable_accesskit();
@@ -8545,15 +8600,19 @@ mod tests {
                         });
                     },
                 );
+                let mut output = output;
+                output.textures_delta.clear();
                 out = Some(output);
             }
             let out = out.unwrap();
             let tree = out.platform_output.accesskit_update.as_ref().unwrap();
             labels.map(|label| {
-                let node = tree
+                let node = &tree
                     .nodes
                     .iter()
-                    .find(|(_, node)| node.role() == Role::RadioButton && node.label() == Some(label))
+                    .find(|(_, node)| {
+                        node.role() == Role::RadioButton && node.label() == Some(label)
+                    })
                     .unwrap_or_else(|| panic!("missing segment {label}"))
                     .1;
                 let bounds = node.bounds().unwrap();
@@ -8607,10 +8666,16 @@ mod tests {
                 &mut app,
                 EditEvent::update(id, with(&start, Guide::new(new_key, Axis::Y, x))),
             );
-            assert_eq!(app.engine.doc.guides.len(), initial, "an update only previews");
+            assert_eq!(
+                app.engine.doc.guides.len(),
+                initial,
+                "an update only previews"
+            );
             let previewed = shown(&app);
             assert!(
-                previewed.iter().any(|g| g.key == new_key && g.position == x),
+                previewed
+                    .iter()
+                    .any(|g| g.key == new_key && g.position == x),
                 "the dragged guide follows the pointer: {previewed:?}"
             );
         }
@@ -8622,7 +8687,11 @@ mod tests {
                 with(&start, Guide::new(new_key, Axis::Y, 40.0)),
             ),
         );
-        assert_eq!(app.engine.doc.guides.len(), initial + 1, "added once, on release");
+        assert_eq!(
+            app.engine.doc.guides.len(),
+            initial + 1,
+            "added once, on release"
+        );
         assert_eq!(app.guide_preview, None);
         let added = app.engine.doc.guides.last().unwrap().clone();
         assert_eq!(added.axis, stencilcraft_doc::GuideAxis::Vertical);
@@ -8645,7 +8714,11 @@ mod tests {
         pass(&mut app, EditEvent::update(id, moved(50.0)));
         pass(&mut app, EditEvent::update(id, moved(60.0)));
         assert_eq!(app.engine.doc.guides.last().unwrap().position_mm, 40.0);
-        assert!(shown(&app).iter().any(|g| g.key == key && g.position == 60.0));
+        assert!(
+            shown(&app)
+                .iter()
+                .any(|g| g.key == key && g.position == 60.0)
+        );
         pass(
             &mut app,
             EditEvent::commit(id, Mixed::Same(placed.clone()), moved(60.0)),

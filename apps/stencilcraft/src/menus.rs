@@ -1103,7 +1103,10 @@ mod tests {
             assert_eq!(shown, item.label(), "the menu shows {:?}", item.label());
             ampersands += usize::from(item.label().contains('&'));
         }
-        assert!(ampersands >= 2, "Print & Cut is in Panels and File › Export");
+        assert!(
+            ampersands >= 2,
+            "Print & Cut is in Panels and File › Export"
+        );
     }
 
     #[test]

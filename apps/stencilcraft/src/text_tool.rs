@@ -1091,9 +1091,7 @@ fn flow_controls(
 /// content no width limit along a scrolling axis), so the strip keeps its natural width; the
 /// area is as wide as the strip where it fits and scrolls where the panel is narrower.
 fn whole_width(ui: &mut egui::Ui, salt: &str, add: impl FnOnce(&mut egui::Ui)) {
-    egui::ScrollArea::horizontal()
-        .id_salt(salt)
-        .show(ui, add);
+    egui::ScrollArea::horizontal().id_salt(salt).show(ui, add);
 }
 
 #[cfg(test)]

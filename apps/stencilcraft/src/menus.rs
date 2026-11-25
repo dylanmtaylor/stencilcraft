@@ -225,7 +225,7 @@ fn edit_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .shortcut(kbd(cmd_shift(), Key::A))
             .enabled(any)
             .into(),
-        todo("Select by Color…"),
+        item("Select by Color…", A::ShowPanel(P::SelectByColor)).into(),
         SEP,
         todo("History…"),
         todo_key("Preferences…", CMD, Key::K),
@@ -526,7 +526,7 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .enabled(any)
             .into(),
         item("Inverse", A::SelectInverse).into(),
-        todo("Select by Color…"),
+        item("Select by Color…", A::ShowPanel(P::SelectByColor)).into(),
         SEP,
         sub(
             "Same",
@@ -728,9 +728,9 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
     vec![
         item("Page Setup", A::ShowPanel(P::PageSetup)).into(),
         todo("PixScan"),
-        todo("Fill Color"),
-        todo("Line Style"),
-        todo("Select by Color"),
+        item("Fill Color", A::ShowPanel(P::FillColor)).into(),
+        item("Line Style", A::ShowPanel(P::LineStyle)).into(),
+        item("Select by Color", A::ShowPanel(P::SelectByColor)).into(),
         item("Trace", A::ShowPanel(P::Trace)).into(),
         todo("Image Effects"),
         item("Text Style", A::ShowPanel(P::TextStyle)).into(),
@@ -748,7 +748,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         SEP,
         item("Properties", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
         item("Tools", A::ShowPanel(crate::WorkspacePanel::Tools)).into(),
-        todo("Swatches"),
+        item("Swatches", A::ShowPanel(P::FillColor)).into(),
         todo("Recolor Artwork"),
         todo("Graphic Styles"),
         todo("Actions"),

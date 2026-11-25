@@ -46,6 +46,7 @@ use stencilcraft_engine::{Alignment, BooleanOperation, Command, DistributionAxis
 /// connection (the same session core the CLI's `mcp` mode uses).
 mod arc_draw;
 mod click_draw;
+mod colour_panels;
 mod control;
 mod effects;
 mod file_menu;
@@ -749,6 +750,9 @@ pub enum WorkspacePanel {
     Contour,
     Library,
     Glyphs,
+    FillColor,
+    LineStyle,
+    SelectByColor,
 }
 
 struct WorkspaceContent<'a> {
@@ -774,6 +778,9 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Contour => self.app.contour_panel(ui),
             WorkspacePanel::Library => self.app.library_panel(ui),
             WorkspacePanel::Glyphs => self.app.glyphs_panel(ui),
+            WorkspacePanel::FillColor => self.app.fill_colour_panel(ui),
+            WorkspacePanel::LineStyle => self.app.line_style_panel(ui),
+            WorkspacePanel::SelectByColor => self.app.select_by_colour_panel(ui),
         }
     }
 
@@ -795,6 +802,9 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Contour => "Contour",
             WorkspacePanel::Library => "Library",
             WorkspacePanel::Glyphs => "Glyphs",
+            WorkspacePanel::FillColor => "Fill Color",
+            WorkspacePanel::LineStyle => "Line Style",
+            WorkspacePanel::SelectByColor => "Select by Color",
         }
         .to_owned()
     }
@@ -877,6 +887,9 @@ pub struct StencilApp {
     pub effect_preview: Option<effects::EffectPreview>,
     /// Recovery snapshots and the design library.
     pub stores: library_panel::FileStores,
+    /// The colour panels' hex field, and a line style picked there (applied after drawing).
+    pub colour_hex_draft: String,
+    pub pending_style: Option<CutStyle>,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
@@ -1026,6 +1039,9 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Contour,
                                 WorkspacePanel::Library,
                                 WorkspacePanel::Glyphs,
+                                WorkspacePanel::FillColor,
+                                WorkspacePanel::LineStyle,
+                                WorkspacePanel::SelectByColor,
                             ],
                             0,
                         ),
@@ -1109,6 +1125,8 @@ impl StencilApp {
             effects: effects::EffectsState::default(),
             effect_preview: None,
             stores: library_panel::FileStores::default(),
+            colour_hex_draft: String::new(),
+            pending_style: None,
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,

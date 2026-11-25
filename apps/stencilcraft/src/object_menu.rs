@@ -2,8 +2,9 @@
 //! Detach, Flatten, Clipping Mask, and the Contour panel, which hides contours of a shape so
 //! they are kept but not cut.
 
-use craft_ui::controls::Checkbox;
-use craft_ui::patterns::Panel;
+use craft_ui::choice::Checkbox;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_engine::document::DocumentCommand;
 use stencilcraft_engine::{Command, ProductionCommand};
@@ -113,7 +114,9 @@ impl StencilApp {
             _ => None,
         };
         let mut change: Option<(Vec<usize>, bool)> = None;
-        let _ = Panel::new("stencilcraft-contour-panel").show(ui, |ui| {
+        let _ = Panel::new("Contour")
+            .id_salt("stencilcraft-contour-panel")
+            .show(ui, |ui, _| {
             let Some((_, count, hidden)) = &target else {
                 hint(ui, "Select one shape to hide or show its contours.");
                 return;
@@ -126,7 +129,10 @@ impl StencilApp {
                     format!("Contour {}", i + 1)
                 };
                 let was = shown;
-                let _ = Checkbox::bool(&label, &mut shown).show(ui);
+                let _ = Checkbox::new(Bind::bound(&mut shown))
+                    .label(label)
+                    .id_salt(("contour", i))
+                    .show(ui);
                 if shown != was {
                     change = Some((vec![i], !shown));
                 }

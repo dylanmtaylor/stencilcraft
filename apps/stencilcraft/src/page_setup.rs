@@ -3,9 +3,11 @@
 //! and snapping (Show Print/Cut Border, Show Grid, Snap to Grid, Smart Snapping, tolerance,
 //! grid spacing and divisions). Page changes are document commands, so each is one undo step.
 
-use craft_ui::composites::SectionHeader;
-use craft_ui::controls::{Checkbox, ControlSize, Segmented, Select};
-use craft_ui::patterns::Panel;
+use craft_theme::ControlSize;
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
+use craft_ui::pickers::Select;
+use craft_ui::sections::{Panel, Section};
 use eframe::egui;
 use stencilcraft_doc::PagePreset;
 use stencilcraft_engine::Command;
@@ -68,21 +70,34 @@ impl StencilApp {
         let grid = self.engine.doc.grid.clone();
         let mut spacing = grid.spacing_mm;
         let mut divisions = f64::from(grid.subdivisions.max(1));
-        let _ = Panel::new("stencilcraft-page-setup-panel").show(ui, |ui| {
-            let _ = SectionHeader::new("page-setup-page", "Page").show(ui, |ui| {
+        let mat_entries: Vec<_> = MAT_CHOICES
+            .iter()
+            .map(|(choice, label)| Entry::new(*choice, *label))
+            .collect();
+        let media_entries: Vec<Entry<PagePreset>> = MEDIA_PRESETS
+            .iter()
+            .map(|(choice, label)| Entry::new(*choice, *label))
+            .collect();
+        let orientation_entries = [Entry::new(false, "Portrait"), Entry::new(true, "Landscape")];
+        let turn_entries = [
+            Entry::new(0, "0°"),
+            Entry::new(1, "90°"),
+            Entry::new(2, "180°"),
+            Entry::new(3, "270°"),
+        ];
+        let _ = Panel::new("Page Setup")
+            .id_salt("stencilcraft-page-setup-panel")
+            .show(ui, |ui, _| {
+            let _ = Section::new("Page").id_salt("page-setup-page").show(ui, |ui, _| {
                 labelled(ui, "Cutting Mat", |ui| {
-                    let mut select = Select::new("page-mat", "Cutting mat", &mut mat);
-                    for (choice, label) in MAT_CHOICES {
-                        select = select.option(*choice, *label);
-                    }
-                    let _ = select.show(ui);
+                    let _ = Select::new("Cutting mat", Bind::bound(&mut mat), &mat_entries)
+                        .id_salt("page-mat")
+                        .show(ui);
                 });
                 labelled(ui, "Media Size", |ui| {
-                    let mut select = Select::new("page-media", "Media size", &mut preset);
-                    for (choice, label) in MEDIA_PRESETS {
-                        select = select.option(*choice, *label);
-                    }
-                    let _ = select.show(ui);
+                    let _ = Select::new("Media size", Bind::bound(&mut preset), &media_entries)
+                        .id_salt("page-media")
+                        .show(ui);
                 });
                 labelled(ui, "Width", |ui| {
                     number(
@@ -106,29 +121,34 @@ impl StencilApp {
                         &numbers,
                     );
                 });
-                let _ = Segmented::new("page-orientation", "Orientation", &mut landscape)
-                    .item(false, "Portrait")
-                    .item(true, "Landscape")
-                    .size(ControlSize::Sm)
-                    .show(ui);
+                let _ = Segmented::new(
+                    "Orientation",
+                    Bind::bound(&mut landscape),
+                    &orientation_entries,
+                )
+                .id_salt("page-orientation")
+                .size(ControlSize::Sm)
+                .show(ui);
                 labelled(ui, "Rotate View", |ui| {
-                    let _ = Segmented::new("page-rotate-view", "Rotate view", &mut turns)
-                        .item(0, "0°")
-                        .item(1, "90°")
-                        .item(2, "180°")
-                        .item(3, "270°")
+                    let _ = Segmented::new("Rotate view", Bind::bound(&mut turns), &turn_entries)
+                        .id_salt("page-rotate-view")
                         .size(ControlSize::Sm)
                         .show(ui);
                 });
             });
-            let _ = SectionHeader::new("page-setup-grid", "Borders and Grid").show(ui, |ui| {
-                let _ = Checkbox::bool("Show Print Border", &mut prefs.show_print_border).show(ui);
-                let _ = Checkbox::bool("Show Cut Border", &mut prefs.show_cut_border).show(ui);
+            let _ = Section::new("Borders and Grid")
+                .id_salt("page-setup-grid")
+                .show(ui, |ui, _| {
+                let check = |ui: &mut egui::Ui, label: &'static str, value: &mut bool| {
+                    let _ = Checkbox::new(Bind::bound(value)).label(label).show(ui);
+                };
+                check(ui, "Show Print Border", &mut prefs.show_print_border);
+                check(ui, "Show Cut Border", &mut prefs.show_cut_border);
                 ui.horizontal(|ui| {
-                    let _ = Checkbox::bool("Show Grid", &mut prefs.show_grid).show(ui);
-                    let _ = Checkbox::bool("Snap to Grid", &mut snap_grid).show(ui);
+                    check(ui, "Show Grid", &mut prefs.show_grid);
+                    check(ui, "Snap to Grid", &mut snap_grid);
                 });
-                let _ = Checkbox::bool("Enable Smart Snapping", &mut smart).show(ui);
+                check(ui, "Enable Smart Snapping", &mut smart);
                 labelled(ui, "Tolerance", |ui| {
                     number(
                         ui,

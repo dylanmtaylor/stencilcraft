@@ -4,17 +4,15 @@
 
 use craft_draw::ui::pen::PathSelection;
 use craft_theme::TypeRole;
-use craft_ui::canvas::quad::Anchor9;
-use craft_ui::composites::SectionHeader;
-use craft_theme::ControlSize;
-use craft_ui::controls::{ButtonVariant, Checkbox, NumberField, Segmented};
-use craft_behavior::EditEvent;
-use craft_ui::icons::Icon;
-use craft_ui::localized::{LocaleNumbers, Unit};
-use craft_ui::patterns::{AlignBar, Panel};
-use craft_ui::buttons::Button;
-use craft_ui::contract::{Props as _, Show as _};
+use craft_behavior::{Anchor9, IconId};
+use craft_theme::{ControlSize, Variant};
+use craft_ui::bars::AlignAction;
+use craft_ui::buttons::{Button, IconButton};
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft_ui::display::{Shade, Text};
+use craft_ui::sections::{Panel, Section};
+use craft_ui::text::NumberField;
 use eframe::egui;
 use stencilcraft_engine::document::{DocumentCommand, TransformRequest};
 use stencilcraft_engine::{
@@ -57,12 +55,12 @@ impl ScreenSide {
         }
     }
 
-    fn icon(self) -> Icon {
+    fn icon(self) -> IconId {
         match self {
-            Self::Left => Icon::ChevronLeft,
-            Self::Right => Icon::ChevronRight,
-            Self::Above => Icon::ChevronUp,
-            Self::Below => Icon::ChevronDown,
+            Self::Left => IconId::new("chevron_left"),
+            Self::Right => IconId::new("chevron_right"),
+            Self::Above => IconId::new("chevron_up"),
+            Self::Below => IconId::new("chevron_down"),
         }
     }
 }
@@ -343,21 +341,80 @@ pub(crate) fn number(
     value: &mut f64,
     range: std::ops::RangeInclusive<f64>,
     unit: &str,
-    numbers: &LocaleNumbers,
+    _numbers: &LocaleNumbers,
 ) -> bool {
     let (shown, range, unit, per) = in_display(*value, range, unit);
-    let edit = NumberField::new(id, label, shown, numbers)
+    let edit = NumberField::new(label.to_owned(), Bind::given(Some(shown)))
+        .id_salt(id.to_owned())
         .range(range)
-        .decimals(0..=3)
-        .unit(Unit::new(unit))
+        .max_decimals(3)
+        .unit(unit_text(unit))
         .show(ui);
-    match edit.event {
-        Some(EditEvent::Commit { value: v, .. } | EditEvent::Set { value: v, .. }) => {
+    match edit.events.committed() {
+        Some(Some(v)) if v.is_finite() => {
             *value = v / per;
             true
         }
         _ => false,
     }
+}
+
+/// The app's number locale. At the pin a number field reads its locale from the runtime's env, so this keeps
+/// only the app's call sites (`from_tag("en-US")` was the app's one locale).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LocaleNumbers;
+
+impl LocaleNumbers {
+    pub fn from_tag(_tag: &str) -> Self {
+        LocaleNumbers
+    }
+
+    pub fn of_ctx(_ctx: &egui::Context) -> Self {
+        LocaleNumbers
+    }
+}
+
+/// The text after a number for a unit template: `{n} mm` is `mm`, `{n} ×` is `×`, `{n}` is none.
+pub(crate) fn unit_text(template: &str) -> String {
+    template.replace("{n}", "").trim().to_owned()
+}
+
+/// The align buttons of the old `AlignBar`: the six align commands and the two distribute ones the app runs,
+/// as icon buttons, each enabled by `enabled`. At the pin `AlignBar` shows app commands from the command
+/// registry, which the app does not have, so the app shows the same buttons itself.
+pub(crate) fn align_bar(
+    ui: &mut egui::Ui,
+    salt: &str,
+    enabled: impl Fn(AlignAction) -> bool,
+) -> Option<AlignAction> {
+    const BUTTONS: [(AlignAction, &str, &str); 8] = [
+        (AlignAction::AlignLeftEdges, "align_edge_left", "Align Left Edges"),
+        (AlignAction::AlignHorizontalCenters, "align_edge_hcenter", "Align Horizontal Centers"),
+        (AlignAction::AlignRightEdges, "align_edge_right", "Align Right Edges"),
+        (AlignAction::DistributeVertically, "distribute_vertical", "Distribute Vertically"),
+        (AlignAction::AlignTopEdges, "align_edge_top", "Align Top Edges"),
+        (AlignAction::AlignVerticalCenters, "align_edge_vcenter", "Align Vertical Centers"),
+        (AlignAction::AlignBottomEdges, "align_edge_bottom", "Align Bottom Edges"),
+        (AlignAction::DistributeHorizontally, "distribute_horizontal", "Distribute Horizontally"),
+    ];
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        for (i, (action, icon, label)) in BUTTONS.into_iter().enumerate() {
+            if i == 4 {
+                ui.separator();
+            }
+            if IconButton::new(IconId::new(icon))
+                .label(label)
+                .id_salt((salt.to_owned(), i))
+                .enabled(enabled(action))
+                .show(ui)
+                .clicked()
+            {
+                picked = Some(action);
+            }
+        }
+    });
+    picked
 }
 
 /// A field whose unit is `{n} mm` shows its value, range and unit in the display unit
@@ -693,7 +750,9 @@ impl StencilApp {
         let numbers = self.locale_numbers.clone();
         let mut action = None;
         let state = &mut self.panels;
-        let _ = Panel::new("stencilcraft-replicate-panel").show(ui, |ui| {
+        let _ = Panel::new("Replicate")
+            .id_salt("stencilcraft-replicate-panel")
+            .show(ui, |ui, _| {
             labelled(ui, "Spacing", |ui| {
                 number(
                     ui,
@@ -709,19 +768,21 @@ impl StencilApp {
                 ("rep-dup", "Duplicate", false),
                 ("rep-mirror", "Mirror", true),
             ] {
-                let _ = SectionHeader::new(id, title).show(ui, |ui| {
+                let _ = Section::new(title).id_salt(id).show(ui, |ui, _| {
                     ui.horizontal_wrapped(|ui| {
                         for side in ScreenSide::ALL {
                             let label = format!("{title} {}", side.label());
                             let b = Button::new(side.label())
                                 .icon(if mirror {
-                                    Icon::SymmetryVertical
+                                    IconId::new("symmetry_vertical")
                                 } else {
                                     side.icon()
                                 })
+                                .id_salt((id, side.label()))
                                 .size(ControlSize::Sm)
-                                .enabled(any);
-                            if ui.add(b).on_hover_text(label).clicked() {
+                                .enabled(any)
+                                .tooltip(label);
+                            if b.show(ui).clicked() {
                                 action = Some(if mirror {
                                     EditAction::Mirror(side)
                                 } else {
@@ -732,7 +793,7 @@ impl StencilApp {
                     });
                 });
             }
-            let _ = SectionHeader::new("rep-array", "Rows and columns").show(ui, |ui| {
+            let _ = Section::new("Rows and columns").id_salt("rep-array").show(ui, |ui, _| {
                 labelled(ui, "Copies", |ui| {
                     number(
                         ui,
@@ -751,20 +812,18 @@ impl StencilApp {
                     if button(ui, "Column", any) {
                         action = Some(EditAction::Array(DistributionAxis::Vertical));
                     }
-                    if ui
-                        .add(
-                            Button::new("Fill Page")
-                                .icon(Icon::Grid)
-                                .size(ControlSize::Sm)
-                                .enabled(any),
-                        )
+                    if Button::new("Fill Page")
+                        .icon(IconId::new("grid"))
+                        .size(ControlSize::Sm)
+                        .enabled(any)
+                        .show(ui)
                         .clicked()
                     {
                         action = Some(EditAction::FillPage);
                     }
                 });
             });
-            let _ = SectionHeader::new("rep-rotate", "Rotate copies").show(ui, |ui| {
+            let _ = Section::new("Rotate copies").id_salt("rep-rotate").show(ui, |ui, _| {
                 labelled(ui, "Count", |ui| {
                     number(
                         ui,
@@ -783,13 +842,11 @@ impl StencilApp {
                             action = Some(EditAction::RotateCopies);
                         }
                     }
-                    if ui
-                        .add(
-                            Button::new("Rotate")
-                                .icon(Icon::RotateCw)
-                                .size(ControlSize::Sm)
-                                .enabled(any),
-                        )
+                    if Button::new("Rotate")
+                        .icon(IconId::new("rotate_cw"))
+                        .size(ControlSize::Sm)
+                        .enabled(any)
+                        .show(ui)
                         .clicked()
                     {
                         action = Some(EditAction::RotateCopies);
@@ -865,10 +922,17 @@ impl StencilApp {
             .as_ref()
             .and_then(|p| p.result.as_ref().err().cloned());
         let draft = &mut self.panels.offset;
-        let _ = Panel::new("stencilcraft-offset-panel").show(ui, |ui| {
-            let _ = Segmented::new("offset-kind", "Offset direction", &mut draft.internal)
-                .item(false, "Offset")
-                .item(true, "Internal Offset")
+        let kind_entries = [Entry::new(false, "Offset"), Entry::new(true, "Internal Offset")];
+        let join_entries = [
+            Entry::new(JoinStyle::Miter, "Sharp").icon(IconId::new("stroke_join_miter")),
+            Entry::new(JoinStyle::Round, "Round").icon(IconId::new("stroke_join_round")),
+            Entry::new(JoinStyle::Bevel, "Bevel").icon(IconId::new("stroke_join_bevel")),
+        ];
+        let _ = Panel::new("Offset")
+            .id_salt("stencilcraft-offset-panel")
+            .show(ui, |ui, _| {
+            let _ = Segmented::new("Offset direction", Bind::bound(&mut draft.internal), &kind_entries)
+                .id_salt("offset-kind")
                 .size(ControlSize::Sm)
                 .show(ui);
             labelled(ui, "Distance", |ui| {
@@ -883,10 +947,8 @@ impl StencilApp {
                 );
             });
             labelled(ui, "Corner", |ui| {
-                let _ = Segmented::new("offset-join", "Corner", &mut draft.join)
-                    .icon_item(JoinStyle::Miter, Icon::StrokeJoinMiter, "Sharp")
-                    .icon_item(JoinStyle::Round, Icon::StrokeJoinRound, "Round")
-                    .icon_item(JoinStyle::Bevel, Icon::StrokeJoinBevel, "Bevel")
+                let _ = Segmented::new("Corner", Bind::bound(&mut draft.join), &join_entries)
+                    .id_salt("offset-join")
                     .size(ControlSize::Sm)
                     .show(ui);
             });
@@ -903,25 +965,23 @@ impl StencilApp {
                     );
                 });
             }
-            let _ = Checkbox::bool("Weld overlapping offsets", &mut draft.weld).show(ui);
+            let _ = Checkbox::new(Bind::bound(&mut draft.weld))
+                .label("Weld overlapping offsets")
+                .show(ui);
             if let Some(error) = &error {
-                ui.add(Text::new(error).content(Content::Muted));
+                let _ = Text::new(error.clone()).shade(Shade::Muted).show(ui);
             }
             ui.horizontal(|ui| {
-                cancel = ui
-                    .add(
-                        Button::new("Cancel")
-                            .size(ControlSize::Sm)
-                            .enabled(draft.armed),
-                    )
+                cancel = Button::new("Cancel")
+                    .size(ControlSize::Sm)
+                    .enabled(draft.armed)
+                    .show(ui)
                     .clicked();
-                apply = ui
-                    .add(
-                        Button::new("Apply")
-                            .variant(ButtonVariant::Primary)
-                            .size(ControlSize::Sm)
-                            .enabled(any && error.is_none()),
-                    )
+                apply = Button::new("Apply")
+                    .variant(Variant::PRIMARY)
+                    .size(ControlSize::Sm)
+                    .enabled(any && error.is_none())
+                    .show(ui)
                     .clicked();
             });
             hint(
@@ -956,8 +1016,10 @@ impl StencilApp {
         let mut op = None;
         let mut action = None;
         let stroke = &mut self.panels.stroke_mm;
-        let _ = Panel::new("stencilcraft-modify-panel").show(ui, |ui| {
-            let _ = SectionHeader::new("modify-weld", "Combine").show(ui, |ui| {
+        let _ = Panel::new("Modify")
+            .id_salt("stencilcraft-modify-panel")
+            .show(ui, |ui, _| {
+            let _ = Section::new("Combine").id_salt("modify-weld").show(ui, |ui, _| {
                 ui.horizontal_wrapped(|ui| {
                     for (label, o) in [
                         ("Weld", BooleanOperation::Union),
@@ -974,7 +1036,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("modify-pathfinder", "Pathfinder").show(ui, |ui| {
+            let _ = Section::new("Pathfinder").id_salt("modify-pathfinder").show(ui, |ui, _| {
                 ui.horizontal_wrapped(|ui| {
                     for (label, o) in [
                         ("Trim", BooleanOperation::Trim),
@@ -988,7 +1050,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("modify-compound", "Compound paths").show(ui, |ui| {
+            let _ = Section::new("Compound paths").id_salt("modify-compound").show(ui, |ui, _| {
                 ui.horizontal_wrapped(|ui| {
                     for (label, a, enabled) in [
                         ("Make Compound", EditAction::MakeCompound, count >= 2),
@@ -1001,7 +1063,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("modify-stroke", "Outline stroke").show(ui, |ui| {
+            let _ = Section::new("Outline stroke").id_salt("modify-stroke").show(ui, |ui, _| {
                 labelled(ui, "Width", |ui| {
                     number(
                         ui,
@@ -1047,33 +1109,34 @@ impl StencilApp {
         let numbers = self.locale_numbers.clone();
         let mut action = None;
         let tolerance = &mut self.panels.simplify_mm;
-        let _ = Panel::new("stencilcraft-points-panel").show(ui, |ui| {
+        let _ = Panel::new("Point Editing")
+            .id_salt("stencilcraft-points-panel")
+            .show(ui, |ui, _| {
             let label = if editing {
                 "Stop Editing Points"
             } else {
                 "Edit Points"
             };
-            if ui
-                .add(
-                    Button::new(label)
-                        .icon(Icon::DirectSelect)
-                        .size(ControlSize::Sm)
-                        .enabled(!ids.is_empty() || editing),
-                )
+            if Button::new(label)
+                .icon(IconId::new("direct_select"))
+                .size(ControlSize::Sm)
+                .enabled(!ids.is_empty() || editing)
+                .show(ui)
                 .clicked()
             {
                 action = Some(EditAction::TogglePointEdit);
             }
-            match counts {
+            match &counts {
                 Some(Effect::NodeCount(c)) => {
-                    ui.add(Text::new(format!(
+                    let _ = Text::new(format!(
                         "{} nodes · {} contours ({} corner, {} curve)",
                         c.nodes, c.contours, c.linear, c.bezier
-                    )));
+                    ))
+                    .show(ui);
                 }
                 _ => hint(ui, "Double-click a shape to edit its points."),
             }
-            let _ = SectionHeader::new("points-nodes", "Nodes").show(ui, |ui| {
+            let _ = Section::new("Nodes").id_salt("points-nodes").show(ui, |ui, _| {
                 ui.horizontal_wrapped(|ui| {
                     for (label, a, enabled) in [
                         ("Delete", EditAction::DeleteNodes, nodes),
@@ -1089,7 +1152,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("points-segments", "Segments").show(ui, |ui| {
+            let _ = Section::new("Segments").id_salt("points-segments").show(ui, |ui, _| {
                 ui.horizontal_wrapped(|ui| {
                     for (label, a, enabled) in [
                         ("Make Flat", EditAction::Segment(SegmentType::Line), segment),
@@ -1107,7 +1170,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("points-path", "Path").show(ui, |ui| {
+            let _ = Section::new("Path").id_salt("points-path").show(ui, |ui, _| {
                 labelled(ui, "Tolerance", |ui| {
                     number(
                         ui,
@@ -1142,12 +1205,13 @@ impl StencilApp {
         let mut command = None;
         let mut center = false;
         let state = &mut self.panels;
-        let _ = Panel::new("stencilcraft-transform-panel").show(ui, |ui| {
-            let _ = SectionHeader::new("transform-align", "Align").show(ui, |ui| {
-                let picked = AlignBar::new("transform-align-bar")
-                    .enabled(|a| many && align_command(a).is_some())
-                    .show(ui)
-                    .picked;
+        let _ = Panel::new("Transform")
+            .id_salt("stencilcraft-transform-panel")
+            .show(ui, |ui, _| {
+            let _ = Section::new("Align").id_salt("transform-align").show(ui, |ui, _| {
+                let picked = align_bar(ui, "transform-align-bar", |a| {
+                    many && align_command(a).is_some()
+                });
                 command = match picked.and_then(align_command) {
                     Some(AlignCommand::Align(alignment)) => Some(Command::ShapesAlign {
                         ids: ids.clone(),
@@ -1189,11 +1253,9 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = Checkbox::bool(
-                "Transform each object about its own centre",
-                &mut state.each,
-            )
-            .show(ui);
+            let _ = Checkbox::new(Bind::bound(&mut state.each))
+                .label("Transform each object about its own centre")
+                .show(ui);
             let each = state.each;
             // `transform.each` is remembered, so Transform Again repeats any of these.
             let request = |dx_mm: f64, dy_mm: f64, scale_x: f64, scale_y: f64, degrees: f64| {
@@ -1211,7 +1273,7 @@ impl StencilApp {
             let transform = |dx: f64, dy: f64, sx: f64, sy: f64, deg: f64| {
                 Command::Document(DocumentCommand::TransformEach(request(dx, dy, sx, sy, deg)))
             };
-            let _ = SectionHeader::new("transform-rotate", "Rotate").show(ui, |ui| {
+            let _ = Section::new("Rotate").id_salt("transform-rotate").show(ui, |ui, _| {
                 labelled(ui, "Angle", |ui| {
                     number(
                         ui,
@@ -1234,7 +1296,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("transform-scale", "Scale").show(ui, |ui| {
+            let _ = Section::new("Scale").id_salt("transform-scale").show(ui, |ui, _| {
                 ui.horizontal(|ui| {
                     let [mut w, mut h] = state.scale_pct;
                     let wc = number(
@@ -1246,11 +1308,11 @@ impl StencilApp {
                         "{n} %",
                         &numbers,
                     );
-                    let _ = craft_ui::controls::LinkButton::new(
-                        "transform-scale-link",
-                        &mut state.scale_linked,
-                        craft_ui::controls::LinkMode::Ratio,
+                    let _ = craft_ui::text::link_toggle(
+                        "Keep ratio",
+                        Bind::bound(&mut state.scale_linked),
                     )
+                    .id_salt("transform-scale-link")
                     .size(ControlSize::Sm)
                     .show(ui);
                     let hc = number(
@@ -1281,7 +1343,7 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("transform-shear", "Shear").show(ui, |ui| {
+            let _ = Section::new("Shear").id_salt("transform-shear").show(ui, |ui, _| {
                 labelled(ui, "Angle", |ui| {
                     number(
                         ui,
@@ -1310,10 +1372,10 @@ impl StencilApp {
                     }
                 });
             });
-            let _ = SectionHeader::new("transform-move", "Move by").show(ui, |ui| {
+            let _ = Section::new("Move by").id_salt("transform-move").show(ui, |ui, _| {
                 ui.horizontal(|ui| {
                     let [mut dx, mut dy] = state.move_mm;
-                    ui.add(Text::new("X").role(TypeRole::Label));
+                    let _ = Text::new("X").role(TypeRole::Label).show(ui);
                     number(
                         ui,
                         "transform-dx",
@@ -1323,7 +1385,7 @@ impl StencilApp {
                         "{n} mm",
                         &numbers,
                     );
-                    ui.add(Text::new("Y").role(TypeRole::Label));
+                    let _ = Text::new("Y").role(TypeRole::Label).show(ui);
                     number(
                         ui,
                         "transform-dy",

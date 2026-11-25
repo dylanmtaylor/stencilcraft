@@ -3,6 +3,7 @@
 //! pressure, speed and passes, and the cut runs the rows one after another, each with only its
 //! shapes.
 
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _};
 use eframe::egui;
 use stencilcraft_doc::Document;
 
@@ -130,12 +131,15 @@ impl StencilApp {
     pub fn send_mode_ui(&mut self, ui: &mut egui::Ui) {
         let mut mode = self.send.mode;
         ui.label("Send mode");
-        let _ = craft_ui::controls::Segmented::new("send-mode", "Send mode", &mut mode)
-            .item(SendMode::Standard, "Standard")
-            .item(SendMode::LineColor, "Line Color")
-            .item(SendMode::FillColor, "Fill Color")
-            .item(SendMode::Layer, "Layer")
-            .size(craft_ui::controls::ControlSize::Sm)
+        let entries = [
+            Entry::new(SendMode::Standard, "Standard"),
+            Entry::new(SendMode::LineColor, "Line Color"),
+            Entry::new(SendMode::FillColor, "Fill Color"),
+            Entry::new(SendMode::Layer, "Layer"),
+        ];
+        let _ = craft_ui::choice::Segmented::new("Send mode", Bind::bound(&mut mode), &entries)
+            .id_salt("send-mode")
+            .size(craft_theme::ControlSize::Sm)
             .show(ui);
         self.send.mode = mode;
         if mode == SendMode::Standard {

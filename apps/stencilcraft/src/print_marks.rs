@@ -1,8 +1,9 @@
 //! Silhouette's Print & Cut panel: registration marks on the page (length, thickness, inset),
 //! bleed, a check that the design stays clear of the marks, and printing the page at 100 %.
 
-use craft_ui::controls::Checkbox;
-use craft_ui::patterns::Panel;
+use craft_ui::choice::Checkbox;
+use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_doc::Document;
 use stencilcraft_geom::Shape as _;
@@ -123,8 +124,12 @@ impl StencilApp {
         let mut marks = self.prefs.marks;
         let over = if on { self.shapes_over_marks() } else { 0 };
         let (mut print, mut defaults) = (false, false);
-        let _ = Panel::new("stencilcraft-print-cut-panel").show(ui, |ui| {
-            let _ = Checkbox::bool("Show Registration Marks", &mut on).show(ui);
+        let _ = Panel::new("Print & Cut")
+            .id_salt("stencilcraft-print-cut-panel")
+            .show(ui, |ui, _| {
+            let _ = Checkbox::new(Bind::bound(&mut on))
+                .label("Show Registration Marks")
+                .show(ui);
             ui.add_enabled_ui(on, |ui| {
                 for (label, id, value, range) in [
                     ("Length", "marks-length", &mut marks.length_mm, 2.0..=100.0),
@@ -141,7 +146,7 @@ impl StencilApp {
                     });
                 }
                 ui.horizontal(|ui| {
-                    let _ = Checkbox::bool("Bleed", &mut marks.bleed).show(ui);
+                    let _ = Checkbox::new(Bind::bound(&mut marks.bleed)).label("Bleed").show(ui);
                     number(
                         ui,
                         "marks-bleed",

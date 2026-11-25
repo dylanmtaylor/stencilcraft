@@ -178,6 +178,11 @@ pub enum Command {
         scale_y: f64,
         degrees: f64,
     },
+    /// Apply an affine map `[a, b, c, d, e, f]` (x' = a·x + c·y + e, y' = b·x + d·y + f) to the
+    /// shapes as one edit: what an on-canvas transform box produces (scale, stretch, rotate,
+    /// mirror). Degenerate (flattening) maps are refused.
+    #[serde(rename = "shapes.affine")]
+    ShapesAffine { ids: Vec<u64>, matrix: [f64; 6] },
     /// Align multiple shapes by their overall bounds or to the board edge/center.
     #[serde(rename = "shapes.align")]
     ShapesAlign {
@@ -970,6 +975,20 @@ impl Engine {
             Command::Production(c) => production::execute(&mut self.doc, c),
             Command::ShapeRemove { id } => self.remove_shapes(&[id], "shape.remove"),
             Command::ShapesRemove { ids } => self.remove_shapes(&ids, "shapes.remove"),
+            Command::ShapesAffine { ids, matrix } => {
+                const NAME: &str = "shapes.affine";
+                let [a, b, c, d, _, _] = matrix;
+                let det = a * d - b * c;
+                if !matrix.iter().all(|v| v.abs() <= 1e6) || !det.is_finite() || det.abs() <= 1e-9 {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the matrix must be finite, at most 1e6 in each entry and not flatten shapes"
+                    )));
+                }
+                if ids.is_empty() {
+                    return Err(EngineError::Invalid(format!("{NAME}: no shapes given")));
+                }
+                self.vector_transform(&ids, kurbo::Affine::new(matrix), NAME)
+            }
             Command::ShapesDuplicate { ids, dx_mm, dy_mm } => {
                 self.duplicate_shapes(&ids, dx_mm, dy_mm)
             }
@@ -2896,6 +2915,7 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesSetStyle { ids, .. }
         | Command::ShapePathfinder { ids, .. }
         | Command::ShapesTransform { ids, .. }
+        | Command::ShapesAffine { ids, .. }
         | Command::ShapesAlign { ids, .. }
         | Command::ShapesDistribute { ids, .. }
         | Command::PathSimplify { ids, .. }
@@ -3482,6 +3502,51 @@ mod tests {
             })
             .unwrap();
         assert_eq!(engine.doc.shape_count(), 0);
+    }
+
+    #[test]
+    fn affine_scales_and_rotates_shapes_in_one_step_and_refuses_flattening() {
+        use kurbo::Shape as _;
+        let mut engine = Engine::default();
+        engine
+            .run(Command::ShapeAddRect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 5.0,
+            })
+            .unwrap();
+        // Scale ×2 about the origin, then rotate a quarter turn.
+        let m = (kurbo::Affine::rotate(std::f64::consts::FRAC_PI_2) * kurbo::Affine::scale(2.0))
+            .as_coeffs();
+        engine
+            .run(Command::ShapesAffine {
+                ids: vec![1],
+                matrix: m,
+            })
+            .unwrap();
+        let b = engine.doc.get_shape(1).unwrap().path.bounding_box();
+        assert!(
+            (b.width() - 10.0).abs() < 1e-6 && (b.height() - 20.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        assert!(engine.undo());
+        let b = engine.doc.get_shape(1).unwrap().path.bounding_box();
+        assert!((b.width() - 10.0).abs() < 1e-6 && (b.height() - 5.0).abs() < 1e-6);
+        for bad in [
+            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [f64::NAN, 0.0, 0.0, 1.0, 0.0, 0.0],
+            [1e9, 0.0, 0.0, 1.0, 0.0, 0.0],
+        ] {
+            assert!(
+                engine
+                    .run(Command::ShapesAffine {
+                        ids: vec![1],
+                        matrix: bad,
+                    })
+                    .is_err()
+            );
+        }
     }
 
     #[test]

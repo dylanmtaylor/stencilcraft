@@ -155,7 +155,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     menu, drag-an-end-to-join, break/join/close, corner/smooth, flat/curve, simplify and a
     node count (Points panel). Still to check or build against Silhouette: on-canvas
     rounded-corner handles (needs parametric rounded rectangles), clipboard and Paste in
-    Front, Select by Color, Detach Lines, a rotation handle on the selection, a preference
+    Front, Select by Color, Detach Lines, Silhouette's separate rotation knob above the
+    selection (the desktop rotates from the band outside a corner), a preference
     for what a tool does after use, and warp.
 24. **Trace**: engine/MCP support filtering, outer-edge and detach modes and background
     removal; the desktop trace workflow still needs these controls and a live preview.

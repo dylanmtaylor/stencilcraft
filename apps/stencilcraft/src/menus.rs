@@ -850,7 +850,7 @@ fn machine(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .enabled(app.engine.doc.shape_count() > 0)
             .into(),
         todo("Pause"),
-        todo("Cancel"),
+        when("Cancel", A::CancelSend, app.send.busy),
         SEP,
         todo("Load / Unload Media"),
         todo("Register Print & Cut Marks"),

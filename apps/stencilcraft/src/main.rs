@@ -107,6 +107,8 @@ pub struct UserPrefs {
     pub mat_id: Option<String>,
     /// Text Style › Recently used font families, newest first.
     pub recent_fonts: Vec<String>,
+    /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
+    pub select_after_drawing: bool,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -134,6 +136,7 @@ impl Default for UserPrefs {
             media_id: None,
             mat_id: None,
             recent_fonts: Vec::new(),
+            select_after_drawing: false,
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -946,6 +949,8 @@ pub struct StencilApp {
     pub stores: library_panel::FileStores,
     /// The colour panels' hex field, and a line style picked there (applied after drawing).
     pub colour_hex_draft: String,
+    /// Line Style › Perforate: cut and gap lengths (mm).
+    pub perforate: (f64, f64),
     /// Select by Color: the colour row whose recolour palette is open.
     pub recolor_row: Option<usize>,
     /// A Machine-menu hardware action waiting for the Send tab.
@@ -958,6 +963,7 @@ pub struct StencilApp {
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
     pub pending_style: Option<CutStyle>,
+    pub pending_perforate: bool,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
@@ -1243,6 +1249,7 @@ impl StencilApp {
             effect_preview: None,
             stores: library_panel::FileStores::default(),
             colour_hex_draft: String::new(),
+            perforate: (3.0, 1.0),
             recolor_row: None,
             machine_action: None,
             saved_selections: Vec::new(),
@@ -1250,6 +1257,7 @@ impl StencilApp {
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
+            pending_perforate: false,
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,
@@ -3029,6 +3037,10 @@ impl StencilApp {
         if let Some(command) = self.dragged_shape_command(start, end, mods) {
             self.run_command(command);
             self.select_latest_shape();
+            // Silhouette's "action after tool use" preference.
+            if self.prefs.select_after_drawing {
+                self.active_tool = ActiveTool::Select;
+            }
         }
     }
 

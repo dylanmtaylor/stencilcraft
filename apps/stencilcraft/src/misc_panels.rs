@@ -103,6 +103,13 @@ impl StencilApp {
             ] {
                 let _ = Checkbox::bool(label, value).show(ui);
             }
+            ui.separator();
+            ui.label("Tools");
+            let _ = Checkbox::bool(
+                "Return to the Select tool after drawing a shape",
+                &mut prefs.select_after_drawing,
+            )
+            .show(ui);
             hint(
                 ui,
                 "Units are millimetres. Designs are snapshotted every 30 s while unsaved.",

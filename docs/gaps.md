@@ -146,7 +146,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 21. **Cut job settings**: Make offers job-wide cut/draw, tool, holder, passes, mirror, pressure, speed and AutoBlade depth; per-layer controls remain missing. cut order (none/speed/roller), interior contours first,
     closed-contour overcut and line-segment overcut exist as job settings (CLI `cut`, MCP
     `machine.dry_run`); the desktop Send panel doesn't expose them yet, and the speed order
-    doesn't choose contour start points. Missing: test cut, custom saved materials, per-layer settings, a tool/blade-depth chooser and passes for the cutter.
+    doesn't choose contour start points. Send › Advanced exposes cut order, inner contours first, overcut, weld on cut and track enhancing; Send › My materials saves and reuses pressure, speed, passes and blade depth by name; Machine › Test Cut and per-colour/layer rows exist (untested on hardware).
     Also missing: weed lines and borders, and more operation types (pen, score,
     perforate). Also missing: Send modes that set one row of settings per line or fill
     colour, assigning lines to tool holder 1 or 2 (or skipping them) on the cut preview,

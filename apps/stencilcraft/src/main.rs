@@ -893,6 +893,14 @@ pub struct StencilApp {
     pub color_popup_value: egui::Color32,
     /// Whether the working colour changed since the popup opened.
     pub color_popup_dirty: bool,
+    /// The open operation-actions menu: the operation id and its anchor (UI-04/05).
+    pub op_menu: Option<(u64, egui::Response)>,
+    /// One-frame open command for the operation menu.
+    pub op_menu_open: bool,
+    /// The operation whose settings dialog is open, with a working copy (UI-05).
+    pub op_settings: Option<(u64, stencilcraft_doc::OperationSettings)>,
+    /// The operation settings dialog's state.
+    pub op_settings_dialog: DialogState<stencilcraft_doc::OperationSettings>,
     pub text_dialog: bool,
     /// File › Quit was chosen; the next frame closes the window.
     pub quit_requested: bool,
@@ -1112,6 +1120,10 @@ impl StencilApp {
             color_popup: None,
             color_popup_value: egui::Color32::WHITE,
             color_popup_dirty: false,
+            op_menu: None,
+            op_menu_open: false,
+            op_settings: None,
+            op_settings_dialog: DialogState::new(),
             text_dialog: false,
             quit_requested: false,
             text_dialog_state: DialogState::new(),
@@ -2918,18 +2930,18 @@ impl StencilApp {
 
     /// The Layers workspace panel: geometry as geometry (groups + shapes) and
     /// operations as operations (`Document.operations`), side by side.
-    pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
-        self.geometry_panel(ui);
-        self.operations_panel(ui);
-        self.bulk_confirm_dialog(ui);
-        self.tag_overflow_popup(ui);
-        self.operation_color_popup(ui);
-    }
-
     /// The Geometry panel: `Document.groups` walked recursively, plus the
     /// derived Unassigned leaf list. Double-click enters a group, click
     /// (shift/marquee deep-)selects, group/ungroup dispatch GroupCreate /
     /// GroupUngroup after the UI pass (D-08).
+    /// The geometry and operations panels stacked, with their overlays: the
+    /// dock's left group for the headless harness.
+    pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
+        self.geometry_panel(ui);
+        self.operations_panel(ui);
+        self.operation_overlays(ui);
+    }
+
     pub fn geometry_panel(&mut self, ui: &mut egui::Ui) {
         use stencilcraft_ui_egui::layers::{self, GeoRow};
 
@@ -3223,6 +3235,8 @@ impl StencilApp {
             std::cell::RefCell::new(None);
         let hammer_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
             std::cell::RefCell::new(None);
+        let menu_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
+            std::cell::RefCell::new(None);
         let mut bulk: Option<BulkKind> = None;
 
         let doc = &self.engine.doc;
@@ -3348,6 +3362,26 @@ impl StencilApp {
                                     }
                                 });
                             }
+                            // Per-operation actions: settings, kind, lock, reorder, delete.
+                            if let OpKey::Op(index) = key
+                                && let Some(op) = doc.operations.get(index)
+                            {
+                                let hit = &menu_click;
+                                let id = op.id;
+                                let label = v.label.clone();
+                                row = row.trailing_item(20.0, move |ui| {
+                                    let btn = ui.add(
+                                        IconButton::new(
+                                            Icon::More,
+                                            format!("Operation menu {label}"),
+                                        )
+                                        .size(ControlSize::Sm),
+                                    );
+                                    if btn.clicked() {
+                                        *hit.borrow_mut() = Some((id, btn));
+                                    }
+                                });
+                            }
                             row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
                         }
                         row
@@ -3404,6 +3438,10 @@ impl StencilApp {
                 icon: op.icon.clone(),
                 members: op.members.clone(),
             }));
+        }
+        if let Some((id, anchor)) = menu_click.into_inner() {
+            self.op_menu = Some((id, anchor));
+            self.op_menu_open = true;
         }
         if let Some(kind) = bulk {
             self.request_bulk(kind);
@@ -3622,6 +3660,166 @@ impl StencilApp {
                 }));
             }
             self.color_popup = None;
+        }
+    }
+
+    /// App-level overlays that anchor to widgets inside the dock panels: the
+    /// bulk gate, the tag and colour popups, the per-operation menu and the
+    /// settings dialog. Rendered once after the dock so the split panels keep
+    /// their popups (they used to live inside the combined layers panel).
+    pub fn operation_overlays(&mut self, ui: &mut egui::Ui) {
+        self.bulk_confirm_dialog(ui);
+        self.tag_overflow_popup(ui);
+        self.operation_color_popup(ui);
+        self.operation_menu_popup(ui);
+        self.operation_settings_dialog(ui);
+    }
+
+    /// The per-operation actions menu: settings, kind, lock, reorder, delete.
+    fn operation_menu_popup(&mut self, ui: &mut egui::Ui) {
+        let Some((id, anchor)) = self.op_menu.clone() else {
+            return;
+        };
+        let Some((index, op)) = self
+            .engine
+            .doc
+            .operations
+            .iter()
+            .enumerate()
+            .find(|(_, op)| op.id == id)
+            .map(|(i, op)| (i, op.clone()))
+        else {
+            self.op_menu = None;
+            return;
+        };
+        let open_cmd = self
+            .op_menu_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.op_menu_open = false;
+        #[derive(Clone, Copy, PartialEq)]
+        enum Act {
+            Settings,
+            Kind(stencilcraft_doc::OperationKind),
+            Lock(bool),
+            Up,
+            Down,
+            Delete,
+        }
+        let mut entries: Vec<MenuEntry<Act>> = Vec::new();
+        entries.push(MenuItem::new(format!("Settings {}", op.name), Act::Settings).into());
+        for preset in operations::OperationPreset::ALL {
+            entries.push(
+                MenuItem::new(
+                    format!("Set kind {} for {}", preset.label(), op.name),
+                    Act::Kind(preset.kind()),
+                )
+                .into(),
+            );
+        }
+        entries.push(
+            MenuItem::new(
+                format!("{} {}", if op.locked { "Unlock" } else { "Lock" }, op.name),
+                Act::Lock(!op.locked),
+            )
+            .into(),
+        );
+        if index > 0 {
+            entries.push(MenuItem::new(format!("Move up {}", op.name), Act::Up).into());
+        }
+        if index + 1 < self.engine.doc.operations.len() {
+            entries.push(MenuItem::new(format!("Move down {}", op.name), Act::Down).into());
+        }
+        entries.push(MenuItem::new(format!("Delete {}", op.name), Act::Delete).into());
+
+        let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
+        if let Some(action) = shown.chosen {
+            match action {
+                Act::Settings => {
+                    self.op_settings = Some((id, op.settings.clone()));
+                    self.op_settings_dialog = DialogState::new();
+                }
+                Act::Kind(kind) => {
+                    self.run_command(Command::Document(DocumentCommand::OperationSetKind {
+                        id,
+                        kind,
+                    }));
+                }
+                Act::Lock(locked) => {
+                    self.run_command(Command::Document(DocumentCommand::OperationSetLocked {
+                        id,
+                        locked,
+                    }));
+                }
+                Act::Up => {
+                    self.run_command(Command::Document(DocumentCommand::OperationMove {
+                        from: index,
+                        to: index - 1,
+                    }));
+                }
+                Act::Down => {
+                    self.run_command(Command::Document(DocumentCommand::OperationMove {
+                        from: index,
+                        to: index + 1,
+                    }));
+                }
+                Act::Delete => {
+                    self.run_command(Command::Document(DocumentCommand::OperationDelete { id }));
+                }
+            }
+            self.op_menu = None;
+        } else if shown.open {
+            self.op_menu = Some((id, anchor));
+        } else {
+            self.op_menu = None;
+        }
+    }
+
+    /// The operation settings dialog (UI-05): power, speed, passes, focus, kerf.
+    fn operation_settings_dialog(&mut self, ui: &mut egui::Ui) {
+        let Some((id, mut draft)) = self.op_settings.clone() else {
+            return;
+        };
+        let name = self
+            .engine
+            .doc
+            .operations
+            .iter()
+            .find(|op| op.id == id)
+            .map(|op| op.name.clone())
+            .unwrap_or_else(|| "operation".to_string());
+        let shown = Dialog::new("operation-settings", format!("Settings — {name}"))
+            .footer(Footer::standard().ok("Apply").cancel("Cancel"))
+            .show(
+                ui.ctx(),
+                &mut self.op_settings_dialog,
+                &mut draft,
+                |ui, s| {
+                    let row = |ui: &mut egui::Ui, label: &str, value: &mut f64| {
+                        let word = ui.label(label);
+                        ui.add(egui::DragValue::new(value).speed(0.5))
+                            .labelled_by(word.id);
+                    };
+                    ui.horizontal(|ui| row(ui, "Power", &mut s.power));
+                    ui.horizontal(|ui| row(ui, "Speed", &mut s.speed_mm_per_min));
+                    ui.horizontal(|ui| {
+                        let word = ui.label("Passes");
+                        ui.add(egui::DragValue::new(&mut s.passes).range(1..=100))
+                            .labelled_by(word.id);
+                    });
+                    ui.horizontal(|ui| row(ui, "Focus", &mut s.focus_mm));
+                    ui.horizontal(|ui| row(ui, "Kerf", &mut s.kerf_mm));
+                },
+            );
+        if shown.outcome == Some(Outcome::Ok) {
+            self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
+                id,
+                settings: draft,
+            }));
+            self.op_settings = None;
+        } else if shown.closed {
+            self.op_settings = None;
+        } else {
+            self.op_settings = Some((id, draft));
         }
     }
 
@@ -5373,6 +5571,7 @@ impl eframe::App for StencilApp {
         }
         content.app.workspace = workspace;
         content.app.retain_valid_selection();
+        content.app.operation_overlays(ui);
         content.app.text_dialog(ui);
         content.app.new_document_dialog(ui);
         ui.ctx().request_repaint();
@@ -7140,7 +7339,7 @@ mod specs;
 //
 // `craft_ui::testing` (the sibling craft-libs crates' harness) is built on
 // `egui_kittest`; this module uses the same engine against this app: boot a
-// headless `StencilApp`, mount the real `layers_panel`, drive widgets by their
+// headless `StencilApp`, mount the real geometry and operations panels, drive widgets by their
 // accessibility labels, and assert on BOTH sides of the wire — the engine
 // document (backend) and the accessibility tree the user sees (frontend) — with
 // no screenshots.
@@ -7170,7 +7369,17 @@ mod ui_e2e {
             })
             .build_ui_state(
                 |ui, app: &mut StencilApp| {
-                    egui::ScrollArea::vertical().show(ui, |ui| app.layers_panel(ui));
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        // The split panels each fill the space they are given, so the
+                        // harness caps Geometry to keep Operations reachable below it.
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), 360.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| app.geometry_panel(ui),
+                        );
+                        app.operations_panel(ui);
+                        app.operation_overlays(ui);
+                    });
                 },
                 app,
             );

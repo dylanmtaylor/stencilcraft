@@ -16,6 +16,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use craft_ui::behavior::Selection;
+use egui_kittest::kittest::Queryable as _;
 
 use crate::ui_e2e::{
     App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_workspace, click, click_menu,
@@ -214,6 +215,21 @@ fn sorted(mut v: Vec<u64>) -> Vec<u64> {
     v
 }
 
+/// The id and name of the 1-based `n`th operation.
+fn op_at(w: &mut World, n: usize) -> Result<(u64, String), String> {
+    w.state()
+        .engine
+        .doc
+        .operations
+        .get(n.saturating_sub(1))
+        .map(|op| (op.id, op.name.clone()))
+        .ok_or_else(|| format!("there is no operation {n}"))
+}
+
+fn open_op_menu(w: &mut World, name: &str) {
+    click(w.h(), &format!("Operation menu {name}"));
+}
+
 /// Whether the inspector subtree (rooted at the inspector header) contains
 /// `needle` in any accessible label or value. `PropertyRow::word` values are
 /// exposed as `value`, and the inspector shares the window with the lists, so
@@ -342,6 +358,86 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             .ok_or("there is no operation to remove membership from")?;
         click(w.h(), &format!("Operations of #{id}"));
         click_menu(w.h(), &format!("Remove #{id} from {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I open the settings for operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        open_op_menu(w, &name);
+        click_menu(w.h(), &format!("Settings {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I set the power to ") {
+        let power = rest
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("power must be a number, got {rest:?}"))?;
+        w.h().get_by_label("Power").set_value_accesskit(power);
+        w.run();
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I set operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let kind = rest
+            .split_once("to kind \"")
+            .and_then(|(_, r)| r.strip_suffix('"'))
+            .ok_or_else(|| format!("expected `to kind \"…\"` in {rest:?}"))?;
+        let preset = crate::operations::OperationPreset::ALL
+            .iter()
+            .copied()
+            .find(|p| p.kind().kind_name() == kind)
+            .ok_or_else(|| format!("unknown operation kind {kind:?}"))?;
+        let (_, name) = op_at(w, n)?;
+        open_op_menu(w, &name);
+        click_menu(w.h(), &format!("Set kind {} for {name}", preset.label()));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I toggle the lock on operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (id, name) = op_at(w, n)?;
+        let locked = w
+            .state()
+            .engine
+            .doc
+            .operations
+            .iter()
+            .find(|op| op.id == id)
+            .is_some_and(|op| op.locked);
+        open_op_menu(w, &name);
+        click_menu(
+            w.h(),
+            &format!("{} {name}", if locked { "Unlock" } else { "Lock" }),
+        );
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I move operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        let direction = if rest.ends_with("up") { "up" } else { "down" };
+        open_op_menu(w, &name);
+        click_menu(w.h(), &format!("Move {direction} {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I delete operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        open_op_menu(w, &name);
+        click_menu(w.h(), &format!("Delete {name}"));
         return Ok(());
     }
     if let Some(id) = text
@@ -476,6 +572,53 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         };
     }
     if let Some(rest) = text.strip_prefix("operation ") {
+        if let Some((left, right)) = rest.split_once(" has power ") {
+            let idx = nums(left)
+                .first()
+                .copied()
+                .ok_or("operation number missing")? as usize;
+            let want = right
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| format!("power must be a number, got {right:?}"))?;
+            let op = w
+                .state()
+                .engine
+                .doc
+                .operations
+                .get(idx.saturating_sub(1))
+                .ok_or_else(|| format!("there is no operation {idx}"))?;
+            return if (op.settings.power - want).abs() < 0.01 {
+                Ok(())
+            } else {
+                fail(format!(
+                    "expected operation {idx} power {want}, got {}",
+                    op.settings.power
+                ))
+            };
+        }
+        if let Some((left, right)) = rest.split_once(" has kind ") {
+            let idx = nums(left)
+                .first()
+                .copied()
+                .ok_or("operation number missing")? as usize;
+            let kind = unquote(right);
+            let op = w
+                .state()
+                .engine
+                .doc
+                .operations
+                .get(idx.saturating_sub(1))
+                .ok_or_else(|| format!("there is no operation {idx}"))?;
+            return if op.kind_name() == kind {
+                Ok(())
+            } else {
+                fail(format!(
+                    "expected operation {idx} kind {kind:?}, got {:?}",
+                    op.kind_name()
+                ))
+            };
+        }
         if let Some((left, right)) = rest.split_once(" has members ") {
             let idx = nums(left)
                 .first()

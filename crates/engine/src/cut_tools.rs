@@ -30,6 +30,77 @@ pub enum CutMode {
     Outline,
 }
 
+/// Which way stencil bridges run across an island.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BridgeDirection {
+    /// Above and below each island.
+    #[default]
+    Vertical,
+    /// Left and right of each island.
+    Horizontal,
+    /// All four sides.
+    Both,
+}
+
+/// How many islands (holes of the cut area) `area` has.
+pub fn island_count(area: &BezPath) -> usize {
+    if !is_closed_area(area) {
+        return 0;
+    }
+    split_components(area)
+        .iter()
+        .map(|component| contours(component).len().saturating_sub(1))
+        .sum()
+}
+
+/// Stencil bridges: every island (a hole of the cut area, which would fall out of the
+/// stencil) keeps strips of material `width` wide joining it to the rest of the sheet, along
+/// lines through the island's centre. Areas without islands are returned unchanged.
+pub fn bridge_islands(
+    area: &BezPath,
+    width: f64,
+    direction: BridgeDirection,
+) -> Result<Vec<BezPath>, String> {
+    if !is_closed_area(area) {
+        return Ok(vec![area.clone()]);
+    }
+    let bounds = area.bounding_box();
+    let reach = bounds.width().max(bounds.height()) + 10.0;
+    let mut strips = Vec::new();
+    for component in split_components(area) {
+        for hole in contours(&component).iter().skip(1) {
+            let c = hole.bounding_box().center();
+            if matches!(direction, BridgeDirection::Vertical | BridgeDirection::Both) {
+                strips.push(knife_strip(
+                    Point::new(c.x, c.y - reach),
+                    Point::new(c.x, c.y + reach),
+                    width,
+                ));
+            }
+            if matches!(
+                direction,
+                BridgeDirection::Horizontal | BridgeDirection::Both
+            ) {
+                strips.push(knife_strip(
+                    Point::new(c.x - reach, c.y),
+                    Point::new(c.x + reach, c.y),
+                    width,
+                ));
+            }
+        }
+    }
+    let mut pieces = vec![area.clone()];
+    for strip in &strips {
+        let mut next = Vec::new();
+        for piece in &pieces {
+            next.extend(solid_cut(piece, strip)?);
+        }
+        pieces = next;
+    }
+    Ok(pieces)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BrushShape {

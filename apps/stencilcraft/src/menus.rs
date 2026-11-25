@@ -567,7 +567,7 @@ fn effect() -> Vec<MenuEntry<A>> {
         item("Offset…", A::Edit(E::Offset { internal: false })).into(),
         item("Internal Offset…", A::Edit(E::Offset { internal: true })).into(),
         item("Kerf Compensation…", A::ToggleKerfPreview).into(),
-        todo("Bridges…"),
+        eff("Bridges…", M::Bridges),
         eff("Weed Lines and Border…", M::WeedLines),
         SEP,
         item("Trace Image…", A::ShowPanel(P::Trace)).into(),

@@ -508,6 +508,9 @@ pub enum TopMenuAction {
     /// File › Export › PDF/PNG/JPEG.
     Export(file_menu::ExportKind),
     SaveSelectionAs,
+    /// Type › Type on a Path / Curve Text.
+    TypeOnPath,
+    CurveText,
     /// File › Print: the page as a PDF in the system viewer.
     Print,
     /// File › Close Tab: back to a new, empty document (asking before discarding changes).
@@ -745,6 +748,7 @@ pub enum WorkspacePanel {
     Effects,
     Contour,
     Library,
+    Glyphs,
 }
 
 struct WorkspaceContent<'a> {
@@ -769,6 +773,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Effects => self.app.effects_panel(ui),
             WorkspacePanel::Contour => self.app.contour_panel(ui),
             WorkspacePanel::Library => self.app.library_panel(ui),
+            WorkspacePanel::Glyphs => self.app.glyphs_panel(ui),
         }
     }
 
@@ -789,6 +794,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Effects => "Effects",
             WorkspacePanel::Contour => "Contour",
             WorkspacePanel::Library => "Library",
+            WorkspacePanel::Glyphs => "Glyphs",
         }
         .to_owned()
     }
@@ -1019,6 +1025,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Effects,
                                 WorkspacePanel::Contour,
                                 WorkspacePanel::Library,
+                                WorkspacePanel::Glyphs,
                             ],
                             0,
                         ),
@@ -2430,6 +2437,11 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::B))
         {
             self.clipboard_paste(stencilcraft_engine::document::PasteMode::InBack);
+        } else if ctx.input_mut(|input| {
+            consume_exact(input, egui::Modifiers::COMMAND, egui::Key::T)
+                || consume_exact(input, cmd_alt, egui::Key::T)
+        }) {
+            self.handle_menu_action(TopMenuAction::ShowPanel(WorkspacePanel::TextStyle));
         } else if ctx
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::P))
         {
@@ -3299,6 +3311,8 @@ impl StencilApp {
             TopMenuAction::Export(kind) => self.export_dialog(kind),
             TopMenuAction::SaveSelectionAs => self.save_selection_dialog(),
             TopMenuAction::Print => self.print_via_pdf(),
+            TopMenuAction::TypeOnPath => self.type_on_path(),
+            TopMenuAction::CurveText => self.curve_text(),
             TopMenuAction::CloseDoc => self.request_new_document(new_doc::Choice::default()),
             TopMenuAction::ToggleAttach => self.toggle_attach(),
             TopMenuAction::Flatten => self.flatten_selection(),

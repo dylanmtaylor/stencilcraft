@@ -483,22 +483,36 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
 fn type_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
     let text = app.selected_text_ids().next().is_some();
     vec![
-        sub("Font", vec![todo("System Fonts")]),
-        sub("Size", vec![todo("Custom…")]),
-        todo_key("Character", CMD, Key::T),
-        todo_key("Paragraph", cmd_alt(), Key::T),
-        todo("Glyphs"),
+        sub(
+            "Font",
+            vec![item("System Fonts…", A::ShowPanel(P::TextStyle)).into()],
+        ),
+        sub(
+            "Size",
+            vec![item("Custom…", A::ShowPanel(P::TextStyle)).into()],
+        ),
+        item("Character", A::ShowPanel(P::TextStyle))
+            .shortcut(kbd(CMD, Key::T))
+            .into(),
+        item("Paragraph", A::ShowPanel(P::TextStyle))
+            .shortcut(kbd(cmd_alt(), Key::T))
+            .into(),
+        item("Glyphs", A::ShowPanel(P::Glyphs)).into(),
         SEP,
         item("Place Lettering…", A::PlaceText)
             .shortcut(kbd(NONE, Key::T))
             .into(),
         item("Edit Selected Text…", A::EditText).into(),
-        todo("Type on a Path"),
-        todo("Curve Text…"),
+        when(
+            "Type on a Path",
+            A::TypeOnPath,
+            text && app.selected_shapes.len() >= 2,
+        ),
+        when("Curve Text…", A::CurveText, text),
         when("Create Outlines", A::TextToOutlines, text),
         when("Ungroup to Letters", A::TextUngroupLetters, text),
         SEP,
-        todo("Find Font…"),
+        item("Find Font…", A::ShowPanel(P::TextStyle)).into(),
         todo_key("Spelling…", NONE, Key::F7),
     ]
 }

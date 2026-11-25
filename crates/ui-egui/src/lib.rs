@@ -1123,7 +1123,18 @@ fn paint_image_quad(
     image: &stencilcraft_doc::RasterImage,
     texture: egui::TextureId,
 ) {
-    let corners = image_corners(image).map(|p| view.world_to_screen(p));
+    paint_texture_quad(painter, view, image_corners(image), texture);
+}
+
+/// Paint `texture` stretched over the document quad `corners` (millimetres, clockwise from the
+/// texture's top left), so it follows a turned view.
+pub fn paint_texture_quad(
+    painter: &egui::Painter,
+    view: &View,
+    corners: [stencilcraft_geom::Point; 4],
+    texture: egui::TextureId,
+) {
+    let corners = corners.map(|p| view.world_to_screen(p));
     if corners.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
         return;
     }

@@ -283,7 +283,9 @@ pub enum Command {
 
     /// Trace a placed image into closed paths (`options` as
     /// `stencilcraft_raster::TraceOptions`; every field optional). Detach mode also
-    /// clears the traced pixels from the image.
+    /// clears the traced pixels from the image. `area` (millimetres: x, y, width, height)
+    /// traces only that part of the image, as Silhouette's trace area does; `compound`
+    /// makes the result one compound path instead of a shape per contour.
     #[serde(rename = "image.trace")]
     ImageTrace {
         id: u64,
@@ -291,6 +293,10 @@ pub enum Command {
         options: stencilcraft_raster::TraceOptions,
         #[serde(default = "cut_style")]
         style: CutStyle,
+        #[serde(default)]
+        area: Option<[f64; 4]>,
+        #[serde(default)]
+        compound: bool,
     },
 
     /// Make the image's border-connected background transparent (`tolerance` 0–100 %).
@@ -1467,7 +1473,13 @@ impl Engine {
                 self.doc.validate().map_err(invalid("image.set-bounds"))?;
                 Ok(Effect::ImageChanged { id })
             }
-            Command::ImageTrace { id, options, style } => self.trace_image(id, &options, style),
+            Command::ImageTrace {
+                id,
+                options,
+                style,
+                area,
+                compound,
+            } => self.trace_image(id, &options, style, area, compound),
             Command::ImageRemoveBackground { id, tolerance } => {
                 let image = self
                     .doc
@@ -2033,6 +2045,8 @@ impl Engine {
         id: u64,
         options: &stencilcraft_raster::TraceOptions,
         style: CutStyle,
+        area: Option<[f64; 4]>,
+        compound: bool,
     ) -> Result<Effect, EngineError> {
         let image = self
             .doc
@@ -2040,13 +2054,24 @@ impl Engine {
             .ok_or_else(|| no_image("image.trace", id))?
             .clone();
         let pixels = stencilcraft_raster::image_pixels(&image).map_err(invalid("image.trace"))?;
+        let (source, ox, oy) = match area {
+            Some(area) => {
+                stencilcraft_raster::crop_to_area(&image, &pixels, area).ok_or_else(|| {
+                    EngineError::Invalid("image.trace: the trace area misses the image".to_string())
+                })?
+            }
+            None => (pixels.clone(), 0, 0),
+        };
         let traced =
-            stencilcraft_raster::trace(&pixels, options).map_err(invalid("image.trace"))?;
+            stencilcraft_raster::trace(&source, options).map_err(invalid("image.trace"))?;
         let (sx, sy) = (
             image.width_mm / f64::from(image.width_px),
             image.height_mm / f64::from(image.height_px),
         );
-        let map = |p: kurbo::Point| kurbo::Point::new(image.x_mm + p.x * sx, image.y_mm + p.y * sy);
+        let (fx, fy) = (f64::from(ox), f64::from(oy));
+        let map = |p: kurbo::Point| {
+            kurbo::Point::new(image.x_mm + (p.x + fx) * sx, image.y_mm + (p.y + fy) * sy)
+        };
         let layer = match self
             .doc
             .layers
@@ -2066,13 +2091,37 @@ impl Engine {
             }
         };
         let mut ids = Vec::with_capacity(traced.contours.len());
-        for contour in &traced.contours {
-            let path = stencilcraft_raster::contour_path(contour, options.corner_threshold, map);
-            ids.push(self.doc.push_shape(layer, path, style)?.id);
+        if compound {
+            let mut path = kurbo::BezPath::new();
+            for contour in &traced.contours {
+                path.extend(stencilcraft_raster::contour_path(
+                    contour,
+                    options.corner_threshold,
+                    map,
+                ));
+            }
+            if !path.elements().is_empty() {
+                ids.push(self.doc.push_shape(layer, path, style)?.id);
+            }
+        } else {
+            for contour in &traced.contours {
+                let path =
+                    stencilcraft_raster::contour_path(contour, options.corner_threshold, map);
+                ids.push(self.doc.push_shape(layer, path, style)?.id);
+            }
         }
         if let Some(detached) = traced.detached {
-            let replaced = stencilcraft_raster::with_pixels(&image, &detached)
-                .map_err(invalid("image.trace"))?;
+            // Paste the cleared crop back into the whole image.
+            let mut whole = pixels;
+            for (x, y, pixel) in detached.enumerate_pixels() {
+                if let Some(slot) =
+                    whole.get_pixel_mut_checked(x.saturating_add(ox), y.saturating_add(oy))
+                {
+                    *slot = *pixel;
+                }
+            }
+            let replaced =
+                stencilcraft_raster::with_pixels(&image, &whole).map_err(invalid("image.trace"))?;
             if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
                 *slot = replaced;
             }
@@ -4545,7 +4594,9 @@ mod tests {
                 .run(Command::ImageTrace {
                     id: 999,
                     options: Default::default(),
-                    style: CutStyle::Cut
+                    style: CutStyle::Cut,
+                    area: None,
+                    compound: false,
                 })
                 .is_err()
         );
@@ -4562,6 +4613,80 @@ mod tests {
         );
         engine.run(Command::ImageRemove { id }).unwrap();
         assert!(engine.doc.images.is_empty());
+    }
+
+    #[test]
+    fn image_trace_area_is_one_compound_path_and_detaches_only_inside() {
+        // 40×20 px at 10 px/mm: dark squares at x 5..15 and 25..35 (two shapes).
+        let pixels = craft_raster_codecs::common::Pixels::from_fn(40, 20, |x, y| {
+            let dark = (5..15).contains(&y) && ((5..15).contains(&x) || (25..35).contains(&x));
+            craft_raster_codecs::common::Pixel(if dark {
+                [0, 0, 0, 255]
+            } else {
+                [255, 255, 255, 255]
+            })
+        });
+        let placed = stencilcraft_raster::place(&pixels, "two", 254.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("expected ImageAdded");
+        };
+        let trace = |area, compound, mode| Command::ImageTrace {
+            id,
+            options: stencilcraft_raster::TraceOptions {
+                mode,
+                ..Default::default()
+            },
+            style: CutStyle::Cut,
+            area,
+            compound,
+        };
+        let all = added(
+            engine
+                .run(trace(None, true, stencilcraft_raster::TraceMode::AllEdges))
+                .unwrap(),
+        );
+        assert_eq!(all.len(), 1, "both squares in one compound path");
+        assert!(engine.undo());
+        // Only the right square's area, in detach mode.
+        let right = added(
+            engine
+                .run(trace(
+                    Some([2.0, 0.0, 2.0, 2.0]),
+                    true,
+                    stencilcraft_raster::TraceMode::Detach,
+                ))
+                .unwrap(),
+        );
+        assert_eq!(right.len(), 1);
+        let bounds = engine.doc.get_shape(right[0]).unwrap().bounds().unwrap();
+        assert!(
+            (bounds.x0 - 2.5).abs() < 1e-6 && (bounds.width() - 1.0).abs() < 1e-6,
+            "{bounds:?}"
+        );
+        let image = stencilcraft_raster::image_pixels(&engine.doc.images[0]).unwrap();
+        assert_eq!(image.get_pixel(30, 10)[3], 0, "traced pixels cleared");
+        assert_eq!(image.get_pixel(10, 10)[3], 255, "outside the area kept");
+        assert!(
+            engine
+                .run(trace(
+                    Some([100.0, 100.0, 5.0, 5.0]),
+                    true,
+                    stencilcraft_raster::TraceMode::AllEdges
+                ))
+                .is_err(),
+            "an area off the image"
+        );
+        assert!(
+            engine
+                .run(trace(
+                    Some([f64::NAN, 0.0, 1.0, 1.0]),
+                    true,
+                    stencilcraft_raster::TraceMode::AllEdges
+                ))
+                .is_err()
+        );
     }
 
     /// An engine holding one 10 × 5 mm rectangle (id 1) at (10, 20) on a 200 × 100 board.

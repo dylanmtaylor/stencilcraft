@@ -57,6 +57,7 @@ mod new_doc;
 
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod panels;
+mod trace_panel;
 
 const APP_ICON_PNG: &[u8] =
     include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.stencilcraft.png");
@@ -686,6 +687,7 @@ pub enum WorkspacePanel {
     Offset,
     Modify,
     Points,
+    Trace,
 }
 
 struct WorkspaceContent<'a> {
@@ -704,6 +706,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Offset => self.app.offset_panel(ui),
             WorkspacePanel::Modify => self.app.modify_panel(ui),
             WorkspacePanel::Points => self.app.points_panel(ui),
+            WorkspacePanel::Trace => self.app.trace_panel(ui),
         }
     }
 
@@ -718,6 +721,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Offset => "Offset",
             WorkspacePanel::Modify => "Modify",
             WorkspacePanel::Points => "Point Editing",
+            WorkspacePanel::Trace => "Trace",
         }
         .to_owned()
     }
@@ -822,6 +826,10 @@ pub struct StencilApp {
     pub selected_image: Option<u64>,
     /// An image being dragged: its id and the press point.
     pub image_drag: Option<(u64, egui::Pos2)>,
+    /// The Trace panel's live preview.
+    pub trace_preview: Option<trace_panel::TracePreview>,
+    /// Where a trace-area drag started (millimetres).
+    pub trace_area_drag: Option<stencilcraft_geom::Point>,
     /// The selection box part under the pointer, which picks how a drag of it scales.
     pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
     /// The transform a selection-box drag would apply, previewed until release.
@@ -931,6 +939,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Offset,
                                 WorkspacePanel::Modify,
                                 WorkspacePanel::Points,
+                                WorkspacePanel::Trace,
                             ],
                             0,
                         ),
@@ -1035,6 +1044,8 @@ impl StencilApp {
             image_textures: std::collections::HashMap::new(),
             selected_image: None,
             image_drag: None,
+            trace_preview: None,
+            trace_area_drag: None,
             box_part: None,
             box_preview: None,
             arc_draft: None,
@@ -1322,6 +1333,10 @@ impl StencilApp {
             if selectable && !selected.contains(&id) {
                 selected.push(id);
             }
+        }
+        if !selected.is_empty() {
+            // Shapes and a placed image are not picked together.
+            self.selected_image = None;
         }
         self.selected_shape = selected.last().copied();
         self.selected_shapes = selected;
@@ -4819,6 +4834,7 @@ impl StencilApp {
         }
 
         let mut overlay_claimed = guides_claimed;
+        overlay_claimed |= self.trace_canvas(ui, &response, &painter);
 
         // Interactive BezierOverlay for node editing
         if matches!(
@@ -7352,6 +7368,17 @@ mod tests {
             app.engine.doc.images.is_empty(),
             "Delete removes the picked image"
         );
+        assert!(app.engine.undo());
+        app.selected_image = Some(id);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 5.0,
+            height: 5.0,
+        });
+        let shape = app.engine.doc.layers[0].shapes[0].id;
+        app.set_selection([shape]);
+        assert_eq!(app.selected_image, None, "picking shapes drops the image");
     }
 
     #[test]

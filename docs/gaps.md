@@ -100,7 +100,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    permissively licensed pure-Rust decoder), centreline tracing, multi-colour layered
    tracing, and curve fitting beyond midpoint quadratics. The desktop places PNG/JPEG as
    image objects at 300 dpi, draws them under the cut lines, and lets you pick, drag,
-   undo and delete them; it has no Trace panel yet (see item 24).
+   undo and delete them, and traces them from the Trace panel (see item 24).
 12. **PDF/EPS/AI import and PDF/PNG/JPEG export**: vector paths from PDF, EPS/PS and
    `.ai` come in through VectorCraft's readers; fills, text, images and symbol instances
    are dropped and every path becomes a cut shape. PDF export writes strokes only (no
@@ -159,14 +159,17 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     Front, Select by Color, Detach Lines, Silhouette's separate rotation knob above the
     selection (the desktop rotates from the band outside a corner), a preference
     for what a tool does after use, and warp.
-24. **Trace**: engine/MCP support filtering, outer-edge and detach modes and background
-    removal; the desktop trace workflow still needs these controls and a live preview.
-    Multi-colour tracing to layers remains missing. Observed in SS 5.0.556 (2026-11-23,
-    [observations](observations/silhouette-studio.md)): the preview is a resizable trace
-    box painted solid yellow (or outlined) and updated live with the threshold, and a
-    trace yields one compound path with the image kept. Raster placement also differs:
-    SS places PNGs at 300 dpi and ignores the file's own DPI; the desktop now does the
-    same, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to 96 dpi.
+24. **Trace**: the desktop Trace panel follows SS 5.0.556 (2026-11-23,
+    [observations](observations/silhouette-studio.md)): Select Trace Area and drag a box;
+    a live solid-yellow or outline preview follows Threshold (default 45 %), Despeckle and
+    the High/Low Pass filters; Trace, Trace Outer Edge and Trace and Detach each make one
+    compound path (`image.trace` with `area` and `compound`), keep the image and clear the
+    area. Still missing: resizing the trace box and its × button (Clear Area instead), SS's
+    Scale and Trace Quality settings (our smoothing and corner settings stay at their
+    defaults in the panel), background removal in the desktop, and multi-colour tracing to
+    layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
+    at SS's 300 dpi, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to
+    96 dpi.
 25. **Print & Cut, beyond item 3**: missing printing from the app (resolution, preview),
     a printable-area border on the canvas, mark size and position options, bleed,
     printing cut lines, fill colour/gradient for printed artwork, Flatten, print size checks

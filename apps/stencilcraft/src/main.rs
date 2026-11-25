@@ -560,6 +560,8 @@ pub enum TopMenuAction {
     },
     /// Machine › Send Mode.
     SetSendMode(send_modes::SendMode),
+    /// Machine › Cancel: stop a send before its next job.
+    CancelSend,
     /// Panels › Starter Mode.
     ToggleStarterMode,
     ToggleMirror,
@@ -1075,6 +1077,8 @@ pub struct SendTab {
     pub bluetooth_channel: u8,
     pub hardware_result: HardwareResult,
     pub busy: bool,
+    /// Machine › Cancel: stops a multi-job send before its next job.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Machine › Send Mode: one set of settings, or a row per line colour, fill colour or
     /// layer.
     pub mode: send_modes::SendMode,
@@ -1114,6 +1118,7 @@ impl Default for SendTab {
             bluetooth_channel: 1,
             hardware_result: Default::default(),
             busy: false,
+            cancel: Default::default(),
             mode: send_modes::SendMode::Standard,
             rows: Vec::new(),
             order: "roller".to_string(),
@@ -3601,6 +3606,12 @@ impl StencilApp {
             }
             TopMenuAction::ToggleMirror => self.send.mirror = !self.send.mirror,
             TopMenuAction::BeginDistort { rows, columns } => self.begin_distort(rows, columns),
+            TopMenuAction::CancelSend => {
+                self.send
+                    .cancel
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                self.status = "the send stops before its next job".to_string();
+            }
             TopMenuAction::SetSendMode(mode) => {
                 self.send.mode = mode;
                 self.send_mode = true;
@@ -4676,11 +4687,17 @@ impl StencilApp {
         }
         self.send.busy = true;
         let result = self.send.hardware_result.clone();
+        let cancel = std::sync::Arc::clone(&self.send.cancel);
+        cancel.store(false, std::sync::atomic::Ordering::SeqCst);
         let spawned = std::thread::Builder::new()
             .name("cutter-jobs".into())
             .spawn(move || {
                 let mut outcome = Err("no jobs".to_string());
                 for (doc, command) in jobs {
+                    if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                        outcome = Err("cancelled before the next job".to_string());
+                        break;
+                    }
                     outcome = stencilcraft_engine::Engine::new(doc)
                         .run(Command::Hardware(command))
                         .map_err(|e| e.to_string());

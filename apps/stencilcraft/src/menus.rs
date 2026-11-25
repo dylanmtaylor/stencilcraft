@@ -669,7 +669,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         todo("Select by Color"),
         item("Trace", A::ShowPanel(P::Trace)).into(),
         todo("Image Effects"),
-        todo("Text Style"),
+        item("Text Style", A::ShowPanel(P::TextStyle)).into(),
         todo("Spelling"),
         item("Transform", A::ShowPanel(P::Transform)).into(),
         item("Replicate", A::ShowPanel(P::Replicate)).into(),

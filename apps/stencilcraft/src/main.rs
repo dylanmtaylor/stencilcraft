@@ -18,7 +18,7 @@ use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits,
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
     Button, ButtonVariant, Checkbox, IconButton, LinkButton, LinkMode, NumberField, Select, Slider,
-    SliderScale, TextField, ToggleButton,
+    SliderScale, ToggleButton,
 };
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
 use craft_ui::docking::{
@@ -57,6 +57,7 @@ mod new_doc;
 
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod panels;
+mod text_tool;
 mod trace_panel;
 
 const APP_ICON_PNG: &[u8] =
@@ -696,6 +697,7 @@ pub enum WorkspacePanel {
     Modify,
     Points,
     Trace,
+    TextStyle,
 }
 
 struct WorkspaceContent<'a> {
@@ -715,6 +717,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Modify => self.app.modify_panel(ui),
             WorkspacePanel::Points => self.app.points_panel(ui),
             WorkspacePanel::Trace => self.app.trace_panel(ui),
+            WorkspacePanel::TextStyle => self.app.text_style_panel(ui),
         }
     }
 
@@ -730,6 +733,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Modify => "Modify",
             WorkspacePanel::Points => "Point Editing",
             WorkspacePanel::Trace => "Trace",
+            WorkspacePanel::TextStyle => "Text Style",
         }
         .to_owned()
     }
@@ -775,7 +779,6 @@ pub struct StencilApp {
     pub drag_origin: Option<stencilcraft_geom::Rect>,
     /// Smart guides: the lines the last snap of a move drag found, in millimetres.
     pub snap_lines: Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
-    pub text_before: Option<String>,
     pub status: String,
     pub open_path: Option<String>,
     pub send_mode: bool,
@@ -788,10 +791,8 @@ pub struct StencilApp {
     pub selected_shape: Option<u64>,
     pub selected_shapes: Vec<u64>,
     pub selected_layer: Option<usize>,
-    pub text_dialog: bool,
     /// File › Quit was chosen; the next frame closes the window.
     pub quit_requested: bool,
-    pub text_dialog_state: DialogState<String>,
     /// File › New's dialog.
     pub new_doc: new_doc::NewDocState,
     saved_document: stencilcraft_doc::Document,
@@ -799,12 +800,17 @@ pub struct StencilApp {
     discard_new_dialog: DialogState,
     /// Name of an unsaved document (New Document's Name), shown in the title bar.
     pub doc_title: String,
-    pub text_value: String,
-    text_family: String,
-    text_size: f64,
-    text_edit_id: Option<u64>,
-    text_original_font: Option<stencilcraft_doc::FontSpec>,
-    text_fonts: Vec<stencilcraft_engine::text::FontFamily>,
+    /// Font family and size for new text and the Text Style panel.
+    pub text_family: String,
+    pub text_size: f64,
+    pub text_fonts: Vec<stencilcraft_engine::text::FontFamily>,
+    /// The rest of the Text Style panel's settings.
+    pub text_style: text_tool::TextStyle,
+    /// Text being typed on the canvas.
+    pub text_session: Option<text_tool::TextSession>,
+    /// A panel to bring forward once the dock has drawn (the canvas draws inside the dock,
+    /// while its layout cannot change).
+    pub pending_panel: Option<WorkspacePanel>,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
@@ -948,6 +954,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Modify,
                                 WorkspacePanel::Points,
                                 WorkspacePanel::Trace,
+                                WorkspacePanel::TextStyle,
                             ],
                             0,
                         ),
@@ -1005,7 +1012,6 @@ impl StencilApp {
             guide_preview: None,
             drag_origin: None,
             snap_lines: Vec::new(),
-            text_before: None,
             status,
             open_path: open_path.clone(),
             send_mode: false,
@@ -1017,20 +1023,18 @@ impl StencilApp {
             selected_shape: None,
             selected_shapes: Vec::new(),
             selected_layer: Some(0),
-            text_dialog: false,
             quit_requested: false,
-            text_dialog_state: DialogState::new(),
             new_doc: new_doc::NewDocState::default(),
             saved_document,
             pending_new_document: None,
             discard_new_dialog: DialogState::new(),
             doc_title: "Untitled".to_string(),
-            text_value: String::new(),
-            text_family: stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string(),
-            text_size: 36.0,
-            text_edit_id: None,
-            text_original_font: None,
+            text_family: String::new(),
+            text_size: text_tool::DEFAULT_TEXT_SIZE_PT,
             text_fonts: Vec::new(),
+            text_style: text_tool::TextStyle::default(),
+            text_session: None,
+            pending_panel: None,
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,
@@ -2159,6 +2163,8 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        // Typing on the canvas takes every plain key; Cmd shortcuts other than undo still work.
+        self.handle_text_session_keys(ctx);
         if self.handle_click_draft_keys(ctx) || self.handle_clipboard_events(ctx) {
             return;
         }
@@ -2441,7 +2447,6 @@ impl StencilApp {
             self.active_tool = ActiveTool::Star;
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::T)) {
             self.active_tool = ActiveTool::Text;
-            self.open_text_dialog(false);
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::H)) {
             self.active_tool = ActiveTool::Hand;
         } else if ctx.input_mut(|input| consume_exact(input, egui::Modifiers::NONE, egui::Key::Z)) {
@@ -2588,144 +2593,6 @@ impl StencilApp {
     }
 
     /// Open a new text dialog, or edit the selected live text shape.
-    fn open_text_dialog(&mut self, edit: bool) {
-        if edit {
-            let selected = self.selected_shape.and_then(|id| {
-                self.engine
-                    .doc
-                    .get_shape(id)
-                    .and_then(|shape| shape.text.as_deref().map(|spec| (id, spec.clone())))
-            });
-            let Some((id, spec)) = selected else {
-                self.status = "select a live text object to edit".to_string();
-                return;
-            };
-            self.text_value = spec.text;
-            self.text_family = spec.font.family.clone();
-            self.text_size = spec.size;
-            self.text_original_font = Some(spec.font);
-            self.text_edit_id = Some(id);
-        } else {
-            self.text_edit_id = None;
-            self.text_original_font = None;
-        }
-        if let Ok(stencilcraft_engine::Effect::Fonts { families }) =
-            self.engine.run(Command::TextFonts {
-                query: String::new(),
-            })
-        {
-            self.text_fonts = families;
-        }
-        self.text_before = None;
-        self.text_dialog = true;
-    }
-
-    /// Create or update text through the engine, preserving editable text metadata.
-    pub fn add_text(&mut self) {
-        let font = self
-            .text_original_font
-            .as_ref()
-            .filter(|font| font.family == self.text_family)
-            .cloned()
-            .unwrap_or_else(|| {
-                let style = self
-                    .text_fonts
-                    .iter()
-                    .find(|family| family.family == self.text_family)
-                    .and_then(|family| {
-                        family
-                            .styles
-                            .iter()
-                            .find(|style| style.eq_ignore_ascii_case("regular"))
-                            .or_else(|| family.styles.first())
-                    })
-                    .cloned()
-                    .unwrap_or_else(|| "Regular".to_string());
-                stencilcraft_doc::FontSpec {
-                    family: self.text_family.clone(),
-                    style,
-                    file: None,
-                }
-            });
-        let command = if let Some(id) = self.text_edit_id {
-            Command::TextEdit(stencilcraft_engine::text::TextEdit {
-                id,
-                text: Some(self.text_value.clone()),
-                font: Some(font),
-                size: Some(self.text_size),
-                ..Default::default()
-            })
-        } else {
-            Command::TextAdd(stencilcraft_engine::text::TextAdd {
-                spec: stencilcraft_doc::TextSpec {
-                    text: self.text_value.clone(),
-                    font,
-                    size: self.text_size,
-                    x: 20.0,
-                    y: 20.0,
-                    alignment: stencilcraft_doc::TextAlign::Left,
-                    letter_spacing: 0.0,
-                    line_spacing: 100.0,
-                    kerning: true,
-                    vertical: false,
-                    weld: false,
-                    flow: stencilcraft_doc::TextFlow::Straight,
-                    letters: Vec::new(),
-                    transform: stencilcraft_doc::IDENTITY_TRANSFORM,
-                },
-                style: None,
-            })
-        };
-        match self.engine.run(command) {
-            Ok(stencilcraft_engine::Effect::ShapeAdded { id }) => {
-                self.set_selection([id]);
-                self.status = "text added".to_string();
-            }
-            Ok(_) => self.status = "text updated".to_string(),
-            Err(error) => self.status = error.to_string(),
-        }
-    }
-
-    pub fn text_dialog(&mut self, parent: &mut egui::Ui) {
-        if !self.text_dialog {
-            return;
-        }
-        let mut before = self.text_before.take();
-        let title = if self.text_edit_id.is_some() {
-            "Edit text"
-        } else {
-            "Add text"
-        };
-        let fonts = &self.text_fonts;
-        let family = &mut self.text_family;
-        let size = &mut self.text_size;
-        let numbers = &self.locale_numbers;
-        let shown = Dialog::new("place-text-dialog", title)
-            .footer(Footer::standard().ok("Apply").cancel("Cancel"))
-            .show(parent.ctx(), &mut self.text_dialog_state, &mut self.text_value, |ui, text| {
-                ui.add(Text::new("Text stays editable; the single-line font is suitable for pens and engraving.").content(Content::Muted));
-                let edit = TextField::new("place-text", "Text to place", text.as_str()).char_limit(10_000).show(ui);
-                apply_edit(text, &mut before, edit.event);
-                let mut select = Select::new("text-font", "Font family", family);
-                for font in fonts {
-                    select = select.option(font.family.clone(), &font.family);
-                }
-                let _ = select.show(ui);
-                let edit = NumberField::new("text-size", "Size", *size, numbers)
-                    .range(0.01..=10_000.0).unit(Unit::new("pt")).show(ui);
-                if let Some(value) = edit.event.and_then(|event| event.value().copied()) && value.is_finite() {
-                    *size = value;
-                }
-            });
-        self.text_before = before;
-        if shown.closed {
-            self.text_dialog = false;
-        }
-        if shown.outcome == Some(Outcome::Ok) {
-            self.add_text();
-        }
-    }
-
     /// Opens File › New on `tab` (0 Recent, 1.. the preset categories).
     pub fn open_new_document(&mut self, tab: usize) {
         let kerf = self.engine.doc.kerf.width_mm;
@@ -3177,9 +3044,9 @@ impl StencilApp {
             }),
             TopMenuAction::PlaceText => {
                 self.active_tool = ActiveTool::Text;
-                self.open_text_dialog(false);
+                self.status = "click the page where the text starts".to_string();
             }
-            TopMenuAction::EditText => self.open_text_dialog(true),
+            TopMenuAction::EditText => self.edit_selected_text(),
             TopMenuAction::TextToOutlines => {
                 let ids: Vec<u64> = self.selected_text_ids().collect();
                 if !ids.is_empty() {
@@ -3805,7 +3672,7 @@ impl StencilApp {
                     self.import_image(path);
                 }
             }
-            Some(ToolsAction::Text) => self.open_text_dialog(false),
+            Some(ToolsAction::Text) => self.active_tool = ActiveTool::Text,
             None => {}
         }
     }
@@ -4919,6 +4786,7 @@ impl StencilApp {
 
         let mut overlay_claimed = guides_claimed;
         overlay_claimed |= self.trace_canvas(ui, &response, &painter);
+        overlay_claimed |= self.text_canvas(ui, &response, &painter);
 
         // Interactive BezierOverlay for node editing
         if matches!(
@@ -5685,7 +5553,21 @@ impl StencilApp {
                 && let Some(pointer) = response.interact_pointer_pos()
             {
                 let hit = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0);
+                let text_hit = hit.filter(|id| {
+                    self.engine
+                        .doc
+                        .get_shape(*id)
+                        .is_some_and(|shape| shape.text.is_some())
+                });
                 match (self.active_tool, hit) {
+                    // Double-clicking text edits it, as in Silhouette.
+                    (ActiveTool::Select, Some(_)) if text_hit.is_some() => {
+                        if let Some(id) = text_hit {
+                            let p = self.view.screen_to_world(pointer.to_vec2());
+                            self.begin_text_edit(id, None);
+                            self.place_text_caret(p);
+                        }
+                    }
                     (ActiveTool::Select, Some(id)) => {
                         self.set_selection([id]);
                         self.path_selection = PathSelection::default();
@@ -6122,9 +6004,6 @@ impl eframe::App for StencilApp {
             );
         if let Some(tool) = rail_out.select {
             self.active_tool = tool;
-            if tool == ActiveTool::Text {
-                self.open_text_dialog(false);
-            }
         }
         if rail_out.toggle_columns {
             self.prefs.rail_columns = if self.prefs.rail_columns == 1 { 2 } else { 1 };
@@ -6152,8 +6031,12 @@ impl eframe::App for StencilApp {
             content.app.status = format!("workspace layout rejected: {error}");
         }
         content.app.workspace = workspace;
+        if let Some(panel) = content.app.pending_panel.take() {
+            content
+                .app
+                .handle_menu_action(TopMenuAction::ShowPanel(panel));
+        }
         content.app.retain_valid_selection();
-        content.app.text_dialog(ui);
         content.app.new_document_dialog(ui);
         ui.ctx().request_repaint();
     }
@@ -7803,10 +7686,12 @@ mod tests {
     #[test]
     fn type_menu_outlines_and_letters_and_next_object_steps_the_stack() {
         let mut app = StencilApp::new(None);
-        app.open_text_dialog(false);
-        app.text_value = "Hi".to_string();
-        app.add_text();
-        let text = app.selected_shape.expect("text");
+        app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
+        app.begin_text_at(stencilcraft_geom::Point::new(20.0, 40.0));
+        app.text_insert("Hi");
+        let text = app.text_session.as_ref().and_then(|s| s.id).expect("text");
+        app.end_text_session();
+        app.set_selection([text]);
         app.handle_menu_action(TopMenuAction::TextUngroupLetters);
         assert_eq!(app.selected_shapes.len(), 2, "one text per letter");
         assert!(app.selected_text_ids().count() == 2);
@@ -7849,74 +7734,123 @@ mod tests {
         assert_eq!(app.selected_shapes, vec![ids[1]]);
     }
 
-    #[test]
-    fn desktop_text_can_be_edited_undone_and_saved() {
-        let mut app = StencilApp::new(None);
-        app.open_text_dialog(false);
-        assert!(
-            app.text_fonts
-                .iter()
-                .any(|font| font.family == stencilcraft_engine::text::SINGLE_LINE_FAMILY)
+    /// Feed raw events through the keyboard handler, as one frame.
+    fn type_events(app: &mut StencilApp, events: Vec<egui::Event>) {
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |ui| app.handle_keyboard_shortcuts(ui.ctx()),
         );
-        app.text_value = "Hello".to_string();
-        app.text_size = 24.0;
-        app.add_text();
-        let id = app.selected_shape.expect("new text selected");
-        let shape = app.engine.doc.get_shape(id).expect("text shape");
-        let spec = shape.text.as_deref().expect("live text");
-        assert_eq!(spec.text, "Hello");
-        assert_eq!(spec.size, 24.0);
-        assert_eq!(shape.style, CutStyle::Engrave);
-        assert!(!shape.path.elements().is_empty());
+        output.textures_delta.clear();
+    }
 
-        app.open_text_dialog(true);
-        app.text_value = "Updated".to_string();
-        app.text_size = 48.0;
-        app.add_text();
-        let spec = app
-            .engine
-            .doc
-            .get_shape(id)
-            .unwrap()
-            .text
-            .as_deref()
-            .unwrap();
-        assert_eq!((&*spec.text, spec.size), ("Updated", 48.0));
-        let saved = app.engine.doc.save_json().unwrap();
-        let loaded = stencilcraft_doc::Document::load_json(&saved).unwrap();
-        assert_eq!(
-            loaded.get_shape(id).unwrap().text.as_deref().unwrap().text,
-            "Updated"
+    #[test]
+    fn text_is_typed_on_the_canvas_one_undo_step_per_key() {
+        let mut app = StencilApp::new(None);
+        assert_eq!(app.text_size, 72.0, "Silhouette's default size");
+        app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
+        app.text_size = 24.0;
+        app.begin_text_at(stencilcraft_geom::Point::new(30.0, 50.0));
+        assert!(
+            app.engine.doc.shapes().next().is_none(),
+            "nothing until a letter"
         );
-        app.engine.run(Command::Undo).unwrap();
-        assert_eq!(
-            app.engine
-                .doc
-                .get_shape(id)
-                .unwrap()
-                .text
-                .as_deref()
-                .unwrap()
-                .text,
-            "Hello"
+        // Letters type; "t" and "r" must not switch tools while typing.
+        type_events(&mut app, vec![egui::Event::Text("Hext".into())]);
+        type_events(
+            &mut app,
+            vec![key(egui::Key::Backspace, egui::Modifiers::NONE)],
         );
+        type_events(
+            &mut app,
+            vec![key(egui::Key::ArrowLeft, egui::Modifiers::NONE)],
+        );
+        type_events(
+            &mut app,
+            vec![key(egui::Key::Backspace, egui::Modifiers::NONE)],
+        );
+        type_events(&mut app, vec![egui::Event::Text("llo r".into())]);
+        type_events(&mut app, vec![key(egui::Key::End, egui::Modifiers::NONE)]);
+        type_events(&mut app, vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        type_events(&mut app, vec![egui::Event::Text("t".into())]);
+        assert_eq!(app.active_tool, ActiveTool::Text);
+        assert_eq!(app.session_text(), "Hllo rx\nt");
+        let id = app
+            .text_session
+            .as_ref()
+            .and_then(|s| s.id)
+            .expect("text shape");
+        let shape = app.engine.doc.get_shape(id).expect("shape");
+        let spec = shape.text.as_deref().expect("live text");
+        assert_eq!((spec.size, spec.x, spec.y), (24.0, 30.0, 50.0));
+        assert_eq!(shape.style, CutStyle::Engrave, "single-line text is drawn");
+        // Cmd+Z takes back the last key and keeps typing.
+        type_events(&mut app, vec![key(egui::Key::Z, egui::Modifiers::COMMAND)]);
+        assert_eq!(app.session_text(), "Hllo rx\n");
+        assert!(app.text_session.is_some());
+        // Esc ends typing and returns to the Select tool with nothing selected.
+        type_events(
+            &mut app,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(app.text_session.is_none());
+        assert_eq!(app.active_tool, ActiveTool::Select);
+        assert!(app.selected_shapes.is_empty());
+        // Edit Selected Text picks it up again; deleting every letter removes the shape.
+        app.set_selection([id]);
+        app.handle_menu_action(TopMenuAction::EditText);
+        assert_eq!(app.text_session.as_ref().and_then(|s| s.id), Some(id));
+        for _ in 0..12 {
+            app.text_erase(false);
+        }
+        assert!(app.engine.doc.get_shape(id).is_none());
+        let saved = app.engine.doc.save_json().expect("saves");
+        assert!(stencilcraft_doc::Document::load_json(&saved).is_ok());
+    }
+
+    #[test]
+    fn text_style_changes_the_text_being_typed() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
+        app.begin_text_at(stencilcraft_geom::Point::new(10.0, 40.0));
+        app.text_insert("AV");
+        let id = app.text_session.as_ref().and_then(|s| s.id).expect("text");
+        frame(&ctx, &mut app, vec![], StencilApp::text_style_panel);
+        assert_eq!(app.text_style.char_pct, 100.0);
+        // The panel shows the text's own style: Character Spacing on Silhouette's scale.
+        let edit = stencilcraft_engine::text::TextEdit {
+            id,
+            size: Some(36.0),
+            letter_spacing: Some(text_tool::letter_spacing_for(200.0)),
+            ..Default::default()
+        };
+        app.engine.run(Command::TextEdit(edit)).expect("edit");
+        frame(&ctx, &mut app, vec![], StencilApp::text_style_panel);
+        assert!((app.text_style.char_pct - 200.0).abs() < 1e-9);
+        assert_eq!(app.text_size, 36.0);
     }
 
     #[test]
     fn edit_text_requires_live_text_and_invalid_font_is_reported() {
         let mut app = StencilApp::new(None);
-        app.open_text_dialog(true);
-        assert!(!app.text_dialog);
+        app.handle_menu_action(TopMenuAction::EditText);
+        assert!(app.text_session.is_none());
         assert!(app.status.contains("select a live text"));
-        app.text_value = "Hello".to_string();
         app.text_family = "StencilCraft font that does not exist".to_string();
-        app.add_text();
-        assert!(app.selected_shape.is_none());
-        assert!(app.status.contains("not installed"));
+        app.begin_text_at(stencilcraft_geom::Point::new(10.0, 10.0));
+        app.text_insert("Hello");
+        assert!(app.engine.doc.shapes().next().is_none());
+        assert!(app.status.contains("not installed"), "{}", app.status);
     }
 
     #[test]
-    fn shared_send_sliders_and_text_dialog_accept_input() {
+    fn shared_send_sliders_accept_input() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
@@ -7937,41 +7871,6 @@ mod tests {
             node_center(&out, "Speed"),
         );
         assert_ne!(app.send.speed_override, 5);
-        let ctx = egui::Context::default();
-        ctx.enable_accesskit();
-        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
-        app.text_dialog = true;
-        frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
-        let out = frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
-        click(
-            &ctx,
-            &mut app,
-            StencilApp::text_dialog,
-            node_center(&out, "Text to place"),
-        );
-        frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::Text("HELLO".into())],
-            StencilApp::text_dialog,
-        );
-        frame(
-            &ctx,
-            &mut app,
-            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
-            StencilApp::text_dialog,
-        );
-        frame(&ctx, &mut app, vec![], StencilApp::text_dialog);
-        assert_eq!(app.text_value, "HELLO");
-        // Enter commits the typed run. A plain text field passes Escape through, so the
-        // committed text stays.
-        frame(
-            &ctx,
-            &mut app,
-            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
-            StencilApp::text_dialog,
-        );
-        assert_eq!(app.text_value, "HELLO");
     }
 
     #[test]

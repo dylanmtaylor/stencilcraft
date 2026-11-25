@@ -12,6 +12,7 @@ rust-version = "1.95"
 [workspace.dependencies]
 # foundation
 kurbo = { version = "0.13", features = ["serde"] }
+roxmltree = "0.21"
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }

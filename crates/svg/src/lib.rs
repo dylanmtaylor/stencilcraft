@@ -1,9 +1,12 @@
 //! StencilCraft SVG import and export policy on shared Craft-Libs SVG parsing and writing.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use kurbo::BezPath;
-use stencilcraft_doc::{CutStyle, Document, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{
+    CutStyle, Document, Group, GroupChild, Layer, Operation, OperationSettings, Shape,
+    ShapeProduction,
+};
 
 /// The production pass a legacy `CutStyle` maps to.
 fn op_of(style: CutStyle) -> Option<Operation> {
@@ -14,6 +17,7 @@ fn op_of(style: CutStyle) -> Option<Operation> {
 }
 use stencilcraft_geom::{Polyline, path_to_polylines};
 
+use craft_svg::paths::Kind as _;
 use craft_svg::write::{Attribute as SvgAttribute, Element as SvgElement, Scene as SvgScene};
 
 #[derive(Debug, thiserror::Error)]
@@ -384,10 +388,32 @@ impl craft_svg::paths::Kind for SvgKind {
     }
 }
 
+/// How the importer maps source structure onto the document (ADR 0001).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImportPolicy {
+    /// Phase-2 semantics: `<g>` becomes an operation layer and source styling becomes
+    /// the layer's operation. Kept reachable for one release (GEO-03).
+    pub legacy_style_operations: bool,
+}
+
+/// A non-binding suggestion that source styling implies a production operation for a
+/// group. Hints are collected on [`SvgImport`] and surfaced for explicit user
+/// confirmation; the importer never applies them (GEO-02).
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationHint {
+    /// Names of the `<g>` elements of the hinted element, outermost first; empty for a
+    /// top-level shape.
+    pub group_path: Vec<String>,
+    /// The operation the element's `data-kind`/class suggests.
+    pub operation: Operation,
+}
+
 #[derive(Debug)]
 pub struct SvgImport {
     pub document: Document,
     pub warnings: Vec<String>,
+    /// Source-styling suggestions, never applied by the importer.
+    pub operation_hints: Vec<OperationHint>,
 }
 pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
     let result = import_with_warnings(svg, name)?;
@@ -398,12 +424,37 @@ pub fn import(svg: &str, name: &str) -> Result<Document, SvgError> {
 }
 /// Decode SVG or SVGZ with the shared bounded reader and apply Stencil's vector policy.
 pub fn import_bytes_with_warnings(bytes: &[u8], name: &str) -> Result<SvgImport, SvgError> {
+    import_bytes_with_warnings_policy(bytes, name, &ImportPolicy::default())
+}
+/// Like [`import_bytes_with_warnings`], with an explicit [`ImportPolicy`].
+pub fn import_bytes_with_warnings_policy(
+    bytes: &[u8],
+    name: &str,
+    policy: &ImportPolicy,
+) -> Result<SvgImport, SvgError> {
     let text = craft_svg::svgz::text(bytes, craft_svg::paths::MAX_SVG_BYTES)
         .map_err(|error| SvgError::Import(error.to_string()))?;
-    import_with_warnings(&text, name)
+    import_with_warnings_policy(&text, name, policy)
 }
 
 pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError> {
+    import_with_warnings_policy(svg, name, &ImportPolicy::default())
+}
+
+/// One source shape that survives clipping, with the styling the legacy layer mapping
+/// needs. `None` marks an emitted shape whose clipped path is empty (dropped).
+struct PendingShape {
+    path: BezPath,
+    style: CutStyle,
+    color: Option<String>,
+    layer: Option<String>,
+}
+
+pub fn import_with_warnings_policy(
+    svg: &str,
+    name: &str,
+    policy: &ImportPolicy,
+) -> Result<SvgImport, SvgError> {
     let imported = craft_svg::paths::import::<SvgKind>(svg, name)
         .map_err(|error| SvgError::Import(error.to_string()))?;
     let mut doc = Document {
@@ -413,10 +464,10 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
         },
         ..Document::default()
     };
-    let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
-    layers.insert(("cut".into(), false, None), 0);
+    doc.layers.clear();
     let mut warnings = imported.warnings.clone();
     let mut dropped = imported.dropped_warnings;
+    let mut pending: Vec<Option<PendingShape>> = Vec::with_capacity(imported.shapes.len());
     for shape in &imported.shapes {
         // Cutters retain open centerlines even when SVG's default fill would paint no area.
         // Ask the shared clipper to treat an entirely open path as linework.
@@ -434,9 +485,9 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
             .clipped_path(&cut_shape)
             .map_err(|error| SvgError::Import(error.to_string()))?;
         if path.elements().is_empty() {
+            pending.push(None);
             continue;
         }
-        let style = shape.kind.0;
         let color = shape
             .stroke
             .as_deref()
@@ -451,38 +502,49 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
                     None
                 }
             });
-        let layer_name = shape
-            .layer
-            .clone()
-            .unwrap_or_else(|| match (&color, style) {
-                (Some(color), CutStyle::Cut) => format!("Line {color}"),
-                (Some(color), CutStyle::Engrave) => format!("engrave {color}"),
-                (None, CutStyle::Cut) => "cut".into(),
-                (None, CutStyle::Engrave) => "engrave".into(),
-            });
-        let key = (
-            layer_name.clone(),
-            style == CutStyle::Engrave,
-            color.clone(),
-        );
-        let index = if let Some(index) = layers.get(&key) {
-            *index
-        } else {
-            let mut layer = Layer::new(layer_name, op_of(style));
-            layer.color = color;
-            doc.layers.push(layer);
-            let i = doc.layers.len() - 1;
-            layers.insert(key, i);
-            i
-        };
-        doc.push_shape(index, path)
-            .map_err(|e| SvgError::Model(e.to_string()))?;
+        pending.push(Some(PendingShape {
+            path,
+            style: shape.kind.0,
+            color,
+            layer: shape.layer.clone(),
+        }));
     }
     if dropped > 0 {
         warnings.push(format!("{dropped} more SVG warnings omitted"));
     }
-    for i in 0..doc.layers.len() {
-        if let Some(bounds) = doc.layer_bounds(i) {
+
+    let operation_hints = if policy.legacy_style_operations {
+        build_legacy_layers(&mut doc, &pending)?;
+        Vec::new()
+    } else {
+        // Geometry-preserving import (GEO-01): shapes land unassigned, `<g>` nesting
+        // becomes `Document.groups`, and styling is collected as hints only.
+        let mut shape_ids = Vec::with_capacity(pending.len());
+        for item in &pending {
+            let Some(p) = item else {
+                shape_ids.push(None);
+                continue;
+            };
+            let id = doc.next_shape_id;
+            doc.next_shape_id = doc
+                .next_shape_id
+                .checked_add(1)
+                .ok_or_else(|| SvgError::Model("shape ids exhausted".into()))?;
+            doc.shapes.push(Shape {
+                id,
+                path: p.path.clone(),
+                hidden: false,
+                locked: false,
+                text: None,
+                production: ShapeProduction::default(),
+            });
+            shape_ids.push(Some(id));
+        }
+        attach_groups(&mut doc, svg, &shape_ids)
+    };
+
+    for shape in &doc.shapes {
+        if let Some(bounds) = shape.bounds() {
             doc.board.width_mm = doc.board.width_mm.max(bounds.x1);
             doc.board.height_mm = doc.board.height_mm.max(bounds.y1);
         }
@@ -491,7 +553,429 @@ pub fn import_with_warnings(svg: &str, name: &str) -> Result<SvgImport, SvgError
     Ok(SvgImport {
         document: doc,
         warnings,
+        operation_hints,
     })
+}
+
+/// The Phase-2 mapping, kept verbatim behind `ImportPolicy::legacy_style_operations`:
+/// one layer per (name, style, colour), shapes grouped into operation layers.
+fn build_legacy_layers(
+    doc: &mut Document,
+    pending: &[Option<PendingShape>],
+) -> Result<(), SvgError> {
+    let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
+    doc.layers.push(Layer::new("cut", op_of(CutStyle::Cut)));
+    layers.insert(("cut".into(), false, None), 0);
+    for item in pending {
+        let Some(p) = item else { continue };
+        let layer_name = p
+            .layer
+            .clone()
+            .unwrap_or_else(|| match (&p.color, p.style) {
+                (Some(color), CutStyle::Cut) => format!("Line {color}"),
+                (Some(color), CutStyle::Engrave) => format!("engrave {color}"),
+                (None, CutStyle::Cut) => "cut".into(),
+                (None, CutStyle::Engrave) => "engrave".into(),
+            });
+        let key = (
+            layer_name.clone(),
+            p.style == CutStyle::Engrave,
+            p.color.clone(),
+        );
+        let index = if let Some(index) = layers.get(&key) {
+            *index
+        } else {
+            let mut layer = Layer::new(layer_name, op_of(p.style));
+            layer.color = p.color.clone();
+            doc.layers.push(layer);
+            let i = doc.layers.len() - 1;
+            layers.insert(key, i);
+            i
+        };
+        doc.push_shape(index, p.path.clone())
+            .map_err(|e| SvgError::Model(e.to_string()))?;
+    }
+    Ok(())
+}
+
+/// One `<g>` seen while walking the source tree, in document order (parents first).
+struct WalkGroup {
+    name: String,
+    /// `data-group` written by [`export`], reused as the group id so an export→import
+    /// round trip preserves group identity.
+    data_group: Option<u64>,
+    parent: Option<usize>,
+}
+
+#[derive(Clone, Default)]
+struct WalkState {
+    /// Inherited subset of the computed style the walk tracks: presentation attributes
+    /// and inline declarations only (CSS-driven hiding can desynchronize the walk; the
+    /// caller then skips grouping rather than misassign members).
+    props: HashMap<String, String>,
+}
+
+const WALK_MAX_DEPTH: usize = 128;
+const WALK_MAX_VISITS: usize = 1_000_000;
+
+/// The result of walking the source tree: the `<g>` skeleton, one leaf chain (group
+/// indices, outermost first) per shape the shared importer emits, and the declared
+/// production kinds as `(group chain, style)` hints.
+#[derive(Default)]
+struct GroupWalk {
+    groups: Vec<WalkGroup>,
+    leaves: Vec<Vec<usize>>,
+    hints: Vec<(Vec<usize>, CutStyle)>,
+}
+
+/// Best-effort reconstruction of the source `<g>` tree.
+fn walk_groups(svg: &str) -> GroupWalk {
+    let mut walk = GroupWalk {
+        groups: Vec::new(),
+        leaves: Vec::new(),
+        hints: Vec::new(),
+    };
+    let Ok(xml) = roxmltree::Document::parse(svg) else {
+        return walk;
+    };
+    let root = xml.root_element();
+    let mut id_index: HashMap<String, roxmltree::Node> = HashMap::new();
+    let mut nodes = 0usize;
+    for node in root.descendants() {
+        nodes += 1;
+        if nodes > craft_svg::paths::MAX_SVG_NODES {
+            return GroupWalk::default();
+        }
+        if let Some(id) = node.attribute("id") {
+            id_index.entry(id.to_string()).or_insert(node);
+        }
+    }
+    let mut ref_stack: Vec<String> = Vec::new();
+    let mut visits = 0usize;
+    walk_node(
+        root,
+        &id_index,
+        &mut ref_stack,
+        &mut visits,
+        &mut walk,
+        Vec::new(),
+        WalkState::default(),
+        0,
+    );
+    walk
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_node(
+    node: roxmltree::Node,
+    id_index: &HashMap<String, roxmltree::Node>,
+    ref_stack: &mut Vec<String>,
+    visits: &mut usize,
+    walk: &mut GroupWalk,
+    chain: Vec<usize>,
+    inherited: WalkState,
+    depth: usize,
+) {
+    *visits += 1;
+    if depth > WALK_MAX_DEPTH || *visits > WALK_MAX_VISITS {
+        return;
+    }
+    let tag = node.tag_name().name();
+    // Not drawable content unless instantiated via `<use>`.
+    if matches!(
+        tag,
+        "defs" | "symbol" | "clipPath" | "mask" | "pattern" | "marker"
+    ) {
+        return;
+    }
+    // The node's own declarations decide whether it *declares* a production kind
+    // (a hint); everything else inherits down the tree.
+    let mut own: HashMap<String, String> = HashMap::new();
+    for key in ["data-kind"] {
+        if let Some(value) = node.attribute(key) {
+            own.insert(key.to_string(), value.to_string());
+        }
+    }
+    if let Some(inline) = node.attribute("style") {
+        for declaration in inline.split(';') {
+            if let Some((key, value)) = declaration.split_once(':')
+                && key.trim() == "data-kind"
+            {
+                own.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+    }
+    let class = node.attribute("class").unwrap_or("");
+    let declared = SvgKind::of(&own, class).map(|kind| kind.0);
+    let mut props = inherited.props.clone();
+    for key in ["data-kind", "display", "visibility", "fill", "stroke"] {
+        if let Some(value) = node.attribute(key) {
+            props.insert(key.to_string(), value.to_string());
+        }
+    }
+    if let Some(inline) = node.attribute("style") {
+        for declaration in inline.split(';') {
+            if let Some((key, value)) = declaration.split_once(':') {
+                props.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+    }
+    let state = WalkState {
+        props: props.clone(),
+    };
+    let display_none = props.get("display").is_some_and(|v| v == "none")
+        || (props.get("stroke").is_some_and(|v| v == "none")
+            && props.get("fill").is_some_and(|v| v == "none"));
+    let visibility_hidden = props
+        .get("visibility")
+        .is_some_and(|v| v == "hidden" || v == "collapse");
+
+    if tag == "g" {
+        let name = node
+            .attribute("id")
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("group-{}", walk.groups.len() + 1));
+        let data_group = node
+            .attribute("data-group")
+            .and_then(|value| value.parse::<u64>().ok());
+        let index = walk.groups.len();
+        walk.groups.push(WalkGroup {
+            name,
+            data_group,
+            parent: chain.last().copied(),
+        });
+        if let Some(kind) = declared {
+            let mut path = chain.clone();
+            path.push(index);
+            walk.hints.push((path, kind));
+        }
+        let mut child_chain = chain;
+        child_chain.push(index);
+        for child in node.children().filter(|n| n.is_element()) {
+            walk_node(
+                child,
+                id_index,
+                ref_stack,
+                visits,
+                walk,
+                child_chain.clone(),
+                state.clone(),
+                depth + 1,
+            );
+        }
+        return;
+    }
+    if tag == "use" {
+        if !display_none
+            && let Some(href) = node
+                .attribute("href")
+                .or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")))
+            && let Some(id) = href.strip_prefix('#').filter(|s| !s.is_empty())
+            && !ref_stack.iter().any(|active| active == id)
+            && let Some(target) = id_index.get(id)
+        {
+            let target_tag = target.tag_name().name();
+            if matches!(
+                target_tag,
+                "g" | "symbol"
+                    | "path"
+                    | "rect"
+                    | "circle"
+                    | "ellipse"
+                    | "line"
+                    | "polyline"
+                    | "polygon"
+            ) {
+                ref_stack.push(id.to_string());
+                if target_tag == "g" || target_tag == "symbol" {
+                    // Each instance of a reused `<g>` is its own group at the use site;
+                    // a `<symbol>` instantiates its children without a group of its own.
+                    let mut child_chain = chain;
+                    if target_tag == "g" {
+                        let name = target
+                            .attribute("id")
+                            .map(str::to_string)
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| format!("group-{}", walk.groups.len() + 1));
+                        let data_group = target
+                            .attribute("data-group")
+                            .and_then(|value| value.parse::<u64>().ok());
+                        let index = walk.groups.len();
+                        walk.groups.push(WalkGroup {
+                            name,
+                            data_group,
+                            parent: child_chain.last().copied(),
+                        });
+                        let mut target_props = HashMap::new();
+                        for key in ["data-kind", "display", "visibility", "fill", "stroke"] {
+                            if let Some(value) = target.attribute(key) {
+                                target_props.insert(key.to_string(), value.to_string());
+                            }
+                        }
+                        child_chain.push(index);
+                        if let Some(kind) =
+                            SvgKind::of(&target_props, target.attribute("class").unwrap_or(""))
+                        {
+                            walk.hints.push((child_chain.clone(), kind.0));
+                        }
+                    }
+                    for child in target.children().filter(|n| n.is_element()) {
+                        walk_node(
+                            child,
+                            id_index,
+                            ref_stack,
+                            visits,
+                            walk,
+                            child_chain.clone(),
+                            state.clone(),
+                            depth + 1,
+                        );
+                    }
+                } else {
+                    walk_node(
+                        *target,
+                        id_index,
+                        ref_stack,
+                        visits,
+                        walk,
+                        chain,
+                        state,
+                        depth + 1,
+                    );
+                }
+                ref_stack.pop();
+            }
+        }
+        return;
+    }
+    if tag == "text" {
+        return;
+    }
+    if matches!(
+        tag,
+        "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon"
+    ) && !display_none
+        && !visibility_hidden
+    {
+        if let Some(kind) = declared {
+            walk.hints.push((chain.clone(), kind));
+        }
+        walk.leaves.push(chain);
+        return;
+    }
+    for child in node.children().filter(|n| n.is_element()) {
+        walk_node(
+            child,
+            id_index,
+            ref_stack,
+            visits,
+            walk,
+            chain.clone(),
+            state.clone(),
+            depth + 1,
+        );
+    }
+}
+
+/// Build `doc.groups` from the walked source tree and turn declared styling into
+/// operation hints. When the walk's leaf count does not match the shapes the shared
+/// importer emitted (CSS-driven hiding can desynchronize it), grouping is skipped and
+/// only the hints are returned.
+fn attach_groups(doc: &mut Document, svg: &str, shape_ids: &[Option<u64>]) -> Vec<OperationHint> {
+    let walk = walk_groups(svg);
+    let groups = &walk.groups;
+    let mut hints = Vec::new();
+    for (chain, kind) in &walk.hints {
+        if let Some(operation) = op_of(*kind) {
+            let group_path = chain
+                .iter()
+                .filter_map(|&i| groups.get(i).map(|g| g.name.clone()))
+                .collect();
+            hints.push(OperationHint {
+                group_path,
+                operation,
+            });
+        }
+    }
+    let leaves = &walk.leaves;
+    if leaves.len() != shape_ids.len() {
+        return hints;
+    }
+    // Keep only groups that hold at least one shape, directly or nested.
+    let mut has_shape = vec![false; walk.groups.len()];
+    for leaf in leaves {
+        for &index in leaf {
+            if let Some(slot) = has_shape.get_mut(index) {
+                *slot = true;
+            }
+        }
+    }
+    let mut remap: Vec<Option<usize>> = Vec::with_capacity(walk.groups.len());
+    let mut kept = 0usize;
+    for (index, _) in groups.iter().enumerate() {
+        if has_shape[index] {
+            remap.push(Some(kept));
+            kept += 1;
+        } else {
+            remap.push(None);
+        }
+    }
+    // Allocate document group ids, preferring the exported `data-group` id (first
+    // pass) so an export→import round trip preserves group identity.
+    let mut used: BTreeSet<u64> = BTreeSet::new();
+    let mut next_id = doc.next_group_id();
+    let mut id_of = vec![0u64; walk.groups.len()];
+    for (index, group) in groups.iter().enumerate() {
+        if remap[index].is_none() {
+            continue;
+        }
+        if let Some(data_group) = group.data_group
+            && used.insert(data_group)
+        {
+            id_of[index] = data_group;
+            if data_group >= next_id {
+                next_id = data_group.saturating_add(1);
+            }
+        }
+    }
+    for (index, _) in groups.iter().enumerate() {
+        if remap[index].is_none() || id_of[index] != 0 {
+            continue;
+        }
+        while used.contains(&next_id) {
+            next_id = next_id.saturating_add(1);
+        }
+        used.insert(next_id);
+        id_of[index] = next_id;
+        next_id = next_id.saturating_add(1);
+    }
+    // Parents are created before their children (pre-order walk), so pushing in index
+    // order satisfies the "member group exists" invariant.
+    for (index, group) in groups.iter().enumerate() {
+        let Some(new_index) = remap[index] else {
+            continue;
+        };
+        let mut children: Vec<GroupChild> = Vec::new();
+        for (child, child_group) in groups.iter().enumerate() {
+            if child_group.parent == Some(index) && remap[child].is_some() {
+                children.push(GroupChild::Group(id_of[child]));
+            }
+        }
+        for (leaf, shape_id) in leaves.iter().zip(shape_ids) {
+            let Some(id) = shape_id else { continue };
+            let mapped: Vec<usize> = leaf.iter().filter_map(|&i| remap[i]).collect();
+            if mapped.last() == Some(&new_index) {
+                children.push(GroupChild::Shape(*id));
+            }
+        }
+        doc.groups.push(Group {
+            id: id_of[index],
+            name: group.name.clone(),
+            children,
+        });
+    }
+    hints
 }
 pub fn polylines_of(bez: &BezPath) -> Vec<Polyline> {
     path_to_polylines(bez, stencilcraft_geom::DEFAULT_FLATTEN_STEPS)
@@ -502,13 +986,27 @@ mod tests_group_walk {
     use super::*;
 
     #[test]
-    fn groups_are_skipped_not_rejected() {
-        let doc = import(
+    fn groups_are_preserved() {
+        let imported = import_with_warnings(
             r#"<svg><g class="stencilcraft-cut"><path d="M 0 0 L 5 0 L 5 5 Z"/></g></svg>"#,
             "grouped.svg",
         )
         .unwrap();
+        let doc = imported.document;
         assert_eq!(doc.shape_count(), 1);
+        // A plain import synthesizes no operation layers; the shape starts Unassigned.
+        assert!(doc.layers.is_empty());
+        assert_eq!(doc.unassigned_shapes().count(), 1);
+        // The source <g> nesting is preserved as a document group referencing the shape.
+        assert_eq!(doc.groups.len(), 1);
+        assert_eq!(doc.groups[0].children, vec![GroupChild::Shape(1)]);
+        // The group's cut class is collected as a hint, never applied.
+        assert_eq!(imported.operation_hints.len(), 1);
+        assert!(matches!(
+            imported.operation_hints[0].operation,
+            Operation::Cut(_)
+        ));
+        assert_eq!(imported.operation_hints[0].group_path.len(), 1);
     }
 }
 
@@ -520,6 +1018,23 @@ mod tests {
     /// The `i`-th member shape of `layer` in `doc`.
     fn member(doc: &Document, layer: usize, i: usize) -> &DocShape {
         doc.get_shape(doc.layers[layer].members[i]).unwrap()
+    }
+
+    /// The `i`-th shape in document order.
+    fn nth_shape(doc: &Document, i: usize) -> &DocShape {
+        doc.shapes().nth(i).unwrap()
+    }
+
+    /// Import with the Phase-2 legacy semantics (groups→layers, style→operation).
+    fn legacy(svg: &str) -> SvgImport {
+        import_with_warnings_policy(
+            svg,
+            "legacy.svg",
+            &ImportPolicy {
+                legacy_style_operations: true,
+            },
+        )
+        .unwrap()
     }
     use craft_svg::paths::{
         MAX_CSS_BYTES, MAX_SVG_BYTES, MAX_SVG_DEPTH, MAX_SVG_NODES, MAX_SVG_WARNINGS,
@@ -545,7 +1060,8 @@ mod tests {
             "{svg}"
         );
         assert!(svg.contains("width=\"100.000mm\""));
-        assert!(svg.contains("data-kind=\"cut\""));
+        // The default base layer is operation-less, so no production kind is written.
+        assert!(svg.contains("data-kind=\"none\""));
     }
 
     #[test]
@@ -692,7 +1208,7 @@ mod tests {
         let back = import(&svg, "test.svg").unwrap();
         assert_eq!(back.shape_count(), 1);
         assert_eq!(
-            member(&back, 0, 0).path.to_svg(),
+            nth_shape(&back, 0).path.to_svg(),
             member(&doc, 0, 0).path.to_svg()
         );
     }
@@ -737,8 +1253,9 @@ mod tests {
         </svg>"#;
         let doc = import(svg, "shapes.svg").unwrap();
         assert_eq!(doc.shape_count(), 7);
-        assert!(member(&doc, 0, 0).path.elements().len() >= 5);
-        assert!(member(&doc, 0, 1).path.elements().len() >= 6);
+        assert!(doc.layers.is_empty());
+        assert!(nth_shape(&doc, 0).path.elements().len() >= 5);
+        assert!(nth_shape(&doc, 1).path.elements().len() >= 6);
     }
 
     #[test]
@@ -750,17 +1267,71 @@ mod tests {
             </g>
           </g>
         </svg>"#;
-        let doc = import(svg, "groups.svg").unwrap();
+        // New semantics: nesting becomes groups, transforms still resolve, and no
+        // operation layers are synthesized — all shapes start Unassigned.
+        let imported = import_with_warnings(svg, "groups.svg").unwrap();
+        let doc = imported.document;
         assert_eq!(doc.shape_count(), 1);
-        assert_eq!(doc.layers.len(), 2);
+        assert!(doc.layers.is_empty());
+        assert_eq!(doc.unassigned_shapes().count(), 1);
+        assert_eq!(doc.groups.len(), 2);
+        let outer = &doc.groups[0];
+        let inner = &doc.groups[1];
+        assert!(matches!(outer.children.as_slice(), [GroupChild::Group(id)] if *id == inner.id));
+        assert_eq!(inner.children, vec![GroupChild::Shape(1)]);
+        // The inherited engrave styling is a hint on the outer group, not a layer.
+        assert_eq!(imported.operation_hints.len(), 1);
         assert!(matches!(
-            doc.layers[1].operation,
-            Some(Operation::Engrave(_))
+            imported.operation_hints[0].operation,
+            Operation::Engrave(_)
         ));
-        let b = member(&doc, 1, 0).bounds().unwrap();
+        assert_eq!(imported.operation_hints[0].group_path.len(), 1);
+        let b = nth_shape(&doc, 0).bounds().unwrap();
         assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 6.0).abs() < 1e-9, "{b:?}");
+        // Legacy branch: the old two-layer result (cut base + engrave layer).
+        let legacy = legacy(svg).document;
+        assert_eq!(legacy.layers.len(), 2);
+        assert!(matches!(
+            legacy.layers[1].operation,
+            Some(Operation::Engrave(_))
+        ));
+        let b = member(&legacy, 1, 0).bounds().unwrap();
+        assert!((b.x0 - 12.0).abs() < 1e-9, "{b:?}");
+        assert!((b.y0 - 24.0).abs() < 1e-9, "{b:?}");
+        assert!((b.width() - 6.0).abs() < 1e-9, "{b:?}");
+    }
+
+    #[test]
+    fn export_import_round_trips_the_group_tree() {
+        let mut doc = Document::default();
+        let first = doc.push_shape(0, rect(0.0, 0.0, 5.0, 5.0)).unwrap().id;
+        let second = doc.push_shape(0, rect(10.0, 10.0, 5.0, 5.0)).unwrap().id;
+        let inner_id = 10;
+        doc.groups.push(Group {
+            id: inner_id,
+            name: "inner".into(),
+            children: vec![GroupChild::Shape(second)],
+        });
+        let outer_id = 11;
+        doc.groups.push(Group {
+            id: outer_id,
+            name: "outer".into(),
+            children: vec![GroupChild::Shape(first), GroupChild::Group(inner_id)],
+        });
+        let svg = export(&doc).unwrap();
+        let back = import(&svg, "roundtrip.svg").unwrap();
+        assert_eq!(back.shape_count(), 2);
+        assert!(back.layers.is_empty());
+        // The exported data-group ids come back as the same group ids (export carries
+        // group identity, not names).
+        let outer = back.group(outer_id).unwrap();
+        assert!(outer.children.contains(&GroupChild::Shape(first)));
+        assert!(outer.children.contains(&GroupChild::Group(inner_id)));
+        assert_eq!(outer.children.len(), 2);
+        let inner = back.group(inner_id).unwrap();
+        assert_eq!(inner.children, vec![GroupChild::Shape(second)]);
     }
 
     #[test]
@@ -779,26 +1350,29 @@ mod tests {
             xmlns:xlink="http://www.w3.org/1999/xlink"/>
           <use href="#badge" x="50" y="10" width="40" height="40"/>
         </svg>"##;
-        let doc = import(svg, "use.svg").unwrap();
+        let imported = import_with_warnings(svg, "use.svg").unwrap();
+        let doc = imported.document;
         assert_eq!(doc.shape_count(), 3);
-        assert_eq!(doc.layers[0].members.len(), 0);
-        assert_eq!(doc.layers[1].members.len(), 3);
-        let first = member(&doc, 1, 0).bounds().unwrap();
+        assert!(doc.layers.is_empty());
+        let first = nth_shape(&doc, 0).bounds().unwrap();
         assert!((first.x0 - 17.0).abs() < 1e-9, "{first:?}");
         assert!((first.y0 - 24.0).abs() < 1e-9, "{first:?}");
         assert!((first.width() - 6.0).abs() < 1e-9, "{first:?}");
-        let second = member(&doc, 1, 1).bounds().unwrap();
+        let second = nth_shape(&doc, 1).bounds().unwrap();
         assert!((second.x0 - 32.0).abs() < 1e-9, "{second:?}");
         assert!((second.y0 - 9.0).abs() < 1e-9, "{second:?}");
-        let badge = member(&doc, 1, 2).bounds().unwrap();
+        let badge = nth_shape(&doc, 2).bounds().unwrap();
         assert!((badge.x0 - 50.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.y0 - 20.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.width() - 40.0).abs() < 1e-9, "{badge:?}");
         assert!((badge.height() - 20.0).abs() < 1e-9, "{badge:?}");
-        assert!(matches!(
-            doc.layers[1].operation,
-            Some(Operation::Engrave(_))
-        ));
+        // The defs' engrave styling is collected as a hint, not applied to a layer.
+        assert!(
+            imported
+                .operation_hints
+                .iter()
+                .any(|hint| matches!(hint.operation, Operation::Engrave(_)))
+        );
     }
 
     #[test]
@@ -832,7 +1406,7 @@ mod tests {
         let doc = import(svg, "viewbox.svg").unwrap();
         assert_eq!(doc.board.width_mm, 200.0);
         assert_eq!(doc.board.height_mm, 100.0);
-        let b = member(&doc, 0, 0).bounds().unwrap();
+        let b = nth_shape(&doc, 0).bounds().unwrap();
         assert!((b.x0 - 20.0).abs() < 1e-9, "{b:?}");
         assert!((b.y0 - 20.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 10.0).abs() < 1e-9, "{b:?}");
@@ -848,10 +1422,20 @@ mod tests {
             <line x1="5" y1="6" x2="7" y2="8"/>
           </g>
         </svg>"#;
-        let doc = import(svg, "style.svg").unwrap();
+        let imported = import_with_warnings(svg, "style.svg").unwrap();
+        let doc = imported.document;
+        // The display:none group and the hidden line drop out; one shape survives,
+        // unassigned, inside the visibility group that carries the visible line.
         assert_eq!(doc.shape_count(), 1);
-        assert_eq!(doc.layers.len(), 2);
-        assert_eq!(doc.layers[1].members.len(), 1);
+        assert!(doc.layers.is_empty());
+        assert_eq!(doc.groups.len(), 1);
+        assert_eq!(doc.groups[0].children.len(), 1);
+        assert!(matches!(doc.groups[0].children[0], GroupChild::Shape(_)));
+        assert_eq!(imported.operation_hints.len(), 1);
+        assert!(matches!(
+            imported.operation_hints[0].operation,
+            Operation::Engrave(_)
+        ));
     }
 
     #[test]
@@ -871,7 +1455,9 @@ mod tests {
             <path id="second" class="mark" style="data-kind:engrave" d="M3 3L4 3"/>
           </g>
         </svg>"##;
-        let doc = import(svg, "css.svg").unwrap();
+        // CSS-driven hiding is a legacy-mode concern: the new import preserves groups
+        // and collects styling as hints instead of building layers.
+        let doc = legacy(svg).document;
         assert_eq!(doc.shape_count(), 1);
         assert_eq!(doc.layers[0].members.len(), 1);
         assert_eq!(member(&doc, 0, 0).bounds().unwrap().x0, 3.0);
@@ -939,7 +1525,7 @@ mod tests {
         let doc = import(svg, "px.svg").unwrap();
         assert!((doc.board.width_mm - 25.4).abs() < 1e-9);
         assert!((doc.board.height_mm - 12.7).abs() < 1e-9);
-        let b = member(&doc, 0, 0).bounds().unwrap();
+        let b = nth_shape(&doc, 0).bounds().unwrap();
         assert!((b.x0 - 10.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
         assert!((b.width() - 8.0 * 25.4 / 96.0).abs() < 1e-9, "{b:?}");
     }
@@ -1019,8 +1605,9 @@ mod tests {
           <rect width="1" height="1" stroke="none" fill="black"/>
           <g data-kind="engrave"><rect width="1" height="1" stroke="#00800080"/></g>
         </svg>"##;
-        let imported = lenient(svg);
+        let imported = legacy(svg);
         assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
+        assert!(imported.operation_hints.is_empty());
         let doc = imported.document;
         assert_eq!(doc.shape_count(), 10);
         assert_eq!(doc.layers[0].name, "cut");
@@ -1037,17 +1624,17 @@ mod tests {
         assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
         assert_eq!(engrave.color.as_deref(), Some("#008000"));
         assert!(matches!(engrave.operation, Some(Operation::Engrave(_))));
-        // The same document comes through the strict import unchanged.
-        assert_eq!(
-            import(svg, "colours.svg").unwrap().layers.len(),
-            doc.layers.len()
-        );
+        // The strict (new-semantics) import of the same file keeps every shape and
+        // synthesizes no layers.
+        let strict = import(svg, "colours.svg").unwrap();
+        assert_eq!(strict.shape_count(), 10);
+        assert!(strict.layers.is_empty());
     }
 
     #[test]
     fn unreadable_stroke_colour_warns_and_strict_import_refuses() {
         let svg = r#"<svg><rect id="odd" width="1" height="1" stroke="color(srgb 1 0 0)"/></svg>"#;
-        let imported = lenient(svg);
+        let imported = legacy(svg);
         assert_eq!(imported.document.layers[0].members.len(), 1);
         assert_eq!(imported.warnings.len(), 1);
         assert!(
@@ -1059,12 +1646,7 @@ mod tests {
     }
 
     fn bounds_of(doc: &Document) -> Vec<kurbo::Rect> {
-        doc.layers
-            .iter()
-            .flat_map(|layer| layer.members.iter())
-            .filter_map(|id| doc.get_shape(*id))
-            .map(|shape| shape.bounds().unwrap())
-            .collect()
+        doc.shapes().map(|shape| shape.bounds().unwrap()).collect()
     }
 
     fn near(a: kurbo::Rect, b: (f64, f64, f64, f64)) -> bool {
@@ -1104,7 +1686,7 @@ mod tests {
         // The clip region lives in the referencing element's user space.
         assert!(near(bounds[4], (0.0, 60.0, 10.0, 80.0)), "{bounds:?}");
         // The clipped closed shape stays closed (a cut contour, not an open run).
-        let first = &member(&imported.document, 0, 0).path;
+        let first = &nth_shape(&imported.document, 0).path;
         assert!(matches!(
             first.elements().last(),
             Some(kurbo::PathEl::ClosePath)
@@ -1176,7 +1758,7 @@ mod tests {
             <rect width="1" height="1"/>
           </g>
         </svg>"##;
-        let imported = lenient(svg);
+        let imported = legacy(svg);
         assert!(imported.warnings.is_empty(), "{:?}", imported.warnings);
         let names: Vec<_> = imported
             .document
@@ -1207,7 +1789,7 @@ mod tests {
             rect:hover, rect.ok { stroke: red; }
             a::before { stroke: blue; }
           </style><rect class="ok" width="1" height="1"/></svg>"##;
-        let imported = lenient(svg);
+        let imported = legacy(svg);
         let warnings = imported.warnings.join("\n");
         assert!(warnings.contains("@import"), "{warnings}");
         assert!(warnings.contains("@media"), "{warnings}");

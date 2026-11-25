@@ -134,6 +134,110 @@ pub fn with_pixels(image: &RasterImage, pixels: &RgbaImage) -> Result<RasterImag
     })
 }
 
+/// Most pixels a straightened image may have.
+const MAX_RECTIFY_PIXELS: u64 = 16_000_000;
+
+/// Solve the 8×8 system for the homography taking the unit square's corners (0,0), (1,0),
+/// (1,1), (0,1) to `quad` (clockwise from the top left). `None` when the quad is degenerate.
+fn unit_square_homography(quad: [[f64; 2]; 4]) -> Option<[f64; 8]> {
+    let unit = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let mut m = [[0.0f64; 9]; 8];
+    for (k, (u, q)) in unit.iter().zip(quad).enumerate() {
+        let (x, y) = (u[0], u[1]);
+        let (sx, sy) = (q[0], q[1]);
+        m[2 * k] = [x, y, 1.0, 0.0, 0.0, 0.0, -x * sx, -y * sx, sx];
+        m[2 * k + 1] = [0.0, 0.0, 0.0, x, y, 1.0, -x * sy, -y * sy, sy];
+    }
+    // Gaussian elimination with partial pivoting.
+    for col in 0..8 {
+        let pivot = (col..8).max_by(|&a, &b| m[a][col].abs().total_cmp(&m[b][col].abs()))?;
+        if m[pivot][col].abs() < 1e-12 {
+            return None;
+        }
+        m.swap(col, pivot);
+        for row in 0..8 {
+            if row != col {
+                let f = m[row][col] / m[col][col];
+                for c in col..9 {
+                    m[row][c] -= f * m[col][c];
+                }
+            }
+        }
+    }
+    let mut h = [0.0; 8];
+    for (i, slot) in h.iter_mut().enumerate() {
+        *slot = m[i][8] / m[i][i];
+    }
+    h.iter().all(|v| v.is_finite()).then_some(h)
+}
+
+/// PixScan, by hand: the part of `pixels` inside `corners` (pixel coordinates of the page's
+/// top-left, top-right, bottom-right and bottom-left corners in a photo) straightened into a
+/// `width` × `height` pixel image by a perspective (homography) warp, bilinear sampled.
+pub fn rectify(
+    pixels: &RgbaImage,
+    corners: [[f64; 2]; 4],
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage, RasterError> {
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_RECTIFY_PIXELS {
+        return Err(bad(format!(
+            "rectify: {width} × {height} pixels is empty or too large"
+        )));
+    }
+    if !corners.iter().flatten().all(|v| v.is_finite()) {
+        return Err(bad("rectify: the corners are not finite".to_string()));
+    }
+    let h = unit_square_homography(corners)
+        .ok_or_else(|| bad("rectify: the four corners do not make a quadrilateral".to_string()))?;
+    let (sw, sh) = (pixels.width(), pixels.height());
+    let sample = |x: f64, y: f64| -> [f64; 4] {
+        if !(x.is_finite() && y.is_finite()) || x < 0.0 || y < 0.0 {
+            return [255.0, 255.0, 255.0, 0.0];
+        }
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        // Non-negative and finite here, so the casts saturate harmlessly.
+        let (ix, iy) = (x0 as u32, y0 as u32);
+        let px = |cx: u32, cy: u32| -> [f64; 4] {
+            pixels
+                .get_pixel_checked(cx.min(sw.saturating_sub(1)), cy.min(sh.saturating_sub(1)))
+                .map_or([255.0, 255.0, 255.0, 0.0], |p| p.0.map(f64::from))
+        };
+        if ix >= sw || iy >= sh {
+            return [255.0, 255.0, 255.0, 0.0];
+        }
+        let (a, b, c, d) = (
+            px(ix, iy),
+            px(ix.saturating_add(1), iy),
+            px(ix, iy.saturating_add(1)),
+            px(ix.saturating_add(1), iy.saturating_add(1)),
+        );
+        let mut out = [0.0; 4];
+        for k in 0..4 {
+            let top = a[k] + (b[k] - a[k]) * fx;
+            let bottom = c[k] + (d[k] - c[k]) * fx;
+            out[k] = top + (bottom - top) * fy;
+        }
+        out
+    };
+    Ok(RgbaImage::from_fn(width, height, |ox, oy| {
+        let u = (f64::from(ox) + 0.5) / f64::from(width);
+        let v = (f64::from(oy) + 0.5) / f64::from(height);
+        let w = h[6] * u + h[7] * v + 1.0;
+        let (x, y) = if w.abs() > 1e-12 {
+            (
+                (h[0] * u + h[1] * v + h[2]) / w,
+                (h[3] * u + h[4] * v + h[5]) / w,
+            )
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+        // Each channel is within 0..=255 (a blend of pixel values), so the casts are exact.
+        common::Pixel(sample(x, y).map(|c| c.round().clamp(0.0, 255.0) as u8))
+    }))
+}
+
 /// Image Effects: brightness, contrast and saturation (each −100…100, 0 leaves it), then
 /// greyscale and invert. Alpha is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
@@ -277,6 +381,50 @@ mod tests {
                 decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
             assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
+    }
+
+    #[test]
+    fn rectify_straightens_a_skewed_page() {
+        // A 100×100 photo: a white page with a black square marking its top-left quarter,
+        // photographed as the axis-aligned rect (10,10)-(90,90).
+        let photo = RgbaImage::from_fn(100, 100, |x, y| {
+            if (10..50).contains(&x) && (10..50).contains(&y) {
+                Pixel([0, 0, 0, 255])
+            } else {
+                Pixel([255, 255, 255, 255])
+            }
+        });
+        let out = rectify(
+            &photo,
+            [[10.0, 10.0], [90.0, 10.0], [90.0, 90.0], [10.0, 90.0]],
+            40,
+            40,
+        )
+        .unwrap();
+        assert_eq!(out.get_pixel(5, 5).0[0], 0, "top-left quarter is black");
+        assert_eq!(out.get_pixel(35, 35).0[0], 255, "bottom-right is white");
+        assert!(
+            rectify(&photo, [[0.0, 0.0]; 4], 10, 10).is_err(),
+            "degenerate"
+        );
+        assert!(
+            rectify(
+                &photo,
+                [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                0,
+                10
+            )
+            .is_err()
+        );
+        assert!(
+            rectify(
+                &photo,
+                [[f64::NAN, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+                5,
+                5
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -161,7 +161,7 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
         ),
         SEP,
         item("Library…", A::ShowPanel(P::Library)).into(),
-        todo("Scan…"),
+        item("Scan…", A::ShowPanel(P::PixScan)).into(),
         SEP,
         item("Print…", A::Print).shortcut(kbd(CMD, Key::P)).into(),
         item("Print Page Setup…", A::ShowPanel(P::PageSetup)).into(),
@@ -751,7 +751,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
     use stencilcraft_ui_egui::ColorTheme;
     vec![
         item("Page Setup", A::ShowPanel(P::PageSetup)).into(),
-        todo("PixScan"),
+        item("PixScan", A::ShowPanel(P::PixScan)).into(),
         item("Fill Color", A::ShowPanel(P::FillColor)).into(),
         item("Line Style", A::ShowPanel(P::LineStyle)).into(),
         item("Select by Color", A::ShowPanel(P::SelectByColor)).into(),

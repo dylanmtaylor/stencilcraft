@@ -115,9 +115,16 @@ pub enum Command {
     /// Remove multiple shapes as one undoable document edit.
     #[serde(rename = "shapes.remove")]
     ShapesRemove { ids: Vec<u64> },
-    /// Duplicate one or more shapes at their exact positions as one undoable edit.
+    /// Duplicate one or more shapes as one undoable edit, moved by `dx_mm`/`dy_mm` (default 0:
+    /// at their exact positions).
     #[serde(rename = "shapes.duplicate")]
-    ShapesDuplicate { ids: Vec<u64> },
+    ShapesDuplicate {
+        ids: Vec<u64>,
+        #[serde(default)]
+        dx_mm: f64,
+        #[serde(default)]
+        dy_mm: f64,
+    },
     /// Translate a shape by a finite millimetre offset.
     #[serde(rename = "shape.move")]
     ShapeMove { id: u64, dx_mm: f64, dy_mm: f64 },
@@ -963,7 +970,9 @@ impl Engine {
             Command::Production(c) => production::execute(&mut self.doc, c),
             Command::ShapeRemove { id } => self.remove_shapes(&[id], "shape.remove"),
             Command::ShapesRemove { ids } => self.remove_shapes(&ids, "shapes.remove"),
-            Command::ShapesDuplicate { ids } => self.duplicate_shapes(&ids),
+            Command::ShapesDuplicate { ids, dx_mm, dy_mm } => {
+                self.duplicate_shapes(&ids, dx_mm, dy_mm)
+            }
             Command::ShapeMove { id, dx_mm, dy_mm } => {
                 if !(dx_mm.is_finite() && dy_mm.is_finite()) {
                     return Err(EngineError::Invalid(
@@ -2160,10 +2169,24 @@ impl Engine {
         Ok(Effect::ShapesAdded { ids: result_ids })
     }
 
-    fn duplicate_shapes(&mut self, ids: &[u64]) -> Result<Effect, EngineError> {
-        let shapes = self.selected_shapes(ids, "shapes.duplicate")?;
-        let new_ids = self.vector_add_paths(shapes, "shapes.duplicate")?;
-        Ok(Effect::ShapesAdded { ids: new_ids })
+    fn duplicate_shapes(
+        &mut self,
+        ids: &[u64],
+        dx_mm: f64,
+        dy_mm: f64,
+    ) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.duplicate";
+        if !(dx_mm.abs() <= 100_000.0 && dy_mm.abs() <= 100_000.0) {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: dx_mm and dy_mm must be finite and within ±100000"
+            )));
+        }
+        let shapes = self.selected_shapes(ids, NAME)?;
+        if dx_mm == 0.0 && dy_mm == 0.0 {
+            let new_ids = self.vector_add_paths(shapes, NAME)?;
+            return Ok(Effect::ShapesAdded { ids: new_ids });
+        }
+        self.add_replicas(&shapes, &[kurbo::Affine::translate((dx_mm, dy_mm))], NAME)
     }
 
     /// The selection for a replicate command, with its combined bounds.
@@ -3142,7 +3165,11 @@ mod tests {
             .unwrap();
 
         let effect = engine
-            .run(Command::ShapesDuplicate { ids: vec![2, 1] })
+            .run(Command::ShapesDuplicate {
+                ids: vec![2, 1],
+                dx_mm: 0.0,
+                dy_mm: 0.0,
+            })
             .unwrap();
         assert_eq!(effect, Effect::ShapesAdded { ids: vec![3, 4] });
         assert_eq!(engine.doc.shape_count(), 4);
@@ -3169,7 +3196,15 @@ mod tests {
             .unwrap();
         let before = engine.doc.clone();
         for ids in [vec![], vec![1, 1], vec![1, 99]] {
-            assert!(engine.run(Command::ShapesDuplicate { ids }).is_err());
+            assert!(
+                engine
+                    .run(Command::ShapesDuplicate {
+                        ids,
+                        dx_mm: 0.0,
+                        dy_mm: 0.0,
+                    })
+                    .is_err()
+            );
             assert_eq!(engine.doc, before);
         }
     }

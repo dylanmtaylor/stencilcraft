@@ -8,6 +8,7 @@ use craft_ui::controls::Kbd;
 use craft_ui::menu::{MenuEntry, MenuItem};
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use stencilcraft_doc::CutStyle;
+use stencilcraft_engine::document::{ArrangeOrder, PasteMode};
 use stencilcraft_engine::{Alignment, BooleanOperation, DistributionAxis, NodeAxis};
 
 use crate::panels::{EditAction as E, ScreenSide};
@@ -178,12 +179,24 @@ fn edit_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .enabled(app.engine.can_redo())
             .into(),
         SEP,
-        todo_key("Cut", CMD, Key::X),
-        todo_key("Copy", CMD, Key::C),
-        todo_key("Paste", CMD, Key::V),
-        todo_key("Paste in Front", CMD, Key::F),
+        item("Cut", A::Cut)
+            .shortcut(kbd(CMD, Key::X))
+            .enabled(any)
+            .into(),
+        item("Copy", A::Copy)
+            .shortcut(kbd(CMD, Key::C))
+            .enabled(any)
+            .into(),
+        item("Paste", A::Paste(PasteMode::Offset))
+            .shortcut(kbd(CMD, Key::V))
+            .into(),
+        item("Paste in Front", A::Paste(PasteMode::InFront))
+            .shortcut(kbd(CMD, Key::F))
+            .into(),
         todo_key("Paste in Back", CMD, Key::B),
-        todo_key("Paste in Place", cmd_shift(), Key::V),
+        item("Paste in Place", A::Paste(PasteMode::InPlace))
+            .shortcut(kbd(cmd_shift(), Key::V))
+            .into(),
         item("Delete", A::Delete)
             .shortcut(kbd(NONE, Key::Delete))
             .enabled(any)
@@ -228,10 +241,22 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Arrange",
             vec![
-                todo_key("Bring to Front", cmd_shift(), Key::CloseBracket),
-                todo_key("Bring Forward", CMD, Key::CloseBracket),
-                todo_key("Send Backward", CMD, Key::OpenBracket),
-                todo_key("Send to Back", cmd_shift(), Key::OpenBracket),
+                item("Bring to Front", A::Arrange(ArrangeOrder::Front))
+                    .shortcut(kbd(cmd_shift(), Key::CloseBracket))
+                    .enabled(any)
+                    .into(),
+                item("Bring Forward", A::Arrange(ArrangeOrder::Forward))
+                    .shortcut(kbd(CMD, Key::CloseBracket))
+                    .enabled(any)
+                    .into(),
+                item("Send Backward", A::Arrange(ArrangeOrder::Backward))
+                    .shortcut(kbd(CMD, Key::OpenBracket))
+                    .enabled(any)
+                    .into(),
+                item("Send to Back", A::Arrange(ArrangeOrder::Back))
+                    .shortcut(kbd(cmd_shift(), Key::OpenBracket))
+                    .enabled(any)
+                    .into(),
                 SEP,
                 todo("Send to Layer…"),
             ],
@@ -263,15 +288,16 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     .collect(),
                 ),
                 SEP,
+                // Even spacing needs three or more shapes (the engine refuses fewer).
                 when(
                     "Space Horizontally",
                     A::Distribute(DistributionAxis::Horizontal),
-                    many,
+                    app.selected_shapes.len() >= 3,
                 ),
                 when(
                     "Space Vertically",
                     A::Distribute(DistributionAxis::Vertical),
-                    many,
+                    app.selected_shapes.len() >= 3,
                 ),
                 when(
                     "Distribute Spacing by Value…",
@@ -813,7 +839,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Bring to Front", "Detach Lines", "Outline View"] {
+        for planned in ["Paste in Back", "Detach Lines", "Outline View"] {
             assert!(
                 items
                     .iter()

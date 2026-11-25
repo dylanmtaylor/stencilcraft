@@ -107,6 +107,26 @@ impl Settings for UserPrefs {
     const SCHEMA_VERSION: u32 = 1;
 }
 
+/// An arrow key pressed alone or with Shift: the nudge in screen pixels (Silhouette moves about
+/// 2 px per press, 16 px with Shift).
+fn arrow_nudge(ctx: &egui::Context) -> Option<(f64, f64)> {
+    ctx.input_mut(|input| {
+        for (key, dx, dy) in [
+            (egui::Key::ArrowLeft, -1.0, 0.0),
+            (egui::Key::ArrowRight, 1.0, 0.0),
+            (egui::Key::ArrowUp, 0.0, -1.0),
+            (egui::Key::ArrowDown, 0.0, 1.0),
+        ] {
+            for (mods, step) in [(egui::Modifiers::SHIFT, 16.0), (egui::Modifiers::NONE, 2.0)] {
+                if consume_exact(input, mods, key) {
+                    return Some((dx * step, dy * step));
+                }
+            }
+        }
+        None
+    })
+}
+
 /// Consume `key` only when it was pressed with exactly `modifiers`. egui's `consume_key`
 /// ignores extra Shift and Alt, so Shift+G would pick the Polygon tool and Cmd+Shift+L would
 /// run Cmd+L; shortcuts here want the combination as written.
@@ -401,6 +421,10 @@ pub enum TopMenuAction {
     Undo,
     Redo,
     Duplicate,
+    Cut,
+    Copy,
+    Paste(stencilcraft_engine::document::PasteMode),
+    Arrange(stencilcraft_engine::document::ArrangeOrder),
     Delete,
     SelectAll,
     Deselect,
@@ -1291,16 +1315,142 @@ impl StencilApp {
         self.set_selection(ids);
     }
 
+    /// One screen pixel in millimetres at the current zoom.
+    fn screen_px_mm(&self) -> f64 {
+        1.0 / f64::from(self.view.zoom.max(f32::EPSILON))
+    }
+
+    /// Duplicate the selection beside itself, 40 screen pixels to the right, as Silhouette does
+    /// (the copy is easy to see and grab); the copies become the selection.
     pub fn duplicate_selection(&mut self) {
         let ids = self.selected_shapes.clone();
-        match self.engine.run(Command::ShapesDuplicate { ids }) {
+        let dx_mm = 40.0 * self.screen_px_mm();
+        self.select_added(Command::ShapesDuplicate {
+            ids,
+            dx_mm,
+            dy_mm: 0.0,
+        });
+    }
+
+    /// Run a command that adds shapes and select what it added.
+    fn select_added(&mut self, command: Command) {
+        match self.engine.run(command) {
             Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => {
+                self.path_selection = PathSelection::default();
                 self.set_selection(ids);
-                self.status = "duplicated in place".to_string();
+                self.status = "done".to_string();
             }
-            Ok(_) => {}
+            Ok(_) => self.status = "done".to_string(),
             Err(error) => self.status = error.to_string(),
         }
+    }
+
+    /// The desktop backend turns Cmd/Ctrl+X, C and V into clipboard events rather than key
+    /// presses, and sends Paste only when the system clipboard holds text. Copy and Cut put the
+    /// selection there as SVG (so it also pastes into other apps, and Paste always arrives);
+    /// Paste pastes the in-app clipboard, in place when Shift is held. Returns whether a
+    /// clipboard event was handled.
+    fn handle_clipboard_events(&mut self, ctx: &egui::Context) -> bool {
+        if ctx.text_edit_focused() || self.send_mode {
+            return false;
+        }
+        let (cut, copy, paste) = ctx.input_mut(|input| {
+            let mut seen = (false, false, false);
+            input.events.retain(|event| match event {
+                egui::Event::Cut => {
+                    seen.0 = true;
+                    false
+                }
+                egui::Event::Copy => {
+                    seen.1 = true;
+                    false
+                }
+                egui::Event::Paste(_) => {
+                    seen.2 = true;
+                    false
+                }
+                _ => true,
+            });
+            seen
+        });
+        if (cut || copy) && !self.selected_shapes.is_empty() {
+            if let Some(svg) = self.selection_svg() {
+                ctx.copy_text(svg);
+            }
+            if cut {
+                self.clipboard_cut();
+            } else {
+                self.clipboard_copy();
+            }
+        }
+        if paste {
+            let mode = if ctx.input(|input| input.modifiers.shift) {
+                stencilcraft_engine::document::PasteMode::InPlace
+            } else {
+                stencilcraft_engine::document::PasteMode::Offset
+            };
+            self.clipboard_paste(mode);
+        }
+        cut || copy || paste
+    }
+
+    /// The selected shapes as an SVG document, for the system clipboard.
+    fn selection_svg(&self) -> Option<String> {
+        let mut doc = self.engine.doc.clone();
+        for layer in &mut doc.layers {
+            layer
+                .shapes
+                .retain(|shape| self.selected_shapes.contains(&shape.id));
+        }
+        let bytes = stencilcraft_import::write_document(&doc, "svg", 300.0).ok()?;
+        String::from_utf8(bytes).ok()
+    }
+
+    pub fn clipboard_copy(&mut self) {
+        if self.selected_shapes.is_empty() {
+            return;
+        }
+        self.run_command(Command::Document(DocumentCommand::ClipboardCopy {
+            ids: self.selected_shapes.clone(),
+        }));
+        self.status = "copied".to_string();
+    }
+
+    pub fn clipboard_cut(&mut self) {
+        if self.selected_shapes.is_empty() {
+            return;
+        }
+        self.run_command(Command::Document(DocumentCommand::ClipboardCut {
+            ids: self.selected_shapes.clone(),
+        }));
+        self.retain_valid_selection();
+    }
+
+    /// Paste: Silhouette puts the copy 80 screen pixels down and to the right; Paste in Front
+    /// puts it exactly on top of the original, Paste in Place at the same spot on top.
+    pub fn clipboard_paste(&mut self, mode: stencilcraft_engine::document::PasteMode) {
+        let offset_mm = 80.0 * self.screen_px_mm();
+        self.select_added(Command::Document(DocumentCommand::ClipboardPaste {
+            mode,
+            offset_mm,
+        }));
+    }
+
+    /// Arrow keys move the selection by screen pixels, so the step suits the zoom (Silhouette:
+    /// about 2 px, 16 px with Shift). One undo step per press.
+    pub fn nudge_selection(&mut self, dx_px: f64, dy_px: f64) {
+        if self.selected_shapes.is_empty() {
+            return;
+        }
+        let px = self.screen_px_mm();
+        self.run_command(Command::ShapesTransform {
+            ids: self.selected_shapes.clone(),
+            dx_mm: dx_px * px,
+            dy_mm: dy_px * px,
+            scale_x: 1.0,
+            scale_y: 1.0,
+            degrees: 0.0,
+        });
     }
 
     /// Move the dragged selection so its bounds sit `total_screen` from where the drag
@@ -1668,7 +1818,7 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.handle_click_draft_keys(ctx) {
+        if self.handle_click_draft_keys(ctx) || self.handle_clipboard_events(ctx) {
             return;
         }
         // Buttons and other controls can retain keyboard focus after a click. Only
@@ -1785,6 +1935,78 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Num1))
         {
             self.view.zoom = 1.0;
+        } else if ctx.input_mut(|input| {
+            consume_exact(
+                input,
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::CloseBracket,
+            )
+        }) {
+            self.handle_menu_action(TopMenuAction::Arrange(
+                stencilcraft_engine::document::ArrangeOrder::Front,
+            ));
+        } else if ctx.input_mut(|input| {
+            consume_exact(
+                input,
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::OpenBracket,
+            )
+        }) {
+            self.handle_menu_action(TopMenuAction::Arrange(
+                stencilcraft_engine::document::ArrangeOrder::Back,
+            ));
+        } else if ctx.input_mut(|input| {
+            consume_exact(input, egui::Modifiers::COMMAND, egui::Key::CloseBracket)
+        }) {
+            self.handle_menu_action(TopMenuAction::Arrange(
+                stencilcraft_engine::document::ArrangeOrder::Forward,
+            ));
+        } else if ctx.input_mut(|input| {
+            consume_exact(input, egui::Modifiers::COMMAND, egui::Key::OpenBracket)
+        }) {
+            self.handle_menu_action(TopMenuAction::Arrange(
+                stencilcraft_engine::document::ArrangeOrder::Backward,
+            ));
+        } else if ctx.input_mut(|input| {
+            consume_exact(
+                input,
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::V,
+            )
+        }) {
+            self.clipboard_paste(stencilcraft_engine::document::PasteMode::InPlace);
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::X))
+        {
+            self.clipboard_cut();
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::C))
+        {
+            self.clipboard_copy();
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::V))
+        {
+            self.clipboard_paste(stencilcraft_engine::document::PasteMode::Offset);
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::F))
+        {
+            self.clipboard_paste(stencilcraft_engine::document::PasteMode::InFront);
+        } else if let Some((dx, dy)) = (!self.editing_points()).then(|| arrow_nudge(ctx)).flatten()
+        {
+            self.nudge_selection(dx, dy);
+        } else if let Some(side) = ctx.input_mut(|input| {
+            [
+                (egui::Key::ArrowLeft, panels::ScreenSide::Left),
+                (egui::Key::ArrowRight, panels::ScreenSide::Right),
+                (egui::Key::ArrowUp, panels::ScreenSide::Above),
+                (egui::Key::ArrowDown, panels::ScreenSide::Below),
+            ]
+            .into_iter()
+            .find(|(key, _)| consume_exact(input, egui::Modifiers::COMMAND, *key))
+            .map(|(_, side)| side)
+        }) {
+            // Silhouette: Ctrl+Arrow duplicates the selection to that side.
+            self.handle_edit_action(panels::EditAction::Duplicate(side));
         } else if ctx
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::D))
         {
@@ -2421,6 +2643,15 @@ impl StencilApp {
                 self.retain_valid_selection();
             }
             TopMenuAction::Duplicate => self.duplicate_selection(),
+            TopMenuAction::Cut => self.clipboard_cut(),
+            TopMenuAction::Copy => self.clipboard_copy(),
+            TopMenuAction::Paste(mode) => self.clipboard_paste(mode),
+            TopMenuAction::Arrange(order) => {
+                self.run_command(Command::Document(DocumentCommand::ShapesArrange {
+                    ids: self.selected_shapes.clone(),
+                    order,
+                }))
+            }
             TopMenuAction::Delete => self.delete_selection(),
             TopMenuAction::SelectAll => self.select_all_shapes(),
             TopMenuAction::Deselect => {
@@ -2479,11 +2710,22 @@ impl StencilApp {
                 }));
             }
             TopMenuAction::CenterToPage => {
-                for alignment in [Alignment::HorizontalCenter, Alignment::VerticalCenter] {
-                    self.run_command(Command::ShapesAlign {
+                // One move of the whole selection, so one shape works and it is one undo step.
+                if let Some(bounds) = stencilcraft_ui_egui::selected_world_bounds(
+                    &self.engine.doc,
+                    &self.selected_shapes,
+                ) {
+                    let board = &self.engine.doc.board;
+                    let target = stencilcraft_geom::Point::new(board.width_mm, board.height_mm)
+                        .midpoint(stencilcraft_geom::Point::ZERO);
+                    let shift = target - bounds.center();
+                    self.run_command(Command::ShapesTransform {
                         ids: self.selected_shapes.clone(),
-                        alignment,
-                        to_board: true,
+                        dx_mm: shift.x,
+                        dy_mm: shift.y,
+                        scale_x: 1.0,
+                        scale_y: 1.0,
+                        degrees: 0.0,
                     });
                 }
             }
@@ -5398,10 +5640,15 @@ mod tests {
         output.textures_delta.clear();
         assert_eq!(app.engine.doc.shape_count(), 2);
         assert_eq!(app.selected_shapes, vec![2]);
-        assert_eq!(
-            app.engine.doc.get_shape(1).unwrap().bounds(),
-            app.engine.doc.get_shape(2).unwrap().bounds()
+        // Silhouette places a duplicate 40 screen pixels to the right.
+        let step = 40.0 / f64::from(app.view.zoom);
+        let original = app.engine.doc.get_shape(1).unwrap().bounds().unwrap();
+        let copy = app.engine.doc.get_shape(2).unwrap().bounds().unwrap();
+        assert!(
+            (copy.x0 - original.x0 - step).abs() < 1e-6,
+            "{original:?} {copy:?}"
         );
+        assert!((copy.y0 - original.y0).abs() < 1e-6);
     }
 
     #[test]
@@ -6275,6 +6522,103 @@ mod tests {
             app.engine.doc.shape_count(),
             1,
             "and the shape itself is still there"
+        );
+    }
+
+    #[test]
+    fn clipboard_nudge_arrange_and_center_follow_silhouette() {
+        use stencilcraft_engine::document::{ArrangeOrder, PasteMode};
+        let mut app = StencilApp::new(None);
+        for x in [10.0, 40.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 10.0,
+                width: 20.0,
+                height: 10.0,
+            });
+        }
+        let px = 1.0 / f64::from(app.view.zoom);
+        let bounds = |app: &StencilApp, id| app.engine.doc.get_shape(id).unwrap().bounds().unwrap();
+        app.set_selection([1]);
+        press_key(&mut app, egui::Key::C, egui::Modifiers::COMMAND);
+        press_key(&mut app, egui::Key::V, egui::Modifiers::COMMAND);
+        assert_eq!(app.engine.doc.shape_count(), 3);
+        let pasted = app.selected_shapes.clone();
+        assert_eq!(pasted.len(), 1, "the paste is selected");
+        let (a, b) = (bounds(&app, 1), bounds(&app, pasted[0]));
+        assert!((b.x0 - a.x0 - 80.0 * px).abs() < 1e-6 && (b.y0 - a.y0 - 80.0 * px).abs() < 1e-6);
+        // Paste in Front: exactly on top of the copied shape.
+        press_key(&mut app, egui::Key::F, egui::Modifiers::COMMAND);
+        let front = app.selected_shapes.clone();
+        assert_eq!(bounds(&app, front[0]), a);
+
+        // Arrow keys nudge by 2 px, Shift by 16 px.
+        app.set_selection([1]);
+        press_key(&mut app, egui::Key::ArrowRight, egui::Modifiers::NONE);
+        assert!((bounds(&app, 1).x0 - (a.x0 + 2.0 * px)).abs() < 1e-6);
+        press_key(&mut app, egui::Key::ArrowDown, egui::Modifiers::SHIFT);
+        assert!((bounds(&app, 1).y0 - (a.y0 + 16.0 * px)).abs() < 1e-6);
+
+        // Arrange: Bring to Front puts shape 1 last in drawing order.
+        app.handle_menu_action(TopMenuAction::Arrange(ArrangeOrder::Front));
+        let order: Vec<u64> = app.engine.doc.shapes().map(|(_, s)| s.id).collect();
+        assert_eq!(order.last(), Some(&1), "{order:?}");
+
+        // Center to Page works for one shape (it used to need two).
+        app.handle_menu_action(TopMenuAction::CenterToPage);
+        let board = &app.engine.doc.board;
+        let centre = bounds(&app, 1).center();
+        assert!((centre.x - board.width_mm / 2.0).abs() < 1e-6);
+        assert!((centre.y - board.height_mm / 2.0).abs() < 1e-6);
+
+        // Cut removes and keeps it for pasting.
+        press_key(&mut app, egui::Key::X, egui::Modifiers::COMMAND);
+        assert!(app.engine.doc.get_shape(1).is_none());
+        app.clipboard_paste(PasteMode::InPlace);
+        assert_eq!(app.selected_shapes.len(), 1);
+    }
+
+    #[test]
+    fn clipboard_events_from_the_desktop_backend_copy_and_paste() {
+        // Regression: the desktop backend sends Ctrl+C/V as Copy/Paste events, not keys, so
+        // the clipboard did nothing in the real app.
+        let ctx = egui::Context::default();
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 20.0,
+            height: 10.0,
+        });
+        app.set_selection([1]);
+        let send = |app: &mut StencilApp, event: egui::Event| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![event],
+                    ..Default::default()
+                },
+                |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let output = send(&mut app, egui::Event::Copy);
+        let copied = output
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text.contains("<svg")));
+        assert!(
+            copied,
+            "Copy puts the selection on the system clipboard as SVG"
+        );
+        send(&mut app, egui::Event::Paste(String::new()));
+        assert_eq!(app.engine.doc.shape_count(), 2, "Paste pastes the shapes");
+        send(&mut app, egui::Event::Cut);
+        assert_eq!(
+            app.engine.doc.shape_count(),
+            1,
+            "Cut removes the pasted copy"
         );
     }
 
@@ -7377,10 +7721,15 @@ mod tests {
         assert_eq!(app.engine.doc.shape_count(), 2);
         assert_eq!(app.selected_shape, Some(2));
         assert_eq!(app.selected_shapes, vec![2]);
-        assert_eq!(
-            app.engine.doc.get_shape(1).unwrap().bounds(),
-            app.engine.doc.get_shape(2).unwrap().bounds()
+        // Silhouette places a duplicate 40 screen pixels to the right.
+        let step = 40.0 / f64::from(app.view.zoom);
+        let original = app.engine.doc.get_shape(1).unwrap().bounds().unwrap();
+        let copy = app.engine.doc.get_shape(2).unwrap().bounds().unwrap();
+        assert!(
+            (copy.x0 - original.x0 - step).abs() < 1e-6,
+            "{original:?} {copy:?}"
         );
+        assert!((copy.y0 - original.y0).abs() < 1e-6);
         assert_eq!(
             app.engine.doc.get_shape(1).unwrap().style,
             app.engine.doc.get_shape(2).unwrap().style

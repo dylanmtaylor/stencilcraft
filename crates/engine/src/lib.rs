@@ -241,6 +241,9 @@ pub enum Command {
         join: JoinStyle,
         #[serde(default = "default_miter_limit")]
         miter_limit: f64,
+        /// Unite overlapping offsets (of the same cut style) into one outline.
+        #[serde(default)]
+        weld: bool,
     },
     /// Add a layer with a name and a production kind.
     #[serde(rename = "layer.add")]
@@ -1371,6 +1374,7 @@ impl Engine {
                 distance_mm,
                 join,
                 miter_limit,
+                weld,
             } => {
                 const C: &str = "shapes.offset";
                 let shapes = self.selected_shapes(&ids, C)?;
@@ -1383,6 +1387,12 @@ impl Engine {
                             .map_err(|error| EngineError::Invalid(format!("{C}: {error}")))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
+                let outlines = if weld {
+                    weld_by_style(outlines)
+                        .map_err(|e| EngineError::Invalid(format!("{C}: {e}")))?
+                } else {
+                    outlines
+                };
                 self.add_replicas(&outlines, &[kurbo::Affine::IDENTITY], C)
             }
             Command::LayerAdd { name, kind } => {
@@ -3008,6 +3018,29 @@ impl Engine {
         self.restore_history_entry(&next);
         true
     }
+}
+
+/// `paths` with those of each cut style united into one outline (Offset's weld option).
+pub fn weld_by_style(paths: Vec<(BezPath, CutStyle)>) -> Result<Vec<(BezPath, CutStyle)>, String> {
+    let mut out: Vec<(BezPath, CutStyle)> = Vec::new();
+    for (path, style) in paths {
+        match out.iter_mut().find(|(_, s)| *s == style) {
+            Some((united, _)) => {
+                *united = vectorcraft_pathops::try_boolean(
+                    &vectorcraft_geom::PathData::from_bezpath(united),
+                    vectorcraft_geom::FillRule::NonZero,
+                    &vectorcraft_geom::PathData::from_bezpath(&path),
+                    vectorcraft_geom::FillRule::NonZero,
+                    vectorcraft_pathops::BoolOp::Union,
+                    0.001,
+                )
+                .map_err(|e| e.to_string())?
+                .to_bezpath();
+            }
+            None => out.push((path, style)),
+        }
+    }
+    Ok(out)
 }
 
 fn bridge_width() -> f64 {
@@ -5144,6 +5177,7 @@ mod tests {
                     distance_mm: distance,
                     join,
                     miter_limit: 4.0,
+                    weld: false,
                 },
             );
             assert_eq!(engine.doc.shape_count(), 2, "the original stays");
@@ -5160,9 +5194,77 @@ mod tests {
                 ids: vec![1],
                 distance_mm: -0.5,
                 join: JoinStyle::Miter,
-                miter_limit: 4.0
+                miter_limit: 4.0,
+                weld: false,
             }
         );
+    }
+
+    #[test]
+    fn offset_weld_unites_overlapping_outlines() {
+        let mut engine = Engine::default();
+        for x in [0.0, 8.0] {
+            engine
+                .run(Command::ShapeAddRect {
+                    x,
+                    y: 0.0,
+                    width: 10.0,
+                    height: 10.0,
+                })
+                .unwrap();
+        }
+        let ids: Vec<u64> = engine.doc.shapes().map(|(_, s)| s.id).collect();
+        let run = |engine: &mut Engine, weld| {
+            let before = engine.doc.shape_count();
+            engine
+                .run(Command::ShapesOffset {
+                    ids: ids.clone(),
+                    distance_mm: 2.0,
+                    join: JoinStyle::Round,
+                    miter_limit: 4.0,
+                    weld,
+                })
+                .unwrap();
+            engine.doc.shape_count() - before
+        };
+        assert_eq!(run(&mut engine, false), 2, "one offset per shape");
+        assert!(engine.undo());
+        assert_eq!(
+            run(&mut engine, true),
+            1,
+            "overlapping offsets weld into one"
+        );
+        let welded = engine
+            .doc
+            .shapes()
+            .last()
+            .map(|(_, s)| s.path.clone())
+            .unwrap();
+        let b = kurbo::Shape::bounding_box(&welded);
+        assert!(
+            (b.x0 + 2.0).abs() < 1e-3 && (b.y0 + 2.0).abs() < 1e-3 && (b.x1 - 20.0).abs() < 1e-3,
+            "the weld keeps every offset corner: {b:?}"
+        );
+        // Every point of the outline is 2 mm outside the squares: no corner is cut short.
+        let mut points = Vec::new();
+        kurbo::flatten(welded.iter(), 0.01, |el| {
+            if let kurbo::PathEl::LineTo(p) | kurbo::PathEl::MoveTo(p) = el {
+                points.push(p);
+            }
+        });
+        let gap = |p: kurbo::Point| {
+            [(0.0, 10.0), (8.0, 18.0)]
+                .iter()
+                .map(|(x0, x1)| {
+                    let dx = (x0 - p.x).max(p.x - x1).max(0.0);
+                    let dy = (0.0 - p.y).max(p.y - 10.0).max(0.0);
+                    dx.hypot(dy)
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        for p in points {
+            assert!((gap(p) - 2.0).abs() < 0.05, "{p:?} is {} mm out", gap(p));
+        }
     }
 
     #[test]
@@ -5215,12 +5317,14 @@ mod tests {
                 distance_mm: f64::NAN,
                 join: JoinStyle::Round,
                 miter_limit: 4.0,
+                weld: false,
             },
             Command::ShapesOffset {
                 ids: vec![1],
                 distance_mm: 1.0,
                 join: JoinStyle::Miter,
                 miter_limit: 0.0,
+                weld: false,
             },
         ];
         for command in bad {

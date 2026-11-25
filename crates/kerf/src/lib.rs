@@ -261,7 +261,27 @@ fn offset_shape_path(
     delta: f64,
     options: &OffsetOptions,
 ) -> Result<kurbo::BezPath, KerfError> {
-    let lines = Polyline::from_path(path);
+    // A closed contour drawn back to its start before closing (as rectangles are) repeats
+    // its first point; that zero-length edge would put an offset vertex on the original
+    // corner, so repeated points are dropped first.
+    let lines: Vec<Polyline> = Polyline::from_path(path)
+        .into_iter()
+        .map(|mut pl| {
+            pl.points.dedup_by(|a, b| a.distance(*b) <= 1e-9);
+            if pl.closed {
+                while pl.points.len() > 1
+                    && pl
+                        .points
+                        .first()
+                        .zip(pl.points.last())
+                        .is_some_and(|(a, b)| a.distance(*b) <= 1e-9)
+                {
+                    pl.points.pop();
+                }
+            }
+            pl
+        })
+        .collect();
     let mut moved: Vec<Polyline> = Vec::with_capacity(lines.len());
     for (i, pl) in lines.iter().enumerate() {
         if !pl.closed || pl.points.len() < 3 {
@@ -332,6 +352,44 @@ fn in_ring(p: &Point, ring: &[Point]) -> bool {
         }
     }
     inside
+}
+
+#[cfg(test)]
+mod closing_segment_tests {
+    use super::*;
+
+    /// Regression: a contour drawn back to its start before closing (as the engine's
+    /// rectangles are) left a vertex of the offset on the original corner.
+    #[test]
+    fn a_repeated_start_point_does_not_pin_the_offset_to_the_corner() {
+        let mut p = kurbo::BezPath::new();
+        p.move_to((0.0, 0.0));
+        p.line_to((10.0, 0.0));
+        p.line_to((10.0, 10.0));
+        p.line_to((0.0, 10.0));
+        p.line_to((0.0, 0.0));
+        p.close_path();
+        let options = OffsetOptions {
+            join: JoinStyle::Round,
+            miter_limit: 4.0,
+        };
+        let out = offset_path(&p, 2.0, &options).expect("offset");
+        let mut inside = Vec::new();
+        kurbo::flatten(out.iter(), 0.01, |el| {
+            if let kurbo::PathEl::LineTo(q) | kurbo::PathEl::MoveTo(q) = el
+                && q.x > -1.0
+                && q.x < 11.0
+                && q.y > -1.0
+                && q.y < 11.0
+            {
+                inside.push(q);
+            }
+        });
+        assert!(
+            inside.is_empty(),
+            "points left inside the offset: {inside:?}"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -213,7 +213,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 31. **Weld on cut and cut by layer**: the job layer has weld on cut (`cut --weld`, MCP
     `weld`), and the desktop Send tab has Silhouette's send modes: Standard, or a row per
     line colour, fill colour or layer, each with on/off, cut/draw, pressure, speed and
-    passes, cut one after another. Missing: weld on cut in the desktop, per-row tool
+    passes, cut one after another; Send › Advanced has weld on cut. Missing: per-row tool
     holder and material, a chosen row order, and weld treats a shape lying wholly inside
     another as a hole. Per-row cutting is untested on hardware.
 32. **Path construction**: Join, Average, Break, Close, Merge/Delete Points, compound
@@ -264,7 +264,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     shapes for Unite, Subtract, Intersect and Exclude and can uncombine them; the
     desktop Pathfinder remains destructive and needs a live-combine workflow.
 44. **Offset UI**: the desktop Offset panel previews and applies `shapes.offset` with
-    join style and miter limit. A weld-offsets option remains missing.
+    join style and miter limit, and can weld overlapping offsets into one outline.
 45. **Templates and Guide layers**: a layer can be a guide layer (Layers panel: shown,
     never cut). Missing: built-in sizing backgrounds (shirt, mug, card blanks) and document
     presets ("base type").

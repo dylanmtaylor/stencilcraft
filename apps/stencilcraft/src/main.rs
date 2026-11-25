@@ -8,8 +8,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use craft_draw::ui::pen::{
-    BezierHit, BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown,
-    PathEdit, PathSelection, PenDraft, PenNames,
+    BezierHit, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathEdit,
+    PathSelection, PenDraft,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
@@ -232,6 +232,111 @@ pub struct DragMods {
     pub square: bool,
     /// Alt: the press point is the centre of the shape.
     pub from_centre: bool,
+}
+
+/// The one anchor a node drag moved, snapped as the node overlay snapped it before: an open end
+/// dragged within `join_reach` of another open end lands on it (it joins on release), otherwise the
+/// anchor snaps by the document's snap settings unless `off` (Ctrl/Cmd, a suspended snap). Its
+/// handles move with it.
+pub fn snap_moved_anchor(
+    edited: &mut [EditSubpath],
+    change: &PathEdit,
+    doc: &stencilcraft_doc::Document,
+    exclude: &[u64],
+    join_reach: f64,
+    off: bool,
+) {
+    let PathEdit::MoveAnchors { anchors, .. } = change else {
+        return;
+    };
+    let [moved] = anchors.as_slice() else {
+        return;
+    };
+    let Some(at) = edited
+        .get(moved.subpath)
+        .and_then(|s| s.knots.get(moved.knot))
+        .map(|k| k.anchor)
+    else {
+        return;
+    };
+    let join = stencilcraft_ui_egui::open_path_ends(edited)
+        .contains(moved)
+        .then(|| stencilcraft_ui_egui::open_end_near(edited, *moved, at, join_reach))
+        .flatten()
+        .and_then(|end| edited.get(end.subpath)?.knots.get(end.knot))
+        .map(|k| k.anchor);
+    let snapped = match join {
+        Some(target) => target,
+        None if off => return,
+        None => snap_point_in(doc, at, exclude),
+    };
+    if let Some(knot) = edited
+        .get_mut(moved.subpath)
+        .and_then(|s| s.knots.get_mut(moved.knot))
+    {
+        let shift = snapped - knot.anchor;
+        knot.anchor = snapped;
+        knot.in_ctrl += shift;
+        knot.out_ctrl += shift;
+    }
+}
+
+/// The affine that maps the selection box's start `bounds` onto `state`'s quad (scale and
+/// rotation; the box allows no skew or distortion). `None` for an empty or non-finite box.
+pub fn box_affine(
+    bounds: stencilcraft_geom::Rect,
+    state: &craft_behavior::geometry::quad::BoxState,
+) -> Option<craft_behavior::kurbo::Affine> {
+    let (w, h) = (bounds.width(), bounds.height());
+    if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let [q0, q1, _, q3] = state.quad;
+    let ux = (q1 - q0) / w;
+    let uy = (q3 - q0) / h;
+    let (a, b, c, d) = (ux.x, ux.y, uy.x, uy.y);
+    let e = q0.x - a * bounds.x0 - c * bounds.y0;
+    let f = q0.y - b * bounds.x0 - d * bounds.y0;
+    let coeffs = [a, b, c, d, e, f];
+    coeffs
+        .iter()
+        .all(|v| v.is_finite())
+        .then(|| craft_behavior::kurbo::Affine::new(coeffs))
+}
+
+/// Paints `rows` (a label and a value each) beside the pointer at `at` for this pass: the value
+/// readout of a canvas gesture.
+pub fn pointer_readout(ui: &egui::Ui, at: egui::Pos2, rows: &[(&str, String)]) {
+    let env = craft_ui::runtime::env::Env::of(ui);
+    let rows: Vec<(craft_ui::runtime::env::Label, String)> = rows
+        .iter()
+        .map(|(label, value)| (craft_ui::runtime::env::Label::from(*label), value.clone()))
+        .collect();
+    craft_ui::contract::ghost::readout(ui.ctx(), &env.view(), at, &rows);
+}
+
+/// The first guide of `before` that `after` moves, turns or removes, as a drag preview.
+pub fn guide_change(
+    before: &[craft_ui::canvas::Guide],
+    after: &[craft_ui::canvas::Guide],
+) -> Option<stencilcraft_ui_egui::GuidePreview> {
+    before.iter().find_map(|old| {
+        match after.iter().find(|g| g.key == old.key) {
+            None => Some(stencilcraft_ui_egui::GuidePreview {
+                key: old.key,
+                along: old.along,
+                at: None,
+            }),
+            Some(new) if new.along != old.along || new.position != old.position => {
+                Some(stencilcraft_ui_egui::GuidePreview {
+                    key: new.key,
+                    along: new.along,
+                    at: Some(new.position),
+                })
+            }
+            Some(_) => None,
+        }
+    })
 }
 
 /// `p` snapped by the document's snap settings, ignoring shapes `exclude` (a dragged node
@@ -1027,7 +1132,7 @@ pub struct StencilApp {
     pub speed_before: Option<f64>,
     pub zoom_before: Option<f64>,
     /// A ruler guide being dragged on the canvas: its key and where it is now.
-    pub guide_preview: Option<(u64, craft_ui::canvas::GuidePlace)>,
+    pub guide_preview: Option<stencilcraft_ui_egui::GuidePreview>,
     /// The selection's bounds when a move drag began, so snapping works from the start.
     pub drag_origin: Option<stencilcraft_geom::Rect>,
     /// Smart guides: the lines the last snap of a move drag found, in millimetres.
@@ -1112,6 +1217,8 @@ pub struct StencilApp {
     pub bezier_live_path: Option<(u64, stencilcraft_geom::BezPath)>,
     pub handles_shown: HandlesShown,
     pub pen_draft: Option<EditSubpath>,
+    /// The Pen tool on the canvas's tool host; it keeps its run between frames.
+    pub pen_tool: craft_draw::ui::pen::PenTool,
     /// Set by Cmd+Z while a pen path is being drawn: the pen drops its last anchor this frame
     /// instead of the document undoing its last command.
     pub pen_undo_requested: bool,
@@ -1130,7 +1237,7 @@ pub struct StencilApp {
     /// A drag on the trace box: what it grabs, the box before and the press point.
     pub trace_area_grab: Option<(trace_panel::AreaGrab, [f64; 4], stencilcraft_geom::Point)>,
     /// The selection box part under the pointer, which picks how a drag of it scales.
-    pub box_part: Option<craft_ui::canvas::quad::BoxPart>,
+    pub box_part: Option<craft_behavior::geometry::quad::BoxPart>,
     /// The transform a selection-box drag would apply, previewed until release.
     pub box_preview: Option<craft_behavior::kurbo::Affine>,
     /// The Arc tool after its first drag: centre and radius are set, the sweep follows the pointer.
@@ -1408,6 +1515,7 @@ impl StencilApp {
             bezier_live_path: None,
             handles_shown: HandlesShown::Selected,
             pen_draft: None,
+            pen_tool: craft_draw::ui::pen::PenTool::new(),
             pen_undo_requested: false,
             click_draft: None,
             image_textures: std::collections::HashMap::new(),
@@ -2275,36 +2383,51 @@ impl StencilApp {
     /// Turn a canvas guide edit into `guide.*` commands: a drag shows as a preview and
     /// commits once; a guide dragged out of a ruler is added; one dropped off the page
     /// (or deleted) is removed. Keys are guide index + 1 ([`stencilcraft_ui_egui::canvas_guides`]).
-    pub fn apply_guide_event(
+    ///
+    /// `before` is the document's guides as the canvas shows them with no drag
+    /// ([`stencilcraft_ui_egui::canvas_guides`] with no preview); `events` the guides control's edit
+    /// of the whole list, which this pass changes at most one guide of.
+    pub fn apply_guide_edit(
         &mut self,
-        event: Option<(Option<u64>, EditEvent<craft_ui::canvas::GuidePlace>)>,
+        before: &[craft_ui::canvas::Guide],
+        events: &craft_behavior::EditEvents<Vec<craft_ui::canvas::Guide>>,
     ) {
-        let Some((key, event)) = event else {
+        if events.is_empty() {
+            return;
+        }
+        if events.cancel_reason().is_some() {
+            self.guide_preview = None;
+            return;
+        }
+        let Some(after) = events.landed() else {
+            if let Some(proposed) = events.value() {
+                self.guide_preview = guide_change(before, proposed);
+            }
             return;
         };
-        match (key, event) {
-            (
-                Some(key),
-                EditEvent::Begin {
-                    value: Some(place), ..
-                },
-            )
-            | (Some(key), EditEvent::Update { value: place, .. }) => {
-                self.guide_preview = Some((key, place));
-            }
-            (_, EditEvent::Cancel { .. }) => self.guide_preview = None,
-            (key, EditEvent::Commit { value: place, .. } | EditEvent::Set { value: place, .. }) => {
-                self.guide_preview = None;
-                let axis = match place.orientation {
-                    craft_ui::canvas::Orientation::Horizontal => {
-                        stencilcraft_doc::GuideAxis::Horizontal
-                    }
-                    craft_ui::canvas::Orientation::Vertical => {
-                        stencilcraft_doc::GuideAxis::Vertical
-                    }
+        self.guide_preview = None;
+        // A moved, turned or removed guide, else one dragged out of a ruler (a key not shown before).
+        let added = after
+            .iter()
+            .find(|g| !before.iter().any(|b| b.key == g.key));
+        let (index, along, position) = match (guide_change(before, after), added) {
+            (Some(change), _) => (
+                before.iter().position(|g| g.key == change.key),
+                change.along,
+                change.at,
+            ),
+            (None, Some(guide)) => (None, guide.along, Some(guide.position)),
+            (None, None) => return,
+        };
+        {
+            {
+                // A horizontal guide runs along x.
+                let axis = if along == craft_behavior::Axis::X {
+                    stencilcraft_doc::GuideAxis::Horizontal
+                } else {
+                    stencilcraft_doc::GuideAxis::Vertical
                 };
-                let index = key.and_then(|k| usize::try_from(k.checked_sub(1)?).ok());
-                let command = match (index, place.position) {
+                let command = match (index, position) {
                     (None, Some(position_mm)) => DocumentCommand::GuideAdd { axis, position_mm },
                     (None, None) => return,
                     (Some(index), None) => DocumentCommand::GuideRemove { index },
@@ -2323,7 +2446,6 @@ impl StencilApp {
                 };
                 self.run_command(Command::Document(command));
             }
-            _ => {}
         }
     }
 
@@ -5403,15 +5525,22 @@ impl StencilApp {
     }
 
     pub fn canvas_body(&mut self, ui: &mut egui::Ui) {
+        use craft_behavior::geometry::quad::{BoxAllow, BoxPart, BoxRules, BoxState, ScaleRule};
+        use craft_draw::ui::pen::PenEvent;
+        use craft_ui::canvas::{Canvas, CanvasScrollbars, RulerText, Rulers, ToolHost, tool_pass};
+        use craft_ui::canvas_controls::Guides;
+        use craft_ui::contract::ShowContainer as _;
+        use craft_ui::runtime::env::UnitKind;
         let mut doc = self.engine.doc.clone();
         if let Some(width_mm) = self.kerf_draft {
             doc.kerf.width_mm = width_mm;
         }
         let backdrop = mat_backdrop(self.mat);
         let full_rect = ui.available_rect_before_wrap();
-        let tokens = <craft_ui::theme::Tokens as craft_ui::theme::TokensOf>::of(ui);
+        // The view lies inside the rulers' strips while they show (the canvas lays them out).
         let clip = if self.prefs.show_rulers {
-            Rulers::content_rect(&tokens, full_rect)
+            let (top, left, _) = Rulers::strips(ui, full_rect);
+            egui::Rect::from_min_max(egui::pos2(left.max.x, top.max.y), full_rect.max)
         } else {
             full_rect
         };
@@ -5447,6 +5576,37 @@ impl StencilApp {
             self.view.zoom_at(zoom / self.view.zoom, clip.center());
         }
 
+        let view = self.view;
+        let canvas_view = self.view.to_canvas_view(clip);
+        let length_unit = stencilcraft_ui_egui::length_unit();
+        let unit_kind = match length_unit {
+            stencilcraft_ui_egui::LengthUnit::Millimetres => UnitKind::Millimetres,
+            stencilcraft_ui_egui::LengthUnit::Centimetres => UnitKind::Centimetres,
+            stencilcraft_ui_egui::LengthUnit::Inches => UnitKind::Inches,
+        };
+        // The canvas publishes the units to its rulers, guides, node overlay and selection box.
+        let mm_units = RulerText::new(
+            craft_behavior::RulerUnits::new(
+                length_unit.per_mm(),
+                craft_behavior::Ticks::decimal(false),
+            ),
+            unit_kind,
+        );
+        let guides_before = stencilcraft_ui_egui::canvas_guides(&doc.guides, None);
+        let guides_shown = stencilcraft_ui_egui::canvas_guides(&doc.guides, self.guide_preview);
+        let scroll_document = stencilcraft_ui_egui::scroll_extent(extent_width, extent_height);
+        let canvas_id = ui.id().with("stencil-canvas");
+        let mut origin = self.ruler_origin;
+        let mut canvas = Canvas::new("Canvas")
+            .id(canvas_id)
+            .view(canvas_view)
+            .rulers(mm_units, mm_units);
+        if self.prefs.show_rulers {
+            canvas = canvas.with_rulers(Some(Rulers::new("Rulers", Bind::bound(&mut origin))));
+        }
+        let shown = canvas.show_at(ui, full_rect, |ui, body| {
+        // The measuring run has no tool pass: the app's canvas runs once, in the real run.
+        let pass = tool_pass(&body.env)?;
         let response = ui.allocate_rect(clip, egui::Sense::click_and_drag());
         framework::host_canvas(ui.ctx(), response.id);
         let preview_updated = self.kerf_preview && self.update_kerf_preview_cache(&doc);
@@ -5553,65 +5713,23 @@ impl StencilApp {
 
         // Scroll bars over the mat/board extent (plus a margin): drag one to bring the mat
         // back after scrolling or zooming it out of view.
-        let mut scroll_view = self.view.to_canvas_view(clip);
-        let bars = craft_ui::canvas::CanvasScrollbars::new(
-            "stencil-scrollbars",
-            craft_ui::canvas::ScrollbarNames::new("Horizontal scroll", "Vertical scroll"),
-        )
-        .overscroll(true)
-        .show(
-            ui,
-            &mut scroll_view,
-            stencilcraft_ui_egui::scroll_extent(extent_width, extent_height),
-        );
-        if bars.changed {
-            self.view.from_canvas_view(&scroll_view);
+        let bars = CanvasScrollbars::new("Scroll bars", Bind::given(canvas_view), scroll_document)
+            .show_at(ui, clip);
+        if let Some(scrolled) = bars.view.value() {
+            self.view.from_canvas_view(scrolled);
             ui.ctx().request_repaint();
         }
-        let canvas_view = self.view.to_canvas_view(clip);
         let mut guides_claimed = bars.over;
-        let length_unit = stencilcraft_ui_egui::length_unit();
-        let mm_units = RulerUnits {
-            per_doc: length_unit.per_mm(),
-            ticks: craft_ui::canvas::Ticks::Decimal { whole: false },
-            numbers: self.locale_numbers.clone(),
-            unit: Unit::new(length_unit.template()),
-            decimals: length_unit.decimals(),
-        };
 
-        let guides_id = if self.prefs.show_guides {
-            let shown = stencilcraft_ui_egui::canvas_guides(&doc.guides, self.guide_preview);
-            let guides = craft_ui::canvas::Guides::new(
-                "stencil-guides",
-                &shown,
-                &mm_units,
-                &mm_units,
-                craft_ui::canvas::GuideNames::new("Guides", "Vertical guide", "Horizontal guide"),
-            )
-            .zero(self.ruler_origin)
-            .show(ui, &response, &canvas_view);
-            self.apply_guide_event(guides.event);
-            guides_claimed = guides.claimed;
-            Some(guides.id)
-        } else {
-            None
-        };
-
-        if self.prefs.show_rulers {
-            let r = Rulers::new(
-                "stencil-rulers",
-                &mm_units,
-                &mm_units,
-                RulerNames::new("Horizontal ruler", "Vertical ruler", "Ruler origin"),
-            )
-            .zero(self.ruler_origin)
-            .show(ui, full_rect, &canvas_view, guides_id);
-            if r.reset_origin {
-                self.ruler_origin = stencilcraft_geom::Point::ZERO;
-            }
-            if let Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) = r.origin {
-                self.ruler_origin = value;
-            }
+        if self.prefs.show_guides {
+            let guides = Guides::new("Guides", canvas_id, Bind::given(guides_shown.clone()))
+                .interactive(true)
+                .show_at(ui, body.rect);
+            self.apply_guide_edit(&guides_before, &guides.edit.events);
+            // A press on a guide never reaches the canvas below it.
+            guides_claimed |= guides.edit.response.hovered()
+                || guides.edit.response.dragged()
+                || !guides.edit.events.is_empty();
         }
 
         let mut overlay_claimed = guides_claimed;
@@ -5637,73 +5755,42 @@ impl StencilApp {
                 .filter_map(|&id| {
                     let shape = self.engine.doc.get_shape(id)?;
                     let subpaths = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
-                    Some(EditPath {
-                        key: id,
-                        subpaths,
-                        color: None,
-                    })
+                    Some(EditPath::new(id, subpaths))
                 })
                 .collect();
 
             // Within 8 px an open end is "on" another (as for shape hit tests).
             let join_reach = 8.0 / f64::from(view.zoom.max(f32::EPSILON));
-            let (snap_doc, snap_off, snap_exclude) = (
-                &self.engine.doc,
-                self.snap_suspended,
-                self.selected_shapes.clone(),
-            );
+            // Dragged points snap like everything else (grid, guides, other shapes); Ctrl (Cmd)
+            // suspends it.
+            let snap_off = self.snap_suspended || ui.input(|input| input.modifiers.command);
             let b_resp = BezierOverlay::new(
-                "stencil-bezier-overlay",
-                &edit_paths,
+                "Paths",
+                Bind::given(edit_paths.clone()),
                 &self.path_selection,
-                &mm_units,
-                &mm_units,
-                BezierNames::new(
-                    "Paths",
-                    "In handle",
-                    "Out handle",
-                    "Select path nodes",
-                    |i, n| format!("Anchor {i} of {n}"),
-                ),
             )
             .tool(b_tool)
             .handles(self.handles_shown)
-            // Silhouette: an open end dragged onto another open end snaps to it (and joins on
-            // release, below).
-            .snap(|hit, at, mods| {
-                if let BezierHit::Anchor { path, knot } = hit
-                    && let Some(edit) = edit_paths.iter().find(|e| e.key == *path)
-                    && stencilcraft_ui_egui::open_path_ends(&edit.subpaths).contains(knot)
-                    && let Some(end) =
-                        stencilcraft_ui_egui::open_end_near(&edit.subpaths, *knot, at, join_reach)
-                    && let Some(target) = edit
-                        .subpaths
-                        .get(end.subpath)
-                        .and_then(|s| s.knots.get(end.knot))
-                {
-                    return target.anchor;
-                }
-                // Dragged points snap like everything else (grid, guides, other shapes);
-                // Ctrl (Cmd) suspends it.
-                if snap_off || mods.command {
-                    return at;
-                }
-                snap_point_in(snap_doc, at, &snap_exclude)
-            })
-            .show(ui, &response, &canvas_view);
+            .show_at(ui, body.rect);
 
-            overlay_claimed = b_resp.claimed;
-            if let Some(sel) = b_resp.select {
+            // The overlay's parts take their presses before the canvas below them.
+            overlay_claimed = b_resp.hover.is_some() || !b_resp.edit.events.is_empty();
+            if let Some(sel) = b_resp.select.clone() {
                 if let Some(pid) = sel.path {
                     self.selected_shape = Some(pid);
                     self.selected_shapes = vec![pid];
                 }
                 self.path_selection = sel;
             }
-            if let Some(ev) = b_resp.event {
-                match ev {
-                    EditEvent::Begin { .. } => {}
-                    EditEvent::Update { value, .. } => {
+            let landed = b_resp.edit.events.landed().is_some();
+            let cancelled = b_resp.edit.events.cancel_reason().is_some();
+            if cancelled {
+                self.bezier_gesture_base = None;
+                self.bezier_live_path = None;
+            } else if let Some(value) = b_resp.change.as_ref() {
+                match landed {
+                    false if b_resp.edit.events.is_empty() => {}
+                    false => {
                         let pid = value.path();
                         if self.bezier_gesture_base.is_none()
                             && let Some(orig) = self.engine.doc.get_shape(pid)
@@ -5714,14 +5801,22 @@ impl StencilApp {
                         if let Some((base_id, ref base)) = self.bezier_gesture_base
                             && base_id == pid
                         {
-                            let edited = stencilcraft_ui_egui::apply_path_edit(base, &value);
+                            let mut edited = stencilcraft_ui_egui::apply_path_edit(base, value);
+                            snap_moved_anchor(
+                                &mut edited,
+                                value,
+                                &self.engine.doc,
+                                &self.selected_shapes,
+                                join_reach,
+                                snap_off,
+                            );
                             self.bezier_live_path = Some((
                                 pid,
                                 stencilcraft_ui_egui::edit_subpaths_to_bezpath(&edited),
                             ));
                         }
                     }
-                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. } => {
+                    true => {
                         let pid = value.path();
                         let base = self
                             .bezier_gesture_base
@@ -5735,9 +5830,17 @@ impl StencilApp {
                             });
                         self.bezier_live_path = None;
                         if let Some(base) = base {
-                            let mut edited = stencilcraft_ui_egui::apply_path_edit(&base, &value);
+                            let mut edited = stencilcraft_ui_egui::apply_path_edit(&base, value);
+                            snap_moved_anchor(
+                                &mut edited,
+                                value,
+                                &self.engine.doc,
+                                &self.selected_shapes,
+                                join_reach,
+                                snap_off,
+                            );
                             // An open end dropped on another open end rejoins the path.
-                            if let PathEdit::MoveAnchors { anchors, .. } = &value
+                            if let PathEdit::MoveAnchors { anchors, .. } = value
                                 && let [moved] = anchors.as_slice()
                                 && let Some(at) = edited
                                     .get(moved.subpath)
@@ -5757,11 +5860,6 @@ impl StencilApp {
                             }
                         }
                     }
-                    EditEvent::Cancel { .. } => {
-                        self.bezier_gesture_base = None;
-                        self.bezier_live_path = None;
-                    }
-                    _ => {}
                 }
             }
             if let Some((pid, seg, t)) = b_resp.insert
@@ -5771,11 +5869,7 @@ impl StencilApp {
                 if let Some(new_knot) = stencilcraft_ui_egui::insert_path_knot(&mut subs, seg, t) {
                     let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&subs);
                     self.run_command(Command::ShapeSetPath { id: pid, path });
-                    self.path_selection = PathSelection {
-                        path: Some(pid),
-                        anchors: vec![new_knot],
-                        segment: None,
-                    };
+                    self.path_selection = PathSelection::new(Some(pid), vec![new_knot], None);
                 }
             }
             // Silhouette: in point editing a click on a line where no point is adds one there.
@@ -5787,6 +5881,7 @@ impl StencilApp {
                     path: pid,
                     segment,
                     t,
+                    ..
                 }) = BezierOverlay::hit_test(
                     &edit_paths,
                     &self.path_selection,
@@ -5803,69 +5898,57 @@ impl StencilApp {
                 {
                     let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&subs);
                     self.run_command(Command::ShapeSetPath { id: pid, path });
-                    self.path_selection = PathSelection {
-                        path: Some(pid),
-                        anchors: vec![new_knot],
-                        segment: None,
-                    };
+                    self.path_selection = PathSelection::new(Some(pid), vec![new_knot], None);
                     self.status = "added a point".to_string();
                 }
             }
             // A right-click on a point or line selects it for the point menu below.
-            if let Some(hit) = &b_resp.context {
+            if let Some((hit, _)) = &b_resp.context {
                 self.path_selection = match *hit {
-                    BezierHit::Anchor { path, knot } => PathSelection {
-                        path: Some(path),
-                        anchors: vec![knot],
-                        segment: None,
-                    },
-                    BezierHit::Segment { path, segment, .. } => PathSelection {
-                        path: Some(path),
-                        anchors: Vec::new(),
-                        segment: Some(segment),
-                    },
-                    BezierHit::Handle { path, knot, .. } => PathSelection {
-                        path: Some(path),
-                        anchors: vec![knot],
-                        segment: None,
-                    },
+                    BezierHit::Anchor { path, knot, .. } | BezierHit::Handle { path, knot, .. } => {
+                        PathSelection::new(Some(path), vec![knot], None)
+                    }
+                    BezierHit::Segment { path, segment, .. } => {
+                        PathSelection::new(Some(path), Vec::new(), Some(segment))
+                    }
+                    _ => self.path_selection.clone(),
                 };
             }
             response.context_menu(|ui| self.point_context_menu(ui));
-            if let Some((pid, knots)) = b_resp.delete {
-                self.remove_path_points(pid, &knots);
+            if let Some(delete) = b_resp.delete {
+                self.remove_path_points(delete.path, &delete.anchors);
             }
         }
 
-        // Interactive PenDraft for Pen tool
+        // The Pen tool: the framework's pen draft, run on the canvas's tool host.
         if self.active_tool == ActiveTool::Pen {
-            let pen_resp = PenDraft::new(
-                "stencil-pen-draft",
-                self.pen_draft.as_ref(),
-                PenNames::new("Cut path being drawn", |i, n| format!("Anchor {i} of {n}")),
-            )
-            .units(&mm_units, &mm_units)
-            .remove_last(std::mem::take(&mut self.pen_undo_requested))
-            .show(ui, &response, &canvas_view);
-
-            overlay_claimed = overlay_claimed || pen_resp.claimed;
-            if let Some(ev) = pen_resp.event {
-                match ev {
-                    EditEvent::Begin { .. } => {}
-                    EditEvent::Update { value, .. } => {
+            if std::mem::take(&mut self.pen_undo_requested) {
+                let _ = self.pen_tool.remove_last();
+            }
+            self.pen_tool
+                .draft(self.pen_draft.as_ref().map(PenDraft::Own));
+            let pen_resp = ToolHost::new().run(ui, &pass, &mut self.pen_tool);
+            overlay_claimed = overlay_claimed || pen_resp.gesture.is_some();
+            for event in self.pen_tool.take_events() {
+                match event {
+                    PenEvent::Edit(EditEvent::Update { value, .. }) => {
                         self.pen_draft = Some(value);
                     }
-                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. } => {
-                        self.pen_draft = Some(value);
+                    PenEvent::Edit(
+                        EditEvent::Commit { after, .. } | EditEvent::Set { after, .. },
+                    ) => {
+                        self.pen_draft = Some(after);
                         self.commit_pen_draft();
                     }
-                    EditEvent::Cancel { .. } => {
+                    PenEvent::Edit(EditEvent::Cancel { .. }) => {
                         self.pen_draft = None;
+                    }
+                    // The pen ended a draft without a commit: commit what the app holds, as before.
+                    PenEvent::Finished(_) if self.pen_draft.is_some() => {
+                        self.commit_pen_draft();
                     }
                     _ => {}
                 }
-            } else if pen_resp.finished {
-                self.commit_pen_draft();
             }
         }
 
@@ -5881,56 +5964,42 @@ impl StencilApp {
             && bounds.width() > 0.0
             && bounds.height() > 0.0
         {
-            use craft_ui::canvas::quad::{BoxAllow, BoxPart, BoxRules, BoxState, ScaleRule};
             let state = BoxState::from_rect(bounds);
-            let rules = BoxRules {
-                scale: if matches!(self.box_part, Some(BoxPart::Corner(_))) {
+            let rules = BoxRules::default()
+                .with_scale(if matches!(self.box_part, Some(BoxPart::Corner(_))) {
                     ScaleRule::Proportional
                 } else {
                     ScaleRule::Free
-                },
-                allow: BoxAllow {
-                    rotate: true,
-                    skew: false,
-                    distort: false,
-                },
-                ..BoxRules::default()
-            };
+                })
+                .with_allow(BoxAllow::new(true, false, false).with_warp(false));
             let r = craft_draw::ui::TransformBox::new(
-                "stencil-selection-box",
-                &state,
-                craft_draw::ui::TransformNames::default(),
+                "Selection box",
+                Bind::given(state),
+                bounds,
+                0.0,
             )
             .rules(rules)
             .rotate_zone(craft_draw::ui::RotateZone::Band)
             .inside_moves(false)
             .reference_point(false)
-            .units(&mm_units, &mm_units)
-            .start(bounds, 0.0)
-            .show(ui, &response, &canvas_view);
-            overlay_claimed = overlay_claimed || r.claimed;
-            match r.event {
-                Some(EditEvent::Begin { .. }) | None => {}
-                Some(EditEvent::Update { value, .. }) => {
-                    self.box_preview = value
-                        .affine_from(bounds)
-                        .map(|a| self.snap_box_scale(bounds, a));
+            .show_at(ui, body.rect);
+            overlay_claimed = overlay_claimed || r.hovered.is_some() || r.held.is_some();
+            if let Some(after) = r.edit.events.landed() {
+                self.box_preview = None;
+                self.snap_lines.clear();
+                if let Some(affine) =
+                    box_affine(bounds, after).map(|a| self.snap_box_scale(bounds, a))
+                    && affine != craft_behavior::kurbo::Affine::IDENTITY
+                {
+                    self.run_command(Command::ShapesAffine {
+                        ids: self.selected_shapes.clone(),
+                        matrix: affine.as_coeffs(),
+                    });
                 }
-                Some(EditEvent::Commit { value, .. } | EditEvent::Set { value, .. }) => {
-                    self.box_preview = None;
-                    self.snap_lines.clear();
-                    if let Some(affine) = value
-                        .affine_from(bounds)
-                        .map(|a| self.snap_box_scale(bounds, a))
-                        && affine != craft_behavior::kurbo::Affine::IDENTITY
-                    {
-                        self.run_command(Command::ShapesAffine {
-                            ids: self.selected_shapes.clone(),
-                            matrix: affine.as_coeffs(),
-                        });
-                    }
-                }
-                Some(_) => self.box_preview = None,
+            } else if let Some(value) = r.edit.value() {
+                self.box_preview = box_affine(bounds, value).map(|a| self.snap_box_scale(bounds, a));
+            } else if !r.edit.events.is_empty() {
+                self.box_preview = None;
             }
             if self.box_preview.is_none() {
                 self.box_part = r.hovered.or(r.picked);
@@ -5952,6 +6021,13 @@ impl StencilApp {
         } else {
             self.box_preview = None;
         }
+        Some((response, overlay_claimed))
+        });
+        self.ruler_origin = origin;
+        let Some(Some((response, overlay_claimed))) = shown.inner else {
+            return;
+        };
+        let painter = ui.painter_at(clip);
 
         // Polyline and Curve: click to place points (Silhouette Studio's tools). Switching to
         // another tool keeps what was placed, like the pen.
@@ -6006,10 +6082,14 @@ impl StencilApp {
             if let Some(mut draft) = self.arc_draft {
                 if let Some(pointer) = response.hover_pos() {
                     draft.track(self.view.screen_to_world(pointer.to_vec2()), snap);
-                    Readout::new("arc-readout")
-                        .row("R", panels::len(draft.radius))
-                        .row("∠", format!("{:.0}°", draft.sweep_degrees()))
-                        .show(ui.ctx(), pointer);
+                    pointer_readout(
+                        ui,
+                        pointer,
+                        &[
+                            ("R", panels::len(draft.radius)),
+                            ("∠", format!("{:.0}°", draft.sweep_degrees())),
+                        ],
+                    );
                 }
                 self.arc_draft = Some(draft);
                 let end = draft.end();
@@ -6051,9 +6131,11 @@ impl StencilApp {
                         &[radius],
                         preview_colour,
                     );
-                    Readout::new("arc-readout")
-                        .row("R", panels::len((world_pt - start).hypot()))
-                        .show(ui.ctx(), pointer);
+                    pointer_readout(
+                        ui,
+                        pointer,
+                        &[("R", panels::len((world_pt - start).hypot()))],
+                    );
                 }
                 if response.drag_stopped()
                     && let (Some(centre), Some(start)) =
@@ -6151,9 +6233,7 @@ impl StencilApp {
                     stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
                 );
                 if let Some(pointer) = response.interact_pointer_pos() {
-                    Readout::new("knife-readout")
-                        .row("L", panels::len((end - start).hypot()))
-                        .show(ui.ctx(), pointer);
+                    pointer_readout(ui, pointer, &[("L", panels::len((end - start).hypot()))]);
                 }
             }
             if response.drag_stopped()
@@ -6248,17 +6328,19 @@ impl StencilApp {
                         // Screen y grows downward; report the angle the way it looks.
                         // `+ 0.0` turns -0 into 0 so a level line reads 0°, not -0°.
                         let angle = (-run.y).atan2(run.x).to_degrees() + 0.0;
-                        Readout::new("shape-readout")
-                            .row("L", panels::len(run.hypot()))
-                            .row("∠", format!("{angle:.0}°"))
-                            .show(ui.ctx(), pointer);
+                        pointer_readout(
+                            ui,
+                            pointer,
+                            &[("L", panels::len(run.hypot())), ("∠", format!("{angle:.0}°"))],
+                        );
                     } else {
                         let drag = drag_box(start, world_pt, mods);
                         let (w, h) = (drag.width(), drag.height());
-                        Readout::new("shape-readout")
-                            .row("W", panels::len(w))
-                            .row("H", panels::len(h))
-                            .show(ui.ctx(), pointer);
+                        pointer_readout(
+                            ui,
+                            pointer,
+                            &[("W", panels::len(w)), ("H", panels::len(h))],
+                        );
                     }
                 }
             }
@@ -6462,12 +6544,16 @@ impl StencilApp {
                     )
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
-                    Readout::new("move-readout")
-                        .row("X", panels::len(b.x0))
-                        .row("Y", panels::len(b.y0))
-                        .row("W", panels::len(b.width()))
-                        .row("H", panels::len(b.height()))
-                        .show(ui.ctx(), pointer);
+                    pointer_readout(
+                        ui,
+                        pointer,
+                        &[
+                            ("X", panels::len(b.x0)),
+                            ("Y", panels::len(b.y0)),
+                            ("W", panels::len(b.width())),
+                            ("H", panels::len(b.height())),
+                        ],
+                    );
                 }
             }
             if response.dragged()
@@ -6539,7 +6625,10 @@ impl StencilApp {
             self.snap_lines.clear();
         }
         if self.prefs.smart_guides && !self.snap_lines.is_empty() {
-            let color = craft_ui::canvas::Guides::style(&tokens).smart;
+            // The smart guide colour of the canvas controls: the theme's `data.magenta`.
+            let env = craft_ui::runtime::env::Env::of(ui);
+            let style = craft_ui::style::StyleCx::of_env(ui.ctx(), &env);
+            let color = style.color(style.tokens.color.data.magenta).egui();
             stencilcraft_ui_egui::paint_snap_lines(&painter, &self.view, &self.snap_lines, color);
         }
 

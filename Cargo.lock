@@ -5795,7 +5795,9 @@ dependencies = [
  "craft-atomic",
  "craft-behavior",
  "craft-draw",
+ "craft-host",
  "craft-jsonrpc",
+ "craft-keymap",
  "craft-raster-codecs",
  "craft-settings",
  "craft-theme",
@@ -6086,6 +6088,7 @@ dependencies = [
 name = "stencilcraft-ui-egui"
 version = "0.1.0"
 dependencies = [
+ "craft-behavior",
  "craft-draw",
  "craft-theme",
  "craft-ui",

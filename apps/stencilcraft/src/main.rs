@@ -7263,6 +7263,7 @@ mod tests {
     #[test]
     fn command_d_duplicates_the_selection_and_selects_the_copies() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.run_command(Command::ShapeAddRect {
             x: 3.0,
@@ -7329,6 +7330,7 @@ mod tests {
     #[test]
     fn shifted_shortcuts_are_not_taken_by_their_unshifted_twins() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.run_command(Command::ShapeAddRect {
             x: 3.0,
@@ -7364,6 +7366,7 @@ mod tests {
     #[test]
     fn command_a_selects_every_shape_on_the_canvas() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         for x in [3.0, 23.0, 43.0] {
             app.run_command(Command::ShapeAddRect {
@@ -7399,6 +7402,7 @@ mod tests {
             (egui::Key::C, CanvasViewCommand::Center),
         ] {
             let ctx = egui::Context::default();
+            crate::framework::install_headless(&ctx).unwrap();
             let mut app = StencilApp::new(None);
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -7473,6 +7477,7 @@ mod tests {
     #[test]
     fn wheel_zoom_keeps_the_point_under_the_pointer() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
         let pointer = egui::pos2(300.0, 250.0);
@@ -7523,6 +7528,7 @@ mod tests {
     #[test]
     fn zoom_buttons_zoom_about_the_canvas_centre() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
         let frame = |app: &mut StencilApp| {
@@ -7560,6 +7566,7 @@ mod tests {
     #[test]
     fn canvas_view_shortcuts_are_ignored_while_text_input_is_wanted() {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         let mut text = String::new();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -7880,6 +7887,7 @@ mod tests {
             (egui::Key::Backspace, true),
         ] {
             let ctx = egui::Context::default();
+            crate::framework::install_headless(&ctx).unwrap();
             let mut app = StencilApp::new(None);
             app.run_command(Command::ShapeAddRect {
                 x: 3.0,
@@ -7910,6 +7918,7 @@ mod tests {
 
     fn press_key(app: &mut StencilApp, key: egui::Key, modifiers: egui::Modifiers) {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut output = ctx.run_ui(
             egui::RawInput {
                 events: vec![egui::Event::Key {
@@ -7939,11 +7948,8 @@ mod tests {
             });
             app.set_selection([1]);
             app.active_tool = ActiveTool::DirectSelect;
-            app.path_selection = PathSelection {
-                path: Some(1),
-                anchors: vec![craft_draw::ui::pen::KnotRef::new(0, 0)],
-                segment: None,
-            };
+            app.path_selection =
+                PathSelection::new(Some(1), vec![craft_draw::ui::pen::KnotRef::new(0, 0)], None);
             press_key(&mut app, key, egui::Modifiers::NONE);
             assert_eq!(app.engine.doc.shape_count(), 1, "{key:?} kept the shape");
             press_key(&mut app, egui::Key::Escape, egui::Modifiers::NONE);
@@ -8078,11 +8084,8 @@ mod tests {
         let before = stencilcraft_ui_egui::bezpath_to_edit_subpaths(
             &app.engine.doc.get_shape(1).expect("rect").path,
         );
-        app.path_selection = PathSelection {
-            path: Some(1),
-            anchors: vec![craft_draw::ui::pen::KnotRef::new(0, 0)],
-            segment: None,
-        };
+        app.path_selection =
+            PathSelection::new(Some(1), vec![craft_draw::ui::pen::KnotRef::new(0, 0)], None);
         app.handle_edit_action(panels::EditAction::DeleteNodes);
         let shape = app.engine.doc.get_shape(1).expect("triangle left");
         let after = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
@@ -8262,6 +8265,7 @@ mod tests {
         // Regression: the desktop backend sends Ctrl+C/V as Copy/Paste events, not keys, so
         // the clipboard did nothing in the real app.
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.run_command(Command::ShapeAddRect {
             x: 10.0,
@@ -8306,6 +8310,7 @@ mod tests {
         // Regression: after dragging a selection handle the box kept keyboard focus and
         // Cmd+Z (every shortcut but Delete) did nothing.
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
         app.run_command(Command::ShapeAddRect {
             x: 0.0,
@@ -8454,6 +8459,7 @@ mod tests {
     fn delete_preserves_text_input_but_works_with_button_focus() {
         for text_focus in [true, false] {
             let ctx = egui::Context::default();
+            crate::framework::install_headless(&ctx).unwrap();
             let mut app = StencilApp::new(None);
             app.run_command(Command::ShapeAddRect {
                 x: 3.0,
@@ -8901,6 +8907,7 @@ mod tests {
     /// Feed raw events through the keyboard handler, as one frame.
     fn type_events(app: &mut StencilApp, events: Vec<egui::Event>) {
         let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
         let mut output = ctx.run_ui(
             egui::RawInput {
                 events,

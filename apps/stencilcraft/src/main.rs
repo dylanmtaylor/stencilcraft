@@ -7,7 +7,6 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use crate::operations::{OpDrag, OperationPreset};
 use craft_draw::ui::pen::{
     BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
     PenDraft, PenNames,
@@ -15,7 +14,7 @@ use craft_draw::ui::pen::{
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
 use craft_theme::{ControlSize, TypeRole};
-use craft_ui::behavior::{Axis, DropPosition, Move, Reorder, RowInfo, Selection};
+use craft_ui::behavior::{RowInfo, Selection};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
@@ -89,6 +88,9 @@ pub struct UserPrefs {
     /// Import source styling as operation layers instead of keeping geometry untouched
     /// with non-binding hints (ADR 0001, GEO-03; default false).
     pub import_legacy_style_operations: bool,
+    /// Bulk "new operation" actions over more shapes than this ask first
+    /// ("Create N operations? Continue?") (D-07; default 10).
+    pub bulk_confirm_threshold: u32,
 }
 
 /// The keyboard modifier that turns an Add Layer click into the operation popup (D-02).
@@ -127,6 +129,7 @@ impl Default for UserPrefs {
             recent_new: Vec::new(),
             op_popup_modifier: OpPopupModifier::default(),
             import_legacy_style_operations: false,
+            bulk_confirm_threshold: 10,
         }
     }
 }
@@ -624,18 +627,21 @@ pub enum CanvasViewCommand {
     Rotate(u8),
 }
 
-/// Stable key for one row of the layers tree panel.
+/// Stable key for one row of the geometry tree panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PanelKey {
-    Layer(usize),
-    /// A member leaf under a layer group (layer index keeps N:M memberships unique).
-    Member {
-        layer: usize,
-        shape: u64,
-    },
-    /// A leaf under the derived Unassigned group.
+pub enum GeoKey {
+    /// The ".." row shown while a group is entered.
+    Up,
+    Group(u64),
+    /// A shape leaf (inside a group or under Unassigned).
     Shape(u64),
     Unassigned,
+}
+
+/// Stable key for one row of the operations panel (index into `Document::operations`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OpKey {
+    Op(usize),
 }
 
 /// Pre-built display data for one tree row; the panel never reads the doc mid-pass.
@@ -644,75 +650,182 @@ struct RowVisual {
     detail: String,
     icon: Option<Icon>,
     eye: Option<bool>,
-    lock: Option<bool>,
     swatch: Option<egui::Color32>,
     dimmed: bool,
 }
 
-/// Reorder accepts only layer group rows as drag sources and drop targets —
-/// member leaves, shape leaves and the Unassigned group reject drops (D-11).
-fn layer_rows_only(mv: &Move<PanelKey>) -> bool {
-    mv.items.len() == 1
-        && matches!(mv.items.first(), Some(PanelKey::Layer(_)))
-        && matches!(mv.target, PanelKey::Layer(_))
-        && mv.position != DropPosition::Into
-        && !mv.copy
+/// Display label for an operation: the built-in preset catalogue's label where
+/// the kind matches a preset, the kind's wire name otherwise.
+fn operation_label(op: &stencilcraft_doc::Operation) -> String {
+    operation_preset(op)
+        .map(|preset| preset.label().to_string())
+        .unwrap_or_else(|| op.kind_name().to_string())
 }
 
-/// Map a committed reorder gesture on layer rows to engine `LayerMove` indices.
-/// `to` is the post-removal insert slot the engine's `layer.move` arm expects.
-fn layer_move(mv: &Move<PanelKey>) -> Option<(usize, usize)> {
-    let [PanelKey::Layer(from)] = mv.items.as_slice() else {
-        return None;
-    };
-    let PanelKey::Layer(target) = mv.target else {
-        return None;
-    };
-    let to = match mv.position {
-        DropPosition::Before => {
-            if *from < target {
-                target - 1
-            } else {
-                target
-            }
-        }
-        DropPosition::After => {
-            if *from < target {
-                target
-            } else {
-                target + 1
-            }
-        }
-        DropPosition::Into => return None,
-    };
-    Some((*from, to))
-}
-
-/// Display label for a layer's operation: the built-in preset catalogue's label
-/// where the operation matches a preset, a plain name otherwise.
-fn operation_label(op: &stencilcraft_doc::Operation) -> &'static str {
+/// The icon an operation row shows: the preset catalogue's icon where the kind
+/// matches a preset, the stored icon name's slot otherwise.
+fn operation_icon(op: &stencilcraft_doc::Operation) -> Icon {
     if let Some(preset) = operation_preset(op) {
-        return preset.label();
+        return preset.icon();
     }
-    use stencilcraft_doc::Operation::*;
-    match op {
-        KissCut(_) => "Kiss Cut",
-        DieCut(_) => "Die Cut",
-        Draw(_) => "Draw",
-        Perforate(_) => "Perforate",
-        PrintThenCut(_) => "Print Then Cut",
-        Punch(_) => "Punch",
-        // Cut/Engrave/Score/Guide are always covered by the preset catalogue above.
-        _ => "Operation",
+    match op.icon.as_deref() {
+        Some("scissors") => Icon::Scissors,
+        Some("flame") => Icon::Flame,
+        Some("spline") => Icon::Spline,
+        Some("ruler") => Icon::Ruler,
+        _ => Icon::Settings,
     }
 }
 
-/// The built-in preset whose operation equals `op`, if any.
+/// The built-in preset whose kind equals `op`'s, if any.
 fn operation_preset(op: &stencilcraft_doc::Operation) -> Option<operations::OperationPreset> {
     operations::OperationPreset::ALL
         .iter()
         .copied()
-        .find(|preset| preset.operation() == *op)
+        .find(|preset| preset.kind() == op.kind)
+}
+
+/// The shapes a geometry-panel selection stands for: a group deep-selects to
+/// every shape it holds, nested groups included (D-08).
+fn shapes_of_geo_selection(doc: &stencilcraft_doc::Document, keys: &[GeoKey]) -> Vec<u64> {
+    let mut out: Vec<u64> = Vec::new();
+    for key in keys {
+        match key {
+            GeoKey::Group(id) => {
+                for shape in stencilcraft_ui_egui::layers::group_member_shapes(doc, *id) {
+                    if !out.contains(&shape) {
+                        out.push(shape);
+                    }
+                }
+            }
+            GeoKey::Shape(id) => {
+                if !out.contains(id) {
+                    out.push(*id);
+                }
+            }
+            GeoKey::Up | GeoKey::Unassigned => {}
+        }
+    }
+    out
+}
+
+/// The group that directly contains `id`, if any (for the ".." navigation row).
+fn parent_group(doc: &stencilcraft_doc::Document, id: u64) -> Option<u64> {
+    doc.groups.iter().find_map(|g| {
+        g.children
+            .iter()
+            .any(|c| matches!(c, stencilcraft_doc::GroupChild::Group(inner) if *inner == id))
+            .then_some(g.id)
+    })
+}
+
+/// Append one geometry shape row (skipped when the view-only filter hides it),
+/// with its operation tags as the row detail: `#id #id …` chips (D-09).
+fn push_shape_row(
+    doc: &stencilcraft_doc::Document,
+    hidden_ops: &std::collections::BTreeSet<u64>,
+    row_infos: &mut Vec<RowInfo<GeoKey>>,
+    visuals: &mut Vec<(GeoKey, RowVisual)>,
+    id: u64,
+    depth: usize,
+) {
+    use stencilcraft_ui_egui::layers;
+    if layers::shape_filtered_out(doc, id, hidden_ops) {
+        return;
+    }
+    let key = GeoKey::Shape(id);
+    let tags = layers::operation_tags(doc, id);
+    let detail = tags
+        .iter()
+        .filter_map(|i| doc.operations.get(*i))
+        .map(|op| format!("#{}", op.id))
+        .collect::<Vec<_>>()
+        .join(" ");
+    row_infos.push(RowInfo::leaf(key).at_depth(depth));
+    visuals.push((
+        key,
+        RowVisual {
+            label: format!("#{id}"),
+            detail,
+            icon: Some(Icon::Spline),
+            eye: None,
+            swatch: None,
+            dimmed: tags.is_empty(),
+        },
+    ));
+}
+
+/// A bulk "new operation" action waiting for its confirm gate (D-07).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingBulk {
+    kind: BulkKind,
+    /// Shapes the operations would cover.
+    shapes: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BulkKind {
+    ByColour,
+    AllSelected,
+    EachSelected,
+}
+
+impl BulkKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ByColour => "New operation by colour",
+            Self::AllSelected => "New operation: all selected",
+            Self::EachSelected => "New operation: each selected",
+        }
+    }
+
+    /// The operations this action creates over `shapes`, as (name, color, members).
+    fn plan(
+        self,
+        doc: &stencilcraft_doc::Document,
+        shapes: &[u64],
+    ) -> Vec<(String, Option<String>, Vec<u64>)> {
+        match self {
+            Self::AllSelected => {
+                if shapes.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![("Cut".to_string(), None, shapes.to_vec())]
+                }
+            }
+            Self::EachSelected => shapes
+                .iter()
+                .map(|id| (format!("Cut #{id}"), None, vec![*id]))
+                .collect(),
+            Self::ByColour => {
+                // Group the shapes by their effective operation's colour; ids are
+                // canonical, colour is only the grouping/filter label here (D-06).
+                let mut order: Vec<Option<String>> = Vec::new();
+                let mut groups: Vec<(Option<String>, Vec<u64>)> = Vec::new();
+                for id in shapes {
+                    let color = doc.operation_of_shape(*id).and_then(|op| op.color.clone());
+                    match groups.iter_mut().find(|(c, _)| *c == color) {
+                        Some((_, members)) => members.push(*id),
+                        None => {
+                            order.push(color.clone());
+                            groups.push((color.clone(), vec![*id]));
+                        }
+                    }
+                }
+                let _ = order;
+                groups
+                    .into_iter()
+                    .map(|(color, members)| {
+                        let name = match &color {
+                            Some(c) => format!("Cut {c}"),
+                            None => "Cut".to_string(),
+                        };
+                        (name, color, members)
+                    })
+                    .collect()
+            }
+        }
+    }
 }
 
 pub struct StencilApp {
@@ -748,14 +861,29 @@ pub struct StencilApp {
     pub selected_shape: Option<u64>,
     pub selected_shapes: Vec<u64>,
     pub selected_layer: Option<usize>,
-    /// Which layers-tree groups are expanded (layer indices plus the Unassigned sentinel).
-    pub open_layer_groups: std::collections::BTreeSet<usize>,
-    /// The layers tree's selection.
-    pub layer_selection: Selection<PanelKey>,
-    /// The open operation popup (D-02): the layer it targets and the anchor it hangs from.
-    pub op_popup: Option<(usize, egui::Response)>,
-    /// The open colour-picker popup (UI-05): the layer it targets and the anchor it hangs from.
-    pub color_popup: Option<(usize, egui::Response)>,
+    /// Which geometry-tree groups are expanded (group ids plus the Unassigned sentinel).
+    pub open_geo_groups: std::collections::BTreeSet<u64>,
+    /// The group the geometry panel is entered into (double-click), if any.
+    pub entered_group: Option<u64>,
+    /// The geometry tree's selection.
+    pub geo_selection: Selection<GeoKey>,
+    /// The operations list's selection.
+    pub op_selection: Selection<OpKey>,
+    /// View-only filter: operation ids whose shapes are hidden in the geometry
+    /// panel. Never persisted into the document (D-09).
+    pub hidden_ops: std::collections::BTreeSet<u64>,
+    /// A bulk action waiting for its confirm gate (D-07).
+    pub pending_bulk: Option<PendingBulk>,
+    /// The bulk confirm dialog's state.
+    pub bulk_dialog: DialogState,
+    /// The open tag-overflow popup: the shape row and the anchor it hangs from.
+    pub tag_popup: Option<(u64, egui::Response)>,
+    /// One-frame open command for the tag popup.
+    pub tag_popup_open: bool,
+    /// Shapes the hammer was clicked for, dispatched after the UI pass.
+    pub pending_hammer: Option<Vec<u64>>,
+    /// The open colour-picker popup (UI-05): the operation id it targets and the anchor.
+    pub color_popup: Option<(u64, egui::Response)>,
     /// Working colour while the colour popup is open; committed on close when dirty.
     pub color_popup_value: egui::Color32,
     /// Whether the working colour changed since the popup opened.
@@ -965,9 +1093,16 @@ impl StencilApp {
             selected_shape: None,
             selected_shapes: Vec::new(),
             selected_layer: Some(0),
-            open_layer_groups: Default::default(),
-            layer_selection: Selection::default(),
-            op_popup: None,
+            open_geo_groups: Default::default(),
+            entered_group: None,
+            geo_selection: Selection::default(),
+            op_selection: Selection::default(),
+            hidden_ops: Default::default(),
+            pending_bulk: None,
+            bulk_dialog: DialogState::new(),
+            tag_popup: None,
+            tag_popup_open: false,
+            pending_hammer: None,
             color_popup: None,
             color_popup_value: egui::Color32::WHITE,
             color_popup_dirty: false,
@@ -2775,163 +2910,374 @@ impl StencilApp {
         }
     }
 
+    /// The Layers workspace panel: geometry as geometry (groups + shapes) and
+    /// operations as operations (`Document.operations`), side by side.
     pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
-        use stencilcraft_ui_egui::layers::{self, LayerRow};
+        self.geometry_panel(ui);
+        self.operations_panel(ui);
+        self.bulk_confirm_dialog(ui);
+        self.tag_overflow_popup(ui);
+        self.operation_color_popup(ui);
+    }
 
-        let mut add_layer = false;
-        let mut delete_layer = false;
-        let mut selected_idx = self.selected_layer;
-        let mut clicked_shape = None;
-        let mut events: Vec<ListEvent<PanelKey>> = Vec::new();
-        // One-frame open command for the operation popup; the anchor itself lives
-        // in self.op_popup so the popup survives across frames.
-        let mut op_popup_open = false;
-        // Palette drag-onto-row result: (layer index, preset) on pointer release.
-        let mut op_drop: Option<(usize, OperationPreset)> = None;
-        let hammer_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+    /// The Geometry panel: `Document.groups` walked recursively, plus the
+    /// derived Unassigned leaf list. Double-click enters a group, click
+    /// (shift/marquee deep-)selects, group/ungroup dispatch GroupCreate /
+    /// GroupUngroup after the UI pass (D-08).
+    pub fn geometry_panel(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_ui_egui::layers::{self, GeoRow};
+
+        let mut events: Vec<ListEvent<GeoKey>> = Vec::new();
+        // Hammer click: the member shapes the new operation is scoped to.
+        let hammer_click: std::cell::RefCell<Option<(Vec<u64>, egui::Response)>> =
             std::cell::RefCell::new(None);
-        // Colour-swatch click: opens the colour picker popup for that layer row.
-        let swatch_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+        // Tag "…" click: the shape row whose operation tags overflow.
+        let tag_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
             std::cell::RefCell::new(None);
-        // Committed reorder gestures, dispatched as LayerMove after the UI pass.
-        let mut reorder_moves: Vec<(usize, usize)> = Vec::new();
-        // One-frame open command for the colour popup; the anchor lives in
-        // self.color_popup so the popup survives across frames.
-        let mut color_popup_open = false;
-        let op_mod = self.prefs.op_popup_modifier;
+        let mut make_group = false;
+        let mut ungroup = false;
 
         // Snapshot the document into plain rows first: the UI pass never touches
         // self.engine.doc, and commands dispatch only after show() returns.
+        let (geo_rows, entered_parent) = {
+            let doc = &self.engine.doc;
+            let rows = layers::build_geometry_rows(doc, &self.open_geo_groups, self.entered_group);
+            let parent = self.entered_group.and_then(|id| parent_group(doc, id));
+            (rows, parent)
+        };
+        let hidden_ops = self.hidden_ops.clone();
         let doc = &self.engine.doc;
-        let can_delete = doc.layers.len() > 1;
-        let layer_count = doc.layers.len();
-        let layer_rows = layers::build_layer_rows(doc, &self.open_layer_groups);
-        let mut row_infos: Vec<RowInfo<PanelKey>> = Vec::with_capacity(layer_rows.len());
-        let mut visuals: Vec<(PanelKey, RowVisual)> = Vec::with_capacity(layer_rows.len());
-        for row in &layer_rows {
+        let mut row_infos: Vec<RowInfo<GeoKey>> = Vec::with_capacity(geo_rows.len());
+        let mut visuals: Vec<(GeoKey, RowVisual)> = Vec::with_capacity(geo_rows.len());
+        let mut hammer_targets: Vec<(GeoKey, Vec<u64>)> = Vec::new();
+        for row in &geo_rows {
             match *row {
-                LayerRow::Layer { index } => {
-                    let Some(layer) = doc.layers.get(index) else {
-                        continue;
-                    };
-                    let mut detail = layer
-                        .operation
-                        .as_ref()
-                        .map(operation_label)
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some(n) = layers::pass_number(doc, index) {
-                        if !detail.is_empty() {
-                            detail.push_str(" · ");
-                        }
-                        detail.push_str(&format!("Pass {n}"));
-                    }
-                    let swatch = Some(stencilcraft_ui_egui::layer_swatch_color(layer, self.theme));
-                    row_infos.push(RowInfo::group(
-                        PanelKey::Layer(index),
-                        self.open_layer_groups.contains(&index),
-                    ));
+                GeoRow::Up => {
+                    row_infos.push(RowInfo::leaf(GeoKey::Up));
                     visuals.push((
-                        PanelKey::Layer(index),
+                        GeoKey::Up,
                         RowVisual {
-                            label: layer.name.clone(),
-                            detail,
-                            icon: layer
-                                .operation
-                                .as_ref()
-                                .and_then(operation_preset)
-                                .map(|preset| preset.icon())
-                                .or(Some(Icon::Layers)),
-                            eye: Some(layer.visible),
-                            lock: Some(layer.locked),
-                            swatch,
-                            dimmed: false,
-                        },
-                    ));
-                }
-                LayerRow::Member { layer, shape } => {
-                    row_infos.push(RowInfo::leaf(PanelKey::Member { layer, shape }).at_depth(1));
-                    visuals.push((
-                        PanelKey::Member { layer, shape },
-                        RowVisual {
-                            label: format!("#{shape}"),
-                            detail: layers::membership_labels(doc, shape).join(", "),
-                            icon: Some(Icon::Spline),
+                            label: "..".to_string(),
+                            detail: String::new(),
+                            icon: Some(Icon::Layers),
                             eye: None,
-                            lock: None,
                             swatch: None,
                             dimmed: false,
                         },
                     ));
                 }
-                LayerRow::UnassignedGroup => {
+                GeoRow::Group { id, depth } => {
+                    let Some(group) = doc.groups.iter().find(|g| g.id == id) else {
+                        continue;
+                    };
+                    let label = if group.name.is_empty() {
+                        format!("Group {id}")
+                    } else {
+                        group.name.clone()
+                    };
+                    let members = layers::group_member_shapes(doc, id);
+                    row_infos.push(
+                        RowInfo::group(GeoKey::Group(id), self.open_geo_groups.contains(&id))
+                            .at_depth(depth),
+                    );
+                    visuals.push((
+                        GeoKey::Group(id),
+                        RowVisual {
+                            detail: format!("{} shapes", members.len()),
+                            label,
+                            icon: Some(Icon::Layers),
+                            eye: None,
+                            swatch: None,
+                            dimmed: false,
+                        },
+                    ));
+                    hammer_targets.push((GeoKey::Group(id), members));
+                }
+                GeoRow::Shape { id, depth } => {
+                    push_shape_row(doc, &hidden_ops, &mut row_infos, &mut visuals, id, depth);
+                    hammer_targets.push((GeoKey::Shape(id), vec![id]));
+                }
+                GeoRow::UnassignedShape { id } => {
+                    push_shape_row(doc, &hidden_ops, &mut row_infos, &mut visuals, id, 1);
+                    hammer_targets.push((GeoKey::Shape(id), vec![id]));
+                }
+                GeoRow::UnassignedGroup => {
                     row_infos.push(RowInfo::group(
-                        PanelKey::Unassigned,
-                        self.open_layer_groups.contains(&layers::UNASSIGNED_GROUP),
+                        GeoKey::Unassigned,
+                        self.open_geo_groups.contains(&layers::UNASSIGNED_GROUP),
                     ));
                     visuals.push((
-                        PanelKey::Unassigned,
+                        GeoKey::Unassigned,
                         RowVisual {
                             label: "Unassigned".to_string(),
                             detail: String::new(),
                             icon: Some(Icon::Layers),
                             eye: None,
-                            lock: None,
                             swatch: None,
                             dimmed: false,
                         },
                     ));
                 }
-                LayerRow::UnassignedMember { shape } => {
-                    row_infos.push(RowInfo::leaf(PanelKey::Shape(shape)).at_depth(1));
-                    visuals.push((
-                        PanelKey::Shape(shape),
-                        RowVisual {
-                            label: format!("#{shape}"),
-                            detail: "Unassigned".to_string(),
-                            icon: Some(Icon::Spline),
-                            eye: None,
-                            lock: None,
-                            swatch: None,
-                            dimmed: true,
-                        },
-                    ));
-                }
             }
         }
-        let mut selection = std::mem::take(&mut self.layer_selection);
-        let selected_keys: Vec<PanelKey> = selection.items.clone();
+        let mut selection = std::mem::take(&mut self.geo_selection);
+        let selected_keys: Vec<GeoKey> = selection.items.clone();
 
-        Panel::new("stencilcraft-layers-panel")
-            .footer_label("Layer actions")
+        Panel::new("stencilcraft-geometry-panel")
+            .footer_label("Geometry actions")
             .footer(|ui| {
                 PanelFooter::show(ui, |ui| {
-                    // Plain click adds an operation-less layer (D-01); the configured
-                    // modifier (default shift) also opens the operation popup (D-02).
-                    let add = ui.add(IconButton::new(Icon::Plus, "Add Layer"));
-                    if add.clicked() {
-                        add_layer = true;
-                        if op_mod.held(ui.input(|i| i.modifiers)) {
-                            self.op_popup = Some((layer_count, add.clone()));
-                            op_popup_open = true;
-                        }
-                    }
                     if ui
-                        .add(IconButton::new(Icon::Trash, "Delete Layer").enabled(can_delete))
+                        .add(
+                            IconButton::new(Icon::Plus, "Group selection")
+                                .enabled(!selected_keys.is_empty()),
+                        )
                         .clicked()
                     {
-                        delete_layer = true;
+                        make_group = true;
+                    }
+                    if ui
+                        .add(
+                            IconButton::new(Icon::Trash, "Ungroup selected")
+                                .enabled(!selected_keys.is_empty()),
+                        )
+                        .clicked()
+                    {
+                        ungroup = true;
                     }
                 });
             })
             .show(ui, |ui| {
-                let out = List::new("layers-tree", "Layers", row_infos.as_slice())
+                let _ = SectionHeader::new("geometry-tree-header", "Geometry")
+                    .collapsible(false)
+                    .show(ui, |_| {});
+                let out = List::new("geometry-tree", "Geometry", row_infos.as_slice())
                     .tree(true)
                     .selection(&mut selection)
-                    // Drag-handle reorder (D-11): only layer group rows drag and
-                    // take drops; the new row position is the production order.
-                    .can_drag(|key| matches!(key, PanelKey::Layer(_)))
-                    .reorder(Reorder::new(Axis::Vertical).accepts(|mv, _mods| layer_rows_only(mv)))
+                    .show(ui, |_, &key| {
+                        let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
+                        let mut row =
+                            ListRow::new(key, visual.map(|v| v.label.clone()).unwrap_or_default());
+                        if let Some(v) = visual {
+                            if !v.detail.is_empty() {
+                                row = row.detail(v.detail.clone());
+                            }
+                            if let Some(icon) = v.icon {
+                                row = row.icon(icon);
+                            }
+                            // Hammer on a geometry node: create an operation scoped to it.
+                            if let Some(members) = hammer_targets
+                                .iter()
+                                .find(|(k, _)| *k == key)
+                                .map(|(_, m)| m.clone())
+                                && !members.is_empty()
+                            {
+                                let hit = &hammer_click;
+                                let label = v.label.clone();
+                                row = row.trailing_item(20.0, move |ui| {
+                                    let btn = ui.add(
+                                        IconButton::new(
+                                            Icon::Settings,
+                                            format!("New operation from {label}"),
+                                        )
+                                        .size(ControlSize::Sm),
+                                    );
+                                    if btn.clicked() {
+                                        *hit.borrow_mut() = Some((members.clone(), btn));
+                                    }
+                                });
+                            }
+                            // Tag "…" overflow on a shape row.
+                            if matches!(key, GeoKey::Shape(_)) {
+                                let hit = &tag_click;
+                                row = row.trailing_item(16.0, move |ui| {
+                                    let btn = ui.add(
+                                        IconButton::new(
+                                            Icon::Settings,
+                                            format!("Operations of {}", v.label),
+                                        )
+                                        .size(ControlSize::Sm),
+                                    );
+                                    if btn.clicked()
+                                        && let GeoKey::Shape(id) = key
+                                    {
+                                        *hit.borrow_mut() = Some((id, btn));
+                                    }
+                                });
+                            }
+                            row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
+                        }
+                        row
+                    });
+                events.extend(out.events);
+            });
+
+        self.geo_selection = selection;
+
+        // Deep-select: a selected group stands for every shape it holds.
+        let shapes = {
+            let doc = &self.engine.doc;
+            shapes_of_geo_selection(doc, &self.geo_selection.items)
+        };
+        if !shapes.is_empty() {
+            self.set_selection(shapes);
+        }
+
+        for ev in events {
+            match ev {
+                ListEvent::Open(change) => match change.row {
+                    GeoKey::Group(id) => {
+                        if change.open {
+                            self.open_geo_groups.insert(id);
+                        } else {
+                            self.open_geo_groups.remove(&id);
+                        }
+                    }
+                    GeoKey::Unassigned => {
+                        if change.open {
+                            self.open_geo_groups.insert(layers::UNASSIGNED_GROUP);
+                        } else {
+                            self.open_geo_groups.remove(&layers::UNASSIGNED_GROUP);
+                        }
+                    }
+                    _ => {}
+                },
+                // Double-click enters a group; on the ".." row it goes back up.
+                ListEvent::Activate(GeoKey::Group(id)) => {
+                    self.entered_group = Some(id);
+                    self.open_geo_groups.insert(id);
+                }
+                ListEvent::Activate(GeoKey::Up) => {
+                    self.entered_group = entered_parent;
+                }
+                _ => {}
+            }
+        }
+
+        if make_group {
+            let doc = &self.engine.doc;
+            let mut ids = Vec::new();
+            let mut groups = Vec::new();
+            for key in &self.geo_selection.items {
+                match key {
+                    GeoKey::Shape(id) => ids.push(*id),
+                    GeoKey::Group(id) => groups.push(*id),
+                    GeoKey::Up | GeoKey::Unassigned => {}
+                }
+            }
+            let _ = doc;
+            if ids.len() + groups.len() >= 2 {
+                let name = format!("Group {}", self.engine.doc.groups.len() + 1);
+                self.run_command(Command::Document(DocumentCommand::GroupCreate {
+                    ids,
+                    groups,
+                    name,
+                }));
+            } else {
+                self.status = "select two or more shapes or groups to group".to_string();
+            }
+        }
+        if ungroup {
+            for key in self.geo_selection.items.clone() {
+                if let GeoKey::Group(id) = key {
+                    self.run_command(Command::Document(DocumentCommand::GroupUngroup { id }));
+                }
+            }
+        }
+        if let Some((members, _anchor)) = hammer_click.into_inner() {
+            self.pending_hammer = Some(members);
+        }
+        if let Some((shape, anchor)) = tag_click.into_inner() {
+            self.tag_popup = Some((shape, anchor));
+            self.tag_popup_open = true;
+        }
+        // The hammer dispatches after show(): one operation scoped to the node.
+        if let Some(members) = self.pending_hammer.take() {
+            let n = self.engine.doc.operations.len() + 1;
+            let cut = operations::OperationPreset::Cut;
+            self.run_command(Command::Document(DocumentCommand::OperationCreate {
+                name: format!("{} {n}", cut.label()),
+                kind: cut.kind(),
+                settings: Default::default(),
+                color: None,
+                icon: Some(cut.icon_name().to_string()),
+                members,
+            }));
+        }
+    }
+
+    /// The Operations panel: `Document.operations` with icon, derived pass
+    /// number, colour swatch, baked profile and member count. The eye is the
+    /// document's visibility; the filter toggle is view-only (D-09).
+    pub fn operations_panel(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_ui_egui::layers;
+
+        let mut events: Vec<ListEvent<OpKey>> = Vec::new();
+        let swatch_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
+            std::cell::RefCell::new(None);
+        let hammer_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+            std::cell::RefCell::new(None);
+        let mut bulk: Option<BulkKind> = None;
+
+        let doc = &self.engine.doc;
+        let op_count = doc.operations.len();
+        let mut row_infos: Vec<RowInfo<OpKey>> = Vec::with_capacity(op_count);
+        let mut visuals: Vec<(OpKey, RowVisual)> = Vec::with_capacity(op_count);
+        for (index, op) in doc.operations.iter().enumerate() {
+            let key = OpKey::Op(index);
+            row_infos.push(RowInfo::leaf(key));
+            let mut detail = op.kind_name().to_string();
+            if let Some(n) = layers::pass_number(doc, index) {
+                detail = format!("Pass {n} · {detail}");
+            }
+            detail = format!(
+                "{detail} · {} members · {}% @ {} mm/min",
+                op.members.len(),
+                op.settings.power,
+                op.settings.speed_mm_per_min
+            );
+            visuals.push((
+                key,
+                RowVisual {
+                    label: op.name.clone(),
+                    detail,
+                    icon: Some(operation_icon(op)),
+                    eye: Some(op.visible),
+                    swatch: Some(stencilcraft_ui_egui::operation_swatch_color(op, self.theme)),
+                    dimmed: !op.visible,
+                },
+            ));
+        }
+        let mut selection = std::mem::take(&mut self.op_selection);
+        let selected_keys: Vec<OpKey> = selection.items.clone();
+
+        Panel::new("stencilcraft-operations-panel")
+            .footer_label("Operation actions")
+            .footer(|ui| {
+                PanelFooter::show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for kind in [
+                            BulkKind::ByColour,
+                            BulkKind::AllSelected,
+                            BulkKind::EachSelected,
+                        ] {
+                            if ui
+                                .add(Button::new(kind.label()).size(ControlSize::Sm))
+                                .clicked()
+                            {
+                                bulk = Some(kind);
+                            }
+                        }
+                    });
+                });
+            })
+            .show(ui, |ui| {
+                let _ = SectionHeader::new("operations-list-header", "Operations")
+                    .collapsible(false)
+                    .show(ui, |_| {});
+                let out = List::new("operations-list", "Operations", row_infos.as_slice())
+                    .tree(true)
+                    .selection(&mut selection)
                     .show(ui, |_, &key| {
                         let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
                         let mut row =
@@ -2949,13 +3295,23 @@ impl StencilApp {
                                     on,
                                 ));
                             }
-                            if let Some(on) = v.lock {
-                                row =
-                                    row.toggle(ToggleColumn::lock(format!("Lock {}", v.label), on));
+                            // View-only filter toggle (second column): hides the operation's
+                            // shapes in the geometry panel without touching the document.
+                            if let OpKey::Op(index) = key
+                                && let Some(op) = doc.operations.get(index)
+                            {
+                                let filtered = self.hidden_ops.contains(&op.id);
+                                row = row.toggle(ToggleColumn::new(
+                                    format!("Filter {}", v.label),
+                                    Icon::Eye,
+                                    Icon::EyeOff,
+                                    !filtered,
+                                ));
                             }
-                            // Colour swatch button (UI-05): opens the egui colour
-                            // picker for this layer row.
-                            if let (Some(col), PanelKey::Layer(index)) = (v.swatch, key) {
+                            // Colour swatch: opens the colour picker for this operation.
+                            if let (Some(col), OpKey::Op(index)) = (v.swatch, key)
+                                && let Some(op) = doc.operations.get(index)
+                            {
                                 let hit = &swatch_click;
                                 row = row.trailing_item(16.0, move |ui| {
                                     let (rect, resp) = ui.allocate_exact_size(
@@ -2964,20 +3320,20 @@ impl StencilApp {
                                     );
                                     ui.painter().rect_filled(rect, 2.0, col);
                                     if resp.clicked() {
-                                        *hit.borrow_mut() = Some((index, resp.clone()));
+                                        *hit.borrow_mut() = Some((op.id, resp.clone()));
                                     }
                                 });
                             }
-                            // Hammer-equivalent trailing button: opens the same
-                            // operation popup anchored to this layer row (D-02).
-                            if let PanelKey::Layer(index) = key {
+                            // Hammer on an operation row: a new pass over the same members.
+                            {
+                                let OpKey::Op(index) = key;
                                 let hit = &hammer_click;
                                 let label = v.label.clone();
                                 row = row.trailing_item(20.0, move |ui| {
                                     let btn = ui.add(
                                         IconButton::new(
                                             Icon::Settings,
-                                            format!("Set operation of {label}"),
+                                            format!("New operation from {label}"),
                                         )
                                         .size(ControlSize::Sm),
                                     );
@@ -2990,208 +3346,276 @@ impl StencilApp {
                         }
                         row
                     });
-                let list_rows = out.rows;
                 events.extend(out.events);
-
-                // Palette drop: an OpDrag payload released over a layer row assigns
-                // that row's layer the dragged preset (D-13). Shape rows and the
-                // Unassigned group are ignored — only PanelKey::Layer rects hit-test.
-                if ui.input(|i| i.pointer.any_released())
-                    && let Some(payload) = egui::DragAndDrop::payload::<OpDrag>(ui.ctx())
-                    && let Some(pos) = ui.ctx().pointer_interact_pos()
-                {
-                    for (key, rect) in &list_rows {
-                        if let PanelKey::Layer(i) = key
-                            && rect.contains(pos)
-                        {
-                            op_drop = Some((*i, payload.0));
-                        }
-                    }
-                }
-
-                // Draggable operations palette: each entry carries a distinct OpDrag
-                // payload so it can never be confused with a list reorder drag.
-                let _ = SectionHeader::new("layers-operations", "Operations")
-                    .collapsible(false)
-                    .show(ui, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for preset in OperationPreset::ALL {
-                                ui.dnd_drag_source(
-                                    ui.make_persistent_id(["op-palette", preset.label()]),
-                                    OpDrag(preset),
-                                    |ui| {
-                                        ui.add(
-                                            Button::new(preset.label())
-                                                .icon(preset.icon())
-                                                .size(ControlSize::Sm),
-                                        );
-                                    },
-                                );
-                            }
-                        });
-                    });
             });
 
-        self.layer_selection = selection;
-        let mut vis_toggles: Vec<(usize, bool)> = Vec::new();
-        let mut lock_toggles: Vec<(usize, bool)> = Vec::new();
+        self.op_selection = selection;
+
         for ev in events {
-            match ev {
-                ListEvent::Open(change) => match change.row {
-                    PanelKey::Layer(i) => {
-                        if change.open {
-                            self.open_layer_groups.insert(i);
+            if let ListEvent::Row(RowEvent::Toggle(
+                EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+            )) = ev
+            {
+                let OpKey::Op(index) = value.row;
+                if let Some(op) = self.engine.doc.operations.get(index) {
+                    if value.column == 0 {
+                        self.run_command(Command::Document(DocumentCommand::OperationSetVisible {
+                            id: op.id,
+                            visible: value.on,
+                        }));
+                    } else if value.column == 1 {
+                        // View-only filter: never persisted into the document.
+                        if value.on {
+                            self.hidden_ops.remove(&op.id);
                         } else {
-                            self.open_layer_groups.remove(&i);
-                        }
-                    }
-                    PanelKey::Unassigned => {
-                        if change.open {
-                            self.open_layer_groups.insert(layers::UNASSIGNED_GROUP);
-                        } else {
-                            self.open_layer_groups.remove(&layers::UNASSIGNED_GROUP);
-                        }
-                    }
-                    _ => {}
-                },
-                ListEvent::Row(RowEvent::Toggle(
-                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
-                )) => {
-                    if let PanelKey::Layer(i) = value.row {
-                        if value.column == 0 {
-                            vis_toggles.push((i, value.on));
-                        } else {
-                            lock_toggles.push((i, value.on));
+                            self.hidden_ops.insert(op.id);
                         }
                     }
                 }
-                ListEvent::Clicked(PanelKey::Layer(i)) => selected_idx = Some(i),
-                ListEvent::Clicked(PanelKey::Member { shape, .. })
-                | ListEvent::Clicked(PanelKey::Shape(shape)) => clicked_shape = Some(shape),
-                ListEvent::Reorder(EditEvent::Commit { value, .. }) => {
-                    if let Some((from, to)) = layer_move(&value) {
-                        reorder_moves.push((from, to));
-                    }
-                }
-                _ => {}
             }
         }
-
-        self.selected_layer = selected_idx;
-        if let Some(id) = clicked_shape {
-            self.set_selection([id]);
-        }
-        if add_layer {
-            self.run_command(Command::LayerAdd {
-                name: format!("Layer {}", self.engine.doc.layers.len() + 1),
-                operation: None,
-            });
-            self.selected_layer = Some(self.engine.doc.layers.len() - 1);
-        }
-        if delete_layer && let Some(idx) = self.selected_layer {
-            self.run_command(Command::LayerRemove { index: idx });
-            self.selected_layer = Some(idx.saturating_sub(1));
-        }
-        for (idx, vis) in vis_toggles {
-            self.run_command(Command::LayerSetVisible {
-                index: idx,
-                visible: vis,
-            });
-        }
-        for (idx, locked) in lock_toggles {
-            self.run_command(Command::Document(DocumentCommand::LayerSetLocked {
-                index: idx,
-                locked,
-            }));
-        }
-        // Reorder dispatches LayerMove through run_command after the UI pass
-        // (D-11); Pass N badges renumber next frame via pass_number.
-        for (from, to) in reorder_moves {
-            self.run_command(Command::Document(DocumentCommand::LayerMove { from, to }));
-        }
-        if let Some((index, anchor)) = hammer_click.into_inner() {
-            self.op_popup = Some((index, anchor));
-            op_popup_open = true;
-        }
-        if let Some((index, preset)) = op_drop {
-            self.run_command(Command::Document(DocumentCommand::LayerSetOperation {
-                index,
-                operation: Some(preset.operation()),
-            }));
-        }
-        if let Some((layer, anchor)) = self.op_popup.take() {
-            let open_cmd = op_popup_open.then_some(egui::SetOpenCommand::Bool(true));
-            let entries: Vec<MenuEntry<OperationPreset>> = OperationPreset::ALL
-                .iter()
-                .map(|p| MenuItem::new(p.label(), *p).icon(p.icon()).into())
-                .collect();
-            let shown =
-                Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
-            if let Some(preset) = shown.chosen {
-                self.run_command(Command::Document(DocumentCommand::LayerSetOperation {
-                    index: layer,
-                    operation: Some(preset.operation()),
-                }));
-            }
-            if shown.open {
-                self.op_popup = Some((layer, anchor));
-            }
-        }
-        // Colour picker popup (UI-05): the swatch opens it; the chosen colour is
-        // canonicalised and dispatched as LayerSetColor when the popup closes.
-        if let Some((index, anchor)) = swatch_click.into_inner() {
+        if let Some((id, anchor)) = swatch_click.into_inner() {
             self.color_popup_value = self
                 .engine
                 .doc
-                .layers
-                .get(index)
-                .map(|l| stencilcraft_ui_egui::layer_swatch_color(l, self.theme))
+                .operations
+                .iter()
+                .find(|op| op.id == id)
+                .map(|op| stencilcraft_ui_egui::operation_swatch_color(op, self.theme))
                 .unwrap_or(egui::Color32::WHITE);
             self.color_popup_dirty = false;
-            self.color_popup = Some((index, anchor));
-            color_popup_open = true;
+            self.color_popup = Some((id, anchor));
         }
-        if let Some((index, anchor)) = self.color_popup.clone() {
-            let mut clear = false;
-            let open_cmd = color_popup_open.then_some(egui::SetOpenCommand::Bool(true));
-            let shown = egui::Popup::menu(&anchor).open_memory(open_cmd).show(|ui| {
-                let name = self
-                    .engine
-                    .doc
-                    .layers
-                    .get(index)
-                    .map(|l| l.name.clone())
-                    .unwrap_or_else(|| "layer".to_string());
-                ui.label(format!("Colour of {name}"));
-                let resp = ui.color_edit_button_srgba(&mut self.color_popup_value);
-                if resp.changed() {
-                    self.color_popup_dirty = true;
-                }
-                if ui.button("Clear colour").clicked() {
-                    clear = true;
-                }
+        if let Some((index, _anchor)) = hammer_click.into_inner()
+            && let Some(op) = self.engine.doc.operations.get(index).cloned()
+        {
+            let n = self.engine.doc.operations.len() + 1;
+            self.run_command(Command::Document(DocumentCommand::OperationCreate {
+                name: format!("{} {n}", operation_label(&op)),
+                kind: op.kind,
+                settings: op.settings.clone(),
+                color: None,
+                icon: op.icon.clone(),
+                members: op.members.clone(),
+            }));
+        }
+        if let Some(kind) = bulk {
+            self.request_bulk(kind);
+        }
+    }
+
+    /// Bulk "new operation" actions: confirm first when the affected shape
+    /// count exceeds `UserPrefs.bulk_confirm_threshold` (D-07).
+    fn request_bulk(&mut self, kind: BulkKind) {
+        let shapes = self.selected_shapes.clone();
+        if shapes.is_empty() {
+            self.status = "select shapes first".to_string();
+            return;
+        }
+        if shapes.len() as u32 > self.prefs.bulk_confirm_threshold {
+            self.pending_bulk = Some(PendingBulk { kind, shapes });
+        } else {
+            self.run_bulk(kind, &shapes);
+        }
+    }
+
+    fn run_bulk(&mut self, kind: BulkKind, shapes: &[u64]) {
+        let plans = kind.plan(&self.engine.doc, shapes);
+        for (name, color, members) in plans {
+            self.run_command(Command::Document(DocumentCommand::OperationCreate {
+                name,
+                kind: stencilcraft_doc::OperationKind::Cut,
+                settings: Default::default(),
+                color,
+                icon: Some(operations::OperationPreset::Cut.icon_name().to_string()),
+                members,
+            }));
+        }
+        self.status = format!(
+            "created {} operation(s)",
+            kind.plan(&self.engine.doc, shapes).len()
+        );
+    }
+
+    /// The confirm gate for bulk creation over the threshold: "Create N
+    /// operations? Continue?" (D-07).
+    fn bulk_confirm_dialog(&mut self, ui: &mut egui::Ui) {
+        let Some(pending) = self.pending_bulk.clone() else {
+            return;
+        };
+        let n = pending.kind.plan(&self.engine.doc, &pending.shapes).len();
+        let count = pending.shapes.len();
+        let shown = Dialog::new("bulk-confirm", format!("Create {n} operations?"))
+            .footer(Footer::standard().ok("Continue").cancel("Cancel"))
+            .show(ui.ctx(), &mut self.bulk_dialog, &mut (), |ui, ()| {
+                ui.add(
+                    Text::new(format!(
+                        "Create {n} operations over {count} shapes? Continue?"
+                    ))
+                    .content(Content::Muted),
+                );
             });
-            if clear {
-                self.run_command(Command::Document(DocumentCommand::LayerSetColor {
-                    index,
-                    color: None,
-                }));
-                self.color_popup = None;
-            } else if shown.is_some() {
-                self.color_popup = Some((index, anchor));
-            } else {
-                // Popup closed: commit the picked colour, canonicalised to
-                // #rrggbb (the engine rejects anything else, T-02-15).
-                if self.color_popup_dirty {
-                    let c = self.color_popup_value;
-                    let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
-                    self.run_command(Command::Document(DocumentCommand::LayerSetColor {
-                        index,
-                        color: Some(hex),
+        if shown.outcome == Some(Outcome::Ok) {
+            let kind = pending.kind;
+            let shapes = pending.shapes.clone();
+            self.pending_bulk = None;
+            self.run_bulk(kind, &shapes);
+        } else if shown.closed {
+            self.pending_bulk = None;
+        }
+    }
+
+    /// The operation-tag overflow menu on a geometry row: remove membership,
+    /// toggle visibility, select members (D-09).
+    fn tag_overflow_popup(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_ui_egui::layers;
+        let Some((shape, anchor)) = self.tag_popup.clone() else {
+            return;
+        };
+        let open_cmd = self
+            .tag_popup_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.tag_popup_open = false;
+        #[derive(Clone, Copy, PartialEq)]
+        enum TagAction {
+            Remove(u64),
+            ToggleVisible(u64),
+            SelectMembers(u64),
+            Filter(u64),
+            Unfilter(u64),
+        }
+        let doc = &self.engine.doc;
+        let tags = layers::operation_tags(doc, shape);
+        let entries: Vec<MenuEntry<TagAction>> = tags
+            .iter()
+            .filter_map(|i| doc.operations.get(*i))
+            .flat_map(|op| {
+                // The operation's name: ids are canonical, the name is unique per document.
+                let name = &op.name;
+                let filtered = self.hidden_ops.contains(&op.id);
+                [
+                    MenuItem::new(
+                        format!("Remove #{shape} from {name}"),
+                        TagAction::Remove(op.id),
+                    )
+                    .into(),
+                    MenuItem::new(
+                        format!("{} {name}", if op.visible { "Hide" } else { "Show" }),
+                        TagAction::ToggleVisible(op.id),
+                    )
+                    .into(),
+                    MenuItem::new(
+                        format!("Select members of {name}"),
+                        TagAction::SelectMembers(op.id),
+                    )
+                    .into(),
+                    // View-only filter, never persisted into the document (D-09).
+                    MenuItem::new(
+                        format!(
+                            "{} {name} from the geometry view",
+                            if filtered { "Show" } else { "Hide" }
+                        ),
+                        if filtered {
+                            TagAction::Unfilter(op.id)
+                        } else {
+                            TagAction::Filter(op.id)
+                        },
+                    )
+                    .into(),
+                ]
+            })
+            .collect();
+        let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
+        if let Some(action) = shown.chosen {
+            match action {
+                TagAction::Remove(op_id) => {
+                    self.run_command(Command::Document(DocumentCommand::OperationRemoveMembers {
+                        id: op_id,
+                        ids: vec![shape],
                     }));
                 }
-                self.color_popup = None;
+                TagAction::ToggleVisible(op_id) => {
+                    let visible = self
+                        .engine
+                        .doc
+                        .operations
+                        .iter()
+                        .find(|op| op.id == op_id)
+                        .is_some_and(|op| !op.visible);
+                    self.run_command(Command::Document(DocumentCommand::OperationSetVisible {
+                        id: op_id,
+                        visible,
+                    }));
+                }
+                TagAction::SelectMembers(op_id) => {
+                    let members = self
+                        .engine
+                        .doc
+                        .operations
+                        .iter()
+                        .find(|op| op.id == op_id)
+                        .map(|op| op.members.clone())
+                        .unwrap_or_default();
+                    self.set_selection(members);
+                }
+                TagAction::Filter(op_id) => {
+                    self.hidden_ops.insert(op_id);
+                }
+                TagAction::Unfilter(op_id) => {
+                    self.hidden_ops.remove(&op_id);
+                }
             }
+            self.tag_popup = None;
+        } else if shown.open {
+            self.tag_popup = Some((shape, anchor));
+        } else {
+            self.tag_popup = None;
+        }
+    }
+
+    /// The colour-picker popup for an operation row (UI-05); the picked colour
+    /// is canonicalised and dispatched as OperationSetColor when it closes.
+    fn operation_color_popup(&mut self, _ui: &mut egui::Ui) {
+        let Some((id, anchor)) = self.color_popup.clone() else {
+            return;
+        };
+        let mut clear = false;
+        let shown = egui::Popup::menu(&anchor).show(|ui| {
+            let name = self
+                .engine
+                .doc
+                .operations
+                .iter()
+                .find(|op| op.id == id)
+                .map(|op| op.name.clone())
+                .unwrap_or_else(|| "operation".to_string());
+            ui.label(format!("Colour of {name}"));
+            let resp = ui.color_edit_button_srgba(&mut self.color_popup_value);
+            if resp.changed() {
+                self.color_popup_dirty = true;
+            }
+            if ui.button("Clear colour").clicked() {
+                clear = true;
+            }
+        });
+        if clear {
+            self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                id,
+                color: None,
+            }));
+            self.color_popup = None;
+        } else if shown.is_some() {
+            self.color_popup = Some((id, anchor));
+        } else {
+            if self.color_popup_dirty {
+                let c = self.color_popup_value;
+                let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
+                self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                    id,
+                    color: Some(hex),
+                }));
+            }
+            self.color_popup = None;
         }
     }
 
@@ -3235,25 +3659,20 @@ impl StencilApp {
     }
 
     pub fn inspector(&mut self, ui: &mut egui::Ui) {
-        // UI-07: the effective operation of the current selection, read-only. A layer
-        // row as the panel's lead shows that layer's operation; otherwise the first
-        // selected shape's owning operation layer, or "Unassigned" when it has none.
+        // UI-07: the effective operation of the current selection, read-only —
+        // the first operation in pass order containing the first selected shape,
+        // or "Unassigned" when it has none.
         let doc = &self.engine.doc;
-        let effective: Option<(Option<stencilcraft_doc::Operation>, String)> =
-            match self.layer_selection.lead {
-                Some(PanelKey::Layer(i)) => doc
-                    .layers
-                    .get(i)
-                    .map(|l| (l.operation.clone(), l.name.clone())),
-                _ => self.selected_shapes.first().copied().map(|id| {
-                    match stencilcraft_ui_egui::layers::effective_operation(doc, id) {
-                        Some((op, name)) => (Some(op), name),
-                        None => (None, "Unassigned".to_string()),
-                    }
-                }),
-            };
+        let effective: Option<(Option<stencilcraft_doc::Operation>, String)> = self
+            .selected_shapes
+            .first()
+            .copied()
+            .map(|id| match doc.operation_of_shape(id) {
+                Some(op) => (Some(op.clone()), op.name.clone()),
+                None => (None, "Unassigned".to_string()),
+            });
         if let Some((op, source)) = effective {
-            let op_text = op.as_ref().map(operation_label).unwrap_or("—").to_string();
+            let op_text = op.as_ref().map(operation_label).unwrap_or("—".to_string());
             let _ = SectionHeader::new("inspector-operation", "Operation").show(ui, |ui| {
                 PropertyGroup::new("inspector-operation-group").show(ui, |ui| {
                     PropertyRow::word("Operation").show(ui, |ui, _| {
@@ -6705,7 +7124,8 @@ mod tests {
     }
 }
 
-// End-to-end tests over the real layers panel: the "Playwright for StencilCraft" harness.
+// End-to-end tests over the real geometry + operations panels: the "Playwright for
+// StencilCraft" harness.
 //
 // `craft_ui::testing` (the sibling craft-libs crates' harness) is built on
 // `egui_kittest`; this module uses the same engine against this app: boot a
@@ -6719,14 +7139,16 @@ mod ui_e2e {
     use eframe::egui;
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    use stencilcraft_ui_egui::layers::UNASSIGNED_GROUP;
 
     type App = Harness<'static, StencilApp>;
 
-    /// Boot the app with the layers panel mounted as the only surface.
+    /// Boot the app with the layers panel (geometry + operations) mounted as the
+    /// only surface. Tall enough that both lists are inside the viewport.
     fn boot() -> App {
         let app = StencilApp::new(None);
         let mut h = Harness::builder()
-            .with_size([680.0, 720.0])
+            .with_size([680.0, 800.0])
             .with_step_dt(0.05)
             .with_max_steps(40)
             .with_context_setup(|ctx| {
@@ -6735,7 +7157,12 @@ mod ui_e2e {
                     &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
                 );
             })
-            .build_ui_state(|ui, app: &mut StencilApp| app.layers_panel(ui), app);
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    egui::ScrollArea::vertical().show(ui, |ui| app.layers_panel(ui));
+                },
+                app,
+            );
         h.run();
         h
     }
@@ -6753,11 +7180,39 @@ mod ui_e2e {
         h.run();
     }
 
-    fn has(h: &App, label: &str) -> bool {
-        h.query_by_label(label).is_some()
+    /// A raw pointer click at `pos` — list rows and toggle cells only sense real
+    /// pointer press/release frames, which `Node::click` does not produce.
+    fn raw_click(h: &mut App, pos: egui::Pos2) {
+        h.event(egui::Event::PointerMoved(pos));
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
+        h.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run();
     }
 
-    /// Rows are `TreeItem` nodes whose accessible name is `"{label}, {detail}"`.
+    /// Click a list row or toggle cell by its accessible label.
+    fn raw_click_label(h: &mut App, label: &str) {
+        let pos = h.get_by_label(label).rect().center();
+        raw_click(h, pos);
+    }
+
+    /// `query_by_label` panics on multiple matches, so presence checks go through
+    /// `query_all`.
+    fn has(h: &App, label: &str) -> bool {
+        h.query_all_by_label(label).next().is_some()
+    }
+
+    /// Rows are `TreeItem` nodes whose accessible name contains the label.
     fn is_row(n: &egui_kittest::Node<'_>, matches: impl Fn(&str) -> bool) -> bool {
         let node = n.accesskit_node();
         node.role() == egui::accesskit::Role::TreeItem && node.label().is_some_and(|l| matches(&l))
@@ -6768,206 +7223,288 @@ mod ui_e2e {
             .any(|n| is_row(&n, |l| l.contains(needle)))
     }
 
-    fn row_rect(h: &App, name: &str) -> Option<egui::Rect> {
-        h.query_all_by_label_contains(name)
-            .find(|n| is_row(n, |l| l.starts_with(name)))
-            .map(|n| n.rect())
-    }
-
-    fn toggled(h: &App, label: &str) -> egui::accesskit::Toggled {
-        h.get_by_label(label)
-            .accesskit_node()
-            .toggled()
-            .expect("toggle")
-    }
-
-    fn layer_name(app: &StencilApp, index: usize) -> String {
-        app.engine
-            .doc
-            .layers
-            .get(index)
-            .expect("layer")
-            .name
-            .clone()
-    }
-
-    fn drag(h: &mut App, from: egui::Pos2, to: egui::Pos2) {
-        h.event(egui::Event::PointerMoved(from));
-        h.step();
-        h.event(egui::Event::PointerButton {
-            pos: from,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        });
-        h.step();
-        for step in 1..=8 {
-            let p = from + (to - from) * (step as f32 / 8.0);
-            h.event(egui::Event::PointerMoved(p));
-            h.step();
+    /// A nested fixture through the public command surface: three rects (the
+    /// engine's `shape.add-rect` also ensures one Cut operation over them), an
+    /// "inner" group over shapes 1-2, an "outer" group over inner + shape 3.
+    fn add_nested_fixture(app: &mut StencilApp) {
+        for (x, y) in [(5.0, 5.0), (20.0, 5.0), (40.0, 5.0)] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y,
+                width: 10.0,
+                height: 10.0,
+            });
         }
-        h.event(egui::Event::PointerButton {
-            pos: to,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::NONE,
-        });
-        h.step();
-        h.run();
+        let inner = match app
+            .engine
+            .run(Command::Document(DocumentCommand::GroupCreate {
+                ids: vec![1, 2],
+                groups: vec![],
+                name: "inner".to_string(),
+            }))
+            .expect("group.create inner")
+        {
+            stencilcraft_engine::Effect::Document(
+                stencilcraft_engine::document::DocumentEffect::GroupCreated { id },
+            ) => id,
+            other => panic!("expected GroupCreated, got {other:?}"),
+        };
+        let _outer = app
+            .engine
+            .run(Command::Document(DocumentCommand::GroupCreate {
+                ids: vec![3],
+                groups: vec![inner],
+                name: "outer".to_string(),
+            }))
+            .expect("group.create outer");
     }
 
-    // D-01 / D-18 incongruence, pinned: a plain "Add Layer" click makes an
-    // operation-less layer. It shows up, accepts shapes, and produces nothing
-    // until an operation is set — which the row does not say out loud.
-    #[test]
-    fn add_layer_makes_an_operationless_layer_and_shows_it() {
-        let mut h = boot();
-        let before = h.state().engine.doc.layers.len();
-        let new_name = format!("Layer {}", before + 1);
-        assert!(!has(&h, &new_name));
-
-        click(&mut h, "Add Layer");
-
-        assert_eq!(h.state().engine.doc.layers.len(), before + 1);
-        let added = h.state().engine.doc.layers.last().expect("added layer");
-        assert_eq!(added.name, new_name);
-        assert!(
-            added.operation.is_none(),
-            "D-01: Add Layer is operation-less"
-        );
-        assert!(has(&h, &new_name), "the new row is on screen");
-        assert!(
-            !has_row_containing(&h, "Pass "),
-            "an operation-less layer has no pass badge"
-        );
-    }
-
-    #[test]
-    fn visibility_toggle_drives_backend_and_frontend() {
-        let mut h = boot();
-        let name = layer_name(h.state(), 0);
-        let label = format!("Visibility {name}");
-        assert_eq!(toggled(&h, &label), egui::accesskit::Toggled::True);
-
-        click(&mut h, &label);
-
-        assert!(!h.state().engine.doc.layers[0].visible, "backend hidden");
-        assert_eq!(
-            toggled(&h, &label),
-            egui::accesskit::Toggled::False,
-            "frontend hidden"
-        );
-
-        click(&mut h, &label);
-        assert!(h.state().engine.doc.layers[0].visible, "backend shown");
-        assert_eq!(
-            toggled(&h, &label),
-            egui::accesskit::Toggled::True,
-            "frontend shown"
-        );
+    /// Expand every group so the nested rows are on screen.
+    fn expand_all(app: &mut StencilApp) {
+        app.open_geo_groups = app
+            .engine
+            .doc
+            .groups
+            .iter()
+            .map(|g| g.id)
+            .chain([UNASSIGNED_GROUP])
+            .collect();
     }
 
     #[test]
-    fn lock_toggle_drives_backend_and_frontend() {
+    fn nested_fixture_shows_groups_in_the_geometry_panel() {
         let mut h = boot();
-        let name = layer_name(h.state(), 0);
-        let label = format!("Lock {name}");
-        assert_eq!(toggled(&h, &label), egui::accesskit::Toggled::False);
-
-        click(&mut h, &label);
-
-        assert!(h.state().engine.doc.layers[0].locked, "backend locked");
-        assert_eq!(
-            toggled(&h, &label),
-            egui::accesskit::Toggled::True,
-            "frontend locked"
-        );
-    }
-
-    #[test]
-    fn operation_popup_sets_operation_on_both_sides() {
-        let mut h = boot();
-        let name = layer_name(h.state(), 0);
-        click(&mut h, &format!("Set operation of {name}"));
-
-        click_menu(&mut h, "Engrave");
-
-        assert!(
-            matches!(
-                h.state().engine.doc.layers[0].operation,
-                Some(stencilcraft_doc::Operation::Engrave(_))
-            ),
-            "backend operation is Engrave"
-        );
-        assert!(
-            has_row_containing(&h, "Engrave"),
-            "the row detail shows Engrave (frontend)"
-        );
-    }
-
-    #[test]
-    fn dragging_a_layer_reorders_and_renumbers_passes() {
-        let mut h = boot();
-        click(&mut h, "Add Layer");
-        let second = layer_name(h.state(), 1);
-        click(&mut h, &format!("Set operation of {second}"));
-        click_menu(&mut h, "Cut");
-        assert_eq!(layer_name(h.state(), 0), "base");
-        let second = layer_name(h.state(), 1);
-        let from = row_rect(&h, &second).expect("Layer 2 row").center();
-        let above_base = row_rect(&h, "base").expect("base row");
-        // Drop above the first row's midpoint: "insert at position 0".
-        let to = egui::pos2(above_base.center().x, above_base.top() + 1.0);
-
-        drag(&mut h, from, to);
-
-        assert_eq!(
-            layer_name(h.state(), 0),
-            "Layer 2",
-            "the dragged layer is now first"
-        );
-        assert!(
-            has_row_containing(&h, "Pass 1"),
-            "the reordered layer is pass 1 on screen"
-        );
-    }
-
-    // Pins the D-09 gap: the spec says a layer expands to show its member
-    // objects "with eye/lock toggles", but member rows are built with
-    // `eye: None, lock: None`. The members show; only the toggles are missing.
-    #[test]
-    fn member_rows_show_the_shape_but_not_the_d09_eye_and_lock() {
-        let mut h = boot();
-        h.state_mut().run_command(Command::ShapeAddRect {
-            x: 10.0,
-            y: 10.0,
-            width: 20.0,
-            height: 10.0,
-        });
-        h.run();
-        let id = h.state().engine.doc.shapes.last().expect("shape").id;
-        // Force membership on the base layer regardless of where the add landed.
-        h.state_mut()
-            .run_command(Command::Document(DocumentCommand::LayerAddMembers {
-                layer: 0,
-                ids: vec![id],
-            }));
+        add_nested_fixture(h.state_mut());
+        expand_all(h.state_mut());
         h.run();
 
-        click(&mut h, "Expand base");
+        assert!(
+            has_row_containing(&h, "outer"),
+            "outer group row is on screen"
+        );
+        assert!(
+            has_row_containing(&h, "inner"),
+            "nested group row is on screen"
+        );
+        assert!(
+            has_row_containing(&h, "#1"),
+            "member shape row is on screen"
+        );
+        assert!(
+            has_row_containing(&h, "Unassigned"),
+            "the Unassigned leaf is on screen"
+        );
+        // Groups live only in Document.groups — never as layers or operations.
+        assert_eq!(h.state().engine.doc.groups.len(), 2);
+    }
 
-        let member = format!("#{id}");
-        assert!(
-            row_rect(&h, &member).is_some(),
-            "member row {member} is on screen"
+    #[test]
+    fn clicking_a_shape_row_deep_selects_it_on_the_canvas() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        expand_all(h.state_mut());
+        h.run();
+
+        raw_click_label(&mut h, "#2, #1");
+        assert_eq!(
+            h.state().selected_shapes,
+            vec![2],
+            "click selects the shape"
+        );
+
+        // Clicking a group row deep-selects every shape it holds.
+        raw_click_label(&mut h, "inner, 2 shapes");
+        let mut selected = h.state().selected_shapes.clone();
+        selected.sort_unstable();
+        assert_eq!(
+            selected,
+            vec![1, 2],
+            "a group click deep-selects its members"
+        );
+    }
+
+    #[test]
+    fn hammer_on_a_geometry_row_creates_an_operation_with_membership() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        expand_all(h.state_mut());
+        h.run();
+        let before = h.state().engine.doc.operations.len();
+
+        // Hammer on the outer group: an operation scoped to every member shape.
+        click(&mut h, "New operation from outer");
+
+        let doc = &h.state().engine.doc;
+        assert_eq!(
+            doc.operations.len(),
+            before + 1,
+            "one operation was created"
+        );
+        let op = doc.operations.last().expect("the new operation");
+        assert_eq!(op.kind, stencilcraft_doc::OperationKind::Cut);
+        let mut members = op.members.clone();
+        members.sort_unstable();
+        assert_eq!(
+            members,
+            vec![1, 2, 3],
+            "membership landed on the group's shapes"
         );
         assert!(
-            !has(&h, &format!("Visibility {member}")),
-            "D-09 gap: member rows have no eye toggle"
+            has_row_containing(&h, &op.name),
+            "the operation row is on screen"
         );
         assert!(
-            !has(&h, &format!("Lock {member}")),
-            "D-09 gap: member rows have no lock toggle"
+            has_row_containing(&h, "Pass 2"),
+            "the derived pass badge renumbers after the auto cut pass"
+        );
+        // The geometry rows now carry the tag chip of the new operation.
+        assert!(
+            has_row_containing(&h, "#3, #1 #2"),
+            "shape rows show their operation tags"
+        );
+    }
+
+    #[test]
+    fn bulk_over_threshold_asks_first_and_continues() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        h.state_mut().prefs.bulk_confirm_threshold = 2;
+        h.state_mut().set_selection([1, 2, 3]);
+        h.run();
+        let before = h.state().engine.doc.operations.len();
+
+        click(&mut h, "New operation: each selected");
+
+        // 3 shapes > threshold 2: the confirm gate is up, nothing created yet.
+        assert!(
+            has(&h, "Create 3 operations?"),
+            "the confirm dialog is on screen"
+        );
+        assert_eq!(
+            h.state().engine.doc.operations.len(),
+            before,
+            "nothing created yet"
+        );
+
+        click(&mut h, "Continue");
+
+        let ops = &h.state().engine.doc.operations;
+        assert_eq!(
+            ops.len(),
+            before + 3,
+            "each selected shape got its own operation"
+        );
+        assert_eq!(ops[before].members, vec![1]);
+        assert_eq!(ops[before + 1].members, vec![2]);
+        assert_eq!(ops[before + 2].members, vec![3]);
+    }
+
+    #[test]
+    fn bulk_under_threshold_creates_without_asking() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        h.state_mut().set_selection([1, 2]);
+        h.run();
+        let before = h.state().engine.doc.operations.len();
+
+        click(&mut h, "New operation: all selected");
+
+        assert!(
+            !has(&h, "operations?"),
+            "no confirm gate under the threshold"
+        );
+        let ops = &h.state().engine.doc.operations;
+        assert_eq!(ops.len(), before + 1);
+        assert_eq!(ops.last().expect("new op").members, vec![1, 2]);
+    }
+
+    #[test]
+    fn view_only_filter_hides_geometry_assigned_to_the_filtered_operation() {
+        let mut h = boot();
+        // Two rects, both unassigned (no groups): the auto cut pass covers them.
+        for (x, y) in [(5.0, 5.0), (20.0, 5.0)] {
+            h.state_mut().run_command(Command::ShapeAddRect {
+                x,
+                y,
+                width: 10.0,
+                height: 10.0,
+            });
+        }
+        h.state_mut().open_geo_groups.insert(UNASSIGNED_GROUP);
+        h.run();
+        assert!(has_row_containing(&h, "#1, #1"));
+        assert!(has_row_containing(&h, "#2, #1"));
+
+        // A second operation over shape #1 only, via the row hammer.
+        click(&mut h, "New operation from #1");
+        assert_eq!(h.state().engine.doc.operations.len(), 2);
+        let cut_name = h.state().engine.doc.operations[0].name.clone();
+
+        // Filter the auto cut operation out of the geometry view through the tag
+        // overflow menu: #2's only operation is filtered, so its row hides; #1
+        // still runs in the hammered pass and stays.
+        click(&mut h, "Operations of #1");
+        click_menu(&mut h, &format!("Hide {cut_name} from the geometry view"));
+
+        // "#2, #1" is shape #2's row label (label + its only tag chip); row #1's
+        // label "#1, #1 #2" must not match it.
+        assert!(
+            !has_row_containing(&h, "#2, #1"),
+            "the shape whose only operation is filtered out is hidden"
+        );
+        assert!(
+            has_row_containing(&h, "#1, #1 #2"),
+            "the shape with another operation stays"
+        );
+        // The filter is view-only: the document is untouched.
+        assert_eq!(h.state().engine.doc.operations.len(), 2);
+        assert!(h.state().engine.doc.operations[0].visible);
+        assert_eq!(h.state().engine.doc.operations[0].members.len(), 2);
+
+        click(&mut h, "Operations of #1");
+        click_menu(&mut h, &format!("Show {cut_name} from the geometry view"));
+        assert!(
+            has_row_containing(&h, "#2, #1"),
+            "unfiltering shows the shape again"
+        );
+    }
+
+    #[test]
+    fn group_and_ungroup_dispatch_engine_commands() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        h.state_mut().geo_selection = Selection::only(GeoKey::Group(2));
+        h.run();
+
+        click(&mut h, "Ungroup selected");
+
+        let doc = &h.state().engine.doc;
+        assert!(
+            doc.groups.iter().all(|g| g.id != 2),
+            "inner group was dissolved through GroupUngroup"
+        );
+        assert_eq!(doc.groups.len(), 1);
+    }
+
+    #[test]
+    fn tag_overflow_removes_membership() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        expand_all(h.state_mut());
+        h.run();
+        click(&mut h, "New operation from outer");
+        let op = h.state().engine.doc.operations.last().expect("op").clone();
+
+        click(&mut h, "Operations of #1");
+        click_menu(&mut h, &format!("Remove #1 from {}", op.name));
+
+        let doc = &h.state().engine.doc;
+        let mut members = doc.operations.last().unwrap().members.clone();
+        members.sort_unstable();
+        assert_eq!(
+            members,
+            vec![2, 3],
+            "membership removed via the overflow menu"
         );
     }
 }

@@ -1,8 +1,9 @@
 //! The built-in operation-preset catalogue (D-17): Cut, Engrave, Score, Guide.
-//! Presets carry `OperationSettings::default()` and never set `preset_id`.
+//! Presets carry `OperationKind`s and default settings; the hammer turns one
+//! into a first-class `Document.operations` entry through `OperationCreate`.
 
 use craft_ui::icons::Icon;
-use stencilcraft_doc::{Operation, OperationSettings};
+use stencilcraft_doc::OperationKind;
 
 /// One built-in operation preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,28 +36,33 @@ impl OperationPreset {
         }
     }
 
-    /// The operation a new layer gets from this preset, with default settings.
-    pub fn operation(self) -> Operation {
+    /// The first-class operation kind a new operation gets from this preset.
+    pub fn kind(self) -> OperationKind {
         match self {
-            Self::Cut => Operation::Cut(OperationSettings::default()),
-            Self::Engrave => Operation::Engrave(OperationSettings::default()),
-            Self::Score => Operation::Score(OperationSettings::default()),
-            Self::Guide => Operation::Guide,
+            Self::Cut => OperationKind::Cut,
+            Self::Engrave => OperationKind::Engrave,
+            Self::Score => OperationKind::Score,
+            Self::Guide => OperationKind::Guide,
+        }
+    }
+
+    /// The icon name stored on the created operation (`Operation.icon`).
+    pub fn icon_name(self) -> &'static str {
+        match self {
+            Self::Cut => "scissors",
+            Self::Engrave => "flame",
+            Self::Score => "spline",
+            Self::Guide => "ruler",
         }
     }
 }
-
-/// Drag payload: which preset an operations-palette entry is being dragged onto.
-/// Hit-tested against the layers list's layer-row rects on pointer release (D-13).
-#[derive(Clone, Copy, Debug)]
-pub struct OpDrag(pub OperationPreset);
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn catalogue_is_cut_engrave_score_guide_with_default_settings() {
+    fn catalogue_is_cut_engrave_score_guide_with_matching_kinds() {
         assert_eq!(
             OperationPreset::ALL,
             [
@@ -66,27 +72,18 @@ mod tests {
                 OperationPreset::Guide
             ]
         );
-        assert_eq!(
-            OperationPreset::Cut.operation(),
-            Operation::Cut(OperationSettings::default())
-        );
-        assert_eq!(
-            OperationPreset::Engrave.operation(),
-            Operation::Engrave(OperationSettings::default())
-        );
-        assert_eq!(
-            OperationPreset::Score.operation(),
-            Operation::Score(OperationSettings::default())
-        );
-        assert_eq!(OperationPreset::Guide.operation(), Operation::Guide);
+        assert_eq!(OperationPreset::Cut.kind(), OperationKind::Cut);
+        assert_eq!(OperationPreset::Engrave.kind(), OperationKind::Engrave);
+        assert_eq!(OperationPreset::Score.kind(), OperationKind::Score);
+        assert_eq!(OperationPreset::Guide.kind(), OperationKind::Guide);
         for preset in OperationPreset::ALL {
-            // The built-in catalogue never sets preset_id; Guide is canvas-only.
-            assert!(preset.operation().settings().is_none_or(|_| true));
             assert_eq!(
-                preset.operation().is_guide(),
-                preset == OperationPreset::Guide
+                preset.kind().is_guide(),
+                preset == OperationPreset::Guide,
+                "Guide is canvas-only"
             );
             assert!(!preset.label().is_empty());
+            assert!(!preset.icon_name().is_empty());
         }
     }
 }

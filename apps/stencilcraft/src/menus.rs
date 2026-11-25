@@ -227,8 +227,10 @@ fn edit_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .into(),
         item("Select by Color…", A::ShowPanel(P::SelectByColor)).into(),
         SEP,
-        todo("History…"),
-        todo_key("Preferences…", CMD, Key::K),
+        item("History…", A::ShowPanel(P::History)).into(),
+        item("Preferences…", A::ShowPanel(P::Preferences))
+            .shortcut(kbd(CMD, Key::K))
+            .into(),
     ]
 }
 
@@ -549,8 +551,8 @@ fn select(app: &StencilApp) -> Vec<MenuEntry<A>> {
             any,
         ),
         SEP,
-        todo("Save Selection…"),
-        todo("Edit Selection…"),
+        item("Save Selection…", A::ShowPanel(P::Selections)).into(),
+        item("Edit Selection…", A::ShowPanel(P::Selections)).into(),
     ]
 }
 
@@ -585,7 +587,13 @@ fn effect() -> Vec<MenuEntry<A>> {
                 eff("Perspective…", M::WarpPerspective),
             ],
         ),
-        sub("Distort", vec![todo("Shear"), todo("Free Distort")]),
+        sub(
+            "Distort",
+            vec![
+                item("Shear…", A::ShowPanel(P::Transform)).into(),
+                todo("Free Distort"),
+            ],
+        ),
         todo("Lattice…"),
         eff("Pop-up Card…", M::PopupCard),
         eff("Puzzle…", M::Puzzle),

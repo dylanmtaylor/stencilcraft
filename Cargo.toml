@@ -24,6 +24,7 @@ eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Every craft-libs crate comes from storytold/craft-libs main (formats, codecs, protocols, UI).
 craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
+craft-behavior = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-theme = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-draw = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7", features = ["ui"] }

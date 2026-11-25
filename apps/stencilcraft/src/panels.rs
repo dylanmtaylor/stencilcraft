@@ -16,7 +16,7 @@ use eframe::egui;
 use stencilcraft_engine::document::{DocumentCommand, TransformRequest};
 use stencilcraft_engine::{
     BooleanOperation, Command, DistributionAxis, Effect, NodeAxis, NodeRef, NodeType, SegmentType,
-    Side,
+    DockEdge,
 };
 use stencilcraft_geom::BezPath;
 use stencilcraft_kerf::JoinStyle;
@@ -36,12 +36,12 @@ pub enum ScreenSide {
 impl ScreenSide {
     pub const ALL: [ScreenSide; 4] = [Self::Left, Self::Right, Self::Above, Self::Below];
 
-    pub fn engine(self) -> Side {
+    pub fn engine(self) -> DockEdge {
         match self {
-            Self::Left => Side::Left,
-            Self::Right => Side::Right,
-            Self::Above => Side::Below,
-            Self::Below => Side::Above,
+            Self::Left => DockEdge::Left,
+            Self::Right => DockEdge::Right,
+            Self::Above => DockEdge::Below,
+            Self::Below => DockEdge::Above,
         }
     }
 
@@ -1407,9 +1407,9 @@ mod tests {
 
     #[test]
     fn screen_sides_flip_vertically_for_the_y_up_engine() {
-        assert_eq!(ScreenSide::Above.engine(), Side::Below);
-        assert_eq!(ScreenSide::Below.engine(), Side::Above);
-        assert_eq!(ScreenSide::Left.engine(), Side::Left);
+        assert_eq!(ScreenSide::Above.engine(), DockEdge::Below);
+        assert_eq!(ScreenSide::Below.engine(), DockEdge::Above);
+        assert_eq!(ScreenSide::Left.engine(), DockEdge::Left);
     }
 
     #[test]

@@ -21,12 +21,12 @@ use craft_ui::controls::{
     SliderScale, ToggleButton,
 };
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
-use craft_ui::docking::{
-    Column, DockArea, DockContent, DockStyle, Group, Layout, Node, Permissions, Side,
-};
+use craft_behavior::dock::{Column, DockEdge, Group, Layout, Node, Permissions};
+use craft_ui::docking::{DockArea, DockContent, DockStyle};
 use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
-use craft_ui::layout::{SplitAxis, SplitSize};
+use craft_behavior::flow::Axis;
+use craft_behavior::dock::SplitSize;
 use craft_ui::list::{ListRow, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::menu::{MenuBar, MenuItem};
@@ -1228,14 +1228,14 @@ pub fn starter_workspace() -> Layout<WorkspacePanel> {
 fn workspace_with(strip: Vec<WorkspacePanel>) -> Layout<WorkspacePanel> {
     Layout {
         root: Some(Node::Split {
-            axis: SplitAxis::Horizontal,
+            axis: Axis::X,
             size: SplitSize::Ratio(0.78),
             first: Box::new(Node::Tabs {
                 panels: vec![WorkspacePanel::Canvas],
                 active: 0,
             }),
             second: Box::new(Node::Dock {
-                side: Side::End,
+                side: DockEdge::End,
                 columns: vec![Column::new(
                     vec![
                         Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Layers], 0),
@@ -3648,9 +3648,9 @@ impl StencilApp {
             TopMenuAction::ShowSend => self.send_mode = true,
             TopMenuAction::ShowPanel(panel) => {
                 let action = if self.workspace.contains(&panel) {
-                    craft_ui::docking::Action::Activate { panel }
+                    craft_behavior::dock::Action::Activate { panel }
                 } else {
-                    craft_ui::docking::Action::Open {
+                    craft_behavior::dock::Action::Open {
                         panel,
                         anchor: None,
                     }
@@ -6864,7 +6864,7 @@ impl eframe::App for StencilApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use craft_ui::docking::{Action, Placement};
+    use craft_behavior::dock::{Action, DockPlacement};
 
     #[test]
     fn mats_follow_machine_capabilities() {
@@ -6990,7 +6990,7 @@ mod tests {
                 [Action::Move {
                     panel: WorkspacePanel::Layers,
                     anchor: WorkspacePanel::Inspector,
-                    placement: Placement::Group {
+                    placement: DockPlacement::Group {
                         below: true,
                         height: None,
                     },

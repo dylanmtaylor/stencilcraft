@@ -590,7 +590,7 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 .collect(),
         ),
         SEP,
-        todo("Grid Options…"),
+        item("Grid Options…", A::ShowPanel(P::PageSetup)).into(),
         item("Show Grid", A::ToggleGrid)
             .shortcut(kbd(CMD, Key::Quote))
             .check(app.prefs.show_grid)
@@ -640,10 +640,20 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
             ],
         ),
         SEP,
-        todo_key("Outline View", CMD, Key::Y),
-        todo_key("Show Print Border", cmd_shift(), Key::P),
-        todo_key("Show Cut Border", cmd_shift(), Key::L),
-        todo("Show Dimensions"),
+        item("Outline View", A::ToggleOutlineView)
+            .check(app.prefs.outline_view)
+            .into(),
+        item("Show Print Border", A::TogglePrintBorder)
+            .shortcut(kbd(cmd_shift(), Key::P))
+            .check(app.prefs.show_print_border)
+            .into(),
+        item("Show Cut Border", A::ToggleCutBorder)
+            .shortcut(kbd(cmd_shift(), Key::L))
+            .check(app.prefs.show_cut_border)
+            .into(),
+        item("Show Dimensions", A::ToggleDimensions)
+            .check(app.prefs.show_dimensions)
+            .into(),
         item("Preview Kerf Compensation", A::ToggleKerfPreview)
             .check(app.kerf_preview)
             .into(),
@@ -662,7 +672,7 @@ fn view(app: &StencilApp) -> Vec<MenuEntry<A>> {
 fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
     use stencilcraft_ui_egui::ColorTheme;
     vec![
-        todo("Page Setup"),
+        item("Page Setup", A::ShowPanel(P::PageSetup)).into(),
         todo("PixScan"),
         todo("Fill Color"),
         todo("Line Style"),
@@ -861,7 +871,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Detach Lines", "Outline View"] {
+        for planned in ["Detach Lines", "Spelling…"] {
             assert!(
                 items
                     .iter()

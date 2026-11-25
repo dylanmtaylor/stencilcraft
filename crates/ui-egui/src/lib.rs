@@ -69,6 +69,14 @@ pub struct CanvasOptions {
     pub print_cut_marks: bool,
     pub show_selection_bounds: bool,
     pub theme: ColorTheme,
+    /// View › Outline View: every line a hairline, whatever its weight.
+    pub outline_view: bool,
+    /// View › Show Cut Border: the area the machine can cut, just inside the page.
+    pub cut_border: bool,
+    /// View › Show Print Border: the area a printer can print, for Print & Cut.
+    pub print_border: bool,
+    /// View › Show Dimensions: the selection's width and height beside it.
+    pub show_dimensions: bool,
 }
 
 impl Default for CanvasOptions {
@@ -79,8 +87,38 @@ impl Default for CanvasOptions {
             print_cut_marks: false,
             show_selection_bounds: true,
             theme: ColorTheme::Dark,
+            outline_view: false,
+            cut_border: true,
+            print_border: false,
+            show_dimensions: true,
         }
     }
+}
+
+/// How far inside the page Silhouette Studio draws its cut border (measured in SS 5.0.556:
+/// 1.4–1.5 mm on a 12 × 12 in CAMEO page).
+pub const CUT_BORDER_INSET_MM: f64 = 1.5;
+
+/// The print border's inset: a typical printer's unprintable margin, a quarter inch.
+pub const PRINT_BORDER_INSET_MM: f64 = 6.35;
+
+/// The main board's rectangle inset by `inset` millimetres, as a closed screen polyline.
+fn board_inset_screen(
+    doc: &stencilcraft_doc::Document,
+    view: &View,
+    inset: f64,
+) -> Option<Vec<egui::Pos2>> {
+    let (w, h) = (doc.board.width_mm, doc.board.height_mm);
+    if !(w > 2.0 * inset && h > 2.0 * inset) {
+        return None;
+    }
+    let (x0, y0, x1, y1) = (inset, inset, w - inset, h - inset);
+    Some(
+        [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+            .into_iter()
+            .map(|(x, y)| view.world_to_screen(stencilcraft_geom::Point::new(x, y)))
+            .collect(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -622,6 +660,25 @@ pub fn paint_document(
         paint_registration_marks(painter, view, doc, palette);
     }
 
+    if options.cut_border
+        && let Some(points) = board_inset_screen(doc, view, CUT_BORDER_INSET_MM)
+    {
+        painter.add(egui::Shape::line(
+            points,
+            egui::Stroke::new(1.0, palette.cut_line.linear_multiply(0.6)),
+        ));
+    }
+    if options.print_border
+        && let Some(points) = board_inset_screen(doc, view, PRINT_BORDER_INSET_MM)
+    {
+        painter.extend(egui::Shape::dashed_line(
+            &points,
+            egui::Stroke::new(1.0, palette.engrave_line),
+            6.0,
+            4.0,
+        ));
+    }
+
     // Placed images, under the cut lines, each mapped corner to corner so a turned view turns
     // them too.
     for image in &doc.images {
@@ -638,9 +695,12 @@ pub fn paint_document(
         }
         for shape in layer.shapes.iter().filter(|shape| !shape.hidden) {
             let (mut color, mut width) = shape_visual(shape, view, options.kerf_preview, palette);
+            if options.outline_view {
+                width = 1.0;
+            }
             if selection.selected_shapes.contains(&shape.id) {
                 color = palette.selection;
-                width = width.max(2.5);
+                width = width.max(if options.outline_view { 1.5 } else { 2.5 });
             }
             for pl in stencilcraft_geom::path_to_polylines(
                 &shape.path,
@@ -695,7 +755,53 @@ pub fn paint_document(
             egui::Stroke::new(1.0, palette.selection),
             egui::StrokeKind::Outside,
         );
+        if options.show_dimensions {
+            paint_dimensions(painter, bounds.expand(3.0), union, palette);
+        }
     }
+}
+
+/// Silhouette's dimension callouts: the selection's width below it and its height to its left,
+/// each with a measuring line.
+fn paint_dimensions(
+    painter: &egui::Painter,
+    bounds: egui::Rect,
+    world: kurbo::Rect,
+    palette: Palette,
+) {
+    let stroke = egui::Stroke::new(1.0, palette.selection);
+    let font = egui::FontId::proportional(11.0);
+    let gap = 10.0;
+    let y = bounds.max.y + gap;
+    painter.line_segment(
+        [egui::pos2(bounds.min.x, y), egui::pos2(bounds.max.x, y)],
+        stroke,
+    );
+    for x in [bounds.min.x, bounds.max.x] {
+        painter.line_segment([egui::pos2(x, y - 4.0), egui::pos2(x, y + 4.0)], stroke);
+    }
+    painter.text(
+        egui::pos2(bounds.center().x, y + 3.0),
+        egui::Align2::CENTER_TOP,
+        format!("{:.2} mm", world.width()),
+        font.clone(),
+        palette.selection,
+    );
+    let x = bounds.min.x - gap;
+    painter.line_segment(
+        [egui::pos2(x, bounds.min.y), egui::pos2(x, bounds.max.y)],
+        stroke,
+    );
+    for y in [bounds.min.y, bounds.max.y] {
+        painter.line_segment([egui::pos2(x - 4.0, y), egui::pos2(x + 4.0, y)], stroke);
+    }
+    painter.text(
+        egui::pos2(x - 3.0, bounds.center().y),
+        egui::Align2::RIGHT_CENTER,
+        format!("{:.2} mm", world.height()),
+        font,
+        palette.selection,
+    );
 }
 
 /// Compute the union axis-aligned bounding box in millimetres of `ids` inside `doc`.

@@ -125,9 +125,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)
     and draws smart guides. Missing: snapping while drawing shapes, resizing, dragging
-    nodes and the pen; Alt to suspend snapping; a Grid Options panel (spacing,
-    subdivisions, tolerance, isometric grid, Smart Snap only within media); live
-    width/height callouts beyond the move readout; display units other than mm. A move
+    nodes and the pen; Alt to suspend snapping; isometric grid and Smart Snap only
+    within media (spacing, divisions, tolerance and the toggles are in Page Setup); live
+    width/height callouts while drawing; display units other than mm. A move
     drag still records one undo step per frame.
 19. **Text**: as in SS 5.0.556, the Text tool types on the canvas: click the page (the
     first baseline starts there) and type; letters appear as you type, one undo step per
@@ -230,7 +230,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     integrated template wizard and Save Selection As remain incomplete.
 36. **View aids**: Zoom to Selection, zoom presets, Rotate Page (0/90/180/270, view
     only), Smart Guides, Snap to Point and Guides (show, lock, make, release, clear) exist.
-    Missing: outline view, Show Print/Cut Border, Show Dimensions; Make Guides turns a
+    Outline View, Show Print/Cut Border and Show Dimensions exist too, and the Page Setup
+    panel sets the page, mat, orientation and grid. Make Guides turns a
     shape into its bounds' edge lines, not a guide of its own outline (guides are
     straight lines only).
 37. **Select menu**: Select Inverse and Select Same (fill, stroke, layer) exist now.

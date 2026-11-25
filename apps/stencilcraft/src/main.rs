@@ -55,6 +55,7 @@ mod menus;
 
 /// File › New: the New Document dialog (preset cards and details).
 mod new_doc;
+mod object_menu;
 
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod page_setup;
@@ -500,6 +501,15 @@ pub enum TopMenuAction {
     ReleaseGuides,
     ClearGuides,
     ToggleKerfPreview,
+    /// Object › Arrange › Send to Layer.
+    SendToLayer(usize),
+    /// Object › Attach / Detach.
+    ToggleAttach,
+    /// Object › Flatten.
+    Flatten,
+    /// Object › Clipping Mask › Make / Release.
+    ClipMake,
+    ClipRelease,
     /// An Effect menu item: the Effects panel on that effect.
     OpenEffect(effects::EffectMenu),
     /// Effect › Apply Last Effect.
@@ -722,6 +732,7 @@ pub enum WorkspacePanel {
     TextStyle,
     PageSetup,
     Effects,
+    Contour,
 }
 
 struct WorkspaceContent<'a> {
@@ -744,6 +755,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::TextStyle => self.app.text_style_panel(ui),
             WorkspacePanel::PageSetup => self.app.page_setup_panel(ui),
             WorkspacePanel::Effects => self.app.effects_panel(ui),
+            WorkspacePanel::Contour => self.app.contour_panel(ui),
         }
     }
 
@@ -762,6 +774,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::TextStyle => "Text Style",
             WorkspacePanel::PageSetup => "Page Setup",
             WorkspacePanel::Effects => "Effects",
+            WorkspacePanel::Contour => "Contour",
         }
         .to_owned()
     }
@@ -988,6 +1001,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::TextStyle,
                                 WorkspacePanel::PageSetup,
                                 WorkspacePanel::Effects,
+                                WorkspacePanel::Contour,
                             ],
                             0,
                         ),
@@ -3247,6 +3261,11 @@ impl StencilApp {
             }
             TopMenuAction::ToggleKerfPreview => self.kerf_preview = !self.kerf_preview,
             TopMenuAction::OpenEffect(menu) => self.open_effect(menu),
+            TopMenuAction::SendToLayer(index) => self.send_to_layer(index),
+            TopMenuAction::ToggleAttach => self.toggle_attach(),
+            TopMenuAction::Flatten => self.flatten_selection(),
+            TopMenuAction::ClipMake => self.make_clipping_mask(),
+            TopMenuAction::ClipRelease => self.release_clipping_mask(),
             TopMenuAction::ApplyLastEffect => self.apply_last_effect(),
             TopMenuAction::ToggleOutlineView => {
                 self.prefs.outline_view = !self.prefs.outline_view;

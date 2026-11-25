@@ -260,7 +260,16 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     .enabled(any)
                     .into(),
                 SEP,
-                todo("Send to Layer…"),
+                sub(
+                    "Send to Layer",
+                    app.engine
+                        .doc
+                        .layers
+                        .iter()
+                        .enumerate()
+                        .map(|(i, layer)| when(&layer.name, A::SendToLayer(i), any))
+                        .collect(),
+                ),
             ],
         ),
         sub(
@@ -316,7 +325,7 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 when("Rotate 90° Clockwise", A::RotateBy(90), any),
                 when("Rotate 90° Counterclockwise", A::RotateBy(-90), any),
                 when("Rotate 180°", A::RotateBy(180), any),
-                todo("Custom…"),
+                item("Custom…", A::ShowPanel(P::Transform)).into(),
             ],
         ),
         sub(
@@ -396,7 +405,15 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .shortcut(kbd(cmd_shift(), Key::G))
             .enabled(any)
             .into(),
-        todo("Attach / Detach"),
+        when(
+            if app.selection_attached() {
+                "Detach"
+            } else {
+                "Attach"
+            },
+            A::ToggleAttach,
+            if app.selection_attached() { any } else { many },
+        ),
         edit_key("Lock", E::Lock, any, CMD, Key::Num2),
         edit_key("Unlock All", E::UnlockAll, true, cmd_alt(), Key::Num2),
         edit_key("Hide", E::Hide, any, CMD, Key::Num3),
@@ -414,8 +431,14 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Clipping Mask",
             vec![
-                todo_key("Make", CMD, Key::Num7),
-                todo_key("Release", cmd_alt(), Key::Num7),
+                item("Make", A::ClipMake)
+                    .shortcut(kbd(CMD, Key::Num7))
+                    .enabled(app.selected_shapes.len() == 2)
+                    .into(),
+                item("Release", A::ClipRelease)
+                    .shortcut(kbd(cmd_alt(), Key::Num7))
+                    .enabled(any)
+                    .into(),
             ],
         ),
         edit_key("Simplify", E::Simplify, any, CMD, Key::J),
@@ -441,9 +464,9 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("Point Editing Panel…", A::ShowPanel(P::Points)).into(),
             ],
         ),
-        todo("Expand"),
-        todo("Contour"),
-        todo("Flatten"),
+        edit("Expand", E::ToPath, any),
+        item("Contour…", A::ShowPanel(P::Contour)).into(),
+        when("Flatten", A::Flatten, any),
     ]
 }
 

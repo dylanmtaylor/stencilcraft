@@ -10,7 +10,7 @@
 //! printer can score/print them, and they travel with the sheet's SVG.
 
 use kurbo::{BezPath, Point};
-use stencilcraft_doc::{Document, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{Document, Layer};
 
 use crate::{Tile, TilingError};
 
@@ -60,14 +60,27 @@ pub fn add_marks(piece: &mut Document, tile: &Tile, overlap_mm: f64) -> Result<(
         }
     }
     let layer_index = piece.layers.len();
-    piece.layers.push(Layer::new(
-        MARKS_LAYER,
-        Some(Operation::Engrave(OperationSettings::default())),
-    ));
+    piece.layers.push(Layer::new(MARKS_LAYER));
+    let op_id = piece.next_operation_id();
+    piece.operations.push(stencilcraft_doc::Operation {
+        id: op_id,
+        name: MARKS_LAYER.to_string(),
+        kind: stencilcraft_doc::OperationKind::Engrave,
+        settings: Default::default(),
+        color: None,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
     for path in paths {
-        piece
+        let id = piece
             .push_shape(layer_index, path)
-            .map_err(|e| TilingError::Model(e.to_string()))?;
+            .map_err(|e| TilingError::Model(e.to_string()))?
+            .id;
+        if let Some(op) = piece.operations.iter_mut().find(|o| o.id == op_id) {
+            op.members.push(id);
+        }
     }
     Ok(())
 }

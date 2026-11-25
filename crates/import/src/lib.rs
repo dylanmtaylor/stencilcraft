@@ -14,14 +14,39 @@ mod render;
 use std::collections::HashMap;
 
 use kurbo::{BezPath, PathEl, Point, Shape as _};
-use stencilcraft_doc::{CutStyle, Document, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{CutStyle, Document, Layer, Operation, OperationKind, OperationSettings};
 
-/// The production pass a legacy `CutStyle` maps to.
-fn op_of(style: CutStyle) -> Option<Operation> {
-    Some(match style {
-        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
-        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
-    })
+/// The production pass kind a legacy `CutStyle` maps to.
+fn kind_of(style: CutStyle) -> OperationKind {
+    match style {
+        CutStyle::Cut => OperationKind::Cut,
+        CutStyle::Engrave => OperationKind::Engrave,
+    }
+}
+
+/// Finds the operation for `(name, style, color)`, or creates it.
+fn ensure_operation(doc: &mut Document, name: &str, style: CutStyle, color: Option<String>) -> u64 {
+    let kind = kind_of(style);
+    if let Some(op) = doc
+        .operations
+        .iter()
+        .find(|o| o.name == name && o.kind == kind && o.color == color)
+    {
+        return op.id;
+    }
+    let id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id,
+        name: name.to_string(),
+        kind,
+        settings: OperationSettings::default(),
+        color,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
+    id
 }
 
 pub use handlers::{FORMAT_CAPABILITIES, FormatCapabilities, write_document};
@@ -221,11 +246,13 @@ fn vector_document(
             width_mm: scene.width_mm,
             height_mm: scene.height_mm,
         },
-        layers: vec![Layer::new("cut", op_of(CutStyle::Cut))],
+        layers: vec![Layer::new("cut")],
         ..Document::default()
     };
-    let mut layers = HashMap::<(String, bool, Option<String>), usize>::new();
-    layers.insert(("cut".into(), false, None), 0);
+    ensure_operation(&mut doc, "cut", CutStyle::Cut, None);
+    let mut layers = HashMap::<(String, bool, Option<String>), (usize, u64)>::new();
+    let cut_op = doc.operations[0].id;
+    layers.insert(("cut".into(), false, None), (0, cut_op));
     for source in scene.shapes {
         if source.path.elements().is_empty() {
             continue;
@@ -254,24 +281,29 @@ fn vector_document(
             style == CutStyle::Engrave,
             color.clone(),
         );
-        let layer_index = if let Some(index) = layers.get(&key) {
-            *index
+        let (layer_index, op_id) = if let Some(entry) = layers.get(&key) {
+            *entry
         } else {
-            let mut layer = Layer::new(layer_name, op_of(style));
-            layer.color = color;
-            doc.layers.push(layer);
+            doc.layers.push(Layer::new(layer_name.clone()));
             let index = doc.layers.len() - 1;
-            layers.insert(key, index);
-            index
+            let op_id = ensure_operation(&mut doc, &layer_name, style, color.clone());
+            layers.insert(key, (index, op_id));
+            (index, op_id)
         };
-        doc.push_shape(layer_index, source.path)
-            .map_err(|e| bad(name, e))?;
+        let shape_id = doc
+            .push_shape(layer_index, source.path)
+            .map_err(|e| bad(name, e))?
+            .id;
+        if let Some(op) = doc.operations.iter_mut().find(|o| o.id == op_id) {
+            op.members.push(shape_id);
+        }
     }
     doc.validate().map_err(|e| bad(name, e))?;
     Ok(doc)
 }
 
 /// Scale the art uniformly to fill the page, its corner at the page's.
+#[allow(dead_code)]
 fn fit(doc: &mut Document, (page_w, page_h): (f64, f64)) {
     let bounds = (0..doc.layers.len())
         .filter_map(|i| doc.layer_bounds(i))

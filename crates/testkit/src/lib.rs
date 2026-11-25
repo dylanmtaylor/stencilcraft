@@ -5,22 +5,35 @@
 
 use kurbo::{BezPath, Point};
 use stencilcraft_doc::{
-    Board, CutStyle, Document, KerfSettings, Layer, Operation, OperationSettings, Shape,
+    Board, CutStyle, Document, KerfSettings, Layer, Operation, OperationKind, OperationSettings,
+    Shape,
 };
 
-/// The production pass a legacy `CutStyle` maps to.
-fn op_of(kind: CutStyle) -> Option<Operation> {
-    Some(match kind {
-        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
-        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
-    })
+/// The production pass kind a legacy `CutStyle` maps to.
+fn kind_of(kind: CutStyle) -> OperationKind {
+    match kind {
+        CutStyle::Cut => OperationKind::Cut,
+        CutStyle::Engrave => OperationKind::Engrave,
+    }
 }
 
-/// A layer plus the shapes that belong to it (v2 keeps geometry in `Document::shapes`).
-fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> (Layer, Vec<Shape>) {
-    let mut layer = Layer::new(name, op_of(kind));
+/// A layer plus the shapes that belong to it and the operation that produces them
+/// (v2 keeps geometry in `Document::shapes`, production in `Document::operations`).
+fn layer(name: &str, kind: CutStyle, shapes: Vec<Shape>) -> (Layer, Vec<Shape>, Operation) {
+    let mut layer = Layer::new(name);
     layer.members = shapes.iter().map(|s| s.id).collect();
-    (layer, shapes)
+    let operation = Operation {
+        id: 0, // re-numbered by base_document
+        name: name.to_string(),
+        kind: kind_of(kind),
+        settings: OperationSettings::default(),
+        color: None,
+        visible: true,
+        locked: false,
+        members: layer.members.clone(),
+        icon: None,
+    };
+    (layer, shapes, operation)
 }
 
 fn shape(id: u64, path: BezPath, _style: CutStyle) -> Shape {
@@ -51,20 +64,29 @@ pub fn line_path(x0: f64, y0: f64, x1: f64, y1: f64) -> BezPath {
     p
 }
 
-fn base_document(board: Board, kerf: KerfSettings, layers: Vec<(Layer, Vec<Shape>)>) -> Document {
+fn base_document(
+    board: Board,
+    kerf: KerfSettings,
+    layers: Vec<(Layer, Vec<Shape>, Operation)>,
+) -> Document {
     let id_top = layers
         .iter()
-        .flat_map(|(_, shapes)| shapes.iter().map(|s| s.id))
+        .flat_map(|(_, shapes, _)| shapes.iter().map(|s| s.id))
         .max()
         .unwrap_or(0);
     let shapes: Vec<Shape> = layers
         .iter()
-        .flat_map(|(_, shapes)| shapes.iter().cloned())
+        .flat_map(|(_, shapes, _)| shapes.iter().cloned())
         .collect();
+    let mut operations: Vec<Operation> = layers.iter().map(|(_, _, op)| op.clone()).collect();
+    for (i, op) in operations.iter_mut().enumerate() {
+        op.id = (i + 1) as u64;
+    }
     Document {
         board,
         kerf,
-        layers: layers.into_iter().map(|(layer, _)| layer).collect(),
+        layers: layers.into_iter().map(|(layer, _, _)| layer).collect(),
+        operations,
         shapes,
         next_shape_id: id_top + 1,
         ..Document::default()

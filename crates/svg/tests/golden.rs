@@ -4,14 +4,21 @@
 
 #![allow(clippy::unwrap_used)] // helpers outside #[test] fail loudly, like tests
 
-use stencilcraft_doc::{Document, Group, GroupChild, Layer, Operation, OperationSettings};
+use stencilcraft_doc::{
+    Document, Group, GroupChild, Layer, Operation, OperationKind, OperationSettings,
+};
 
-/// The production pass a golden fixture layer name maps to.
-fn op(name: &str) -> Option<Operation> {
-    match name {
-        "engrave" => Some(Operation::Engrave(OperationSettings::default())),
-        "guide" => Some(Operation::Guide),
-        _ => Some(Operation::Cut(OperationSettings::default())),
+fn op(id: u64, name: &str, kind: OperationKind, visible: bool, members: Vec<u64>) -> Operation {
+    Operation {
+        id,
+        name: name.to_string(),
+        kind,
+        settings: OperationSettings::default(),
+        color: None,
+        visible,
+        locked: false,
+        members,
+        icon: None,
     }
 }
 use stencilcraft_svg::{TilePreviewOptions, export, export_print_and_cut, export_tile_preview};
@@ -21,11 +28,9 @@ use stencilcraft_testkit::{line_path, rect_path, starter};
 /// and a template layer.
 fn grouped() -> Document {
     let mut doc = Document::default();
-    doc.layers.push(Layer::new("engrave", op("engrave")));
-    doc.layers.push(Layer::new("hidden", op("hidden")));
-    doc.layers.push(Layer::new("guide", op("guide")));
-    doc.layers[2].visible = false;
-    doc.layers[3].operation = Some(Operation::Guide);
+    doc.layers.push(Layer::new("engrave"));
+    doc.layers.push(Layer::new("hidden"));
+    doc.layers.push(Layer::new("guide"));
     let mut curve = kurbo::BezPath::new();
     curve.move_to((5.0, 5.0));
     curve.curve_to((10.5, 0.125), (20.0, 1.0 / 3.0), (25.0, 5.0));
@@ -49,13 +54,24 @@ fn grouped() -> Document {
         .unwrap()
         .id;
     let members = doc.layers[0].members.clone();
-    for id in members {
-        doc.get_shape_mut(id).unwrap().hidden = id == hidden;
+    for id in &members {
+        doc.get_shape_mut(*id).unwrap().hidden = *id == hidden;
     }
-    doc.push_shape(1, line_path(5.0, 90.0, 95.0, 90.0)).unwrap();
-    doc.push_shape(2, rect_path(1.0, 1.0, 2.0, 2.0)).unwrap();
-    doc.push_shape(3, rect_path(0.0, 0.0, 300.0, 300.0))
-        .unwrap();
+    let line = doc
+        .push_shape(1, line_path(5.0, 90.0, 95.0, 90.0))
+        .unwrap()
+        .id;
+    let small = doc.push_shape(2, rect_path(1.0, 1.0, 2.0, 2.0)).unwrap().id;
+    let frame = doc
+        .push_shape(3, rect_path(0.0, 0.0, 300.0, 300.0))
+        .unwrap()
+        .id;
+    doc.operations = vec![
+        op(1, "base", OperationKind::Cut, true, members.clone()),
+        op(2, "engrave", OperationKind::Engrave, true, vec![line]),
+        op(3, "hidden", OperationKind::Cut, false, vec![small]),
+        op(4, "guide", OperationKind::Guide, true, vec![frame]),
+    ];
     doc.groups = vec![
         Group {
             id: 1,

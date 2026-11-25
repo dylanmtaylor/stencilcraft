@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use kurbo::{Affine, BezPath, ParamCurve, ParamCurveArclen, PathSeg, Point, Rect};
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{Document, Operation, OperationSettings, SendAssign, Shape};
+use stencilcraft_doc::{Document, OperationKind, SendAssign, Shape};
 
 use crate::machines::{MarkStyle, machine};
 use crate::mats::{MatOptions, MatPlan, layout_mats};
@@ -186,7 +186,7 @@ pub struct CutOp {
     pub copy: u32,
     pub contour: usize,
     pub group: String,
-    pub operation: Option<Operation>,
+    pub operation: Option<OperationKind>,
     pub tool: u8,
     pub passes: u32,
     /// The contour is closed (an overcut path still counts as closed).
@@ -226,11 +226,11 @@ pub struct CutJob {
     pub mats: Vec<MatJob>,
 }
 
-fn operation_name(op: &Operation) -> &'static str {
+fn operation_name(op: &OperationKind) -> &'static str {
     op.kind_name()
 }
 
-fn group_key(by: CutBy, shape: &Shape, layer: usize, op: Option<&Operation>) -> String {
+fn group_key(by: CutBy, shape: &Shape, layer: usize, op: Option<&OperationKind>) -> String {
     let style = || op.map_or("none", operation_name).to_string();
     match by {
         CutBy::Operation => style(),
@@ -385,7 +385,7 @@ fn mat_ops(
                 continue;
             };
             let layer = layers.get(id).copied().unwrap_or_default();
-            let op = doc.layers.get(layer).and_then(|l| l.operation.as_ref());
+            let op = doc.operation_of_shape(*id).map(|o| &o.kind);
             let group = group_key(options.cut_by, shape, layer, op);
             let setting = options.groups.iter().find(|g| g.key == group);
             let assign = shape.production.send;
@@ -416,7 +416,7 @@ fn mat_ops(
                     copy: placement.copy,
                     contour,
                     group: group.clone(),
-                    operation: op.cloned(),
+                    operation: op.copied(),
                     tool,
                     passes: setting.and_then(|g| g.passes).unwrap_or(options.passes),
                     closed: is_closed(&path),
@@ -601,7 +601,7 @@ fn line_op(path: BezPath, closed: bool, passes: u32) -> CutOp {
         copy: 0,
         contour: 0,
         group: "weed".to_string(),
-        operation: Some(Operation::Cut(OperationSettings::default())),
+        operation: Some(OperationKind::Cut),
         tool: 1,
         passes,
         closed,
@@ -736,6 +736,28 @@ mod tests {
         o.extend(rect(10.0, 10.0, 10.0, 10.0).iter());
         doc.push_shape(0, o).unwrap();
         doc.push_shape(0, rect(100.0, 0.0, 5.0, 5.0)).unwrap();
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![1],
+            icon: None,
+        });
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: 2,
+            name: "engrave".to_string(),
+            kind: OperationKind::Engrave,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: vec![2],
+            icon: None,
+        });
         doc
     }
 

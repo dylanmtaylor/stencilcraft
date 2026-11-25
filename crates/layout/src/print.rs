@@ -320,7 +320,17 @@ mod tests {
     fn ptc_doc() -> Document {
         let mut doc = Document::default();
         doc.push_shape(0, rect(0.0, 0.0, 40.0, 30.0)).unwrap();
-        doc.layers[0].operation = Some(Operation::PrintThenCut(Default::default()));
+        doc.operations.push(stencilcraft_doc::Operation {
+            id: doc.next_operation_id(),
+            name: "print-then-cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::PrintThenCut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: doc.layers[0].members.clone(),
+            icon: None,
+        });
         let s = &mut doc
             .get_shape_mut(doc.layers[0].members[0])
             .unwrap()

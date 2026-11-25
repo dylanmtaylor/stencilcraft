@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use kurbo::{Affine, BezPath, Rect};
 use serde::{Deserialize, Serialize};
-use stencilcraft_doc::{Document, GroupKind, Operation};
+use stencilcraft_doc::{Document, GroupKind, OperationKind};
 
 use crate::machines::{MachineProfile, MarkStyle, machine};
 use crate::{Result, check_range, invalid};
@@ -184,14 +184,14 @@ fn collect_pieces(doc: &Document) -> Vec<Piece> {
     let mut pieces: Vec<Piece> = Vec::new();
     let mut attach_index: BTreeMap<u64, usize> = BTreeMap::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
-        let op = layer.operation.as_ref();
-        if matches!(op, Some(Operation::Guide)) {
-            continue;
-        }
         for id in &layer.members {
             let Some(shape) = doc.get_shape(*id) else {
                 continue;
             };
+            let op = doc.operation_of_shape(*id).map(|o| o.kind);
+            if matches!(op, Some(OperationKind::Guide)) {
+                continue;
+            }
             if shape.hidden {
                 continue;
             }
@@ -202,7 +202,7 @@ fn collect_pieces(doc: &Document) -> Vec<Piece> {
             if path.elements().is_empty() {
                 continue;
             }
-            let printed = matches!(op, Some(Operation::PrintThenCut(_)))
+            let printed = matches!(op, Some(OperationKind::PrintThenCut))
                 || shape
                     .production
                     .group
@@ -210,7 +210,7 @@ fn collect_pieces(doc: &Document) -> Vec<Piece> {
                     .is_some_and(|g| g.kind == GroupKind::Flatten);
             let leads = !matches!(
                 op,
-                Some(Operation::Draw(_) | Operation::Score(_) | Operation::Engrave(_))
+                Some(OperationKind::Draw | OperationKind::Score | OperationKind::Engrave)
             );
             let key = MatKey {
                 print_then_cut: printed,

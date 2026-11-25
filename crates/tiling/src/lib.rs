@@ -210,16 +210,27 @@ pub fn tile_document_with(
             next_shape_id: doc.next_shape_id,
             ..Document::default()
         };
-        for layer in &doc.layers {
-            if !layer.is_output() {
+        for op in &doc.operations {
+            if !op.is_output() {
                 continue;
             }
             let layer_index = piece.layers.len();
-            piece.layers.push(stencilcraft_doc::Layer::new(
-                layer.name.clone(),
-                layer.operation.clone(),
-            ));
-            for id in &layer.members {
+            piece
+                .layers
+                .push(stencilcraft_doc::Layer::new(op.name.clone()));
+            let op_id = piece.next_operation_id();
+            piece.operations.push(stencilcraft_doc::Operation {
+                id: op_id,
+                name: op.name.clone(),
+                kind: op.kind,
+                settings: op.settings.clone(),
+                color: op.color.clone(),
+                visible: op.visible,
+                locked: op.locked,
+                members: Vec::new(),
+                icon: op.icon.clone(),
+            });
+            for id in &op.members {
                 let Some(shape) = doc.get_shape(*id).filter(|shape| !shape.hidden) else {
                     continue;
                 };
@@ -255,10 +266,14 @@ pub fn tile_document_with(
                 translated.id = piece.next_shape_id;
                 piece.next_shape_id += 1;
                 piece.layers[layer_index].members.push(translated.id);
+                if let Some(op) = piece.operations.iter_mut().find(|o| o.id == op_id) {
+                    op.members.push(translated.id);
+                }
                 piece.shapes.push(translated);
             }
             if piece.layers[layer_index].members.is_empty() {
                 piece.layers.pop();
+                piece.operations.retain(|o| o.id != op_id);
             }
         }
         // A tile the artwork never reaches needs no material: skip the sheet rather

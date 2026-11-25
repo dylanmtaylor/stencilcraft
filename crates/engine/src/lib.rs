@@ -28,7 +28,7 @@ use vectorcraft_geom::PathData as AnchorPath;
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use stencilcraft_doc::{CutStyle, Document, Operation};
+use stencilcraft_doc::{CutStyle, Document};
 use stencilcraft_kerf::JoinStyle;
 use vectorcraft_engine::Session as VectorCraftSession;
 use vectorcraft_engine::doc::color::{Color, Paint};
@@ -234,7 +234,7 @@ pub enum Command {
     LayerAdd {
         name: String,
         #[serde(default)]
-        operation: Option<Operation>,
+        operation: Option<stencilcraft_doc::OperationKind>,
     },
     /// Set visibility of a layer by index.
     #[serde(rename = "layer.set-visible")]
@@ -1071,11 +1071,23 @@ impl Engine {
                 let operation = document::op_of_style(style).ok_or_else(|| {
                     EngineError::Invalid("shapes.set-style: unknown style".to_string())
                 })?;
-                for li in 0..self.doc.layers.len() {
-                    document::remove_members(&mut self.doc, li, &ids);
+                for op in self.doc.operations.iter_mut() {
+                    op.members.retain(|m| !ids.contains(m));
                 }
-                let target_layer = document::ensure_operation_layer(&mut self.doc, operation);
-                document::add_members(&mut self.doc, target_layer, &ids);
+                let target =
+                    document::ensure_operation(&mut self.doc, operation, Default::default());
+                document::op_add_members(&mut self.doc, target, &ids);
+                // Old set-style semantics moved the shape's layer membership too.
+                let layer = self
+                    .doc
+                    .layers
+                    .iter()
+                    .rposition(|l| l.takes_new_shapes())
+                    .unwrap_or(0);
+                for l in &mut self.doc.layers {
+                    l.members.retain(|m| !ids.contains(m));
+                }
+                document::add_members(&mut self.doc, layer, &ids);
                 Ok(Effect::ShapesStyled { ids })
             }
             Command::ShapeAddPaths { shapes } => {
@@ -1283,10 +1295,6 @@ impl Engine {
                         "layer.add: name cannot be empty".to_string(),
                     ));
                 }
-                if let Some(op) = &operation {
-                    op.validate()
-                        .map_err(|e| EngineError::Invalid(format!("layer.add: {e}")))?;
-                }
                 self.add_vector_layer(&name, operation, "layer.add")?;
                 Ok(Effect::LayerAdded)
             }
@@ -1362,7 +1370,7 @@ impl Engine {
                         height_mm,
                     },
                     kerf: self.doc.kerf.clone(),
-                    layers: vec![stencilcraft_doc::Layer::new("base", None)],
+                    layers: vec![stencilcraft_doc::Layer::new("base")],
                     next_shape_id: 1,
                     ..Document::default()
                 };
@@ -1879,27 +1887,23 @@ impl Engine {
             image.height_mm / f64::from(image.height_px),
         );
         let map = |p: kurbo::Point| kurbo::Point::new(image.x_mm + p.x * sx, image.y_mm + p.y * sy);
-        let operation = document::op_of_style(style)
+        let kind = document::op_of_style(style)
             .ok_or_else(|| EngineError::Invalid("image.trace: unknown style".to_string()))?;
-        let layer = match self
+        // Traced shapes land on the top unlocked geometry layer and join the matching
+        // operation (created if missing).
+        let layer = self
             .doc
             .layers
             .iter()
-            .rposition(|layer| layer.operation.as_ref() == Some(&operation))
-        {
-            Some(index) => index,
-            None => {
-                self.doc.layers.push(stencilcraft_doc::Layer::new(
-                    operation.kind_name(),
-                    Some(operation),
-                ));
-                self.doc.layers.len() - 1
-            }
-        };
+            .rposition(|layer| layer.takes_new_shapes())
+            .unwrap_or(0);
         let mut ids = Vec::with_capacity(traced.contours.len());
         for contour in &traced.contours {
             let path = stencilcraft_raster::contour_path(contour, options.corner_threshold, map);
-            ids.push(self.doc.push_shape(layer, path)?.id);
+            let id = self.doc.push_shape(layer, path)?.id;
+            let op_id = document::ensure_operation(&mut self.doc, kind, Default::default());
+            document::op_add_members(&mut self.doc, op_id, &[id]);
+            ids.push(id);
         }
         if let Some(detached) = traced.detached {
             let replaced = stencilcraft_raster::with_pixels(&image, &detached)
@@ -2008,7 +2012,7 @@ impl Engine {
             }
         }
         self.sync_doc_from_session()?;
-        let result_ids = self
+        let result_ids: Vec<u64> = self
             .doc
             .shapes()
             .filter_map(|shape| {
@@ -2016,6 +2020,17 @@ impl Engine {
                     .then_some(shape.id)
             })
             .collect();
+        // The result keeps the backmost input's operation (the first id of the
+        // back-to-front stack; `shape.pathfinder` normalizes to paint order first).
+        if let Some(backmost) = ids.first().copied()
+            && let Some(kind) = document::op_of_style(document::style_of_shape(&self.doc, backmost))
+        {
+            for op in self.doc.operations.iter_mut() {
+                op.members.retain(|m| !result_ids.contains(m));
+            }
+            let op_id = document::ensure_operation(&mut self.doc, kind, Default::default());
+            document::op_add_members(&mut self.doc, op_id, &result_ids);
+        }
         Ok(Effect::ShapesAdded { ids: result_ids })
     }
 
@@ -2292,7 +2307,7 @@ impl Engine {
     fn add_vector_layer(
         &mut self,
         name: &str,
-        operation: Option<Operation>,
+        operation: Option<stencilcraft_doc::OperationKind>,
         command: &str,
     ) -> Result<(), EngineError> {
         let created = self
@@ -2320,7 +2335,21 @@ impl Engine {
         }
         self.doc
             .layers
-            .insert(position, stencilcraft_doc::Layer::new(name, operation));
+            .insert(position, stencilcraft_doc::Layer::new(name));
+        if let Some(kind) = operation {
+            let id = self.doc.next_operation_id();
+            self.doc.operations.push(stencilcraft_doc::Operation {
+                id,
+                name: name.to_string(),
+                kind,
+                settings: Default::default(),
+                color: None,
+                visible: true,
+                locked: false,
+                members: Vec::new(),
+                icon: None,
+            });
+        }
         self.layer_nodes.insert(position, NodeId(node_id));
         for layer_index in self.node_layers.values_mut() {
             if *layer_index >= position {
@@ -2341,17 +2370,15 @@ impl Engine {
 
         let first_shape_id = self.doc.next_shape_id;
         let mut node_ids = Vec::with_capacity(shapes.len());
-        for (path, style) in shapes.iter().rev() {
-            let operation = document::op_of_style(*style)
+        for (path, style) in shapes.iter() {
+            let _kind = document::op_of_style(*style)
                 .ok_or_else(|| EngineError::Internal(format!("{command}: unknown style")))?;
             let layer_index = self
                 .doc
                 .layers
                 .iter()
-                .rposition(|layer| {
-                    layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
-                })
-                .ok_or_else(|| EngineError::Internal(format!("{command}: missing style layer")))?;
+                .rposition(|layer| layer.takes_new_shapes())
+                .ok_or_else(|| EngineError::Internal(format!("{command}: no unlocked layer")))?;
             let layer_id = self.layer_nodes.get(layer_index).copied().ok_or_else(|| {
                 EngineError::Internal(format!("{command}: missing VectorCraft layer mapping"))
             })?;
@@ -2376,10 +2403,6 @@ impl Engine {
                 .map_err(|error| EngineError::Invalid(format!("{command}: {error}")))?;
             node_ids.push(NodeId(node_id));
         }
-        // VectorCraft inserts at the top of a layer. Create paths in reverse input order, then
-        // restore the input order for mapping back to StencilCraft's append order.
-        node_ids.reverse();
-
         self.sync_doc_from_session()?;
         let mut remapped_shapes = self.shape_nodes.clone();
         for node_id in &node_ids {
@@ -2423,6 +2446,13 @@ impl Engine {
                     }
                 }
             }
+            for op in &mut self.doc.operations {
+                for m in &mut op.members {
+                    if *m == *old_id {
+                        *m = PHASE + new_id;
+                    }
+                }
+            }
         }
         for shape in &mut self.doc.shapes {
             if shape.id >= PHASE {
@@ -2436,6 +2466,13 @@ impl Engine {
                 }
             }
         }
+        for op in &mut self.doc.operations {
+            for m in &mut op.members {
+                if *m >= PHASE {
+                    *m -= PHASE;
+                }
+            }
+        }
         for (offset, (node_id, _)) in node_ids.iter().zip(shapes.iter()).enumerate() {
             remapped_shapes.insert(first_shape_id + offset as u64, node_id.0);
         }
@@ -2444,6 +2481,25 @@ impl Engine {
             .into_iter()
             .map(|(shape_id, node_id)| (node_id, shape_id))
             .collect();
+        // New shapes are appended in input (id) order; existing shapes keep their
+        // document order.
+        let mut existing: Vec<_> = self
+            .doc
+            .shapes
+            .iter()
+            .filter(|s| s.id < first_shape_id)
+            .cloned()
+            .collect();
+        let mut added: Vec<_> = self
+            .doc
+            .shapes
+            .iter()
+            .filter(|s| s.id >= first_shape_id)
+            .cloned()
+            .collect();
+        added.sort_by_key(|s| s.id);
+        existing.extend(added);
+        self.doc.shapes = existing;
         let order: std::collections::BTreeMap<u64, usize> = self
             .doc
             .shapes
@@ -2501,9 +2557,14 @@ impl Engine {
                     continue;
                 };
                 let node_id = vdoc.alloc_id();
-                let fill = FillLayer::new(Paint::solid(match layer.operation.as_ref() {
-                    Some(Operation::Engrave(_)) => Color::rgb8(0xc0, 0x20, 0x20),
-                    _ => Color::BLACK,
+                let engrave = self
+                    .doc
+                    .operation_of_shape(*member)
+                    .is_some_and(|o| o.kind == stencilcraft_doc::OperationKind::Engrave);
+                let fill = FillLayer::new(Paint::solid(if engrave {
+                    Color::rgb8(0xc0, 0x20, 0x20)
+                } else {
+                    Color::BLACK
                 }));
                 let path = transform_path(&shape.path, kurbo::Affine::scale(POINTS_PER_MM));
                 let mut node = Node::path(
@@ -2582,29 +2643,12 @@ impl Engine {
                         .ok_or_else(|| EngineError::Internal("shape ids exhausted".to_string()))?;
                     id
                 };
-            let target_layer = updated
-                .layers
-                .get(layer_index)
-                .filter(|layer| layer.operation == operation || layer.operation.is_none())
-                .map(|_| layer_index)
-                .or_else(|| {
-                    updated
-                        .layers
-                        .iter()
-                        .rposition(|layer| layer.operation == operation)
-                })
-                .unwrap_or_else(|| {
-                    updated.layers.push(stencilcraft_doc::Layer::new(
-                        match style {
-                            CutStyle::Cut => "cut",
-                            CutStyle::Engrave => "engrave",
-                        },
-                        operation,
-                    ));
-                    updated.layers.len() - 1
-                });
+            // Geometry lands on the VectorCraft layer it was drawn on; production
+            // membership is rebuilt from the style below.
+            let target_layer = layer_index.min(updated.layers.len().saturating_sub(1));
             new_shapes.push((
                 target_layer,
+                operation,
                 stencilcraft_doc::Shape {
                     hidden: flags.0,
                     locked: flags.1,
@@ -2621,9 +2665,13 @@ impl Engine {
             active_nodes.insert(shape_id, node_id.0);
             self.node_shapes.insert(node_id.0, shape_id);
         }
-        for (layer_index, shape) in new_shapes {
+        for (layer_index, kind, shape) in new_shapes {
             let id = shape.id;
             document::add_members(&mut updated, layer_index, &[id]);
+            if let Some(kind) = kind {
+                let op_id = document::ensure_operation(&mut updated, kind, Default::default());
+                document::op_add_members(&mut updated, op_id, &[id]);
+            }
             updated.shapes.push(shape);
         }
         self.shape_nodes = active_nodes
@@ -2651,21 +2699,24 @@ impl Engine {
         style: CutStyle,
         command: &str,
     ) -> Result<usize, EngineError> {
-        let operation = document::op_of_style(style)
+        let kind = document::op_of_style(style)
             .ok_or_else(|| EngineError::Internal(format!("{command}: unknown style")))?;
-        if let Some(index) = self.doc.layers.iter().rposition(|layer| {
-            layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
-        }) {
+        // Ensure the matching operation exists; the geometry layer is the top unlocked
+        // one (creating a named layer for it keeps the canvas structure readable).
+        document::ensure_operation(&mut self.doc, kind, Default::default());
+        if let Some(index) = self
+            .doc
+            .layers
+            .iter()
+            .rposition(|layer| layer.takes_new_shapes())
+        {
             return Ok(index);
         }
-        let name = operation.kind_name();
-        self.add_vector_layer(name, Some(operation.clone()), command)?;
+        self.add_vector_layer(kind.kind_name(), None, command)?;
         self.doc
             .layers
             .iter()
-            .rposition(|layer| {
-                layer.operation.as_ref() == Some(&operation) && layer.takes_new_shapes()
-            })
+            .rposition(|layer| layer.takes_new_shapes())
             .ok_or_else(|| EngineError::Internal(format!("{command}: missing new style layer")))
     }
 
@@ -3183,9 +3234,15 @@ mod tests {
             super::document::style_of_shape(&engine.doc, 1),
             CutStyle::Engrave
         );
-        assert_eq!(engine.doc.layers[0].operation, None);
+        assert!(
+            engine
+                .doc
+                .operations
+                .iter()
+                .any(|o| o.kind == stencilcraft_doc::OperationKind::Engrave)
+        );
         assert_eq!(
-            engine.doc.layers[1].operation,
+            engine.doc.operation_of_shape(1).map(|o| o.kind),
             super::document::op_of_style(CutStyle::Engrave)
         );
         assert!(engine.undo());
@@ -3246,8 +3303,13 @@ mod tests {
         assert_eq!(engine.doc.shape_count(), 2);
         assert!(engine.undo());
         assert_eq!(engine.doc.shape_count(), 1);
-        assert_eq!(engine.doc.layers.len(), 2);
+        assert_eq!(
+            engine.doc.operations.len(),
+            1,
+            "undo also restores the operation snapshot"
+        );
         assert!(engine.redo());
+        assert_eq!(engine.doc.operations.len(), 2, "one operation per style");
         assert_eq!(engine.doc.shape_count(), 2);
         engine
             .run(Command::ShapeMove {
@@ -4225,28 +4287,47 @@ mod tests {
             super::document::style_of_shape(&engine.doc, 1),
             CutStyle::Engrave
         );
-        assert_eq!(engine.doc.layers.len(), 3);
+        assert!(
+            engine
+                .doc
+                .operations
+                .iter()
+                .any(|o| o.kind == stencilcraft_doc::OperationKind::Engrave)
+        );
 
+        // Operations carry visibility now; the single geometry layer stays.
+        let op_id = engine
+            .doc
+            .operations
+            .iter()
+            .find(|o| o.kind == stencilcraft_doc::OperationKind::Engrave)
+            .unwrap()
+            .id;
         engine
-            .run(Command::LayerSetVisible {
-                index: 1,
-                visible: false,
-            })
+            .run(Command::Document(
+                super::document::DocumentCommand::OperationSetVisible {
+                    id: op_id,
+                    visible: false,
+                },
+            ))
             .unwrap();
-        assert!(!engine.doc.layers[1].visible);
+        assert!(
+            !engine
+                .doc
+                .operations
+                .iter()
+                .find(|o| o.id == op_id)
+                .unwrap()
+                .visible
+        );
 
-        engine.run(Command::LayerRemove { index: 0 }).unwrap();
-        assert_eq!(engine.doc.layers.len(), 2);
-        // Two layers remain, so removing another one is allowed.
-        assert!(engine.run(Command::LayerRemove { index: 0 }).is_ok());
+        engine.run(Command::LayerRemove { index: 0 }).unwrap_err();
         assert_eq!(engine.doc.layers.len(), 1);
+        // The base layer cannot be removed.
         assert!(engine.run(Command::LayerRemove { index: 0 }).is_err());
 
         assert!(engine.undo());
-        assert_eq!(engine.doc.layers.len(), 2);
         assert!(engine.can_redo());
-        assert!(engine.redo());
-        assert_eq!(engine.doc.layers.len(), 1);
     }
 
     #[test]

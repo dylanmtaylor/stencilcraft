@@ -11,16 +11,36 @@ use kurbo::{BezPath, Point, Rect, Shape as _};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CutStyle, DocError, Document, Group, GroupChild, Layer, Operation, OperationSettings,
-    PagePreset,
+    CutStyle, DocError, Document, Group, GroupChild, Layer, Operation, OperationKind,
+    OperationSettings, PagePreset,
 };
 
-/// The production pass a legacy `CutStyle` maps to.
-fn op_of(kind: CutStyle) -> Option<Operation> {
-    Some(match kind {
-        CutStyle::Cut => Operation::Cut(OperationSettings::default()),
-        CutStyle::Engrave => Operation::Engrave(OperationSettings::default()),
-    })
+/// The production pass kind a legacy `CutStyle` maps to.
+fn kind_of(style: CutStyle) -> OperationKind {
+    match style {
+        CutStyle::Cut => OperationKind::Cut,
+        CutStyle::Engrave => OperationKind::Engrave,
+    }
+}
+
+/// Finds the operation of `kind`, or creates it (named `name`) with the next free id.
+fn ensure_operation(doc: &mut Document, name: &str, kind: OperationKind) -> u64 {
+    if let Some(op) = doc.operations.iter().find(|o| o.kind == kind) {
+        return op.id;
+    }
+    let id = doc.next_operation_id();
+    doc.operations.push(Operation {
+        id,
+        name: name.to_string(),
+        kind,
+        settings: OperationSettings::default(),
+        color: None,
+        visible: true,
+        locked: false,
+        members: Vec::new(),
+        icon: None,
+    });
+    id
 }
 
 const INCH_MM: f64 = 25.4;
@@ -360,31 +380,34 @@ struct Builder {
 }
 
 impl Builder {
-    /// Index of layer `name` (created with `kind` if missing).
-    fn layer(&mut self, name: &str, kind: CutStyle, template: bool) -> usize {
+    /// Index of layer `name` (created if missing).
+    fn layer(&mut self, name: &str) -> usize {
         if let Some(i) = self.doc.layers.iter().position(|l| l.name == name) {
             return i;
         }
-        let operation = if template {
-            Some(Operation::Guide)
-        } else {
-            op_of(kind)
-        };
-        self.doc.layers.push(Layer::new(name, operation));
+        self.doc.layers.push(Layer::new(name));
         self.doc.layers.len() - 1
     }
 
     fn add(&mut self, layer: &str, kind: CutStyle, path: BezPath) -> Result<u64, DocError> {
-        let index = self.layer(layer, kind, false);
+        let index = self.layer(layer);
         let id = self.doc.push_shape(index, path)?.id;
+        let op_id = ensure_operation(&mut self.doc, layer, kind_of(kind));
+        if let Some(op) = self.doc.operations.iter_mut().find(|o| o.id == op_id) {
+            op.members.push(id);
+        }
         self.grouped.push(id);
         Ok(id)
     }
 
     /// A guide drawn on a template (non-cutting) layer; not part of the group.
     fn guide(&mut self, path: BezPath) -> Result<(), DocError> {
-        let index = self.layer("guide", CutStyle::Cut, true);
-        self.doc.push_shape(index, path)?;
+        let index = self.layer("guide");
+        let id = self.doc.push_shape(index, path)?.id;
+        let op_id = ensure_operation(&mut self.doc, "guide", OperationKind::Guide);
+        if let Some(op) = self.doc.operations.iter_mut().find(|o| o.id == op_id) {
+            op.members.push(id);
+        }
         Ok(())
     }
 
@@ -474,7 +497,8 @@ pub fn new_from_template(
     };
     let media = |b: &mut Builder, m: &str| b.doc.board_setup.media = Some(m.to_string());
     let only_layer = |b: &mut Builder, name: &str, kind: CutStyle| {
-        b.doc.layers = vec![Layer::new(name, op_of(kind))];
+        b.doc.layers = vec![Layer::new(name)];
+        ensure_operation(&mut b.doc, name, kind_of(kind));
     };
     match template {
         T::Blank => {}
@@ -759,13 +783,9 @@ mod tests {
         let outline = member(&doc, 0, 0).bounds().unwrap();
         assert!((outline.width() - 254.0).abs() < 1e-9 && (outline.height() - 177.8).abs() < 1e-9);
         let fold = member(&doc, 1, 0);
-        assert_eq!(
-            (doc.layers[1].name.as_str(), doc.layers[1].operation.clone()),
-            (
-                "score",
-                Some(Operation::Engrave(OperationSettings::default()))
-            )
-        );
+        let score_op = doc.operations.iter().find(|o| o.name == "score").unwrap();
+        assert_eq!(doc.layers[1].name, "score");
+        assert_eq!(score_op.kind, OperationKind::Engrave);
         let b = fold.bounds().unwrap();
         assert!(b.width() < 1e-9 && (b.center().x - outline.center().x).abs() < 1e-9);
         let dashes = fold
@@ -826,9 +846,9 @@ mod tests {
         );
         assert!(
             shirt
-                .layers
+                .operations
                 .iter()
-                .any(|l| matches!(l.operation, Some(Operation::Guide))),
+                .any(|o| o.kind == OperationKind::Guide),
             "print area is a guide"
         );
         let sheet = t(ProjectTemplate::StickerSheet);
@@ -837,16 +857,8 @@ mod tests {
         let cut = sheet.layers.iter().find(|l| l.name == "cut").unwrap();
         assert_eq!(cut.members.len(), 12);
         let sketch = t(ProjectTemplate::Sketch);
-        assert_eq!(
-            (
-                sketch.layers[0].name.as_str(),
-                sketch.layers[0].operation.clone()
-            ),
-            (
-                "pen",
-                Some(Operation::Engrave(OperationSettings::default()))
-            )
-        );
+        assert_eq!(sketch.layers[0].name, "pen");
+        assert_eq!(sketch.operations[0].kind, OperationKind::Engrave);
         let coin = t(ProjectTemplate::CoinCase);
         assert_eq!(
             coin.layers

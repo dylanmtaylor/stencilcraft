@@ -2,7 +2,7 @@
 //! lines red and engrave lines blue (the SVG exporter's colours), hairlines 0.25 mm.
 
 use craft_raster_codecs::common::Pixels as RgbaImage;
-use stencilcraft_doc::{Document, Operation};
+use stencilcraft_doc::{Document, OperationKind};
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 use stencilcraft_raster::{RasterError, image_pixels};
@@ -91,9 +91,13 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
         width: (0.25 * scale).max(1.0) as f32,
         ..Stroke::default()
     };
-    for layer in doc.layers.iter().filter(|layer| layer.visible) {
-        let engrave = matches!(layer.operation, Some(Operation::Engrave(_)));
-        for id in &layer.members {
+    for op in doc
+        .operations
+        .iter()
+        .filter(|op| op.visible && !op.kind.is_guide())
+    {
+        let engrave = op.kind == OperationKind::Engrave;
+        for id in &op.members {
             let Some(shape) = doc.get_shape(*id) else {
                 continue;
             };

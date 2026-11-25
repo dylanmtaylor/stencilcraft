@@ -10,12 +10,13 @@ use std::collections::BTreeSet;
 use kurbo::BezPath;
 use serde::{Deserialize, Serialize};
 use stencilcraft_doc::{
-    CombineOp, Document, GroupKind, Operation, OperationSettings, SendAssign, Shape, SourceGroup,
+    CombineOp, Document, GroupKind, OperationKind, OperationSettings, SendAssign, Shape,
+    SourceGroup,
 };
 use stencilcraft_layout as layout;
 use vectorcraft_geom::{FillRule, PathData};
 
-use crate::document::{add_members, ensure_operation_layer, remove_members};
+use crate::document::{add_members, ensure_operation, op_add_members};
 use crate::{Effect, EngineError};
 
 const MAX_IDS: usize = 10_000;
@@ -97,7 +98,7 @@ pub enum ProductionCommand {
     SetProduction {
         ids: Vec<u64>,
         #[serde(default)]
-        operation: Option<Operation>,
+        operation: Option<OperationKind>,
         #[serde(default)]
         line_color: Option<String>,
         #[serde(default)]
@@ -241,14 +242,15 @@ pub(crate) fn execute(
             let outline = combine_paths(&members, CombineOp::Unite, name)?;
             let template = members.first().cloned();
             let id = group_shape(doc, at, template, outline, GroupKind::Flatten, members)?;
-            for li in 0..doc.layers.len() {
-                if doc.layers[li].operation.is_some() {
-                    remove_members(doc, li, &[id]);
-                }
+            for op in doc.operations.iter_mut() {
+                op.members.retain(|m| *m != id);
             }
-            let li =
-                ensure_operation_layer(doc, Operation::PrintThenCut(OperationSettings::default()));
-            add_members(doc, li, &[id]);
+            let op_id = ensure_operation(
+                doc,
+                OperationKind::PrintThenCut,
+                OperationSettings::default(),
+            );
+            op_add_members(doc, op_id, &[id]);
             Ok(Effect::ShapeAdded { id })
         }
         ProductionCommand::Unflatten { id } => {
@@ -366,17 +368,15 @@ pub(crate) fn execute(
             }
             let template = members.first().cloned();
             let id = group_shape(doc, at, template, outline, GroupKind::Flatten, members)?;
-            let op = match cut {
-                StickerCut::KissCut => Operation::KissCut(OperationSettings::default()),
-                StickerCut::DieCut => Operation::DieCut(OperationSettings::default()),
+            let kind = match cut {
+                StickerCut::KissCut => OperationKind::KissCut,
+                StickerCut::DieCut => OperationKind::DieCut,
             };
-            for li in 0..doc.layers.len() {
-                if doc.layers[li].operation.is_some() {
-                    remove_members(doc, li, &[id]);
-                }
+            for op in doc.operations.iter_mut() {
+                op.members.retain(|m| *m != id);
             }
-            let li = ensure_operation_layer(doc, op);
-            add_members(doc, li, &[id]);
+            let op_id = ensure_operation(doc, kind, OperationSettings::default());
+            op_add_members(doc, op_id, &[id]);
             Ok(Effect::ShapeAdded { id })
         }
         ProductionCommand::SetProduction {
@@ -407,22 +407,15 @@ pub(crate) fn execute(
                 return bad(name, "material must be 1–100 characters");
             }
             for id in &ids {
-                // The operation lives on layers in v2: clear removes the shape from
-                // every operation layer, a set moves it to the matching layer.
+                // The operation lives in v2's `Document.operations`: clear removes the
+                // shape from every operation, a set moves it to the matching one.
                 if clear.contains(&ProductionField::Operation) || operation.is_some() {
-                    let op_layers: Vec<usize> = doc
-                        .layers
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, l)| l.operation.is_some())
-                        .map(|(i, _)| i)
-                        .collect();
-                    for li in op_layers {
-                        remove_members(doc, li, &[*id]);
+                    for op in doc.operations.iter_mut() {
+                        op.members.retain(|m| *m != *id);
                     }
-                    if let Some(op) = &operation {
-                        let li = ensure_operation_layer(doc, op.clone());
-                        add_members(doc, li, &[*id]);
+                    if let Some(kind) = operation {
+                        let op_id = ensure_operation(doc, kind, OperationSettings::default());
+                        op_add_members(doc, op_id, &[*id]);
                     }
                 }
                 let Some(s) = doc.get_shape_mut(*id) else {

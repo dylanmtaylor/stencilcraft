@@ -200,10 +200,14 @@ mod tests {
         add_marks(&mut piece, &tile(0, 0), 10.0).unwrap();
         let marks = &piece.layers[0];
         assert_eq!(marks.name, MARKS_LAYER);
-        assert!(matches!(
-            marks.operation,
-            Some(stencilcraft_doc::Operation::Engrave(_))
-        ));
+        assert!(
+            piece
+                .operations
+                .iter()
+                .any(|op| op.kind == stencilcraft_doc::OperationKind::Engrave
+                    && !op.members.is_empty()),
+            "the marks land in an engrave operation"
+        );
         // Three brackets, no guide ticks on the first sheet.
         assert_eq!(marks.members.len(), 3);
         for id in &marks.members {

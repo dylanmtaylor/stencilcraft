@@ -318,7 +318,12 @@ fn svg_registry_preserves_clipped_cut_lines_and_stroke_layers() {
         .iter()
         .find(|layer| layer.name == "Line #ff0000")
         .unwrap();
-    assert_eq!(layer.color.as_deref(), Some("#ff0000"));
+    let styled_op = doc
+        .operations
+        .iter()
+        .find(|op| op.name == "Line #ff0000")
+        .unwrap();
+    assert_eq!(styled_op.color.as_deref(), Some("#ff0000"));
     assert_eq!(layer.members.len(), 1);
     let unpainted = doc.layers.iter().find(|layer| layer.name == "cut").unwrap();
     assert_eq!(unpainted.members.len(), 1);

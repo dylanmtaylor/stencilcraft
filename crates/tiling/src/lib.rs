@@ -314,6 +314,21 @@ mod tests {
     }
     use stencilcraft_geom::Point;
 
+    /// A cut operation over the layer's members, as the operations-first model stores it.
+    fn cut_operation() -> stencilcraft_doc::Operation {
+        stencilcraft_doc::Operation {
+            id: 1,
+            name: "cut".to_string(),
+            kind: stencilcraft_doc::OperationKind::Cut,
+            settings: Default::default(),
+            color: None,
+            visible: true,
+            locked: false,
+            members: Vec::new(),
+            icon: None,
+        }
+    }
+
     fn cross_doc(board_w: f64, board_h: f64) -> Document {
         let mut doc = Document {
             board: Board {
@@ -321,10 +336,8 @@ mod tests {
                 height_mm: board_h,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![Layer::new(
-                "cut",
-                Some(stencilcraft_doc::Operation::Cut(Default::default())),
-            )],
+            layers: vec![Layer::new("cut")],
+            operations: vec![cut_operation()],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -333,7 +346,8 @@ mod tests {
         let mut p = kurbo::BezPath::new();
         p.move_to(Point::new(1.0, 1.0));
         p.line_to(Point::new(board_w - 1.0, board_h - 1.0));
-        doc.push_shape(0, p).unwrap();
+        let shape = doc.push_shape(0, p).unwrap();
+        doc.operations[0].members.push(shape.id);
         doc
     }
 
@@ -428,10 +442,14 @@ mod tests {
         assert_eq!(pieces.len(), 3);
         for piece in &pieces {
             assert_eq!(piece.shape_count(), 1);
-            assert!(matches!(
-                piece.layers[0].operation,
-                Some(stencilcraft_doc::Operation::Cut(_))
-            ));
+            assert!(
+                piece
+                    .operations
+                    .iter()
+                    .any(|op| op.kind == stencilcraft_doc::OperationKind::Cut
+                        && !op.members.is_empty()),
+                "each sheet carries its cut operation"
+            );
             // Kerf settings travel with each sheet.
             assert_eq!(piece.kerf, doc.kerf);
         }
@@ -447,10 +465,8 @@ mod tests {
                 height_mm: 600.0,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![Layer::new(
-                "cut",
-                Some(stencilcraft_doc::Operation::Cut(Default::default())),
-            )],
+            layers: vec![Layer::new("cut")],
+            operations: vec![cut_operation()],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -460,7 +476,8 @@ mod tests {
         p.line_to(Point::new(595.0, 595.0));
         p.line_to(Point::new(5.0, 595.0));
         p.close_path();
-        doc.push_shape(0, p).unwrap();
+        let shape = doc.push_shape(0, p).unwrap();
+        doc.operations[0].members.push(shape.id);
 
         // 3 × 3 sheets cover the board, but the middle one holds nothing of the
         // outline and must not be exported.
@@ -588,10 +605,8 @@ mod tests {
                 height_mm: 310.0,
             },
             kerf: stencilcraft_doc::KerfSettings::default(),
-            layers: vec![DocLayer::new(
-                "cut",
-                Some(stencilcraft_doc::Operation::Cut(Default::default())),
-            )],
+            layers: vec![DocLayer::new("cut")],
+            operations: vec![cut_operation()],
             next_shape_id: 1,
             ..Document::default()
         };
@@ -603,11 +618,13 @@ mod tests {
         border.line_to(Point::new(417.0, 307.0));
         border.line_to(Point::new(3.0, 307.0));
         border.close_path();
-        doc.push_shape(0, border).unwrap();
+        let shape = doc.push_shape(0, border).unwrap();
+        doc.operations[0].members.push(shape.id);
         let mut diagonal = kurbo::BezPath::new();
         diagonal.move_to(Point::new(0.0, 0.0));
         diagonal.line_to(Point::new(420.0, 310.0));
-        doc.push_shape(0, diagonal).unwrap();
+        let shape = doc.push_shape(0, diagonal).unwrap();
+        doc.operations[0].members.push(shape.id);
         let mut curve = kurbo::BezPath::new();
         curve.move_to(Point::new(30.0, 300.0));
         curve.curve_to(
@@ -615,7 +632,8 @@ mod tests {
             Point::new(280.0, 330.0),
             Point::new(400.0, 40.0),
         );
-        doc.push_shape(0, curve).unwrap();
+        let shape = doc.push_shape(0, curve).unwrap();
+        doc.operations[0].members.push(shape.id);
 
         for (sheet_w, sheet_h, overlap) in [
             (300.0, 300.0, 0.0),
@@ -654,10 +672,14 @@ mod tests {
                 .iter()
                 .find(|l| l.name == MARKS_LAYER)
                 .expect("marks layer on every sheet");
-            assert!(matches!(
-                marks.operation,
-                Some(stencilcraft_doc::Operation::Engrave(_))
-            ));
+            assert!(
+                piece
+                    .operations
+                    .iter()
+                    .any(|op| op.kind == stencilcraft_doc::OperationKind::Engrave
+                        && !op.members.is_empty()),
+                "each sheet carries its engrave marks operation"
+            );
             assert!(!marks.members.is_empty());
             for id in &marks.members {
                 let shape = piece.get_shape(*id).unwrap();

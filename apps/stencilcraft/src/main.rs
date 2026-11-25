@@ -57,6 +57,7 @@ mod menus;
 
 /// File › New: the New Document dialog (preset cards and details).
 mod library_panel;
+mod machine_menu;
 mod new_doc;
 mod object_menu;
 
@@ -89,6 +90,8 @@ pub struct UserPrefs {
     pub show_dimensions: bool,
     /// View › Outline View: hairlines only.
     pub outline_view: bool,
+    /// Machine › Mat Preview: draw the cutting mat behind the page.
+    pub mat_preview: bool,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -109,6 +112,7 @@ impl Default for UserPrefs {
             show_print_border: false,
             show_dimensions: true,
             outline_view: false,
+            mat_preview: true,
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -509,6 +513,13 @@ pub enum TopMenuAction {
     /// File › Export › PDF/PNG/JPEG.
     Export(file_menu::ExportKind),
     SaveSelectionAs,
+    /// Machine › Connect / Rescan, Test Cut and Cut (run from the Send tab).
+    Machine(machine_menu::MachineAction),
+    /// Machine › Mat Preview and Mirror on Mat.
+    ToggleMatPreview,
+    ToggleMirror,
+    /// Machine › Load Type: on a mat (`true`) or without one.
+    LoadOnMat(bool),
     /// Type › Type on a Path / Curve Text.
     TypeOnPath,
     CurveText,
@@ -889,6 +900,10 @@ pub struct StencilApp {
     pub stores: library_panel::FileStores,
     /// The colour panels' hex field, and a line style picked there (applied after drawing).
     pub colour_hex_draft: String,
+    /// A Machine-menu hardware action waiting for the Send tab.
+    pub machine_action: Option<machine_menu::MachineAction>,
+    /// The mat before Load Type › Without Mat / Roll, for On Mat.
+    pub mat_before_unload: Option<stencilcraft_machine::Mat>,
     pub pending_style: Option<CutStyle>,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
@@ -1126,6 +1141,8 @@ impl StencilApp {
             effect_preview: None,
             stores: library_panel::FileStores::default(),
             colour_hex_draft: String::new(),
+            machine_action: None,
+            mat_before_unload: None,
             pending_style: None,
             canvas_drag_shape: None,
             canvas_selection_start: None,
@@ -3330,6 +3347,25 @@ impl StencilApp {
             TopMenuAction::SaveSelectionAs => self.save_selection_dialog(),
             TopMenuAction::Print => self.print_via_pdf(),
             TopMenuAction::TypeOnPath => self.type_on_path(),
+            TopMenuAction::Machine(action) => self.queue_machine_action(action),
+            TopMenuAction::ToggleMatPreview => {
+                self.prefs.mat_preview = !self.prefs.mat_preview;
+                self.save_prefs();
+            }
+            TopMenuAction::ToggleMirror => self.send.mirror = !self.send.mirror,
+            TopMenuAction::LoadOnMat(on) => {
+                if on {
+                    if self.mat == stencilcraft_machine::Mat::None {
+                        self.mat = self
+                            .mat_before_unload
+                            .take()
+                            .unwrap_or(stencilcraft_machine::Mat::Cameo12x12);
+                    }
+                } else if self.mat != stencilcraft_machine::Mat::None {
+                    self.mat_before_unload = Some(self.mat);
+                    self.mat = stencilcraft_machine::Mat::None;
+                }
+            }
             TopMenuAction::CurveText => self.curve_text(),
             TopMenuAction::CloseDoc => self.request_new_document(new_doc::Choice::default()),
             TopMenuAction::ToggleAttach => self.toggle_attach(),
@@ -4277,12 +4313,22 @@ impl StencilApp {
         command: stencilcraft_engine::HardwareCommand,
         ctx: egui::Context,
     ) {
+        let doc = self.engine.doc.clone();
+        self.start_hardware_on(doc, command, ctx);
+    }
+
+    /// Run a hardware command on `doc` in the background (the test cut sends its own design).
+    fn start_hardware_on(
+        &mut self,
+        doc: stencilcraft_doc::Document,
+        command: stencilcraft_engine::HardwareCommand,
+        ctx: egui::Context,
+    ) {
         if self.send.busy {
             return;
         }
         self.send.busy = true;
         let result = self.send.hardware_result.clone();
-        let doc = self.engine.doc.clone();
         let spawned = std::thread::Builder::new()
             .name("cutter-usb".into())
             .spawn(move || {
@@ -4300,7 +4346,37 @@ impl StencilApp {
         }
     }
 
+    /// The Send tab's cut (or validation, when `send` is false) with its current settings.
+    pub fn cut_command(&self, send: bool) -> stencilcraft_engine::HardwareCommand {
+        stencilcraft_engine::HardwareCommand::Cut {
+            model: self.send.model.id().into(),
+            location: self.send.device.clone(),
+            mat: self.mat,
+            force: u32::from(self.send.pressure_override),
+            speed: u32::from(self.send.speed_override),
+            depth: self.send.set_blade_depth.then_some(self.send.blade_depth),
+            tool: self.send.tool,
+            draw: self.send.draw,
+            holder: self.send.holder,
+            passes: self.send.passes,
+            mirror: self.send.mirror,
+            bluetooth: (self.send.connection_mode != 0).then(|| {
+                stencilcraft_engine::hardware::BluetoothTarget {
+                    address: if self.send.connection_mode == 1 {
+                        self.send.device.clone()
+                    } else {
+                        self.send.bluetooth_address.trim().to_owned()
+                    },
+                    channel: self.send.bluetooth_channel,
+                    ble: self.send.connection_mode == 1,
+                }
+            }),
+            send,
+        }
+    }
+
     pub fn send_tab(&mut self, ui: &mut egui::Ui) {
+        self.run_machine_action(ui.ctx());
         let result = self
             .send
             .hardware_result
@@ -4631,34 +4707,8 @@ impl StencilApp {
             };
             for (label, send) in [(validate_label, false), (send_label, true)] {
                 if ui.add(Button::new(label)).clicked() {
-                    self.start_hardware(
-                        stencilcraft_engine::HardwareCommand::Cut {
-                            model: self.send.model.id().into(),
-                            location: self.send.device.clone(),
-                            mat: self.mat,
-                            force: u32::from(self.send.pressure_override),
-                            speed: u32::from(self.send.speed_override),
-                            depth: self.send.set_blade_depth.then_some(self.send.blade_depth),
-                            tool: self.send.tool,
-                            draw: self.send.draw,
-                            holder: self.send.holder,
-                            passes: self.send.passes,
-                            mirror: self.send.mirror,
-                            bluetooth: (self.send.connection_mode != 0).then(|| {
-                                stencilcraft_engine::hardware::BluetoothTarget {
-                                    address: if self.send.connection_mode == 1 {
-                                        self.send.device.clone()
-                                    } else {
-                                        self.send.bluetooth_address.trim().to_owned()
-                                    },
-                                    channel: self.send.bluetooth_channel,
-                                    ble: self.send.connection_mode == 1,
-                                }
-                            }),
-                            send,
-                        },
-                        ui.ctx().clone(),
-                    );
+                    let command = self.cut_command(send);
+                    self.start_hardware(command, ui.ctx().clone());
                 }
             }
         }
@@ -4818,7 +4868,7 @@ impl StencilApp {
             paint_doc,
             &view,
             stencilcraft_ui_egui::CanvasLayers {
-                backdrop: Some(&backdrop),
+                backdrop: self.prefs.mat_preview.then_some(&backdrop),
                 image_textures: &textures,
             },
             stencilcraft_ui_egui::CanvasOptions {

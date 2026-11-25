@@ -233,7 +233,13 @@ pub fn trace_command(args: &[String]) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     let added = match engine
-        .run(Command::ImageTrace { id, options, style })
+        .run(Command::ImageTrace {
+            id,
+            options,
+            style,
+            area: None,
+            compound: false,
+        })
         .map_err(|e| e.to_string())?
     {
         Effect::ShapesAdded { ids } => ids.len(),

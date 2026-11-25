@@ -11,7 +11,9 @@ mod trace;
 use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
 use stencilcraft_doc::RasterImage;
 
-pub use trace::{ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace};
+pub use trace::{
+    ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace, trace_mask,
+};
 
 /// Largest encoded file accepted.
 pub const MAX_FILE_BYTES: usize = 64 * 1024 * 1024;
@@ -62,6 +64,45 @@ pub fn image_pixels(image: &RasterImage) -> Result<RgbaImage, RasterError> {
         )));
     }
     Ok(pixels)
+}
+
+/// The pixels of `image` inside the document rectangle `area` (millimetres: x, y, width,
+/// height), with the pixel offset of the crop's top-left. `None` when the area misses the
+/// image or is not finite.
+pub fn crop_to_area(
+    image: &RasterImage,
+    pixels: &RgbaImage,
+    area: [f64; 4],
+) -> Option<(RgbaImage, u32, u32)> {
+    let [x, y, w, h] = area;
+    if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    if !(image.width_mm > 0.0 && image.height_mm > 0.0) {
+        return None;
+    }
+    let (sx, sy) = (
+        f64::from(image.width_px) / image.width_mm,
+        f64::from(image.height_px) / image.height_mm,
+    );
+    let to_px = |v: f64, scale: f64, max: u32| ((v * scale).floor()).clamp(0.0, f64::from(max));
+    let to_px_up = |v: f64, scale: f64, max: u32| ((v * scale).ceil()).clamp(0.0, f64::from(max));
+    let x0 = to_px(x - image.x_mm, sx, image.width_px);
+    let y0 = to_px(y - image.y_mm, sy, image.height_px);
+    let x1 = to_px_up(x + w - image.x_mm, sx, image.width_px);
+    let y1 = to_px_up(y + h - image.y_mm, sy, image.height_px);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    // Clamped into 0..=width_px/height_px above, so the casts are exact.
+    let (x0, y0, x1, y1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
+    let crop = RgbaImage::from_fn(x1 - x0, y1 - y0, |cx, cy| {
+        pixels
+            .get_pixel_checked(x0.saturating_add(cx), y0.saturating_add(cy))
+            .copied()
+            .unwrap_or(common::Pixel([255, 255, 255, 0]))
+    });
+    Some((crop, x0, y0))
 }
 
 /// A placed image from pixels, at the origin, sized by `dpi` (pixels per inch).

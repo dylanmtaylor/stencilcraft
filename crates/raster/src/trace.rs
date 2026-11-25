@@ -121,6 +121,25 @@ pub struct TraceOutput {
     pub detached: Option<RgbaImage>,
 }
 
+/// The pixels a trace with `options` would take (row-major, `true` = traced): the
+/// foreground after filtering and despeckle, with holes filled in outer-edge mode. A live
+/// preview paints this.
+pub fn trace_mask(pixels: &RgbaImage, options: &TraceOptions) -> Result<Vec<bool>, RasterError> {
+    options.validate()?;
+    let (w, h) = (pixels.width() as usize, pixels.height() as usize);
+    let mut mask = foreground(pixels, options);
+    if w > 0 && h > 0 {
+        despeckle(
+            &mut mask,
+            w,
+            h,
+            options.despeckle as usize,
+            options.mode == TraceMode::OuterEdge,
+        );
+    }
+    Ok(mask)
+}
+
 pub fn trace(pixels: &RgbaImage, options: &TraceOptions) -> Result<TraceOutput, RasterError> {
     options.validate()?;
     let (w, h) = (pixels.width() as usize, pixels.height() as usize);
@@ -130,14 +149,7 @@ pub fn trace(pixels: &RgbaImage, options: &TraceOptions) -> Result<TraceOutput, 
             detached: None,
         });
     }
-    let mut mask = foreground(pixels, options);
-    despeckle(
-        &mut mask,
-        w,
-        h,
-        options.despeckle as usize,
-        options.mode == TraceMode::OuterEdge,
-    );
+    let mask = trace_mask(pixels, options)?;
     let detached = (options.mode == TraceMode::Detach).then(|| {
         let mut out = pixels.clone();
         for (pixel, &fg) in out.pixels_mut().zip(&mask) {

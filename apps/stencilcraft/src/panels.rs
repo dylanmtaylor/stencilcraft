@@ -185,6 +185,10 @@ pub struct PanelState {
     pub knife_solid: bool,
     /// Knife: the gap left along the cut.
     pub knife_gap_mm: f64,
+    /// The Trace panel's settings and trace area.
+    pub trace: crate::trace_panel::TraceDraft,
+    /// The canvas paints the trace preview only in a frame the Trace panel was drawn in.
+    pub trace_shown: bool,
     /// Eraser: Solid (Silhouette's default) removes area; Outline removes lines.
     pub eraser_solid: bool,
     /// Eraser: a round brush, else square.
@@ -239,6 +243,8 @@ impl Default for PanelState {
             offset: OffsetDraft::default(),
             offset_preview: None,
             offset_preview_shown: false,
+            trace: crate::trace_panel::TraceDraft::default(),
+            trace_shown: false,
             simplify_mm: 0.1,
             stroke_mm: 1.0,
             move_mm: [10.0, 10.0],
@@ -323,7 +329,7 @@ pub fn node_refs(selection: &PathSelection) -> Vec<NodeRef> {
 }
 
 /// A number field that reports a committed value.
-fn number(
+pub(crate) fn number(
     ui: &mut egui::Ui,
     id: &str,
     label: &str,
@@ -346,19 +352,19 @@ fn number(
     }
 }
 
-fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.horizontal(|ui| {
         ui.add(Text::new(label).role(TypeRole::Label));
         add(ui);
     });
 }
 
-fn button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
+pub(crate) fn button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     ui.add(Button::new(label).size(ControlSize::Sm).enabled(enabled))
         .clicked()
 }
 
-fn hint(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(
         Text::new(text)
             .role(TypeRole::Caption)
@@ -368,7 +374,7 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 
 impl StencilApp {
     /// Run `command`; when it adds shapes, select them (with the old selection when `keep`).
-    fn run_adding(&mut self, command: Command, keep: bool, done: &str) {
+    pub(crate) fn run_adding(&mut self, command: Command, keep: bool, done: &str) {
         match self.engine.run(command) {
             Ok(Effect::ShapesAdded { ids } | Effect::Selection { ids }) => {
                 let mut selection = if keep {

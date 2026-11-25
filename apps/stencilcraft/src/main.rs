@@ -9333,14 +9333,24 @@ mod tests {
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         let old_zoom = app.view.zoom;
         let out = frame(&ctx, &mut app, vec![], StencilApp::status_bar);
-        // The pin's slider jumps to a click on its track and ignores one on its thumb, which the
-        // fitted view's zoom (about 120 % of 5 to 40,000 %) puts near the track's start: click near
-        // its end.
-        let track = node_rect(&out, "Zoom");
-        let target = egui::pos2(track.left() + track.width() * 0.9, track.center().y);
-        click(&ctx, &mut app, StencilApp::status_bar, target);
-        eprintln!("DIAG zoom after click: pending {:?}", app.pending_zoom);
+        // The slider takes the value a screen reader sets (the pin's `Slider` reads AccessKit's
+        // SetValue as its set-value intent): 400 % on the slider's node.
+        use egui::accesskit::{Action, ActionData, ActionRequest, Role, TreeId};
+        let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        let (slider, _) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Zoom") && node.role() == Role::Slider)
+            .unwrap();
+        let set = egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::SetValue,
+            target_tree: TreeId::ROOT,
+            target_node: *slider,
+            data: Some(ActionData::NumericValue(400.0)),
+        });
+        frame(&ctx, &mut app, vec![set], StencilApp::status_bar);
         assert!(app.pending_zoom.is_some());
+        assert_eq!(app.pending_zoom, Some(4.0), "400 % is a zoom of 4");
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         assert_ne!(app.view.zoom, old_zoom);
         assert!(app.pending_zoom.is_none());

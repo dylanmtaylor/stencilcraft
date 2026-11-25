@@ -40,6 +40,10 @@ pub struct TraceDraft {
     /// Silhouette's Trace Quality, Low (0) to Max (4): how closely the outlines follow the
     /// pixels.
     pub quality: u8,
+    /// Trace by Colour: how many colours Find Colours looks for.
+    pub colour_count: f64,
+    /// The colours found under the area, and whether each is traced (else it is background).
+    pub palette: Vec<([u8; 3], bool)>,
 }
 
 /// Smoothing tolerance (pixels) for each Trace Quality stop, Low to Max.
@@ -118,6 +122,8 @@ const CLOSE_RADIUS_PX: f32 = 8.0;
 impl Default for TraceDraft {
     fn default() -> Self {
         Self {
+            colour_count: 4.0,
+            palette: Vec::new(),
             area: None,
             picking: false,
             threshold: 45.0,
@@ -546,6 +552,73 @@ impl StencilApp {
         self.trace_preview = None;
     }
 
+    /// Find Colours: the main colours of the first image under the area. Near-white colours
+    /// start left out (they are usually the background).
+    pub fn find_trace_colours(&mut self) {
+        let Some(area) = self.panels.trace.area else {
+            return;
+        };
+        let Some(image) = images_under(&self.engine.doc, area)
+            .first()
+            .and_then(|id| self.engine.doc.get_image(*id))
+            .cloned()
+        else {
+            return;
+        };
+        // In 1..=16 after the clamp, so the cast is exact.
+        let count = self.panels.trace.colour_count.round().clamp(2.0, 16.0) as usize;
+        let found = stencilcraft_raster::image_pixels(&image)
+            .ok()
+            .and_then(|pixels| stencilcraft_raster::crop_to_area(&image, &pixels, area))
+            .map(|(crop, _, _)| stencilcraft_raster::palette(&crop, count));
+        match found {
+            Some(Ok(colours)) => {
+                self.panels.trace.palette = colours
+                    .into_iter()
+                    .map(|c| (c, c.iter().map(|v| u32::from(*v)).sum::<u32>() < 690))
+                    .collect();
+            }
+            Some(Err(e)) => self.status = e.to_string(),
+            None => self.status = "the trace area misses the image".to_string(),
+        }
+    }
+
+    /// Trace by Colour: each ticked colour traces into its own filled layer.
+    pub fn trace_by_colour(&mut self) {
+        let Some(area) = self.panels.trace.area else {
+            return;
+        };
+        let hex = |list: &[([u8; 3], bool)], on: bool| -> Vec<String> {
+            list.iter()
+                .filter(|(_, traced)| *traced == on)
+                .map(|(c, _)| stencilcraft_raster::hex(*c))
+                .collect()
+        };
+        let colours = hex(&self.panels.trace.palette, true);
+        let ignore = hex(&self.panels.trace.palette, false);
+        if colours.is_empty() {
+            self.status = "tick at least one colour to trace".to_string();
+            return;
+        }
+        let options = self.panels.trace.options(TraceMode::AllEdges);
+        for (i, id) in images_under(&self.engine.doc, area).into_iter().enumerate() {
+            self.run_adding(
+                Command::ImageTraceColours {
+                    id,
+                    colours: colours.clone(),
+                    ignore: ignore.clone(),
+                    options,
+                    area: Some(area),
+                },
+                i > 0,
+                "traced by colour",
+            );
+        }
+        self.panels.trace.area = None;
+        self.panels.trace.palette.clear();
+        self.trace_preview = None;
+    }
+
     pub fn trace_panel(&mut self, ui: &mut egui::Ui) {
         self.panels.trace_shown = true;
         let numbers = self.locale_numbers.clone();
@@ -559,6 +632,7 @@ impl StencilApp {
         let mut select_area = false;
         let mut clear_area = false;
         let mut action = None;
+        let (mut find_colours, mut by_colour) = (false, false);
         let draft = &mut self.panels.trace;
         let _ = Panel::new("stencilcraft-trace-panel").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -668,6 +742,45 @@ impl StencilApp {
                     }
                 }
             });
+            ui.add_enabled_ui(has_image, |ui| {
+                let _ = SectionHeader::new("trace-colours", "Trace by Colour").show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        labelled(ui, "Colours", |ui| {
+                            number(
+                                ui,
+                                "trace-colour-count",
+                                "Colours to find",
+                                &mut draft.colour_count,
+                                2.0..=16.0,
+                                "{n}",
+                                &numbers,
+                            );
+                        });
+                        find_colours = button(ui, "Find Colours", has_image);
+                    });
+                    for (i, (colour, traced)) in draft.palette.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            let (rect, _) = ui
+                                .allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                            let [r, g, b] = *colour;
+                            ui.painter()
+                                .rect_filled(rect, 2.0, egui::Color32::from_rgb(r, g, b));
+                            let label = format!("{} {}", i + 1, stencilcraft_raster::hex(*colour));
+                            let _ = Checkbox::bool(&label, traced).show(ui);
+                        });
+                    }
+                    by_colour = button(
+                        ui,
+                        "Trace by Colour",
+                        has_image && draft.palette.iter().any(|(_, on)| *on),
+                    );
+                    hint(
+                        ui,
+                        "Each ticked colour becomes a filled layer; unticked colours (like the \
+                         background) are left out.",
+                    );
+                });
+            });
             if !has_area && !draft.picking {
                 hint(
                     ui,
@@ -675,6 +788,12 @@ impl StencilApp {
                 );
             }
         });
+        if find_colours {
+            self.find_trace_colours();
+        }
+        if by_colour {
+            self.trace_by_colour();
+        }
         if select_area {
             self.panels.trace.picking = true;
             self.panels.trace.area = None;
@@ -694,6 +813,47 @@ impl StencilApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trace_by_colour_from_the_panel() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let mut app = StencilApp::new(None);
+        let pixels = Pixels::from_fn(60, 30, |x, y| {
+            if !(5..55).contains(&x) || !(5..25).contains(&y) {
+                Pixel([255, 255, 255, 255])
+            } else if x < 30 {
+                Pixel([220, 30, 30, 255])
+            } else {
+                Pixel([30, 30, 220, 255])
+            }
+        });
+        let image = stencilcraft_raster::place(&pixels, "two", 100.0).expect("placed");
+        let (w, h) = (image.width_mm, image.height_mm);
+        app.place_image(image);
+        app.panels.trace.area = Some([0.0, 0.0, w, h]);
+        app.panels.trace.colour_count = 3.0;
+        app.find_trace_colours();
+        assert_eq!(app.panels.trace.palette.len(), 3, "red, blue, white");
+        assert_eq!(
+            app.panels
+                .trace
+                .palette
+                .iter()
+                .filter(|(_, on)| *on)
+                .count(),
+            2,
+            "white starts left out"
+        );
+        let shapes = app.engine.doc.shapes().count();
+        app.trace_by_colour();
+        assert_eq!(
+            app.engine.doc.shapes().count(),
+            shapes + 2,
+            "{}",
+            app.status
+        );
+        assert!(app.panels.trace.area.is_none() && app.panels.trace.palette.is_empty());
+    }
 
     #[test]
     fn close_button_sits_off_the_top_right_corner() {

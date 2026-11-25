@@ -97,8 +97,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    (bounded decoding) and `image.trace` traces them with threshold, despeckle, low/high-pass
    filters, colour-range mode, smoothing and corner threshold, in all-edges, outer-edge or
    detach mode, plus background removal (`stencilcraft-raster`). Missing: HEIC/HEIF (no
-   permissively licensed pure-Rust decoder), centreline tracing, multi-colour layered
-   tracing, and curve fitting beyond midpoint quadratics. The desktop places PNG/JPEG as
+   permissively licensed pure-Rust decoder), centreline tracing and curve fitting beyond
+   midpoint quadratics; `image.trace-colours` traces by colour into layers. The desktop places PNG/JPEG as
    image objects at 300 dpi, draws them under the cut lines, and lets you pick, drag,
    undo and delete them, and traces them from the Trace panel (see item 24).
 12. **PDF/EPS/AI import and PDF/PNG/JPEG export**: vector paths from PDF, EPS/PS and
@@ -176,7 +176,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     area. The trace box resizes from eight handles and moves when dragged inside;
     Trace Quality (Low…Max) sets how closely outlines follow the pixels; Effect › Remove
     Background clears an image's background; the box's × button clears the area. Still
-    missing: SS's Scale setting, and multi-colour tracing to layers. Despeckle is in pixels, where SS shows a percentage. The desktop places images
+    missing: SS's Scale setting. Trace by Colour traces each of the image's main colours
+    into its own filled layer. Despeckle is in pixels, where SS shows a percentage. The desktop places images
     at SS's 300 dpi, while `ImportOptions` (`crates/import`, CLI/MCP) still defaults to
     96 dpi.
 25. **Print & Cut, beyond item 3**: File › Print opens the Print & Cut sheet (marks,

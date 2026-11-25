@@ -289,6 +289,23 @@ pub enum Command {
     /// clears the traced pixels from the image. `area` (millimetres: x, y, width, height)
     /// traces only that part of the image, as Silhouette's trace area does; `compound`
     /// makes the result one compound path instead of a shape per contour.
+    /// Trace by Colour: each of `colours` (`#rrggbb`, 1–16, e.g. from
+    /// `stencilcraft_raster::palette`) traces the pixels nearest it into its own layer, as one
+    /// compound path filled and lined with that colour. `options` supplies despeckle,
+    /// smoothing, corners and outer-edge mode; `area` limits it as for `image.trace`.
+    /// `ignore` colours (the background, colours left out) still claim their pixels but make
+    /// no shapes.
+    #[serde(rename = "image.trace-colours")]
+    ImageTraceColours {
+        id: u64,
+        colours: Vec<String>,
+        #[serde(default)]
+        ignore: Vec<String>,
+        #[serde(default)]
+        options: stencilcraft_raster::TraceOptions,
+        #[serde(default)]
+        area: Option<[f64; 4]>,
+    },
     #[serde(rename = "image.trace")]
     ImageTrace {
         id: u64,
@@ -835,6 +852,7 @@ impl Engine {
                 | Command::ImageRemove { .. }
                 | Command::ImageSetBounds { .. }
                 | Command::ImageTrace { .. }
+                | Command::ImageTraceColours { .. }
                 | Command::ImageRemoveBackground { .. }
                 | Command::ImageAdjust { .. }
                 | Command::ImageRectify { .. }
@@ -1543,6 +1561,13 @@ impl Engine {
                 area,
                 compound,
             } => self.trace_image(id, &options, style, area, compound),
+            Command::ImageTraceColours {
+                id,
+                colours,
+                ignore,
+                options,
+                area,
+            } => self.trace_colours(id, &colours, &ignore, &options, area),
             Command::ImageRectify {
                 id,
                 corners,
@@ -2274,6 +2299,104 @@ impl Engine {
             if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
                 *slot = replaced;
             }
+        }
+        Ok(Effect::ShapesAdded { ids })
+    }
+
+    fn trace_colours(
+        &mut self,
+        id: u64,
+        colours: &[String],
+        ignore: &[String],
+        options: &stencilcraft_raster::TraceOptions,
+        area: Option<[f64; 4]>,
+    ) -> Result<Effect, EngineError> {
+        const NAME: &str = "image.trace-colours";
+        let parse = |list: &[String]| -> Result<Vec<[u8; 3]>, EngineError> {
+            list.iter()
+                .map(|c| {
+                    stencilcraft_doc::canvas::parse_hex_color(c).ok_or_else(|| {
+                        EngineError::Invalid(format!("{NAME}: {c:?} is not a #rrggbb colour"))
+                    })
+                })
+                .collect()
+        };
+        let rgb = parse(colours)?;
+        let mut all = rgb.clone();
+        all.extend(parse(ignore)?);
+        if rgb.is_empty() || all.len() > stencilcraft_raster::MAX_COLOURS {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: 1 to {} colours",
+                stencilcraft_raster::MAX_COLOURS
+            )));
+        }
+        let image = self
+            .doc
+            .get_image(id)
+            .ok_or_else(|| no_image(NAME, id))?
+            .clone();
+        let pixels = stencilcraft_raster::image_pixels(&image).map_err(invalid(NAME))?;
+        let (source, ox, oy) = match area {
+            Some(area) => {
+                stencilcraft_raster::crop_to_area(&image, &pixels, area).ok_or_else(|| {
+                    EngineError::Invalid(format!("{NAME}: the trace area misses the image"))
+                })?
+            }
+            None => (pixels, 0, 0),
+        };
+        let masks = stencilcraft_raster::colour_masks(&source, &all).map_err(invalid(NAME))?;
+        // The masks are black on white: a brightness trace at 50 % takes exactly them.
+        let options = stencilcraft_raster::TraceOptions {
+            threshold: 50.0,
+            colour_range: None,
+            low_pass: 0.0,
+            high_pass: 0.0,
+            mode: match options.mode {
+                stencilcraft_raster::TraceMode::OuterEdge => {
+                    stencilcraft_raster::TraceMode::OuterEdge
+                }
+                _ => stencilcraft_raster::TraceMode::AllEdges,
+            },
+            ..*options
+        };
+        let (sx, sy) = (
+            image.width_mm / f64::from(image.width_px.max(1)),
+            image.height_mm / f64::from(image.height_px.max(1)),
+        );
+        let (fx, fy) = (f64::from(ox), f64::from(oy));
+        let map = |p: kurbo::Point| {
+            kurbo::Point::new(image.x_mm + (p.x + fx) * sx, image.y_mm + (p.y + fy) * sy)
+        };
+        let mut ids = Vec::new();
+        for (colour, mask) in rgb.iter().zip(&masks) {
+            let traced = stencilcraft_raster::trace(mask, &options).map_err(invalid(NAME))?;
+            let mut path = kurbo::BezPath::new();
+            for contour in &traced.contours {
+                path.extend(stencilcraft_raster::contour_path(
+                    contour,
+                    options.corner_threshold,
+                    map,
+                ));
+            }
+            if path.elements().is_empty() {
+                continue;
+            }
+            let hex = stencilcraft_raster::hex(*colour);
+            self.doc
+                .layers
+                .push(stencilcraft_doc::Layer::new(hex.clone(), CutStyle::Cut));
+            let layer = self.doc.layers.len() - 1;
+            let shape_id = self.doc.push_shape(layer, path, CutStyle::Cut)?.id;
+            if let Some(shape) = self.doc.get_shape_mut(shape_id) {
+                shape.production.fill_color = Some(hex.clone());
+                shape.production.line_color = Some(hex);
+            }
+            ids.push(shape_id);
+        }
+        if ids.is_empty() {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: none of the colours traced to a shape"
+            )));
         }
         Ok(Effect::ShapesAdded { ids })
     }
@@ -4824,6 +4947,64 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+
+    #[test]
+    fn trace_by_colour_makes_a_filled_layer_per_colour() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        // Red left half, blue right half, white margin.
+        let pixels = Pixels::from_fn(60, 30, |x, y| {
+            if !(5..55).contains(&x) || !(5..25).contains(&y) {
+                Pixel([255, 255, 255, 255])
+            } else if x < 30 {
+                Pixel([220, 30, 30, 255])
+            } else {
+                Pixel([30, 30, 220, 255])
+            }
+        });
+        let placed = stencilcraft_raster::place(&pixels, "two", 100.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        let layers_before = engine.doc.layers.len();
+        let Effect::ShapesAdded { ids } = engine
+            .run(Command::ImageTraceColours {
+                id,
+                colours: vec!["#dc1e1e".into(), "#1e1edc".into()],
+                ignore: vec!["#ffffff".into()],
+                options: Default::default(),
+                area: None,
+            })
+            .unwrap()
+        else {
+            panic!("shapes");
+        };
+        assert_eq!(ids.len(), 2);
+        assert_eq!(engine.doc.layers.len(), layers_before + 2);
+        let red = engine.doc.get_shape(ids[0]).unwrap();
+        assert_eq!(red.production.fill_color.as_deref(), Some("#dc1e1e"));
+        let (rb, bb) = (
+            kurbo::Shape::bounding_box(&red.path),
+            kurbo::Shape::bounding_box(&engine.doc.get_shape(ids[1]).unwrap().path),
+        );
+        assert!(rb.x1 <= bb.x0 + 1.0, "red is left of blue: {rb:?} {bb:?}");
+        assert!(engine.undo());
+        assert_eq!(engine.doc.layers.len(), layers_before);
+        for bad in [vec![], vec!["red".to_string()]] {
+            assert!(
+                engine
+                    .run(Command::ImageTraceColours {
+                        id,
+                        colours: bad,
+                        ignore: Vec::new(),
+                        options: Default::default(),
+                        area: None,
+                    })
+                    .is_err()
+            );
+        }
     }
 
     #[test]

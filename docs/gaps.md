@@ -116,9 +116,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 16a. **User offset**: `shapes.offset` creates outward or inward outlines with miter,
     round or bevel joins; the desktop Offset panel provides a preview and Apply. Welding
     multiple offset results into one remains missing.
-17. **Groups, stacking and layer control**: engine commands support groups,
-    reordering, object and layer locks, renaming and moving objects between layers.
-    Desktop controls and shortcuts remain incomplete. Attach and Contour commands exist
+17. **Groups, stacking and layer control**: the desktop groups and ungroups (groups select
+    and move as one), arranges (Bring to Front/Forward, Send Backward/to Back) and has
+    object and layer locks. Still missing in the desktop: renaming groups and moving objects
+    between layers. Attach and Contour commands exist
     in the production engine; their desktop workflows still need integration.
 18. **Snapping and guides**: guides, grid and snap settings, snapping and measuring are
     engine commands, and the desktop wires them: guides drag out of the rulers, move and

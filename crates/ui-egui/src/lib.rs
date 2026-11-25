@@ -559,10 +559,14 @@ pub fn paint_document(
     clip: egui::Rect,
     doc: &stencilcraft_doc::Document,
     view: &View,
-    backdrop: Option<&MatBackdrop>,
+    layers: CanvasLayers<'_>,
     options: CanvasOptions,
     selection: &SelectionState,
 ) {
+    let CanvasLayers {
+        backdrop,
+        image_textures,
+    } = layers;
     let palette = Palette::for_theme(options.theme);
     // Canvas backing, then (optionally) the cutting mat, then the design
     // sheet. Overflow beyond the mat simply stays canvas — a real-world
@@ -616,6 +620,15 @@ pub fn paint_document(
 
     if options.print_cut_marks {
         paint_registration_marks(painter, view, doc, palette);
+    }
+
+    // Placed images, under the cut lines, each mapped corner to corner so a turned view turns
+    // them too.
+    for image in &doc.images {
+        let Some(texture) = image_textures.get(&image.id) else {
+            continue;
+        };
+        paint_image_quad(painter, view, image, *texture);
     }
 
     // Shapes: flatten and convert each polyline to screen space.
@@ -1071,6 +1084,72 @@ pub fn join_path_ends(
         subpaths.remove(drop);
     }
     true
+}
+
+/// The corners of a placed image in millimetres, clockwise from the top left.
+pub fn image_corners(image: &stencilcraft_doc::RasterImage) -> [stencilcraft_geom::Point; 4] {
+    let (x0, y0) = (image.x_mm, image.y_mm);
+    let (x1, y1) = (x0 + image.width_mm, y0 + image.height_mm);
+    [
+        stencilcraft_geom::Point::new(x0, y0),
+        stencilcraft_geom::Point::new(x1, y0),
+        stencilcraft_geom::Point::new(x1, y1),
+        stencilcraft_geom::Point::new(x0, y1),
+    ]
+}
+
+/// The topmost placed image under the screen point `at`, if any.
+pub fn hit_test_image(
+    doc: &stencilcraft_doc::Document,
+    view: &View,
+    at: egui::Pos2,
+) -> Option<u64> {
+    let p = view.screen_to_world(at.to_vec2());
+    doc.images
+        .iter()
+        .rev()
+        .find(|image| {
+            p.x >= image.x_mm
+                && p.y >= image.y_mm
+                && p.x <= image.x_mm + image.width_mm
+                && p.y <= image.y_mm + image.height_mm
+        })
+        .map(|image| image.id)
+}
+
+fn paint_image_quad(
+    painter: &egui::Painter,
+    view: &View,
+    image: &stencilcraft_doc::RasterImage,
+    texture: egui::TextureId,
+) {
+    let corners = image_corners(image).map(|p| view.world_to_screen(p));
+    if corners.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return;
+    }
+    let uvs = [
+        egui::pos2(0.0, 0.0),
+        egui::pos2(1.0, 0.0),
+        egui::pos2(1.0, 1.0),
+        egui::pos2(0.0, 1.0),
+    ];
+    let mut mesh = egui::Mesh::with_texture(texture);
+    for (pos, uv) in corners.into_iter().zip(uvs) {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv,
+            color: egui::Color32::WHITE,
+        });
+    }
+    mesh.indices.extend([0, 1, 2, 0, 2, 3]);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// What the canvas paints under the design: the cutting mat and placed images' textures.
+#[derive(Clone, Copy, Debug)]
+pub struct CanvasLayers<'a> {
+    pub backdrop: Option<&'a MatBackdrop>,
+    pub image_textures: &'a std::collections::HashMap<u64, egui::TextureId>,
 }
 
 /// Selection state painted over the canvas.
@@ -2074,7 +2153,10 @@ mod tests {
                 clip,
                 &doc,
                 &view,
-                None,
+                CanvasLayers {
+                    backdrop: None,
+                    image_textures: &std::collections::HashMap::new(),
+                },
                 CanvasOptions::default(),
                 &SelectionState::default(),
             )

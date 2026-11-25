@@ -29,14 +29,14 @@ craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805
 craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
-# TODO(push): switch to https://github.com/storytold/craft-libs.git at 4a2fada7cdc3c13d8db974752fae65419f36e920
-craft-raster-codecs = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "4a2fada7cdc3c13d8db974752fae65419f36e920" }
-craft-stencilcraft-format = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "4a2fada7cdc3c13d8db974752fae65419f36e920" }
-craft-stencilcraft-document = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "4a2fada7cdc3c13d8db974752fae65419f36e920" }
+# TODO(push): switch to https://github.com/storytold/craft-libs.git at 24f2a743d977183688905c86df2177357ed4769b
+craft-raster-codecs = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "24f2a743d977183688905c86df2177357ed4769b" }
+craft-stencilcraft-format = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "24f2a743d977183688905c86df2177357ed4769b" }
+craft-stencilcraft-document = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "24f2a743d977183688905c86df2177357ed4769b" }
 craft-jsonrpc = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
 craft-mcp = { git = "https://github.com/storytold/craft-libs.git", rev = "e78ede0aa9c8d23d4181d93b9acffe33d7cbe293" }
-# TODO(push): switch to https://github.com/storytold/craft-libs.git at 4a2fada7cdc3c13d8db974752fae65419f36e920
-craft-dxf = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "4a2fada7cdc3c13d8db974752fae65419f36e920" }
+# TODO(push): switch to https://github.com/storytold/craft-libs.git at 24f2a743d977183688905c86df2177357ed4769b
+craft-dxf = { git = "file:///home/r2d2/Sandbox/lasercraft/refs/craft-libs", rev = "24f2a743d977183688905c86df2177357ed4769b" }
 craft-eps = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["paths"] }
 craft-gcode = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0" }
 craft-plotter = { git = "https://github.com/storytold/craft-libs.git", rev = "75c70fa6a786240eb853e6267e25fc445f510cd0", features = ["serde"] }

@@ -26,6 +26,7 @@ pub enum EffectKind {
     PopupCard,
     WeedLines,
     RemoveBackground,
+    Bridges,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -43,6 +44,7 @@ pub enum EffectMenu {
     Puzzle,
     WeedLines,
     RemoveBackground,
+    Bridges,
 }
 
 impl EffectMenu {
@@ -64,6 +66,7 @@ impl EffectMenu {
             Self::Puzzle => (EffectKind::Puzzle, Vec::new()),
             Self::WeedLines => (EffectKind::WeedLines, Vec::new()),
             Self::RemoveBackground => (EffectKind::RemoveBackground, Vec::new()),
+            Self::Bridges => (EffectKind::Bridges, Vec::new()),
         }
     }
 }
@@ -182,6 +185,11 @@ const WARP_STYLES: &[(&str, &str)] = &[
     ("twist", "Twist"),
     ("none", "Perspective (distort only)"),
 ];
+const BRIDGE_DIRECTIONS: &[(&str, &str)] = &[
+    ("vertical", "Above and below"),
+    ("horizontal", "Left and right"),
+    ("both", "All four sides"),
+];
 const WEED_DIRECTIONS: &[(&str, &str)] = &[
     ("vertical", "Vertical"),
     ("horizontal", "Horizontal"),
@@ -197,6 +205,16 @@ struct EffectDef {
 }
 
 const EFFECTS: &[EffectDef] = &[
+    EffectDef {
+        kind: EffectKind::Bridges,
+        title: "Bridges",
+        command: "shapes.bridge",
+        target: Target::Shapes,
+        fields: &[
+            num("width_mm", "Bridge width", 0.1, 100.0, "mm"),
+            choice("direction", "Bridges", BRIDGE_DIRECTIONS),
+        ],
+    },
     EffectDef {
         kind: EffectKind::Rhinestone,
         title: "Rhinestone",
@@ -351,6 +369,7 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
             serde_json::to_value(stencilcraft_generate::weed::WeedParams::default())
         }
         EffectKind::RemoveBackground => Ok(json!({"tolerance": 10.0})),
+        EffectKind::Bridges => Ok(json!({"width_mm": 1.5, "direction": "vertical"})),
     };
     match value {
         Ok(Value::Object(map)) => map,

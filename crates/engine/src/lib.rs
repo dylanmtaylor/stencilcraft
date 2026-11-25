@@ -401,6 +401,16 @@ pub enum Command {
         #[serde(default)]
         gap_mm: f64,
     },
+    /// Stencil bridges: each island of the shapes (a hole that would fall out of the stencil)
+    /// keeps `width_mm` strips of material joining it to the sheet, through its centre.
+    #[serde(rename = "shapes.bridge")]
+    ShapesBridge {
+        ids: Vec<u64>,
+        #[serde(default = "bridge_width")]
+        width_mm: f64,
+        #[serde(default)]
+        direction: cut_tools::BridgeDirection,
+    },
     /// Erase along a brush stroke through `points` (Silhouette's Eraser). `solid` removes the
     /// swept area from closed shapes and keeps each piece left; `outline` removes the lines the
     /// brush covers. Shapes erased completely are removed.
@@ -806,6 +816,7 @@ impl Engine {
                 | Command::ShapesReleaseCompound { .. }
                 | Command::ShapesKnife { .. }
                 | Command::ShapesErase { .. }
+                | Command::ShapesBridge { .. }
                 | Command::ShapesSetLocked { .. }
                 | Command::ShapesSetHidden { .. }
                 | Command::TextAdd(_)
@@ -1583,6 +1594,31 @@ impl Engine {
                 mode,
                 gap_mm,
             } => self.knife(&ids, from, to, mode, gap_mm),
+            Command::ShapesBridge {
+                ids,
+                width_mm,
+                direction,
+            } => {
+                const NAME: &str = "shapes.bridge";
+                if !(width_mm.is_finite() && (0.1..=100.0).contains(&width_mm)) {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: width_mm must be 0.1 to 100"
+                    )));
+                }
+                let islands: usize = ids
+                    .iter()
+                    .filter_map(|id| self.doc.get_shape(*id))
+                    .map(|shape| cut_tools::island_count(&shape.path))
+                    .sum();
+                if islands == 0 {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the shapes have no islands to bridge"
+                    )));
+                }
+                self.cut_each(&ids, NAME, |path| {
+                    cut_tools::bridge_islands(path, width_mm, direction)
+                })
+            }
             Command::ShapesErase {
                 ids,
                 points,
@@ -2943,6 +2979,10 @@ impl Engine {
         self.restore_history_entry(&next);
         true
     }
+}
+
+fn bridge_width() -> f64 {
+    1.5
 }
 
 /// A command's JSON name (`shape.add-rect`), for the History list.
@@ -4585,6 +4625,75 @@ mod tests {
         assert!(engine.can_redo());
         assert!(engine.redo());
         assert_eq!(engine.doc.layers.len(), 1);
+    }
+
+    #[test]
+    fn bridges_hold_islands_and_leave_plain_shapes() {
+        // A square ring: its middle is an island that would fall out.
+        let mut ring = kurbo::BezPath::new();
+        for (a, b) in [(0.0, 40.0), (10.0, 30.0)] {
+            ring.move_to((a, a));
+            ring.line_to((b, a));
+            ring.line_to((b, b));
+            ring.line_to((a, b));
+            ring.close_path();
+        }
+        let mut engine = Engine::default();
+        let Effect::ShapesAdded { ids } = engine
+            .run(Command::ShapeAddPaths {
+                shapes: vec![(ring, CutStyle::Cut)],
+            })
+            .unwrap()
+        else {
+            panic!("added");
+        };
+        let effect = engine
+            .run(
+                serde_json::from_value(serde_json::json!({
+                    "command": "shapes.bridge", "params": {"ids": ids, "width_mm": 2.0}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        // Two vertical bridges split the ring into a left and a right piece.
+        assert_eq!(engine.doc.shape_count(), 2, "{effect:?}");
+        for (_, shape) in engine.doc.shapes() {
+            let b = kurbo::Shape::bounding_box(&shape.path);
+            assert!(
+                b.x1 <= 19.0 + 1e-6 || b.x0 >= 21.0 - 1e-6,
+                "a 2 mm gap at x = 20: {b:?}"
+            );
+        }
+        assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 1);
+        // A plain square has no island and is left alone.
+        engine
+            .run(Command::ShapeAddRect {
+                x: 100.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            })
+            .unwrap();
+        let square = engine.doc.shapes().last().map(|(_, s)| s.id).unwrap();
+        let error = engine
+            .run(Command::ShapesBridge {
+                ids: vec![square],
+                width_mm: 2.0,
+                direction: cut_tools::BridgeDirection::Both,
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("no islands"), "{error}");
+        assert_eq!(engine.doc.shape_count(), 2);
+        assert!(
+            engine
+                .run(Command::ShapesBridge {
+                    ids: vec![square],
+                    width_mm: f64::NAN,
+                    direction: cut_tools::BridgeDirection::Both,
+                })
+                .is_err()
+        );
     }
 
     #[test]

@@ -194,12 +194,15 @@ impl StencilApp {
         let _ =
             Panel::new("stencilcraft-distort-panel").show(ui, |ui| match self.distort.as_mut() {
                 None => {
-                    hint(ui, "Select shapes, then choose Free Distort or Lattice.");
+                    hint(
+                        ui,
+                        "Select shapes, then choose Free Distort or Lattice Distort.",
+                    );
                     ui.horizontal(|ui| {
                         if button(ui, "Free Distort", !self.selected_shapes.is_empty()) {
                             start = Some((1, 1));
                         }
-                        if button(ui, "Lattice", !self.selected_shapes.is_empty()) {
+                        if button(ui, "Lattice Distort", !self.selected_shapes.is_empty()) {
                             start = Some((3, 3));
                         }
                     });

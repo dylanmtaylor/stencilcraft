@@ -345,6 +345,25 @@ pub fn guide_change(
         })
 }
 
+/// The guide a drag in progress changes, as [`stencilcraft_ui_egui::canvas_guides`] previews
+/// it: a moved, turned or removed document guide, else one being dragged out of a ruler (a key
+/// `before` does not hold).
+pub fn guide_drag(
+    before: &[craft_ui::canvas::Guide],
+    proposed: &[craft_ui::canvas::Guide],
+) -> Option<stencilcraft_ui_egui::GuidePreview> {
+    guide_change(before, proposed).or_else(|| {
+        proposed
+            .iter()
+            .find(|g| !before.iter().any(|b| b.key == g.key))
+            .map(|g| stencilcraft_ui_egui::GuidePreview {
+                key: g.key,
+                along: g.along,
+                at: Some(g.position),
+            })
+    })
+}
+
 /// `p` snapped by the document's snap settings, ignoring shapes `exclude` (a dragged node
 /// must not snap to its own shape's bounds). `p` itself when nothing is in reach.
 pub fn snap_point_in(
@@ -2442,9 +2461,11 @@ impl StencilApp {
             self.guide_preview = None;
             return;
         }
-        let Some(after) = events.landed() else {
+        // A drag's updates only preview; the document changes once, on its Commit (or a Set).
+        // (`EditEvents::landed` carries an Update's value too, which added a guide per update.)
+        let Some(after) = events.committed() else {
             if let Some(proposed) = events.value() {
-                self.guide_preview = guide_change(before, proposed);
+                self.guide_preview = guide_drag(before, proposed);
             }
             return;
         };
@@ -8415,6 +8436,103 @@ mod tests {
             1,
             "Cut removes the pasted copy"
         );
+    }
+
+    #[test]
+    fn a_guide_drag_previews_its_updates_and_changes_the_document_once() {
+        // Regression: one drag out of the left ruler added a guide per drag update (four).
+        use craft_behavior::{Axis, EditEvent, EditEvents, GestureId, Mixed};
+        use craft_ui::canvas::{Guide, GuideKey};
+        let mut app = StencilApp::new(None);
+        let initial = app.engine.doc.guides.len();
+        let shown = |app: &StencilApp| {
+            stencilcraft_ui_egui::canvas_guides(&app.engine.doc.guides, app.guide_preview)
+        };
+        let before =
+            |app: &StencilApp| stencilcraft_ui_egui::canvas_guides(&app.engine.doc.guides, None);
+        let with = |list: &[Guide], guide: Guide| {
+            let mut list = list.to_vec();
+            list.push(guide);
+            list
+        };
+        let pass = |app: &mut StencilApp, event: EditEvent<Vec<Guide>>| {
+            let mut events = EditEvents::new();
+            events.push(event);
+            let guides = before(app);
+            app.apply_guide_edit(&guides, &events);
+        };
+        let id = GestureId::new(1);
+        let start = before(&app);
+
+        // Out of the left ruler: a vertical guide, under a key the control gives it.
+        let new_key = GuideKey::new(1000);
+        pass(
+            &mut app,
+            EditEvent::begin(id, Mixed::Same(start.clone()), "Guides".into(), None),
+        );
+        for x in [10.0, 20.0, 30.0, 40.0] {
+            pass(
+                &mut app,
+                EditEvent::update(id, with(&start, Guide::new(new_key, Axis::Y, x))),
+            );
+            assert_eq!(app.engine.doc.guides.len(), initial, "an update only previews");
+            let previewed = shown(&app);
+            assert!(
+                previewed.iter().any(|g| g.key == new_key && g.position == x),
+                "the dragged guide follows the pointer: {previewed:?}"
+            );
+        }
+        pass(
+            &mut app,
+            EditEvent::commit(
+                id,
+                Mixed::Same(start.clone()),
+                with(&start, Guide::new(new_key, Axis::Y, 40.0)),
+            ),
+        );
+        assert_eq!(app.engine.doc.guides.len(), initial + 1, "added once, on release");
+        assert_eq!(app.guide_preview, None);
+        let added = app.engine.doc.guides.last().unwrap().clone();
+        assert_eq!(added.axis, stencilcraft_doc::GuideAxis::Vertical);
+        assert_eq!(added.position_mm, 40.0);
+        assert!(app.engine.undo());
+        assert_eq!(app.engine.doc.guides.len(), initial, "one undo step");
+        assert!(app.engine.redo());
+
+        // Dragging the guide moves it, once.
+        let placed = before(&app);
+        let key = placed.last().unwrap().key;
+        let moved = |at: f64| {
+            let mut list = placed.clone();
+            if let Some(guide) = list.last_mut() {
+                guide.position = at;
+            }
+            list
+        };
+        let id = id.next();
+        pass(&mut app, EditEvent::update(id, moved(50.0)));
+        pass(&mut app, EditEvent::update(id, moved(60.0)));
+        assert_eq!(app.engine.doc.guides.last().unwrap().position_mm, 40.0);
+        assert!(shown(&app).iter().any(|g| g.key == key && g.position == 60.0));
+        pass(
+            &mut app,
+            EditEvent::commit(id, Mixed::Same(placed.clone()), moved(60.0)),
+        );
+        assert_eq!(app.engine.doc.guides.len(), initial + 1);
+        assert_eq!(app.engine.doc.guides.last().unwrap().position_mm, 60.0);
+        assert!(app.engine.undo());
+        assert_eq!(app.engine.doc.guides.last().unwrap().position_mm, 40.0);
+        assert!(app.engine.redo());
+
+        // Dropping it on a ruler removes it.
+        let placed = before(&app);
+        let gone: Vec<Guide> = placed.iter().filter(|g| g.key != key).cloned().collect();
+        let id = id.next();
+        pass(
+            &mut app,
+            EditEvent::commit(id, Mixed::Same(placed.clone()), gone),
+        );
+        assert_eq!(app.engine.doc.guides.len(), initial);
     }
 
     #[test]

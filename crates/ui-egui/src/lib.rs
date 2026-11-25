@@ -1690,7 +1690,7 @@ pub fn canvas_guides(
 ) -> Vec<craft_ui::canvas::Guide> {
     use craft_behavior::Axis;
     use craft_ui::canvas::GuideKey;
-    guides
+    let mut shown: Vec<craft_ui::canvas::Guide> = guides
         .iter()
         .zip(1u64..)
         .filter_map(|(g, key)| {
@@ -1709,7 +1709,16 @@ pub fn canvas_guides(
                 ..craft_ui::canvas::Guide::new(key, along, position)
             })
         })
-        .collect()
+        .collect();
+    // A guide being dragged out of a ruler is not in the document yet: it shows under the
+    // key the guides control gave it, and is added on release.
+    if let Some(drag) = preview
+        && let Some(at) = drag.at
+        && !(1u64..).take(guides.len()).any(|key| GuideKey::new(key) == drag.key)
+    {
+        shown.push(craft_ui::canvas::Guide::new(drag.key, drag.along, at));
+    }
+    shown
 }
 
 /// A document guide being dragged, as [`canvas_guides`] previews it.

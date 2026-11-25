@@ -69,6 +69,7 @@ mod object_menu;
 mod page_setup;
 mod panels;
 mod pixscan;
+mod print_marks;
 mod send_modes;
 mod text_tool;
 mod trace_panel;
@@ -88,6 +89,8 @@ pub struct UserPrefs {
     /// View › Smart Guides: draw the alignment lines snapping found while dragging.
     pub smart_guides: bool,
     pub print_cut_marks: bool,
+    /// Print & Cut: registration mark size and inset, and bleed.
+    pub marks: print_marks::MarkSettings,
     /// View › Show Cut Border (on, as in Silhouette).
     pub show_cut_border: bool,
     /// View › Show Print Border.
@@ -136,6 +139,7 @@ impl Default for UserPrefs {
             show_guides: true,
             smart_guides: true,
             print_cut_marks: false,
+            marks: print_marks::MarkSettings::default(),
             show_cut_border: true,
             show_print_border: false,
             show_dimensions: true,
@@ -850,6 +854,7 @@ pub enum WorkspacePanel {
     GraphicStyles,
     Actions,
     PixScan,
+    PrintCut,
 }
 
 struct WorkspaceContent<'a> {
@@ -885,6 +890,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::GraphicStyles => self.app.graphic_styles_panel(ui),
             WorkspacePanel::Actions => self.app.actions_panel(ui),
             WorkspacePanel::PixScan => self.app.pixscan_panel(ui),
+            WorkspacePanel::PrintCut => self.app.print_cut_panel(ui),
         }
     }
 
@@ -916,6 +922,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::GraphicStyles => "Graphic Styles",
             WorkspacePanel::Actions => "Actions",
             WorkspacePanel::PixScan => "PixScan",
+            WorkspacePanel::PrintCut => "Print & Cut",
         }
         .to_owned()
     }
@@ -1199,6 +1206,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::GraphicStyles,
     WorkspacePanel::Actions,
     WorkspacePanel::PixScan,
+    WorkspacePanel::PrintCut,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -3368,7 +3376,7 @@ impl StencilApp {
                     .set_file_name("print_and_cut.svg")
                     .save_file()
                 {
-                    match stencilcraft_svg::export_print_and_cut(&self.engine.doc) {
+                    match self.print_sheet_svg() {
                         Ok(svg) => {
                             if let Err(e) = std::fs::write(&path, svg) {
                                 self.status = format!("export failed: {e}");
@@ -5445,6 +5453,7 @@ impl StencilApp {
                 kerf_preview: self.kerf_preview,
                 show_grid: self.prefs.show_grid,
                 print_cut_marks: self.prefs.print_cut_marks,
+                mark_geometry: self.prefs.marks.geometry(),
                 show_selection_bounds: true,
                 theme: self.theme,
                 outline_view: self.prefs.outline_view,

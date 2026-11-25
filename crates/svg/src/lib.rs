@@ -287,6 +287,49 @@ pub fn export_tile_preview(
     .write_fixed_view_box())
 }
 
+/// Silhouette's Print & Cut page: the page itself (printed at 100 %) with registration marks
+/// on it (`marks`: `[x, y, width, height]` rectangles in page millimetres) and the design's
+/// fills and line colours.
+pub fn export_print_sheet(doc: &Document, marks: &[[f64; 4]]) -> Result<String, SvgError> {
+    doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
+    let (page_w, page_h) = (doc.board.width_mm, doc.board.height_mm);
+    if !(page_w.is_finite() && page_h.is_finite() && page_w > 0.0 && page_h > 0.0) {
+        return Err(SvgError::Model(
+            "print sheet: the page size is not finite".into(),
+        ));
+    }
+    let rects: Vec<SvgElement> = marks
+        .iter()
+        .filter(|m| m.iter().all(|v| v.is_finite()) && m[2] > 0.0 && m[3] > 0.0)
+        .map(|m| SvgElement::Rect {
+            attributes: Vec::new(),
+            x: m[0],
+            y: m[1],
+            width: m[2],
+            height: m[3],
+        })
+        .collect();
+    let mut elements = vec![SvgElement::Title(
+        "StencilCraft Print & Cut page (print at 100 %)".into(),
+    )];
+    elements.extend(document_elements(doc, false, true, true));
+    elements.push(SvgElement::Group {
+        attributes: vec![
+            SvgAttribute::text("id", "registration-marks"),
+            SvgAttribute::text("fill", "#000000"),
+            SvgAttribute::text("aria-label", "Registration marks"),
+        ],
+        children: rects,
+    });
+    Ok(SvgScene {
+        width_mm: page_w,
+        height_mm: page_h,
+        view_box: [0.0, 0.0, page_w, page_h],
+        elements,
+    }
+    .write_fixed_view_box())
+}
+
 pub fn export_print_and_cut(doc: &Document) -> Result<String, SvgError> {
     const MARGIN: f64 = 12.0;
     const MARK: f64 = 6.0;
@@ -523,6 +566,19 @@ mod tests_group_walk {
 #[cfg(test)]
 mod print_tests {
     use super::*;
+
+    #[test]
+    fn print_sheet_is_the_page_with_its_marks() {
+        let mut doc = Document::default();
+        doc.board.width_mm = 215.9;
+        doc.board.height_mm = 279.4;
+        let sheet =
+            export_print_sheet(&doc, &[[15.0, 15.0, 10.0, 10.0], [f64::NAN, 0.0, 1.0, 1.0]])
+                .expect("sheet");
+        assert!(sheet.contains("registration-marks"));
+        assert!(sheet.contains("215.900mm"), "the page itself: {sheet}");
+        assert_eq!(sheet.matches("<rect").count(), 1, "bad marks are skipped");
+    }
 
     #[test]
     fn print_and_cut_sheet_prints_fill_and_line_colours() {

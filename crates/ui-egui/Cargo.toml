@@ -16,6 +16,7 @@ serde = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
+stencilcraft-layout = { workspace = true }
 
 [dev-dependencies]
 stencilcraft-testkit = { workspace = true }

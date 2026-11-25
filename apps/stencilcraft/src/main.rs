@@ -8368,18 +8368,30 @@ mod tests {
             height: 10.0,
         });
         app.set_selection([1]);
-        let send = |app: &mut StencilApp, event: egui::Event| {
+        // The runtime leaves egui's clipboard events to the app while its canvas is the
+        // window's document canvas (`framework::host_canvas`, which the canvas view declares
+        // each pass); otherwise they stand for their chord. Each pass declares a canvas the way
+        // the app's canvas view does, and a first pass registers it before any event arrives.
+        let send = |app: &mut StencilApp, event: Option<egui::Event>| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
-                    events: vec![event],
+                    events: event.into_iter().collect(),
                     ..Default::default()
                 },
-                |ui| app.handle_keyboard_shortcuts(ui.ctx()),
+                |ui| {
+                    let response = ui.allocate_rect(
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0)),
+                        egui::Sense::click_and_drag(),
+                    );
+                    crate::framework::host_canvas(ui.ctx(), response.id);
+                    app.handle_keyboard_shortcuts(ui.ctx());
+                },
             );
             output.textures_delta.clear();
             output
         };
-        let output = send(&mut app, egui::Event::Copy);
+        send(&mut app, None);
+        let output = send(&mut app, Some(egui::Event::Copy));
         let copied = output
             .platform_output
             .commands
@@ -8389,9 +8401,9 @@ mod tests {
             copied,
             "Copy puts the selection on the system clipboard as SVG"
         );
-        send(&mut app, egui::Event::Paste(String::new()));
+        send(&mut app, Some(egui::Event::Paste(String::new())));
         assert_eq!(app.engine.doc.shape_count(), 2, "Paste pastes the shapes");
-        send(&mut app, egui::Event::Cut);
+        send(&mut app, Some(egui::Event::Cut));
         assert_eq!(
             app.engine.doc.shape_count(),
             1,
@@ -8617,7 +8629,10 @@ mod tests {
         output
     }
 
-    fn node_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    /// The bounds of the control named `label`. The pin's `Text` is an AccessKit `Label` node,
+    /// so a heading drawn above a control with the same name ("Material" over the Material
+    /// select) shares its name: the control is the named node that is not a plain label.
+    fn node_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {
         let tree = output.platform_output.accesskit_update.as_ref().unwrap();
         // A control named by a visible word label (`PropertyRow::word`) has no label of its own:
         // it is `labelled_by` the label's node.
@@ -8630,21 +8645,33 @@ mod tests {
             .filter(|(_, node)| named(node))
             .map(|(id, _)| *id)
             .collect();
+        let named_control = |node: &egui::accesskit::Node| {
+            node.label() == Some(label) && node.role() != egui::accesskit::Role::Label
+        };
         let node = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some(label))
+            .find(|(_, node)| named_control(node))
             .or_else(|| {
                 tree.nodes
                     .iter()
                     .find(|(_, node)| node.labelled_by().iter().any(|id| label_ids.contains(id)))
             })
+            .or_else(|| {
+                tree.nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+            })
             .unwrap_or_else(|| panic!("missing node {label}"));
         let bounds = node.1.bounds().unwrap();
-        egui::pos2(
-            ((bounds.x0 + bounds.x1) / 2.0) as f32,
-            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         )
+    }
+
+    fn node_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+        node_rect(output, label).center()
     }
 
     fn click(
@@ -8746,12 +8773,16 @@ mod tests {
             vec![egui::Event::PointerMoved(start), button(start, true)],
             StencilApp::inspector,
         );
-        frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::PointerMoved(end)],
-            StencilApp::inspector,
-        );
+        // The pin's slider begins the edit on the pass the press passes the slop and proposes
+        // the value from the next pass: the pointer held at `end` for one more pass.
+        for _ in 0..2 {
+            frame(
+                &ctx,
+                &mut app,
+                vec![egui::Event::PointerMoved(end)],
+                StencilApp::inspector,
+            );
+        }
         assert!(app.kerf_draft.is_some_and(|value| value != 0.2));
         assert_eq!(app.engine.doc.kerf.width_mm, 0.2);
         frame(
@@ -8826,12 +8857,16 @@ mod tests {
             vec![egui::Event::PointerMoved(start), button(start, true)],
             StencilApp::send_tab,
         );
-        frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::PointerMoved(end)],
-            StencilApp::send_tab,
-        );
+        // The pin's slider begins the edit on the pass the press passes the slop and proposes
+        // the value from the next pass: the pointer held at `end` for one more pass.
+        for _ in 0..2 {
+            frame(
+                &ctx,
+                &mut app,
+                vec![egui::Event::PointerMoved(end)],
+                StencilApp::send_tab,
+            );
+        }
         assert_ne!(app.send.pressure_override, 10);
         frame(
             &ctx,
@@ -9147,12 +9182,12 @@ mod tests {
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         let old_zoom = app.view.zoom;
         let out = frame(&ctx, &mut app, vec![], StencilApp::status_bar);
-        click(
-            &ctx,
-            &mut app,
-            StencilApp::status_bar,
-            node_center(&out, "Zoom"),
-        );
+        // The pin's slider jumps to a click on its track and ignores one on its thumb, which the
+        // fitted view's zoom puts near the track's middle: the click lands near the start.
+        let track = node_rect(&out, "Zoom");
+        let target = egui::pos2(track.left() + track.width() * 0.1, track.center().y);
+        eprintln!("DIAG zoom slider rect {track:?}, click at {target:?}, zoom {old_zoom}");
+        click(&ctx, &mut app, StencilApp::status_bar, target);
         assert!(app.pending_zoom.is_some());
         frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
         assert_ne!(app.view.zoom, old_zoom);
@@ -9387,10 +9422,11 @@ mod tests {
             .unwrap();
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        // The "Material" heading above the select is a `Label` node of the same name.
         let (selector_id, selector) = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Material"))
+            .find(|(_, node)| node.label() == Some("Material") && node.role() != Role::Label)
             .unwrap();
         assert_eq!(selector.role(), Role::ComboBox);
         assert!(selector.supports_action(Action::Click));
@@ -9455,10 +9491,11 @@ mod tests {
         let initial = app.send.media_index;
         let out = frame(&ctx, &mut app, vec![], StencilApp::send_tab);
         let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+        // The "Material" heading above the select is a `Label` node of the same name.
         let (id, node) = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Material"))
+            .find(|(_, node)| node.label() == Some("Material") && node.role() != Role::Label)
             .unwrap();
         assert_eq!(node.role(), Role::ComboBox);
         assert_eq!(node.value(), Some(media_label(initial).as_str()));

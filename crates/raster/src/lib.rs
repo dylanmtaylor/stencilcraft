@@ -6,10 +6,13 @@
 //! Every decoder runs under byte, side, pixel and allocation caps, so a hostile file is
 //! an error, never a panic or an out-of-memory abort (`AGENTS.md` › Never crash).
 
+mod palette;
 mod trace;
 
 use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
 use stencilcraft_doc::RasterImage;
+
+pub use palette::{MAX_COLOURS, colour_masks, hex, palette};
 
 pub use trace::{
     ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace, trace_mask,

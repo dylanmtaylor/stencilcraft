@@ -4280,6 +4280,8 @@ impl StencilApp {
     }
 
     pub fn layers_panel(&mut self, ui: &mut egui::Ui) {
+        /// Tags layer rows' keys so they never equal an object row's.
+        const LAYER_ROW: &str = "layer";
         let mut add_layer = false;
         let mut delete_layer = false;
         let mut selected_idx = self.selected_layer;
@@ -4359,7 +4361,9 @@ impl StencilApp {
             .show(ui, |ui| {
                 for (i, name, visible, locked) in layer_data {
                     let is_sel = selected_idx == Some(i);
-                    let row = ListRow::new(i, &name)
+                    // Keyed apart from the object rows below (layer 2 and shape 2 would
+                    // otherwise share a widget id).
+                    let row = ListRow::new((LAYER_ROW, i), &name)
                         .toggle(ToggleColumn::eye(format!("Visibility {name}"), visible))
                         .toggle(ToggleColumn::lock(format!("Lock {name}"), locked))
                         .selected(is_sel)
@@ -4373,9 +4377,9 @@ impl StencilApp {
                         ) = ev
                         {
                             if value.column == 0 {
-                                toggles.push((value.row, value.on));
+                                toggles.push((value.row.1, value.on));
                             } else {
-                                lock_toggles.push((value.row, value.on));
+                                lock_toggles.push((value.row.1, value.on));
                             }
                         }
                     }

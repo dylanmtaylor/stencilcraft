@@ -366,6 +366,10 @@ pub struct SnapQuery {
     /// Overrides the document's tolerance (the UI converts a screen distance at its zoom).
     #[serde(default)]
     pub tolerance_mm: Option<f64>,
+    /// Silhouette's "Smart Snap only within media": off the pages (the moving box's centre on
+    /// no page), only the grid and guides snap; points, edges, centres and spacing do not.
+    #[serde(default)]
+    pub within_media: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1698,16 +1702,25 @@ pub fn snap(
         .filter(|s| !s.hidden && !exclude.contains(&s.id))
         .collect();
     let others: Vec<Rect> = other_shapes.iter().filter_map(|s| s.bounds()).collect();
-    if settings.points
+    let pages: Vec<Rect> = doc.all_pages().iter().map(Page::rect).collect();
+    let smart = !query.within_media || pages.iter().any(|page| page.contains(moving.center()));
+    if smart
+        && settings.points
         && let Some(result) = snap_to_point(query, moving, &other_shapes, tolerance)
     {
         return Ok(result);
     }
-    let pages: Vec<Rect> = doc.all_pages().iter().map(Page::rect).collect();
     let extent = pages
         .iter()
         .chain(&others)
         .fold(moving, |acc, r| acc.union(*r));
+    // Off the media with `within_media`, nothing but the grid and guides: no shape or page
+    // targets.
+    let (others, pages) = if smart {
+        (others, pages)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let x = snap_axis(doc, Axis::X, moving, &others, &pages, extent, tolerance);
     let y = snap_axis(doc, Axis::Y, moving, &others, &pages, extent, tolerance);
     let dx = x.as_ref().map_or(0.0, |h| h.offset);
@@ -2568,6 +2581,55 @@ mod tests {
         assert_eq!(snap_at(&doc, 23.0, 0.5, 0.0, 0.0, vec![]).dx, 0.0);
     }
 
+    #[test]
+    fn smart_snaps_stay_on_the_media_when_asked() {
+        // A 100 × 150 page with a 20 × 20 shape at its right edge, objects on, grid off.
+        let mut doc = Document::default();
+        doc.board.width_mm = 100.0;
+        doc.board.height_mm = 150.0;
+        doc.snap = stencilcraft_doc::SnapSettings {
+            grid: false,
+            objects: true,
+            tolerance_mm: 3.0,
+            ..stencilcraft_doc::SnapSettings::default()
+        };
+        let mut path = kurbo::BezPath::new();
+        path.move_to((80.0, 10.0));
+        path.line_to((100.0, 10.0));
+        path.line_to((100.0, 30.0));
+        path.close_path();
+        doc.push_shape(0, path, stencilcraft_doc::CutStyle::Cut)
+            .unwrap();
+        // Just off the page's right edge (x 101.5): the shape's edge at 100 is in reach.
+        let query = |within_media| SnapQuery {
+            x: 101.5,
+            y: 20.0,
+            within_media,
+            ..SnapQuery::default()
+        };
+        let free = snap(&doc, &query(false)).unwrap();
+        assert!(
+            free.dx.abs() > 0.0,
+            "objects snap off the page by default: {free:?}"
+        );
+        let held = snap(&doc, &query(true)).unwrap();
+        assert_eq!(
+            (held.dx, held.dy),
+            (0.0, 0.0),
+            "off the media nothing smart snaps"
+        );
+        // On the page the same option still snaps to the shape.
+        let on = snap(
+            &doc,
+            &SnapQuery {
+                x: 98.5,
+                ..query(true)
+            },
+        )
+        .unwrap();
+        assert!(on.dx.abs() > 0.0, "on the media objects still snap: {on:?}");
+    }
+
     fn snap_at(doc: &Document, x: f64, y: f64, w: f64, h: f64, exclude: Vec<u64>) -> SnapResult {
         snap(
             doc,
@@ -2578,6 +2640,7 @@ mod tests {
                 height: h,
                 exclude,
                 tolerance_mm: None,
+                within_media: false,
             },
         )
         .unwrap()

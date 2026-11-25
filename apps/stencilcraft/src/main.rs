@@ -125,6 +125,8 @@ pub struct UserPrefs {
     pub recent_fonts: Vec<String>,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
+    /// Page Setup › Smart Snap only within media: off the page only the grid and guides snap.
+    pub snap_within_media: bool,
     /// Panels › Graphic Styles: saved line/fill/operation sets.
     pub graphic_styles: Vec<graphic_styles::GraphicStyle>,
     /// Panels › Actions: recorded edit sequences.
@@ -162,6 +164,7 @@ impl Default for UserPrefs {
             mat_id: None,
             recent_fonts: Vec::new(),
             select_after_drawing: false,
+            snap_within_media: false,
             graphic_styles: Vec::new(),
             actions: Vec::new(),
             length_unit: Default::default(),
@@ -246,6 +249,7 @@ pub fn snap_moved_anchor(
     exclude: &[u64],
     join_reach: f64,
     off: bool,
+    within_media: bool,
 ) {
     let PathEdit::MoveAnchors { anchors, .. } = change else {
         return;
@@ -269,7 +273,7 @@ pub fn snap_moved_anchor(
     let snapped = match join {
         Some(target) => target,
         None if off => return,
-        None => snap_point_in(doc, at, exclude),
+        None => snap_point_in(doc, at, exclude, within_media),
     };
     if let Some(knot) = edited
         .get_mut(moved.subpath)
@@ -427,6 +431,7 @@ pub fn snap_point_in(
     doc: &stencilcraft_doc::Document,
     p: stencilcraft_geom::Point,
     exclude: &[u64],
+    within_media: bool,
 ) -> stencilcraft_geom::Point {
     let snap = &doc.snap;
     if !(snap.grid || snap.guides || snap.objects || snap.points) {
@@ -439,6 +444,7 @@ pub fn snap_point_in(
         height: 0.0,
         exclude: exclude.to_vec(),
         tolerance_mm: None,
+        within_media,
     };
     match stencilcraft_engine::document::snap(doc, &query) {
         Ok(r) if r.x.is_finite() && r.y.is_finite() => stencilcraft_geom::Point::new(r.x, r.y),
@@ -2373,6 +2379,7 @@ impl StencilApp {
             height: 0.0,
             exclude: Vec::new(),
             tolerance_mm: None,
+            within_media: self.prefs.snap_within_media,
         };
         match self
             .engine
@@ -2415,6 +2422,7 @@ impl StencilApp {
                 height: origin.height(),
                 exclude: self.selected_shapes.clone(),
                 tolerance_mm: None,
+                within_media: self.prefs.snap_within_media,
             };
             if let Ok(stencilcraft_engine::Effect::Document(
                 stencilcraft_engine::document::DocumentEffect::Snap(r),
@@ -6178,6 +6186,7 @@ impl StencilApp {
                                     &self.selected_shapes,
                                     join_reach,
                                     snap_off,
+                                    self.prefs.snap_within_media,
                                 );
                                 self.bezier_live_path = Some((
                                     pid,
@@ -6208,6 +6217,7 @@ impl StencilApp {
                                     &self.selected_shapes,
                                     join_reach,
                                     snap_off,
+                                    self.prefs.snap_within_media,
                                 );
                                 // An open end dropped on another open end rejoins the path.
                                 if let PathEdit::MoveAnchors { anchors, .. } = value
@@ -9515,6 +9525,31 @@ mod tests {
     }
 
     #[test]
+    fn smart_snap_only_within_media_keeps_off_page_points_free() {
+        let mut app = StencilApp::new(None);
+        app.engine.doc.snap.grid = false;
+        app.engine.doc.snap.objects = true;
+        // Just right of the 100 mm page edge: the page edge is a smart-snap target.
+        let off = stencilcraft_geom::Point::new(101.0, 75.0);
+        let snapped = app.snap_world_point(off);
+        assert!(
+            (snapped.x - 100.0).abs() < 1e-9,
+            "snaps to the page edge: {snapped:?}"
+        );
+        app.prefs.snap_within_media = true;
+        assert_eq!(
+            app.snap_world_point(off),
+            off,
+            "off the media nothing smart snaps"
+        );
+        let on = stencilcraft_geom::Point::new(99.0, 75.0);
+        assert!(
+            (app.snap_world_point(on).x - 100.0).abs() < 1e-9,
+            "on the media it does"
+        );
+    }
+
+    #[test]
     fn dragged_nodes_snap_but_not_to_their_own_shape() {
         let mut app = StencilApp::new(None);
         app.run_command(Command::ShapeAddRect {
@@ -9525,12 +9560,12 @@ mod tests {
         });
         let off = stencilcraft_geom::Point::new(40.4, 39.6);
         assert_eq!(
-            snap_point_in(&app.engine.doc, off, &[]),
+            snap_point_in(&app.engine.doc, off, &[], false),
             off,
             "snapping off"
         );
         app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
-        let snapped = snap_point_in(&app.engine.doc, off, &[1]);
+        let snapped = snap_point_in(&app.engine.doc, off, &[1], false);
         assert!(
             (snapped.x - 40.0).abs() < 1e-9 && (snapped.y - 40.0).abs() < 1e-9,
             "{snapped:?}"

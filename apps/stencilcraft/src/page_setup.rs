@@ -156,6 +156,11 @@ impl StencilApp {
                             check(ui, "Snap to Grid", &mut snap_grid);
                         });
                         check(ui, "Enable Smart Snapping", &mut smart);
+                        check(
+                            ui,
+                            "Smart Snap only within media",
+                            &mut prefs.snap_within_media,
+                        );
                         labelled(ui, "Tolerance", |ui| {
                             number(
                                 ui,

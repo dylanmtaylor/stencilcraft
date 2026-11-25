@@ -86,7 +86,7 @@ pub fn build(app: &StencilApp) -> Vec<MenuItem<A>> {
         MenuItem::submenu("Object", object(app)),
         MenuItem::submenu("Type", type_menu(app)),
         MenuItem::submenu("Select", select(app)),
-        MenuItem::submenu("Effect", effect()),
+        MenuItem::submenu("Effect", effect(app)),
         MenuItem::submenu("View", view(app)),
         MenuItem::submenu("Panels", panels(app)),
         MenuItem::submenu("Machine", machine(app)),
@@ -561,8 +561,9 @@ fn eff(label: &str, menu: crate::effects::EffectMenu) -> MenuEntry<A> {
     item(label, A::OpenEffect(menu)).into()
 }
 
-fn effect() -> Vec<MenuEntry<A>> {
+fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
     use crate::effects::EffectMenu as M;
+    let any = !app.selected_shapes.is_empty();
     vec![
         item("Offset…", A::Edit(E::Offset { internal: false })).into(),
         item("Internal Offset…", A::Edit(E::Offset { internal: true })).into(),
@@ -591,10 +592,24 @@ fn effect() -> Vec<MenuEntry<A>> {
             "Distort",
             vec![
                 item("Shear…", A::ShowPanel(P::Transform)).into(),
-                todo("Free Distort"),
+                when(
+                    "Free Distort",
+                    A::BeginDistort {
+                        rows: 1,
+                        columns: 1,
+                    },
+                    any,
+                ),
             ],
         ),
-        todo("Lattice…"),
+        when(
+            "Lattice…",
+            A::BeginDistort {
+                rows: 3,
+                columns: 3,
+            },
+            any,
+        ),
         eff("Pop-up Card…", M::PopupCard),
         eff("Puzzle…", M::Puzzle),
         SEP,

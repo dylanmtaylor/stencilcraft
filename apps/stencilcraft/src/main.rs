@@ -116,6 +116,8 @@ pub struct UserPrefs {
     pub graphic_styles: Vec<graphic_styles::GraphicStyle>,
     /// Panels › Actions: recorded edit sequences.
     pub actions: Vec<actions::SavedAction>,
+    /// Preferences › Units: what lengths are shown and typed in.
+    pub length_unit: stencilcraft_ui_egui::LengthUnit,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -146,6 +148,7 @@ impl Default for UserPrefs {
             select_after_drawing: false,
             graphic_styles: Vec::new(),
             actions: Vec::new(),
+            length_unit: Default::default(),
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -2638,6 +2641,7 @@ impl StencilApp {
     }
 
     pub fn handle_keyboard_shortcuts(&mut self, ctx: &egui::Context) {
+        stencilcraft_ui_egui::set_length_unit(self.prefs.length_unit);
         self.snap_suspended = ctx.input(|input| input.modifiers.command);
         // Typing on the canvas takes every plain key; Cmd shortcuts other than undo still work.
         self.handle_text_session_keys(ctx);
@@ -3946,12 +3950,14 @@ impl StencilApp {
                                      range: std::ops::RangeInclusive<f64>,
                                      unit: &str| {
                             ui.add(Text::new(label));
-                            let edit = NumberField::new(id, label, *value, &locale_numbers)
+                            let (shown, range, unit, per) = panels::in_display(*value, range, unit);
+                            let edit = NumberField::new(id, label, shown, &locale_numbers)
                                 .range(range)
+                                .decimals(0..=3)
                                 .unit(Unit::new(unit))
                                 .show(ui);
                             if let Some(v) = edit.event.and_then(|e| e.value().copied()) {
-                                *value = v;
+                                *value = v / per;
                             }
                         };
                         let (sides, points, inner, corner) = &mut shape_options;
@@ -4013,13 +4019,15 @@ impl StencilApp {
                             Divider::vertical().show(ui);
                             let mut kerf_val = kerf_val_init;
                             ui.add(Text::new("Kerf:"));
-                            let edit =
-                                NumberField::new("opt-kerf", "Kerf", kerf_val, &locale_numbers)
-                                    .range(0.0..=2.0)
-                                    .unit(Unit::new("{n} mm"))
-                                    .show(ui);
+                            let (shown, range, unit, per) =
+                                panels::in_display(kerf_val, 0.0..=2.0, "{n} mm");
+                            let edit = NumberField::new("opt-kerf", "Kerf", shown, &locale_numbers)
+                                .range(range)
+                                .decimals(0..=4)
+                                .unit(Unit::new(unit))
+                                .show(ui);
                             if let Some(val) = edit.event.and_then(|e| e.value().copied()) {
-                                kerf_val = val;
+                                kerf_val = val / per;
                                 new_kerf = Some(kerf_val);
                             }
                             let _ = ui.add(
@@ -4058,16 +4066,19 @@ impl StencilApp {
                                     }
                                     ui.add(Text::new(format!("{name}:")));
                                     let min = if i < 2 { -10_000.0 } else { 0.01 };
+                                    let (value, range, unit, per) =
+                                        panels::in_display(shown[i], min..=10_000.0, "{n} mm");
                                     let edit = NumberField::new(
                                         ("opt-bound", selected_shape_id, i),
                                         name,
-                                        shown[i],
+                                        value,
                                         &locale_numbers,
                                     )
-                                    .range(min..=10_000.0)
-                                    .decimals(0..=2)
-                                    .unit(Unit::new("{n} mm"))
-                                    .show(ui);
+                                    .range(range)
+                                    .decimals(0..=3)
+                                    .unit(Unit::new(unit))
+                                    .show(ui)
+                                    .map(|v| v / per);
                                     if let Some(
                                         EditEvent::Commit { value, .. }
                                         | EditEvent::Set { value, .. },
@@ -4532,16 +4543,19 @@ impl StencilApp {
                             let shown = values;
                             let field = |ui: &mut egui::Ui, index: usize| {
                                 let min = if index < 2 { -10_000.0 } else { 0.01 };
+                                let (value, range, unit, per) =
+                                    panels::in_display(shown[index], min..=10_000.0, "{n} mm");
                                 NumberField::new(
                                     ("bound", id, index),
                                     names[index],
-                                    shown[index],
+                                    value,
                                     &numbers,
                                 )
-                                .range(min..=10_000.0)
-                                .decimals(0..=2)
-                                .unit(Unit::new("{n} mm"))
+                                .range(range)
+                                .decimals(0..=3)
+                                .unit(Unit::new(unit))
                                 .show(ui)
+                                .map(|v| v / per)
                             };
                             let (first, second) = PropertyRow::pair(
                                 PropertyLabel::glyph(names[a]),
@@ -4756,9 +4770,12 @@ impl StencilApp {
         let mut kerf_preview = self.kerf_preview;
         let _ = SectionHeader::new("inspector-cut", "Cut settings").show(ui, |ui| {
             ui.add(
-                Text::new(format!("Kerf  {kerf_width:.3} mm"))
-                    .role(TypeRole::Label)
-                    .content(Content::Muted),
+                Text::new(format!(
+                    "Kerf  {}",
+                    stencilcraft_ui_egui::length_unit().format(kerf_width, 2)
+                ))
+                .role(TypeRole::Label)
+                .content(Content::Muted),
             );
             kerf_event = Slider::new("kerf", "Kerf", kerf_width, 0.0..=1.0)
                 .show(ui)
@@ -5468,12 +5485,13 @@ impl StencilApp {
         }
         let canvas_view = self.view.to_canvas_view(clip);
         let mut guides_claimed = bars.over;
+        let length_unit = stencilcraft_ui_egui::length_unit();
         let mm_units = RulerUnits {
-            per_doc: 1.0,
+            per_doc: length_unit.per_mm(),
             ticks: craft_ui::canvas::Ticks::Decimal { whole: false },
             numbers: self.locale_numbers.clone(),
-            unit: Unit::new("{n} mm"),
-            decimals: 1,
+            unit: Unit::new(length_unit.template()),
+            decimals: length_unit.decimals(),
         };
 
         let guides_id = if self.prefs.show_guides {
@@ -5904,7 +5922,7 @@ impl StencilApp {
                 if let Some(pointer) = response.hover_pos() {
                     draft.track(self.view.screen_to_world(pointer.to_vec2()), snap);
                     Readout::new("arc-readout")
-                        .row("R", format!("{:.1} mm", draft.radius))
+                        .row("R", panels::len(draft.radius))
                         .row("∠", format!("{:.0}°", draft.sweep_degrees()))
                         .show(ui.ctx(), pointer);
                 }
@@ -5949,7 +5967,7 @@ impl StencilApp {
                         preview_colour,
                     );
                     Readout::new("arc-readout")
-                        .row("R", format!("{:.1} mm", (world_pt - start).hypot()))
+                        .row("R", panels::len((world_pt - start).hypot()))
                         .show(ui.ctx(), pointer);
                 }
                 if response.drag_stopped()
@@ -6049,7 +6067,7 @@ impl StencilApp {
                 );
                 if let Some(pointer) = response.interact_pointer_pos() {
                     Readout::new("knife-readout")
-                        .row("L", format!("{:.1} mm", (end - start).hypot()))
+                        .row("L", panels::len((end - start).hypot()))
                         .show(ui.ctx(), pointer);
                 }
             }
@@ -6146,15 +6164,15 @@ impl StencilApp {
                         // `+ 0.0` turns -0 into 0 so a level line reads 0°, not -0°.
                         let angle = (-run.y).atan2(run.x).to_degrees() + 0.0;
                         Readout::new("shape-readout")
-                            .row("L", format!("{:.1} mm", run.hypot()))
+                            .row("L", panels::len(run.hypot()))
                             .row("∠", format!("{angle:.0}°"))
                             .show(ui.ctx(), pointer);
                     } else {
                         let drag = drag_box(start, world_pt, mods);
                         let (w, h) = (drag.width(), drag.height());
                         Readout::new("shape-readout")
-                            .row("W", format!("{w:.1} mm"))
-                            .row("H", format!("{h:.1} mm"))
+                            .row("W", panels::len(w))
+                            .row("H", panels::len(h))
                             .show(ui.ctx(), pointer);
                     }
                 }
@@ -6360,10 +6378,10 @@ impl StencilApp {
                     && let Some(pointer) = response.interact_pointer_pos()
                 {
                     Readout::new("move-readout")
-                        .row("X", format!("{:.1} mm", b.x0))
-                        .row("Y", format!("{:.1} mm", b.y0))
-                        .row("W", format!("{:.1} mm", b.width()))
-                        .row("H", format!("{:.1} mm", b.height()))
+                        .row("X", panels::len(b.x0))
+                        .row("Y", panels::len(b.y0))
+                        .row("W", panels::len(b.width()))
+                        .row("H", panels::len(b.height()))
                         .show(ui.ctx(), pointer);
                 }
             }
@@ -6457,11 +6475,15 @@ impl StencilApp {
     }
 
     pub fn status_bar(&mut self, parent: &mut egui::Ui) {
+        let unit = stencilcraft_ui_egui::length_unit();
         let info = format!(
-            "{:.1} × {:.1} mm | kerf {:.3} mm | {} shapes",
-            self.engine.doc.board.width_mm,
-            self.engine.doc.board.height_mm,
-            self.engine.doc.kerf.width_mm,
+            "{:.*} × {:.*} {} | kerf {} | {} shapes",
+            unit.decimals(),
+            unit.from_mm(self.engine.doc.board.width_mm),
+            unit.decimals(),
+            unit.from_mm(self.engine.doc.board.height_mm),
+            unit.symbol(),
+            unit.format(self.engine.doc.kerf.width_mm, 2),
             self.engine.doc.shape_count()
         );
         let status_msg = self.status.clone();

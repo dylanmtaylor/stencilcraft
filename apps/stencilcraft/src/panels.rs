@@ -342,18 +342,69 @@ pub(crate) fn number(
     unit: &str,
     numbers: &LocaleNumbers,
 ) -> bool {
-    let edit = NumberField::new(id, label, *value, numbers)
+    let (shown, range, unit, per) = in_display(*value, range, unit);
+    let edit = NumberField::new(id, label, shown, numbers)
         .range(range)
-        .decimals(0..=2)
+        .decimals(0..=3)
         .unit(Unit::new(unit))
         .show(ui);
     match edit.event {
         Some(EditEvent::Commit { value: v, .. } | EditEvent::Set { value: v, .. }) => {
-            *value = v;
+            *value = v / per;
             true
         }
         _ => false,
     }
+}
+
+/// A field whose unit is `{n} mm` shows its value, range and unit in the display unit
+/// (Preferences › Units); divide what comes back by the returned factor for millimetres.
+/// Any other unit passes through with a factor of 1.
+pub(crate) fn in_display(
+    value: f64,
+    range: std::ops::RangeInclusive<f64>,
+    unit: &str,
+) -> (f64, std::ops::RangeInclusive<f64>, &str, f64) {
+    if unit != "{n} mm" {
+        return (value, range, unit, 1.0);
+    }
+    let u = stencilcraft_ui_egui::length_unit();
+    let per = u.per_mm();
+    (
+        value * per,
+        (range.start() * per)..=(range.end() * per),
+        u.template(),
+        per,
+    )
+}
+
+/// A drag value for a length in millimetres, shown in the display unit; `speed_mm` is the
+/// change per pixel dragged, in millimetres.
+pub(crate) fn length_drag(
+    ui: &mut egui::Ui,
+    mm: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    speed_mm: f64,
+) -> egui::Response {
+    let unit = stencilcraft_ui_egui::length_unit();
+    let per = unit.per_mm();
+    let mut shown = *mm * per;
+    let response = ui.add(
+        egui::DragValue::new(&mut shown)
+            .range((range.start() * per)..=(range.end() * per))
+            .speed(speed_mm * per)
+            .max_decimals(unit.decimals().saturating_add(1))
+            .suffix(format!(" {}", unit.symbol())),
+    );
+    if response.changed() && shown.is_finite() && per > 0.0 {
+        *mm = (shown / per).clamp(*range.start(), *range.end());
+    }
+    response
+}
+
+/// A length in millimetres written in the display unit, e.g. `12.3 mm` or `0.484 in`.
+pub(crate) fn len(mm: f64) -> String {
+    stencilcraft_ui_egui::length_unit().format(mm, 0)
 }
 
 pub(crate) fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
@@ -1377,5 +1428,16 @@ mod tests {
             draft.command(vec![1]),
             Command::ShapesOffset { distance_mm, .. } if distance_mm == 2.0
         ));
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    #[test]
+    fn only_millimetre_fields_convert() {
+        // The process-wide unit is millimetres unless a test sets it; this one reads it only.
+        let (value, range, unit, per) = super::in_display(5.0, 0.0..=10.0, "{n}");
+        assert_eq!((value, unit, per), (5.0, "{n}", 1.0));
+        assert_eq!(range, 0.0..=10.0);
     }
 }

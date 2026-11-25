@@ -104,6 +104,15 @@ impl StencilApp {
                 let _ = Checkbox::bool(label, value).show(ui);
             }
             ui.separator();
+            ui.label("Units");
+            let mut unit = prefs.length_unit;
+            let mut units = Segmented::new("pref-units", "Units", &mut unit);
+            for u in stencilcraft_ui_egui::LengthUnit::ALL {
+                units = units.item(u, u.symbol());
+            }
+            let _ = units.show(ui);
+            prefs.length_unit = unit;
+            ui.separator();
             ui.label("Tools");
             let _ = Checkbox::bool(
                 "Return to the Select tool after drawing a shape",
@@ -112,7 +121,8 @@ impl StencilApp {
             .show(ui);
             hint(
                 ui,
-                "Units are millimetres. Designs are snapshotted every 30 s while unsaved.",
+                "Designs are always stored in millimetres; Units sets what you read and type. \
+                 Designs are snapshotted every 30 s while unsaved.",
             );
         });
         if theme != self.theme {

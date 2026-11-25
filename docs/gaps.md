@@ -129,8 +129,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     Resizing the selection box and dragging nodes snap, and holding Ctrl (Cmd) suspends
     snapping; drawing shows a live W/H (or length and angle) callout, and a move drag is one
     undo step. Missing: snapping for the pen (craft-draw's PenDraft has no snap hook); isometric grid and Smart Snap only
-    within media (spacing, divisions, tolerance and the toggles are in Page Setup); display
-    units other than mm.
+    within media (spacing, divisions, tolerance and the toggles are in Page Setup).
+    Preferences › Units shows and takes lengths in mm, cm or inches.
 19. **Text**: as in SS 5.0.556, the Text tool types on the canvas: click the page (the
     first baseline starts there) and type; letters appear as you type, one undo step per
     key; arrows, Home/End, Backspace/Delete, Enter and paste edit; a click inside moves

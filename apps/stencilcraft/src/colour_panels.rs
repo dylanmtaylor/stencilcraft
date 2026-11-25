@@ -139,19 +139,9 @@ impl StencilApp {
                 let (mut cut, mut gap) = self.perforate;
                 ui.horizontal(|ui| {
                     ui.label("Perforate: cut");
-                    ui.add(
-                        egui::DragValue::new(&mut cut)
-                            .range(0.2..=100.0)
-                            .speed(0.1)
-                            .suffix(" mm"),
-                    );
+                    crate::panels::length_drag(ui, &mut cut, 0.2..=100.0, 0.1);
                     ui.label("gap");
-                    ui.add(
-                        egui::DragValue::new(&mut gap)
-                            .range(0.2..=100.0)
-                            .speed(0.1)
-                            .suffix(" mm"),
-                    );
+                    crate::panels::length_drag(ui, &mut gap, 0.2..=100.0, 0.1);
                 });
                 self.perforate = (cut, gap);
                 if button(ui, "Perforate Lines", any) {

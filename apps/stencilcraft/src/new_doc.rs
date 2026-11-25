@@ -835,14 +835,17 @@ impl NewDocState {
         let _ = model_select.show(ui);
 
         caption(ui, "Kerf");
-        let edit = NumberField::new("new-document-kerf", "Kerf", choice.kerf_mm, &numbers)
-            .range(0.0..=MAX_KERF_MM)
-            .unit(Unit::new("{n} mm"))
+        let (shown, range, unit, per) =
+            crate::panels::in_display(choice.kerf_mm, 0.0..=MAX_KERF_MM, "{n} mm");
+        let edit = NumberField::new("new-document-kerf", "Kerf", shown, &numbers)
+            .range(range)
+            .decimals(0..=4)
+            .unit(Unit::new(unit))
             .show(ui);
         if let Some(value) = edit.event.and_then(|e| e.value().copied())
             && value.is_finite()
         {
-            choice.kerf_mm = value.clamp(0.0, MAX_KERF_MM);
+            choice.kerf_mm = (value / per).clamp(0.0, MAX_KERF_MM);
         }
 
         if !choice.is_valid() {

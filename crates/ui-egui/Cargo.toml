@@ -12,6 +12,7 @@ craft-theme = { workspace = true }
 craft-ui = { workspace = true }
 egui = { workspace = true }
 kurbo = { workspace = true }
+serde = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }

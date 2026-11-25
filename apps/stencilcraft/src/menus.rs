@@ -386,8 +386,14 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
             ],
         ),
         SEP,
-        todo_key("Group", CMD, Key::G),
-        todo_key("Ungroup", cmd_shift(), Key::G),
+        item("Group", A::Group)
+            .shortcut(kbd(CMD, Key::G))
+            .enabled(many)
+            .into(),
+        item("Ungroup", A::Ungroup)
+            .shortcut(kbd(cmd_shift(), Key::G))
+            .enabled(any)
+            .into(),
         todo("Attach / Detach"),
         edit_key("Lock", E::Lock, any, CMD, Key::Num2),
         edit_key("Unlock All", E::UnlockAll, true, cmd_alt(), Key::Num2),

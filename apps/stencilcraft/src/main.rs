@@ -3295,7 +3295,7 @@ impl StencilApp {
     }
 
     pub fn new_document_dialog(&mut self, parent: &mut egui::Ui) {
-        let created = self.new_doc.show(parent.ctx(), &self.prefs.recent_new);
+        let created = self.new_doc.show(parent, &self.prefs.recent_new);
         if std::mem::take(&mut self.new_doc.save_requested) {
             let preset = self.new_doc.choice.recent();
             self.prefs.saved_new.retain(|p| p.name != preset.name);

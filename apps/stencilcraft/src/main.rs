@@ -4629,6 +4629,8 @@ impl StencilApp {
                         );
                 let out = List::new("Layers")
                     .id_salt((LAYER_ROW, "list"))
+                    // Grows to its rows inside the scrolling panel, as before the port.
+                    .natural_height(true)
                     .selection(Bind::bound(&mut layer_selection))
                     .columns(toggle_columns())
                     .show_items(ui, &layer_source, &mut |key, icx| {
@@ -4694,6 +4696,8 @@ impl StencilApp {
                         });
                         let out = List::new("Objects")
                             .id_salt("layers-objects-list")
+                            // Grows to its rows inside the scrolling panel, as before the port.
+                            .natural_height(true)
                             .selection(Bind::bound(&mut shape_selection))
                             .columns(toggle_columns())
                             .show_items(ui, &source, &mut |key, icx| {
@@ -5012,6 +5016,8 @@ impl StencilApp {
                 let source = craft_behavior::keyed(&shape_rows, |row: &(u64, String)| row.0);
                 let _ = List::new("Objects")
                     .id_salt("inspector-objects-list")
+                    // Grows to its rows inside the scrolling panel, as before the port.
+                    .natural_height(true)
                     .selection(Bind::bound(&mut selection))
                     .show_items(ui, &source, &mut |key, _| {
                         let label = shape_rows
@@ -9174,6 +9180,30 @@ mod tests {
             node_center(&out, "Speed"),
         );
         assert_ne!(app.send.speed_override, 5);
+    }
+
+    #[test]
+    fn inspector_and_layers_panels_draw_with_lists_in_a_scrolling_panel() {
+        // Regression: at startup the Inspector's Objects list sat in the scrolling panel without
+        // natural height or capped rows, and the framework's collection check panicked.
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::framework::install_headless(&ctx).unwrap();
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 30.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            });
+        }
+        app.set_selection([1]);
+        for _ in 0..3 {
+            frame(&ctx, &mut app, vec![], StencilApp::inspector_panel);
+            frame(&ctx, &mut app, vec![], StencilApp::inspector);
+            frame(&ctx, &mut app, vec![], StencilApp::layers_panel);
+        }
     }
 
     #[test]

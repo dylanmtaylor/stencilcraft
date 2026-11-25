@@ -68,6 +68,7 @@ mod object_menu;
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
 mod page_setup;
 mod panels;
+mod pixscan;
 mod send_modes;
 mod text_tool;
 mod trace_panel;
@@ -817,6 +818,7 @@ pub enum WorkspacePanel {
     Distort,
     GraphicStyles,
     Actions,
+    PixScan,
 }
 
 struct WorkspaceContent<'a> {
@@ -851,6 +853,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Distort => self.app.distort_panel(ui),
             WorkspacePanel::GraphicStyles => self.app.graphic_styles_panel(ui),
             WorkspacePanel::Actions => self.app.actions_panel(ui),
+            WorkspacePanel::PixScan => self.app.pixscan_panel(ui),
         }
     }
 
@@ -881,6 +884,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Distort => "Distort",
             WorkspacePanel::GraphicStyles => "Graphic Styles",
             WorkspacePanel::Actions => "Actions",
+            WorkspacePanel::PixScan => "PixScan",
         }
         .to_owned()
     }
@@ -979,6 +983,8 @@ pub struct StencilApp {
     pub action_name_draft: String,
     /// Free Distort / Lattice in progress.
     pub distort: Option<distort_tool::DistortDraft>,
+    /// PixScan: corners picked on a photo of the page.
+    pub pixscan: pixscan::PixScanState,
     pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
@@ -1159,6 +1165,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::Distort,
     WorkspacePanel::GraphicStyles,
     WorkspacePanel::Actions,
+    WorkspacePanel::PixScan,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -1281,6 +1288,7 @@ impl StencilApp {
             style_name_draft: String::new(),
             action_name_draft: String::new(),
             distort: None,
+            pixscan: pixscan::PixScanState::default(),
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -5396,6 +5404,7 @@ impl StencilApp {
         overlay_claimed |= self.trace_canvas(ui, &response, &painter);
         overlay_claimed |= self.text_canvas(ui, &response, &painter);
         overlay_claimed |= self.distort_canvas(ui, &response, &painter);
+        overlay_claimed |= self.pixscan_canvas(ui, &response, &painter);
         self.paint_effect_preview(&painter);
 
         // Interactive BezierOverlay for node editing

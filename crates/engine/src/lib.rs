@@ -303,6 +303,16 @@ pub enum Command {
     },
 
     /// Make the image's border-connected background transparent (`tolerance` 0–100 %).
+    /// PixScan by hand: straighten the photo of a page whose corners are at `corners` (image
+    /// pixels: top-left, top-right, bottom-right, bottom-left) into a `width_mm` × `height_mm`
+    /// image placed at the page's origin, so the design lines up with the real page.
+    #[serde(rename = "image.rectify")]
+    ImageRectify {
+        id: u64,
+        corners: [[f64; 2]; 4],
+        width_mm: f64,
+        height_mm: f64,
+    },
     #[serde(rename = "image.adjust")]
     ImageAdjust {
         id: u64,
@@ -827,6 +837,7 @@ impl Engine {
                 | Command::ImageTrace { .. }
                 | Command::ImageRemoveBackground { .. }
                 | Command::ImageAdjust { .. }
+                | Command::ImageRectify { .. }
                 | Command::PathBreak { .. }
                 | Command::PathJoin { .. }
                 | Command::PathClose { .. }
@@ -1532,6 +1543,51 @@ impl Engine {
                 area,
                 compound,
             } => self.trace_image(id, &options, style, area, compound),
+            Command::ImageRectify {
+                id,
+                corners,
+                width_mm,
+                height_mm,
+            } => {
+                const NAME: &str = "image.rectify";
+                if !(width_mm.is_finite()
+                    && height_mm.is_finite()
+                    && width_mm > 0.0
+                    && height_mm > 0.0
+                    && width_mm <= 10_000.0
+                    && height_mm <= 10_000.0)
+                {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the page size must be finite and positive"
+                    )));
+                }
+                let image = self.doc.get_image(id).ok_or_else(|| no_image(NAME, id))?;
+                // 300 dpi, scaled down to stay within the pixel limit.
+                let per_mm = 300.0 / 25.4;
+                let budget = (16_000_000.0 / (width_mm * height_mm * per_mm * per_mm))
+                    .sqrt()
+                    .min(1.0);
+                let (w, h) = (
+                    (width_mm * per_mm * budget).round().max(1.0),
+                    (height_mm * per_mm * budget).round().max(1.0),
+                );
+                // Positive and bounded by the 16 MP budget, so the casts are exact.
+                let (w, h) = (w as u32, h as u32);
+                let straight = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| stencilcraft_raster::rectify(&pixels, corners, w, h))
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid(NAME))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = stencilcraft_doc::RasterImage {
+                        x_mm: 0.0,
+                        y_mm: 0.0,
+                        width_mm,
+                        height_mm,
+                        ..straight
+                    };
+                }
+                Ok(Effect::ImageChanged { id })
+            }
             Command::ImageAdjust { id, adjust } => {
                 let image = self
                     .doc
@@ -4765,6 +4821,47 @@ mod tests {
                     ids: vec![square],
                     width_mm: f64::NAN,
                     direction: cut_tools::BridgeDirection::Both,
+                })
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn rectify_fits_a_photographed_page_to_the_page() {
+        let pixels = craft_raster_codecs::common::Pixels::from_pixel(
+            50,
+            40,
+            craft_raster_codecs::common::Pixel([200, 200, 200, 255]),
+        );
+        let placed = stencilcraft_raster::place(&pixels, "photo", 100.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        engine
+            .run(Command::ImageRectify {
+                id,
+                corners: [[5.0, 4.0], [45.0, 6.0], [44.0, 36.0], [6.0, 35.0]],
+                width_mm: 100.0,
+                height_mm: 80.0,
+            })
+            .unwrap();
+        let image = engine.doc.get_image(id).unwrap();
+        assert_eq!(
+            (image.x_mm, image.y_mm, image.width_mm, image.height_mm),
+            (0.0, 0.0, 100.0, 80.0)
+        );
+        assert_eq!(image.width_px, 1181, "300 dpi");
+        assert!(engine.undo());
+        assert_eq!(engine.doc.get_image(id).unwrap().width_px, 50);
+        assert!(
+            engine
+                .run(Command::ImageRectify {
+                    id,
+                    corners: [[0.0, 0.0]; 4],
+                    width_mm: 100.0,
+                    height_mm: 80.0,
                 })
                 .is_err()
         );

@@ -766,7 +766,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         eff("Pop up", M::PopupCard),
         eff("Sketch", M::SketchFill),
         eff("Specialty", M::Rhinestone),
-        item("Print & Cut", A::TogglePrintCutMarks).into(),
+        item("Print & Cut", A::ShowPanel(P::PrintCut)).into(),
         item("Point Editing", A::ShowPanel(P::Points)).into(),
         item("Layers", A::ShowPanel(crate::WorkspacePanel::Layers)).into(),
         SEP,

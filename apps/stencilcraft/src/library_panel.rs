@@ -177,7 +177,7 @@ impl StencilApp {
     /// 100 %); otherwise the page as a PDF.
     pub fn print_via_pdf(&mut self) {
         let (bytes, name) = if self.prefs.print_cut_marks {
-            match stencilcraft_svg::export_print_and_cut(&self.engine.doc) {
+            match self.print_sheet_svg() {
                 Ok(svg) => (svg.into_bytes(), "stencilcraft-print-and-cut.svg"),
                 Err(e) => {
                     self.status = format!("print: {e}");

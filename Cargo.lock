@@ -5887,6 +5887,7 @@ dependencies = [
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-kerf",
+ "stencilcraft-layout",
  "stencilcraft-testkit",
 ]
 

@@ -61,6 +61,26 @@ pub fn theme_base(theme: ColorTheme) -> craft_ui::theme::Base {
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
+/// Silhouette's default registration marks: 0.787 in long, 0.020 in thick, 0.625 in in from
+/// the page edge.
+pub const DEFAULT_MARK_GEOMETRY: [f64; 3] = [0.787 * 25.4, 0.020 * 25.4, 0.625 * 25.4];
+
+/// Registration mark rectangles `[x, y, width, height]` on a `width` × `height` page for
+/// `geometry` (length, thickness, inset): Silhouette's square at the top left and brackets at
+/// the top right and bottom left.
+pub fn mark_rects(width: f64, height: f64, geometry: [f64; 3]) -> Vec<[f64; 4]> {
+    let [length, thickness, inset] = geometry;
+    let page = stencilcraft_layout::PageOptions {
+        width_mm: width,
+        height_mm: height,
+        marks: Some(stencilcraft_layout::MarkStyle::Silhouette),
+        mark_length_mm: length,
+        mark_thickness_mm: thickness,
+        mark_inset_mm: inset,
+    };
+    stencilcraft_layout::registration_marks(&page, stencilcraft_layout::MarkStyle::Silhouette)
+}
+
 /// The unit lengths are shown in (Preferences › Units). The document is always millimetres;
 /// only what the person reads and types changes.
 #[derive(
@@ -159,11 +179,13 @@ pub fn set_length_unit(unit: LengthUnit) {
 }
 
 /// Semantic canvas colours and overlay flags for a specific workspace theme.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasOptions {
     pub kerf_preview: bool,
     pub show_grid: bool,
     pub print_cut_marks: bool,
+    /// Registration mark length, thickness and inset from the page edge, millimetres.
+    pub mark_geometry: [f64; 3],
     pub show_selection_bounds: bool,
     pub theme: ColorTheme,
     /// View › Outline View: every line a hairline, whatever its weight.
@@ -182,6 +204,7 @@ impl Default for CanvasOptions {
             kerf_preview: false,
             show_grid: true,
             print_cut_marks: false,
+            mark_geometry: DEFAULT_MARK_GEOMETRY,
             show_selection_bounds: true,
             theme: ColorTheme::Dark,
             outline_view: false,
@@ -754,7 +777,7 @@ pub fn paint_document(
     }
 
     if options.print_cut_marks {
-        paint_registration_marks(painter, view, doc, palette);
+        paint_registration_marks(painter, view, doc, palette, options.mark_geometry);
     }
 
     if options.cut_border
@@ -959,58 +982,22 @@ fn paint_registration_marks(
     view: &View,
     doc: &stencilcraft_doc::Document,
     palette: Palette,
+    geometry: [f64; 3],
 ) {
-    let mark_mm = 6.0_f64;
-    let inset_mm = 4.0_f64;
-    let w = doc.board.width_mm;
-    let h = doc.board.height_mm;
-    if w < 20.0 || h < 20.0 {
-        return;
-    }
     let mark_color = match palette.board {
         c if c.r() > 140 => egui::Color32::from_gray(24),
         _ => egui::Color32::from_gray(230),
     };
-    let tl_min = view.world_to_screen(stencilcraft_geom::Point::new(inset_mm, inset_mm));
-    let tl_max = view.world_to_screen(stencilcraft_geom::Point::new(
-        inset_mm + mark_mm,
-        inset_mm + mark_mm,
-    ));
-    painter.rect_filled(egui::Rect::from_two_pos(tl_min, tl_max), 0.5, mark_color);
-
-    let tr_h = egui::Rect::from_two_pos(
-        view.world_to_screen(stencilcraft_geom::Point::new(
-            w - inset_mm - mark_mm,
-            inset_mm,
-        )),
-        view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm, inset_mm + 1.5)),
-    );
-    let tr_v = egui::Rect::from_two_pos(
-        view.world_to_screen(stencilcraft_geom::Point::new(w - inset_mm - 1.5, inset_mm)),
-        view.world_to_screen(stencilcraft_geom::Point::new(
-            w - inset_mm,
-            inset_mm + mark_mm,
-        )),
-    );
-    painter.rect_filled(tr_h, 0.0, mark_color);
-    painter.rect_filled(tr_v, 0.0, mark_color);
-
-    let bl_h = egui::Rect::from_two_pos(
-        view.world_to_screen(stencilcraft_geom::Point::new(inset_mm, h - inset_mm - 1.5)),
-        view.world_to_screen(stencilcraft_geom::Point::new(
-            inset_mm + mark_mm,
-            h - inset_mm,
-        )),
-    );
-    let bl_v = egui::Rect::from_two_pos(
-        view.world_to_screen(stencilcraft_geom::Point::new(
-            inset_mm,
-            h - inset_mm - mark_mm,
-        )),
-        view.world_to_screen(stencilcraft_geom::Point::new(inset_mm + 1.5, h - inset_mm)),
-    );
-    painter.rect_filled(bl_h, 0.0, mark_color);
-    painter.rect_filled(bl_v, 0.0, mark_color);
+    for [x, y, w, h] in mark_rects(doc.board.width_mm, doc.board.height_mm, geometry) {
+        if ![x, y, w, h].iter().all(|v| v.is_finite()) {
+            continue;
+        }
+        let rect = egui::Rect::from_two_pos(
+            view.world_to_screen(stencilcraft_geom::Point::new(x, y)),
+            view.world_to_screen(stencilcraft_geom::Point::new(x + w, y + h)),
+        );
+        painter.rect_filled(rect, 0.0, mark_color);
+    }
 }
 
 /// Convert a [`kurbo::BezPath`] into editable [`craft_draw::ui::pen::EditSubpath`]s for

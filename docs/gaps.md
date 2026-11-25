@@ -182,9 +182,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     96 dpi.
 25. **Print & Cut, beyond item 3**: File › Print opens the Print & Cut sheet (marks,
     fills and line colours, at 100 %) or a PDF of the page in the system viewer, and View ›
-    Show Print Border draws a quarter-inch printable area. Missing: printing placed
-    images on the sheet, mark size and position options, bleed, gradients, print size
-    checks, reading the marks with the cutter's sensor, and calibration. Scan-to-cut
+    Show Print Border draws a quarter-inch printable area. Panels › Print & Cut sets the
+    marks' length, thickness and inset, bleed, and warns about shapes over the marks.
+    Missing: printing placed images on the sheet, other mark styles, gradients, reading the
+    marks with the cutter's sensor, and calibration. Scan-to-cut
     (PixScan) is low priority.
 26. **Formats**: DXF, PDF and EPS/AI vector import (File › Import), PDF/PNG/JPEG export
     (File › Export) and placed raster images are available with the fidelity limits in

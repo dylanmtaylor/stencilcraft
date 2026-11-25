@@ -847,6 +847,11 @@ mod tests {
             "Make Guides",
             "Release Guides",
             "Clear Guides",
+            "Paste in Back",
+            "Create Outlines",
+            "Ungroup to Letters",
+            "Next Object Above",
+            "Next Object Below",
         ] {
             let found: Vec<_> = items.iter().filter(|(l, ..)| l == wired).collect();
             assert!(!found.is_empty(), "missing {wired}");
@@ -856,7 +861,7 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Paste in Back", "Detach Lines", "Outline View"] {
+        for planned in ["Detach Lines", "Outline View"] {
             assert!(
                 items
                     .iter()

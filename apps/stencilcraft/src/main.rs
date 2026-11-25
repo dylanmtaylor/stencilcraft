@@ -8,8 +8,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use craft_draw::ui::pen::{
-    BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
-    PenDraft, PenNames,
+    BezierHit, BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown,
+    PathEdit, PathSelection, PenDraft, PenNames,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
@@ -1413,6 +1413,61 @@ impl StencilApp {
                 self.status = "deleted".to_string();
             }
             Err(error) => self.status = error.to_string(),
+        }
+    }
+
+    /// Remove points from a shape, their neighbours joining with a connecting line (Silhouette's
+    /// Delete Point); a shape left with no points is removed.
+    pub fn remove_path_points(&mut self, id: u64, knots: &[craft_draw::ui::pen::KnotRef]) {
+        let Some(shape) = self.engine.doc.get_shape(id) else {
+            return;
+        };
+        let mut subs = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
+        stencilcraft_ui_egui::delete_path_knots(&mut subs, knots);
+        let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&subs);
+        if path.elements().is_empty() {
+            self.run_command(Command::ShapeRemove { id });
+            self.path_selection = PathSelection::default();
+        } else {
+            self.run_command(Command::ShapeSetPath { id, path });
+            self.path_selection.anchors.clear();
+        }
+    }
+
+    /// The right-click menu in point editing (Silhouette's Delete Point / Break Path and the
+    /// Point Editing panel's actions), acting on the point or line under the click.
+    fn point_context_menu(&mut self, ui: &mut egui::Ui) {
+        let has_point = !self.path_selection.anchors.is_empty();
+        let has_line = has_point || self.path_selection.segment.is_some();
+        let items: [(&str, bool, panels::EditAction); 6] = [
+            ("Delete Point", has_point, panels::EditAction::DeleteNodes),
+            ("Break Path", has_point, panels::EditAction::Break),
+            (
+                "Corner",
+                has_point,
+                panels::EditAction::NodeType(stencilcraft_engine::NodeType::Corner),
+            ),
+            (
+                "Smooth",
+                has_point,
+                panels::EditAction::NodeType(stencilcraft_engine::NodeType::Smooth),
+            ),
+            (
+                "Make Flat",
+                has_line,
+                panels::EditAction::Segment(stencilcraft_engine::SegmentType::Line),
+            ),
+            (
+                "Make Curve",
+                has_line,
+                panels::EditAction::Segment(stencilcraft_engine::SegmentType::Curve),
+            ),
+        ];
+        for (label, enabled, action) in items {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                self.handle_edit_action(action);
+                ui.close();
+            }
         }
     }
 
@@ -4117,6 +4172,8 @@ impl StencilApp {
                 })
                 .collect();
 
+            // Within 8 px an open end is "on" another (as for shape hit tests).
+            let join_reach = 8.0 / f64::from(view.zoom.max(f32::EPSILON));
             let b_resp = BezierOverlay::new(
                 "stencil-bezier-overlay",
                 &edit_paths,
@@ -4133,6 +4190,23 @@ impl StencilApp {
             )
             .tool(b_tool)
             .handles(self.handles_shown)
+            // Silhouette: an open end dragged onto another open end snaps to it (and joins on
+            // release, below).
+            .snap(|hit, at, _mods| {
+                if let BezierHit::Anchor { path, knot } = hit
+                    && let Some(edit) = edit_paths.iter().find(|e| e.key == *path)
+                    && stencilcraft_ui_egui::open_path_ends(&edit.subpaths).contains(knot)
+                    && let Some(end) =
+                        stencilcraft_ui_egui::open_end_near(&edit.subpaths, *knot, at, join_reach)
+                    && let Some(target) = edit
+                        .subpaths
+                        .get(end.subpath)
+                        .and_then(|s| s.knots.get(end.knot))
+                {
+                    return target.anchor;
+                }
+                at
+            })
             .show(ui, &response, &canvas_view);
 
             overlay_claimed = b_resp.claimed;
@@ -4178,7 +4252,22 @@ impl StencilApp {
                             });
                         self.bezier_live_path = None;
                         if let Some(base) = base {
-                            let edited = stencilcraft_ui_egui::apply_path_edit(&base, &value);
+                            let mut edited = stencilcraft_ui_egui::apply_path_edit(&base, &value);
+                            // An open end dropped on another open end rejoins the path.
+                            if let PathEdit::MoveAnchors { anchors, .. } = &value
+                                && let [moved] = anchors.as_slice()
+                                && let Some(at) = edited
+                                    .get(moved.subpath)
+                                    .and_then(|s| s.knots.get(moved.knot))
+                                    .map(|k| k.anchor)
+                                && let Some(target) = stencilcraft_ui_egui::open_end_near(
+                                    &edited, *moved, at, join_reach,
+                                )
+                                && stencilcraft_ui_egui::join_path_ends(&mut edited, *moved, target)
+                            {
+                                self.path_selection = PathSelection::default();
+                                self.status = "joined path ends".to_string();
+                            }
                             let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&edited);
                             if !path.elements().is_empty() {
                                 self.run_command(Command::ShapeSetPath { id: pid, path });
@@ -4206,19 +4295,62 @@ impl StencilApp {
                     };
                 }
             }
-            if let Some((pid, knots)) = b_resp.delete
-                && let Some(s) = self.engine.doc.get_shape(pid)
+            // Silhouette: in point editing a click on a line where no point is adds one there.
+            if self.active_tool == ActiveTool::DirectSelect
+                && response.clicked()
+                && !ui.input(|input| input.modifiers.shift)
+                && let Some(pointer) = response.interact_pointer_pos()
+                && let Some(BezierHit::Segment {
+                    path: pid,
+                    segment,
+                    t,
+                }) = BezierOverlay::hit_test(
+                    &edit_paths,
+                    &self.path_selection,
+                    self.handles_shown,
+                    &canvas_view,
+                    pointer,
+                    6.0,
+                )
+                && let Some(shape) = self.engine.doc.get_shape(pid)
             {
-                let mut subs = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&s.path);
-                stencilcraft_ui_egui::delete_path_knots(&mut subs, &knots);
-                let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&subs);
-                if !path.elements().is_empty() {
+                let mut subs = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
+                if let Some(new_knot) =
+                    stencilcraft_ui_egui::insert_path_knot(&mut subs, segment, t)
+                {
+                    let path = stencilcraft_ui_egui::edit_subpaths_to_bezpath(&subs);
                     self.run_command(Command::ShapeSetPath { id: pid, path });
-                    self.path_selection.anchors.clear();
-                } else {
-                    self.run_command(Command::ShapeRemove { id: pid });
-                    self.path_selection = PathSelection::default();
+                    self.path_selection = PathSelection {
+                        path: Some(pid),
+                        anchors: vec![new_knot],
+                        segment: None,
+                    };
+                    self.status = "added a point".to_string();
                 }
+            }
+            // A right-click on a point or line selects it for the point menu below.
+            if let Some(hit) = &b_resp.context {
+                self.path_selection = match *hit {
+                    BezierHit::Anchor { path, knot } => PathSelection {
+                        path: Some(path),
+                        anchors: vec![knot],
+                        segment: None,
+                    },
+                    BezierHit::Segment { path, segment, .. } => PathSelection {
+                        path: Some(path),
+                        anchors: Vec::new(),
+                        segment: Some(segment),
+                    },
+                    BezierHit::Handle { path, knot, .. } => PathSelection {
+                        path: Some(path),
+                        anchors: vec![knot],
+                        segment: None,
+                    },
+                };
+            }
+            response.context_menu(|ui| self.point_context_menu(ui));
+            if let Some((pid, knots)) = b_resp.delete {
+                self.remove_path_points(pid, &knots);
             }
         }
 
@@ -6068,6 +6200,38 @@ mod tests {
         dot.push(Point::new(1.0, 1.0), 0.1);
         app.commit_freehand(&dot, false, 0.1);
         assert_eq!(app.engine.doc.shape_count(), 2);
+    }
+
+    #[test]
+    fn delete_point_joins_neighbours_without_moving_them() {
+        use stencilcraft_geom::Shape;
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 10.0,
+        });
+        app.set_selection([1]);
+        app.active_tool = ActiveTool::DirectSelect;
+        let before = stencilcraft_ui_egui::bezpath_to_edit_subpaths(
+            &app.engine.doc.get_shape(1).expect("rect").path,
+        );
+        app.path_selection = PathSelection {
+            path: Some(1),
+            anchors: vec![craft_draw::ui::pen::KnotRef::new(0, 0)],
+            segment: None,
+        };
+        app.handle_edit_action(panels::EditAction::DeleteNodes);
+        let shape = app.engine.doc.get_shape(1).expect("triangle left");
+        let after = stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path);
+        assert_eq!(after[0].knots.len(), before[0].knots.len() - 1);
+        assert_eq!(
+            &after[0].knots[..],
+            &before[0].knots[1..],
+            "the rest are untouched"
+        );
+        assert!(shape.path.bounding_box().area() > 0.0);
     }
 
     #[test]

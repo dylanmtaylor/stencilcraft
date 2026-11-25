@@ -126,9 +126,13 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
             vec![
                 item("SVG…", A::ImportSvg).into(),
                 item("Image…", A::ImportImage).into(),
-                todo("DXF…"),
-                todo("PDF…"),
-                todo("AI / EPS…"),
+                item("DXF…", A::ImportVector(crate::file_menu::ImportKind::Dxf)).into(),
+                item("PDF…", A::ImportVector(crate::file_menu::ImportKind::Pdf)).into(),
+                item(
+                    "AI / EPS…",
+                    A::ImportVector(crate::file_menu::ImportKind::AiEps),
+                )
+                .into(),
             ],
         ),
         SEP,
@@ -136,7 +140,9 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Save As…", A::SaveAsDoc)
             .shortcut(kbd(cmd_shift(), Key::S))
             .into(),
-        todo("Save Selection As…"),
+        item("Save Selection As…", A::SaveSelectionAs)
+            .enabled(!app.selected_shapes.is_empty())
+            .into(),
         sub(
             "Export",
             vec![
@@ -146,9 +152,9 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("G-code (Grbl)…", A::ExportGcode).into(),
                 item("Tiled SVG Sheets…", A::ExportTiledSvg).into(),
                 SEP,
-                todo("PDF…"),
-                todo("PNG…"),
-                todo("JPEG…"),
+                item("PDF…", A::Export(crate::file_menu::ExportKind::Pdf)).into(),
+                item("PNG…", A::Export(crate::file_menu::ExportKind::Png)).into(),
+                item("JPEG…", A::Export(crate::file_menu::ExportKind::Jpeg)).into(),
             ],
         ),
         SEP,
@@ -156,13 +162,15 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
         todo("Scan…"),
         SEP,
         todo_key("Print…", CMD, Key::P),
-        todo("Print Page Setup…"),
+        item("Print Page Setup…", A::ShowPanel(P::PageSetup)).into(),
         item("Send to Machine…", A::ShowSend)
             .shortcut(kbd(CMD, Key::L))
             .into(),
-        todo("Document Setup…"),
+        item("Document Setup…", A::ShowPanel(P::PageSetup)).into(),
         SEP,
-        todo_key("Close Tab", CMD, Key::W),
+        item("Close Tab", A::CloseDoc)
+            .shortcut(kbd(CMD, Key::W))
+            .into(),
         item("Quit", A::Quit).shortcut(kbd(CMD, Key::Q)).into(),
     ]
 }

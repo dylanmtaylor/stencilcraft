@@ -56,6 +56,7 @@ mod menus;
 mod new_doc;
 
 /// Silhouette-style Transform, Replicate, Offset, Modify and Point Editing panels.
+mod page_setup;
 mod panels;
 mod text_tool;
 mod trace_panel;
@@ -75,6 +76,14 @@ pub struct UserPrefs {
     /// View › Smart Guides: draw the alignment lines snapping found while dragging.
     pub smart_guides: bool,
     pub print_cut_marks: bool,
+    /// View › Show Cut Border (on, as in Silhouette).
+    pub show_cut_border: bool,
+    /// View › Show Print Border.
+    pub show_print_border: bool,
+    /// View › Show Dimensions: the selection's width and height beside it.
+    pub show_dimensions: bool,
+    /// View › Outline View: hairlines only.
+    pub outline_view: bool,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -91,6 +100,10 @@ impl Default for UserPrefs {
             show_guides: true,
             smart_guides: true,
             print_cut_marks: false,
+            show_cut_border: true,
+            show_print_border: false,
+            show_dimensions: true,
+            outline_view: false,
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -486,6 +499,10 @@ pub enum TopMenuAction {
     ReleaseGuides,
     ClearGuides,
     ToggleKerfPreview,
+    ToggleOutlineView,
+    ToggleCutBorder,
+    TogglePrintBorder,
+    ToggleDimensions,
     TogglePrintCutMarks,
     ResetWorkspace,
     SetTheme(stencilcraft_ui_egui::ColorTheme),
@@ -698,6 +715,7 @@ pub enum WorkspacePanel {
     Points,
     Trace,
     TextStyle,
+    PageSetup,
 }
 
 struct WorkspaceContent<'a> {
@@ -718,6 +736,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Points => self.app.points_panel(ui),
             WorkspacePanel::Trace => self.app.trace_panel(ui),
             WorkspacePanel::TextStyle => self.app.text_style_panel(ui),
+            WorkspacePanel::PageSetup => self.app.page_setup_panel(ui),
         }
     }
 
@@ -734,6 +753,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Points => "Point Editing",
             WorkspacePanel::Trace => "Trace",
             WorkspacePanel::TextStyle => "Text Style",
+            WorkspacePanel::PageSetup => "Page Setup",
         }
         .to_owned()
     }
@@ -955,6 +975,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::Points,
                                 WorkspacePanel::Trace,
                                 WorkspacePanel::TextStyle,
+                                WorkspacePanel::PageSetup,
                             ],
                             0,
                         ),
@@ -2356,6 +2377,10 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::B))
         {
             self.clipboard_paste(stencilcraft_engine::document::PasteMode::InBack);
+        } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::P)) {
+            self.handle_menu_action(TopMenuAction::TogglePrintBorder);
+        } else if ctx.input_mut(|input| consume_exact(input, cmd_shift, egui::Key::L)) {
+            self.handle_menu_action(TopMenuAction::ToggleCutBorder);
         } else if let Some((dx, dy)) = (!self.editing_points()).then(|| arrow_nudge(ctx)).flatten()
         {
             self.nudge_selection(dx, dy);
@@ -3207,6 +3232,22 @@ impl StencilApp {
                 self.save_prefs();
             }
             TopMenuAction::ToggleKerfPreview => self.kerf_preview = !self.kerf_preview,
+            TopMenuAction::ToggleOutlineView => {
+                self.prefs.outline_view = !self.prefs.outline_view;
+                self.save_prefs();
+            }
+            TopMenuAction::ToggleCutBorder => {
+                self.prefs.show_cut_border = !self.prefs.show_cut_border;
+                self.save_prefs();
+            }
+            TopMenuAction::TogglePrintBorder => {
+                self.prefs.show_print_border = !self.prefs.show_print_border;
+                self.save_prefs();
+            }
+            TopMenuAction::ToggleDimensions => {
+                self.prefs.show_dimensions = !self.prefs.show_dimensions;
+                self.save_prefs();
+            }
             TopMenuAction::TogglePrintCutMarks => {
                 self.prefs.print_cut_marks = !self.prefs.print_cut_marks;
                 self.save_prefs();
@@ -4681,6 +4722,10 @@ impl StencilApp {
                 print_cut_marks: self.prefs.print_cut_marks,
                 show_selection_bounds: true,
                 theme: self.theme,
+                outline_view: self.prefs.outline_view,
+                cut_border: self.prefs.show_cut_border,
+                print_border: self.prefs.show_print_border,
+                show_dimensions: self.prefs.show_dimensions,
             },
             &selection,
         );

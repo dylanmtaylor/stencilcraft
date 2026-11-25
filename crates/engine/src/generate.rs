@@ -208,6 +208,162 @@ fn upright<E>(
     Ok(out)
 }
 
+/// The shape of each hole of a [`LatticeArgs`] lattice.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LatticeHole {
+    #[default]
+    Square,
+    Circle,
+    Diamond,
+    Hexagon,
+}
+
+/// `generate.lattice`: Silhouette's Lattice. Each closed shape becomes a lattice: holes of
+/// `hole_mm` with `wall_mm` of material between them, kept `border_mm` inside the outline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LatticeArgs {
+    pub ids: Vec<u64>,
+    #[serde(default)]
+    pub hole: LatticeHole,
+    #[serde(default = "lattice_hole")]
+    pub hole_mm: f64,
+    #[serde(default = "lattice_wall")]
+    pub wall_mm: f64,
+    #[serde(default = "lattice_border")]
+    pub border_mm: f64,
+}
+
+fn lattice_hole() -> f64 {
+    5.0
+}
+fn lattice_wall() -> f64 {
+    1.5
+}
+fn lattice_border() -> f64 {
+    3.0
+}
+
+/// Most holes one lattice may make.
+const MAX_LATTICE_HOLES: usize = 20_000;
+
+/// One hole centred on `c`.
+fn lattice_hole_path(kind: LatticeHole, c: kurbo::Point, size: f64) -> BezPath {
+    let r = size / 2.0;
+    match kind {
+        LatticeHole::Circle => kurbo::Circle::new(c, r).to_path(0.01),
+        _ => {
+            let corners: Vec<kurbo::Point> = match kind {
+                LatticeHole::Diamond => vec![(0.0, -r), (r, 0.0), (0.0, r), (-r, 0.0)],
+                LatticeHole::Hexagon => (0..6)
+                    .map(|k| {
+                        let a = std::f64::consts::FRAC_PI_3 * f64::from(k);
+                        (r * a.cos(), r * a.sin())
+                    })
+                    .collect(),
+                _ => vec![(-r, -r), (r, -r), (r, r), (-r, r)],
+            }
+            .into_iter()
+            .map(|(x, y)| kurbo::Point::new(c.x + x, c.y + y))
+            .collect();
+            let mut path = BezPath::new();
+            for (i, p) in corners.into_iter().enumerate() {
+                if i == 0 {
+                    path.move_to(p);
+                } else {
+                    path.line_to(p);
+                }
+            }
+            path.close_path();
+            path
+        }
+    }
+}
+
+/// `area` turned into a lattice (see [`LatticeArgs`]).
+pub fn lattice_path(area: &BezPath, a: &LatticeArgs) -> Result<BezPath, String> {
+    for (v, lo, hi, name) in [
+        (a.hole_mm, 0.2, 500.0, "hole_mm"),
+        (a.wall_mm, 0.1, 500.0, "wall_mm"),
+        (a.border_mm, 0.0, 500.0, "border_mm"),
+    ] {
+        if !(v.is_finite() && (lo..=hi).contains(&v)) {
+            return Err(format!("{name} must be {lo}–{hi}"));
+        }
+    }
+    let outer = area.bounding_box();
+    if 2.0 * a.border_mm + a.hole_mm >= outer.width().min(outer.height()) {
+        return Err("the shape is too small for its border and holes".to_string());
+    }
+    let inside = if a.border_mm > 0.0 {
+        stencilcraft_kerf::offset_path(
+            area,
+            -a.border_mm,
+            &stencilcraft_kerf::OffsetOptions::default(),
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        area.clone()
+    };
+    let b = inside.bounding_box();
+    if !(b.width() > 0.0 && b.height() > 0.0) {
+        return Err("the shape is too small for its border".to_string());
+    }
+    let pitch = a.hole_mm + a.wall_mm;
+    let (nx, ny) = (
+        (b.width() / pitch).ceil() + 1.0,
+        (b.height() / pitch).ceil() + 1.0,
+    );
+    if nx * ny > MAX_LATTICE_HOLES as f64 {
+        return Err(format!(
+            "more than {MAX_LATTICE_HOLES} holes; make them larger"
+        ));
+    }
+    // Hexagons sit in offset rows, the others on a square grid centred on the shape.
+    let row_step = if a.hole == LatticeHole::Hexagon {
+        pitch * 0.866
+    } else {
+        pitch
+    };
+    let centre = b.center();
+    let mut holes = BezPath::new();
+    let (half_x, half_y) = (
+        (nx / 2.0).ceil() as i64,
+        (b.height() / row_step / 2.0).ceil() as i64 + 1,
+    );
+    for j in -half_y..=half_y {
+        let shift = if a.hole == LatticeHole::Hexagon && j.rem_euclid(2) == 1 {
+            pitch / 2.0
+        } else {
+            0.0
+        };
+        for i in -half_x..=half_x {
+            let c = kurbo::Point::new(
+                centre.x + i as f64 * pitch + shift,
+                centre.y + j as f64 * row_step,
+            );
+            holes.extend(lattice_hole_path(a.hole, c, a.hole_mm));
+        }
+    }
+    let boolean = |a: &BezPath, b: &BezPath, op| {
+        vectorcraft_pathops::try_boolean(
+            &vectorcraft_geom::PathData::from_bezpath(a),
+            vectorcraft_geom::FillRule::EvenOdd,
+            &vectorcraft_geom::PathData::from_bezpath(b),
+            vectorcraft_geom::FillRule::NonZero,
+            op,
+            0.001,
+        )
+        .map(|p| p.to_bezpath())
+        .map_err(|e| e.to_string())
+    };
+    let clipped = boolean(&inside, &holes, vectorcraft_pathops::BoolOp::Intersect)?;
+    if clipped.elements().is_empty() {
+        return Err("no hole fits inside the border".to_string());
+    }
+    boolean(area, &clipped, vectorcraft_pathops::BoolOp::Difference)
+}
+
 /// `shapes.distort`: Free Distort and Lattice. The selection's bounds are split into
 /// `rows` × `columns` cells; `points` are where the cell corners move to (row by row from
 /// the top left, `(rows + 1) × (columns + 1)` of them). Each path is flattened and mapped
@@ -443,6 +599,16 @@ impl Engine {
                 let marks = generate::weed::registration(bounds, a.margin_mm, a.arm_mm, a.mark)
                     .map_err(|e| invalid(NAME, e))?;
                 self.add_tagged(vec![(marks, a.style, None)], NAME)
+            }
+            Command::GenerateLattice(a) => {
+                const NAME: &str = "generate.lattice";
+                let mut edits = Vec::new();
+                for (id, path, _) in self.sources(&a.ids, NAME)? {
+                    let out = lattice_path(&path, &a)
+                        .map_err(|e| EngineError::Invalid(format!("{NAME}: {e}")))?;
+                    edits.push((id, out));
+                }
+                self.set_paths(edits, NAME)
             }
             Command::GenerateDistort(a) => {
                 const NAME: &str = "shapes.distort";

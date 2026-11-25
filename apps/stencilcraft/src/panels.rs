@@ -1429,7 +1429,7 @@ mod tests {
         );
         // Centre stays put; unlinked height stays.
         assert_eq!(
-            edit_bounds(b, Anchor9::Center, 2, 80.0, false),
+            edit_bounds(b, Anchor9::Centre, 2, 80.0, false),
             [-10.0, 20.0, 80.0, 20.0]
         );
         // Bottom right fixed, height edit.
@@ -1439,7 +1439,7 @@ mod tests {
         );
         // X and Y place the reference point.
         assert_eq!(
-            edit_bounds(b, Anchor9::Center, 0, 0.0, true),
+            edit_bounds(b, Anchor9::Centre, 0, 0.0, true),
             [-20.0, 20.0, 40.0, 20.0]
         );
         assert_eq!(

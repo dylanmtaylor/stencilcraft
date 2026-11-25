@@ -246,9 +246,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     sketch, stipple, emboss patterns, warp, puzzle, pop-up card, weed lines, lattice and
     stencil bridges, with a live preview; Free Distort and Lattice Distort bend shapes by
     a grid of handles. Flexishapes, cross-stitch and a font creator remain open.
-39. **Colour tools**: swatches (Fill Color, Line Style) and recolouring (Select by
-    Color › Recolor) exist. Missing: graphic styles (saved line/fill/operation sets) and an
-    eyedropper.
+39. **Colour tools**: swatches (Fill Color, Line Style), recolouring (Select by Color ›
+    Recolor), graphic styles (saved line/fill/operation sets) and Match Style (the
+    eyedropper, in the Graphic Styles panel) exist.
 40. **Automation**: missing recorded actions and batch replay inside the app. MCP and the
     CLI cover scripting from outside.
 41. **Design Space conveniences**: Edit › History lists the undo steps and goes back or

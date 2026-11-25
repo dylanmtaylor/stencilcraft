@@ -52,6 +52,7 @@ mod distort_tool;
 mod effects;
 mod file_menu;
 mod freehand;
+mod graphic_styles;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
@@ -109,6 +110,8 @@ pub struct UserPrefs {
     pub recent_fonts: Vec<String>,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
+    /// Panels › Graphic Styles: saved line/fill/operation sets.
+    pub graphic_styles: Vec<graphic_styles::GraphicStyle>,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -137,6 +140,7 @@ impl Default for UserPrefs {
             mat_id: None,
             recent_fonts: Vec::new(),
             select_after_drawing: false,
+            graphic_styles: Vec::new(),
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),
@@ -805,6 +809,7 @@ pub enum WorkspacePanel {
     Preferences,
     Selections,
     Distort,
+    GraphicStyles,
 }
 
 struct WorkspaceContent<'a> {
@@ -837,6 +842,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Preferences => self.app.preferences_panel(ui),
             WorkspacePanel::Selections => self.app.selections_panel(ui),
             WorkspacePanel::Distort => self.app.distort_panel(ui),
+            WorkspacePanel::GraphicStyles => self.app.graphic_styles_panel(ui),
         }
     }
 
@@ -865,6 +871,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Preferences => "Preferences",
             WorkspacePanel::Selections => "Selections",
             WorkspacePanel::Distort => "Distort",
+            WorkspacePanel::GraphicStyles => "Graphic Styles",
         }
         .to_owned()
     }
@@ -957,6 +964,8 @@ pub struct StencilApp {
     pub machine_action: Option<machine_menu::MachineAction>,
     /// Select › Save Selection: named selections for this session.
     pub saved_selections: Vec<misc_panels::SavedSelection>,
+    /// Graphic Styles panel: the name field.
+    pub style_name_draft: String,
     /// Free Distort / Lattice in progress.
     pub distort: Option<distort_tool::DistortDraft>,
     pub selection_name_draft: String,
@@ -1134,6 +1143,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::Preferences,
     WorkspacePanel::Selections,
     WorkspacePanel::Distort,
+    WorkspacePanel::GraphicStyles,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -1253,6 +1263,7 @@ impl StencilApp {
             recolor_row: None,
             machine_action: None,
             saved_selections: Vec::new(),
+            style_name_draft: String::new(),
             distort: None,
             selection_name_draft: String::new(),
             mat_before_unload: None,

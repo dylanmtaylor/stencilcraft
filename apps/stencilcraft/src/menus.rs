@@ -774,7 +774,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Tools", A::ShowPanel(crate::WorkspacePanel::Tools)).into(),
         item("Swatches", A::ShowPanel(P::FillColor)).into(),
         item("Recolor Artwork", A::ShowPanel(P::SelectByColor)).into(),
-        todo("Graphic Styles"),
+        item("Graphic Styles", A::ShowPanel(P::GraphicStyles)).into(),
         todo("Actions"),
         item("Libraries", A::ShowPanel(P::Library)).into(),
         SEP,

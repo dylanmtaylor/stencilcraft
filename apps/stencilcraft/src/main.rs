@@ -55,6 +55,7 @@ mod freehand;
 mod menus;
 
 /// File › New: the New Document dialog (preset cards and details).
+mod library_panel;
 mod new_doc;
 mod object_menu;
 
@@ -507,6 +508,8 @@ pub enum TopMenuAction {
     /// File › Export › PDF/PNG/JPEG.
     Export(file_menu::ExportKind),
     SaveSelectionAs,
+    /// File › Print: the page as a PDF in the system viewer.
+    Print,
     /// File › Close Tab: back to a new, empty document (asking before discarding changes).
     CloseDoc,
     /// Object › Arrange › Send to Layer.
@@ -741,6 +744,7 @@ pub enum WorkspacePanel {
     PageSetup,
     Effects,
     Contour,
+    Library,
 }
 
 struct WorkspaceContent<'a> {
@@ -764,6 +768,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::PageSetup => self.app.page_setup_panel(ui),
             WorkspacePanel::Effects => self.app.effects_panel(ui),
             WorkspacePanel::Contour => self.app.contour_panel(ui),
+            WorkspacePanel::Library => self.app.library_panel(ui),
         }
     }
 
@@ -783,6 +788,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::PageSetup => "Page Setup",
             WorkspacePanel::Effects => "Effects",
             WorkspacePanel::Contour => "Contour",
+            WorkspacePanel::Library => "Library",
         }
         .to_owned()
     }
@@ -863,6 +869,8 @@ pub struct StencilApp {
     /// The Effects panel and its live preview.
     pub effects: effects::EffectsState,
     pub effect_preview: Option<effects::EffectPreview>,
+    /// Recovery snapshots and the design library.
+    pub stores: library_panel::FileStores,
     pub canvas_drag_shape: Option<u64>,
     pub canvas_selection_start: Option<egui::Pos2>,
     pub canvas_selection_additive: bool,
@@ -1010,6 +1018,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                                 WorkspacePanel::PageSetup,
                                 WorkspacePanel::Effects,
                                 WorkspacePanel::Contour,
+                                WorkspacePanel::Library,
                             ],
                             0,
                         ),
@@ -1092,6 +1101,7 @@ impl StencilApp {
             pending_panel: None,
             effects: effects::EffectsState::default(),
             effect_preview: None,
+            stores: library_panel::FileStores::default(),
             canvas_drag_shape: None,
             canvas_selection_start: None,
             canvas_selection_additive: false,
@@ -1214,6 +1224,12 @@ impl StencilApp {
         {
             let (store, _report) = SettingsStore::<UserPrefs>::open(Location::Auto);
             self.prefs = store.get().clone();
+            self.stores = library_panel::FileStores::open();
+            if !self.stores.recovered.is_empty() {
+                self.pending_panel = Some(WorkspacePanel::Library);
+                self.status = "recovered designs from an earlier session are in the Library panel"
+                    .to_string();
+            }
             self.settings_store = Some(store);
             if !self.prefs.recent_files.is_empty() {
                 self.recent_files = self.prefs.recent_files.clone();
@@ -1284,6 +1300,7 @@ impl StencilApp {
             Ok(()) => {
                 self.open_path = Some(path.clone());
                 self.saved_document = self.engine.doc.clone();
+                self.discard_own_snapshot();
                 self.record_recent_file(path);
                 self.status = "saved".to_string();
             }
@@ -2414,6 +2431,10 @@ impl StencilApp {
         {
             self.clipboard_paste(stencilcraft_engine::document::PasteMode::InBack);
         } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::P))
+        {
+            self.handle_menu_action(TopMenuAction::Print);
+        } else if ctx
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::W))
         {
             self.handle_menu_action(TopMenuAction::CloseDoc);
@@ -3277,6 +3298,7 @@ impl StencilApp {
             TopMenuAction::ImportVector(kind) => self.import_vector_dialog(kind),
             TopMenuAction::Export(kind) => self.export_dialog(kind),
             TopMenuAction::SaveSelectionAs => self.save_selection_dialog(),
+            TopMenuAction::Print => self.print_via_pdf(),
             TopMenuAction::CloseDoc => self.request_new_document(new_doc::Choice::default()),
             TopMenuAction::ToggleAttach => self.toggle_attach(),
             TopMenuAction::Flatten => self.flatten_selection(),
@@ -6080,6 +6102,7 @@ impl eframe::App for StencilApp {
         }
         self.drain_control_requests(ui.ctx());
         self.handle_keyboard_shortcuts(ui.ctx());
+        self.autosave_tick();
         if std::mem::take(&mut self.quit_requested) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }

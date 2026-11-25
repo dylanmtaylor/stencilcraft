@@ -117,7 +117,9 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
             .into(),
         item("Open…", A::OpenDoc).shortcut(kbd(CMD, Key::O)).into(),
         sub("Open Recent", recent),
-        todo("Open Recovered…"),
+        item("Open Recovered…", A::ShowPanel(P::Library))
+            .enabled(!app.stores.recovered.is_empty())
+            .into(),
         item("Merge…", A::ImportSvg)
             .shortcut(kbd(cmd_shift(), Key::O))
             .into(),
@@ -158,10 +160,10 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
             ],
         ),
         SEP,
-        todo("Library…"),
+        item("Library…", A::ShowPanel(P::Library)).into(),
         todo("Scan…"),
         SEP,
-        todo_key("Print…", CMD, Key::P),
+        item("Print…", A::Print).shortcut(kbd(CMD, Key::P)).into(),
         item("Print Page Setup…", A::ShowPanel(P::PageSetup)).into(),
         item("Send to Machine…", A::ShowSend)
             .shortcut(kbd(CMD, Key::L))
@@ -736,7 +738,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         todo("Recolor Artwork"),
         todo("Graphic Styles"),
         todo("Actions"),
-        todo("Libraries"),
+        item("Libraries", A::ShowPanel(P::Library)).into(),
         SEP,
         item("Reset Panels to Default", A::ResetWorkspace).into(),
         todo("Starter Mode"),

@@ -425,6 +425,8 @@ pub enum TopMenuAction {
     Copy,
     Paste(stencilcraft_engine::document::PasteMode),
     Arrange(stencilcraft_engine::document::ArrangeOrder),
+    Group,
+    Ungroup,
     Delete,
     SelectAll,
     Deselect,
@@ -1284,7 +1286,27 @@ impl StencilApp {
         true
     }
 
+    /// The outermost group holding shape `id`, if it is grouped.
+    fn outer_group(&self, id: u64) -> Option<u64> {
+        self.engine
+            .doc
+            .group_chain(stencilcraft_doc::GroupChild::Shape(id))
+            .first()
+            .copied()
+    }
+
+    /// `id` and, when it is grouped, every other shape of its outermost group: what a click on
+    /// a grouped shape selects in Silhouette.
+    fn with_group(&self, id: u64) -> Vec<u64> {
+        match self.outer_group(id) {
+            Some(group) => self.engine.doc.group_shapes(group),
+            None => vec![id],
+        }
+    }
+
+    /// Select `ids`, widened to whole groups (a group is selected as one object).
     pub fn set_selection(&mut self, ids: impl IntoIterator<Item = u64>) {
+        let ids: Vec<u64> = ids.into_iter().flat_map(|id| self.with_group(id)).collect();
         let mut selected = Vec::new();
         for id in ids {
             let selectable = self
@@ -1410,6 +1432,72 @@ impl StencilApp {
         }
         let bytes = stencilcraft_import::write_document(&doc, "svg", 300.0).ok()?;
         String::from_utf8(bytes).ok()
+    }
+
+    /// Group the selection (Silhouette's Group, Cmd+G): its loose shapes and the outermost
+    /// groups it holds become one group, which then selects as one object.
+    pub fn group_selection(&mut self) {
+        let mut ids = Vec::new();
+        let mut groups = Vec::new();
+        for &id in &self.selected_shapes {
+            match self.outer_group(id) {
+                Some(group) if !groups.contains(&group) => groups.push(group),
+                Some(_) => {}
+                None => ids.push(id),
+            }
+        }
+        if ids.len() + groups.len() < 2 {
+            self.status = "select two or more objects to group".to_string();
+            return;
+        }
+        self.run_command(Command::Document(DocumentCommand::GroupCreate {
+            ids,
+            groups,
+            name: String::new(),
+        }));
+        self.status = "grouped".to_string();
+    }
+
+    /// Ungroup (Cmd+Shift+G): dissolve the selected outermost groups so their parts select on
+    /// their own. As in Silhouette, ungrouping a compound path releases it into its contours.
+    pub fn ungroup_selection(&mut self) {
+        let mut groups = Vec::new();
+        let mut loose = Vec::new();
+        for &id in &self.selected_shapes {
+            match self.outer_group(id) {
+                Some(group) if !groups.contains(&group) => groups.push(group),
+                Some(_) => {}
+                None => loose.push(id),
+            }
+        }
+        let keep = self.selected_shapes.clone();
+        for group in groups {
+            self.run_command(Command::Document(DocumentCommand::GroupUngroup {
+                id: group,
+            }));
+        }
+        let compound: Vec<u64> = loose
+            .into_iter()
+            .filter(|id| {
+                self.engine.doc.get_shape(*id).is_some_and(|shape| {
+                    stencilcraft_ui_egui::bezpath_to_edit_subpaths(&shape.path).len() > 1
+                })
+            })
+            .collect();
+        let mut selection = keep;
+        if !compound.is_empty() {
+            match self
+                .engine
+                .run(Command::ShapesReleaseCompound { ids: compound })
+            {
+                Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => selection.extend(ids),
+                Ok(_) => {}
+                Err(error) => self.status = error.to_string(),
+            }
+        }
+        // The parts stay selected, now as separate objects.
+        self.set_selection(selection);
+        self.status = "ungrouped".to_string();
     }
 
     pub fn clipboard_copy(&mut self) {
@@ -1650,6 +1738,120 @@ impl StencilApp {
         } else {
             self.run_command(Command::ShapeSetPath { id, path });
             self.path_selection.anchors.clear();
+        }
+    }
+
+    /// The right-click menu of the Select tool, in Silhouette's order: undo/redo, clipboard,
+    /// flip, edit points/weld/offset, group, arrange. With nothing selected it offers undo,
+    /// paste and Select All.
+    fn shape_context_menu(&mut self, ui: &mut egui::Ui) {
+        use stencilcraft_engine::document::{ArrangeOrder, PasteMode};
+        let count = self.selected_shapes.len();
+        let any = count > 0;
+        let grouped = self
+            .selected_shapes
+            .iter()
+            .any(|id| self.outer_group(*id).is_some());
+        let mut chosen = None;
+        let mut item = |ui: &mut egui::Ui, label: &str, enabled: bool, action: TopMenuAction| {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                chosen = Some(action);
+                ui.close();
+            }
+        };
+        item(ui, "Undo", self.engine.can_undo(), TopMenuAction::Undo);
+        item(ui, "Redo", self.engine.can_redo(), TopMenuAction::Redo);
+        ui.separator();
+        if any {
+            item(ui, "Cut", true, TopMenuAction::Cut);
+            item(ui, "Copy", true, TopMenuAction::Copy);
+        }
+        item(ui, "Paste", true, TopMenuAction::Paste(PasteMode::Offset));
+        item(
+            ui,
+            "Paste in Front",
+            true,
+            TopMenuAction::Paste(PasteMode::InFront),
+        );
+        if !any {
+            item(ui, "Select All", true, TopMenuAction::SelectAll);
+            if let Some(action) = chosen {
+                self.handle_menu_action(action);
+            }
+            return;
+        }
+        item(ui, "Duplicate", true, TopMenuAction::Duplicate);
+        item(ui, "Delete", true, TopMenuAction::Delete);
+        ui.separator();
+        item(
+            ui,
+            "Flip Horizontally",
+            true,
+            TopMenuAction::Flip(DistributionAxis::Horizontal),
+        );
+        item(
+            ui,
+            "Flip Vertically",
+            true,
+            TopMenuAction::Flip(DistributionAxis::Vertical),
+        );
+        ui.separator();
+        let mut edit_points = false;
+        if ui
+            .add_enabled(count == 1 && !grouped, egui::Button::new("Edit Points"))
+            .clicked()
+        {
+            edit_points = true;
+            ui.close();
+        }
+        item(
+            ui,
+            "Weld",
+            count >= 2,
+            TopMenuAction::Pathfinder(BooleanOperation::Union),
+        );
+        let mut offset = false;
+        if ui.button("Offset").clicked() {
+            offset = true;
+            ui.close();
+        }
+        ui.separator();
+        item(ui, "Group", count >= 2, TopMenuAction::Group);
+        item(ui, "Ungroup", grouped || count >= 1, TopMenuAction::Ungroup);
+        ui.separator();
+        item(
+            ui,
+            "Send to Back",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Back),
+        );
+        item(
+            ui,
+            "Bring to Front",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Front),
+        );
+        item(
+            ui,
+            "Bring Forward",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Forward),
+        );
+        item(
+            ui,
+            "Send Backward",
+            true,
+            TopMenuAction::Arrange(ArrangeOrder::Backward),
+        );
+        if let Some(action) = chosen {
+            self.handle_menu_action(action);
+        }
+        if edit_points {
+            self.path_selection = PathSelection::default();
+            self.active_tool = ActiveTool::DirectSelect;
+        }
+        if offset {
+            self.handle_edit_action(panels::EditAction::Offset { internal: false });
         }
     }
 
@@ -1998,6 +2200,18 @@ impl StencilApp {
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::Num1))
         {
             self.view.zoom = 1.0;
+        } else if ctx.input_mut(|input| {
+            consume_exact(
+                input,
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::G,
+            )
+        }) {
+            self.ungroup_selection();
+        } else if ctx
+            .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::G))
+        {
+            self.group_selection();
         } else if ctx.input_mut(|input| {
             consume_exact(
                 input,
@@ -2706,6 +2920,8 @@ impl StencilApp {
                 self.retain_valid_selection();
             }
             TopMenuAction::Duplicate => self.duplicate_selection(),
+            TopMenuAction::Group => self.group_selection(),
+            TopMenuAction::Ungroup => self.ungroup_selection(),
             TopMenuAction::Cut => self.clipboard_cut(),
             TopMenuAction::Copy => self.clipboard_copy(),
             TopMenuAction::Paste(mode) => self.clipboard_paste(mode),
@@ -5204,10 +5420,12 @@ impl StencilApp {
                 if ui.ctx().input(|input| input.modifiers.shift) {
                     let mut ids = self.selected_shapes.clone();
                     if let Some(id) = hit {
-                        if let Some(index) = ids.iter().position(|selected| *selected == id) {
-                            ids.remove(index);
+                        // Toggle the shape's whole group, which is selected as one object.
+                        let members = self.with_group(id);
+                        if ids.contains(&id) {
+                            ids.retain(|selected| !members.contains(selected));
                         } else {
-                            ids.push(id);
+                            ids.extend(members);
                         }
                     }
                     self.set_selection(ids);
@@ -5306,6 +5524,16 @@ impl StencilApp {
                 );
                 self.set_selection(ids);
             }
+            // Silhouette's right-click menu: a right-click on a shape selects it (and its group)
+            // first, then the menu acts on the selection.
+            if response.secondary_clicked()
+                && let Some(pointer) = response.interact_pointer_pos()
+                && let Some(id) = stencilcraft_ui_egui::hit_test_shape(&doc, &view, pointer, 8.0)
+                && !self.selected_shapes.contains(&id)
+            {
+                self.set_selection([id]);
+            }
+            response.context_menu(|ui| self.shape_context_menu(ui));
             if response.drag_stopped() {
                 if self.canvas_drag_shape.is_some() {
                     self.fold_drag_into_one_step();
@@ -6904,6 +7132,52 @@ mod tests {
         );
         output.textures_delta.clear();
         assert_eq!(app.engine.doc.shape_count(), 0, "Cmd+Z undid the rectangle");
+    }
+
+    #[test]
+    fn groups_select_as_one_object_and_ungroup_releases_compounds() {
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 30.0, 60.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 20.0,
+                height: 10.0,
+            });
+        }
+        app.set_selection([1, 2]);
+        press_key(&mut app, egui::Key::G, egui::Modifiers::COMMAND);
+        // Selecting either member selects the group.
+        app.set_selection([2]);
+        assert_eq!(app.selected_shapes, vec![1, 2]);
+        app.set_selection([3]);
+        assert_eq!(app.selected_shapes, vec![3], "loose shapes stay single");
+        // A lone loose shape cannot be grouped.
+        app.group_selection();
+        assert_eq!(app.engine.doc.groups.len(), 1);
+
+        app.set_selection([1]);
+        press_key(
+            &mut app,
+            egui::Key::G,
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        );
+        assert!(app.engine.doc.groups.is_empty());
+        assert_eq!(app.selected_shapes, vec![1, 2], "the parts stay selected");
+        app.set_selection([1]);
+        assert_eq!(app.selected_shapes, vec![1], "now separate objects");
+
+        // Ungroup on a compound path releases it, as in Silhouette.
+        app.set_selection([1, 3]);
+        app.handle_edit_action(panels::EditAction::MakeCompound);
+        let compound = app.selected_shapes.clone();
+        assert_eq!(compound.len(), 1);
+        app.ungroup_selection();
+        assert_eq!(
+            app.selected_shapes.len(),
+            2,
+            "released into its two contours"
+        );
     }
 
     #[test]

@@ -293,12 +293,13 @@ pub fn build_job(
 /// x right, y down), one entry per output layer.
 pub fn layer_paths(doc: &Document) -> Vec<LayerPaths> {
     let mut out = Vec::new();
-    for layer in &doc.layers {
-        if !layer.is_output() {
+    // Pass order is the operations order: one entry per output operation.
+    for op in &doc.operations {
+        if !op.is_output() {
             continue;
         }
         let mut paths = Vec::new();
-        for shape in layer
+        for shape in op
             .members
             .iter()
             .filter_map(|id| doc.get_shape(*id))
@@ -308,8 +309,8 @@ pub fn layer_paths(doc: &Document) -> Vec<LayerPaths> {
             paths.extend(machine::paths_from_polylines(&polylines));
         }
         out.push(LayerPaths {
-            name: layer.name.clone(),
-            color: layer.color.clone(),
+            name: op.name.clone(),
+            color: op.color.clone(),
             paths,
         });
     }

@@ -27,6 +27,7 @@ pub enum EffectKind {
     WeedLines,
     RemoveBackground,
     Bridges,
+    ImageEffects,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -45,6 +46,7 @@ pub enum EffectMenu {
     WeedLines,
     RemoveBackground,
     Bridges,
+    ImageEffects,
 }
 
 impl EffectMenu {
@@ -67,6 +69,7 @@ impl EffectMenu {
             Self::WeedLines => (EffectKind::WeedLines, Vec::new()),
             Self::RemoveBackground => (EffectKind::RemoveBackground, Vec::new()),
             Self::Bridges => (EffectKind::Bridges, Vec::new()),
+            Self::ImageEffects => (EffectKind::ImageEffects, Vec::new()),
         }
     }
 }
@@ -205,6 +208,27 @@ struct EffectDef {
 }
 
 const EFFECTS: &[EffectDef] = &[
+    EffectDef {
+        kind: EffectKind::ImageEffects,
+        title: "Image Effects",
+        command: "image.adjust",
+        target: Target::Image,
+        fields: &[
+            num("brightness", "Brightness", -100.0, 100.0, "%"),
+            num("contrast", "Contrast", -100.0, 100.0, "%"),
+            num("saturation", "Saturation", -100.0, 100.0, "%"),
+            Field {
+                key: "grayscale",
+                label: "Greyscale",
+                kind: Kind::Bool,
+            },
+            Field {
+                key: "invert",
+                label: "Invert",
+                kind: Kind::Bool,
+            },
+        ],
+    },
     EffectDef {
         kind: EffectKind::Bridges,
         title: "Bridges",
@@ -370,6 +394,7 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
         }
         EffectKind::RemoveBackground => Ok(json!({"tolerance": 10.0})),
         EffectKind::Bridges => Ok(json!({"width_mm": 1.5, "direction": "vertical"})),
+        EffectKind::ImageEffects => serde_json::to_value(stencilcraft_raster::Adjust::default()),
     };
     match value {
         Ok(Value::Object(map)) => map,

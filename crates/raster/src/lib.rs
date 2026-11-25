@@ -134,6 +134,54 @@ pub fn with_pixels(image: &RasterImage, pixels: &RgbaImage) -> Result<RasterImag
     })
 }
 
+/// Image Effects: brightness, contrast and saturation (each −100…100, 0 leaves it), then
+/// greyscale and invert. Alpha is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Adjust {
+    pub brightness: f64,
+    pub contrast: f64,
+    pub saturation: f64,
+    pub grayscale: bool,
+    pub invert: bool,
+}
+
+pub fn adjust(pixels: &RgbaImage, a: &Adjust) -> Result<RgbaImage, RasterError> {
+    for (value, name) in [
+        (a.brightness, "brightness"),
+        (a.contrast, "contrast"),
+        (a.saturation, "saturation"),
+    ] {
+        if !(value.is_finite() && (-100.0..=100.0).contains(&value)) {
+            return Err(bad(format!("{name} {value} is outside -100–100")));
+        }
+    }
+    let brightness = (a.brightness / 100.0) as f32;
+    // Contrast scales about mid-grey: −100 flattens, +100 doubles the spread.
+    let contrast = (1.0 + a.contrast / 100.0) as f32;
+    let saturation = (1.0 + a.saturation / 100.0) as f32;
+    let mut out = pixels.clone();
+    for pixel in out.pixels_mut() {
+        let [r, g, b, alpha] = pixel.0;
+        let mut c = [r, g, b].map(|v| f32::from(v) / 255.0);
+        for v in &mut c {
+            *v = ((*v - 0.5) * contrast + 0.5 + brightness).clamp(0.0, 1.0);
+        }
+        let grey = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+        let factor = if a.grayscale { 0.0 } else { saturation };
+        for v in &mut c {
+            *v = (grey + (*v - grey) * factor).clamp(0.0, 1.0);
+            if a.invert {
+                *v = 1.0 - *v;
+            }
+        }
+        // In 0..=1 after the clamps, so the casts are exact enough and cannot overflow.
+        let [r, g, b] = c.map(|v| (v * 255.0).round() as u8);
+        pixel.0 = [r, g, b, alpha];
+    }
+    Ok(out)
+}
+
 /// Make the background transparent: flood-fill (4-connected) from every border pixel
 /// whose colour is within `tolerance` percent (0–100, per channel) of the border's most
 /// common colour. Already transparent pixels count as background.
@@ -229,6 +277,51 @@ mod tests {
                 decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
             assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
+    }
+
+    #[test]
+    fn adjust_brightness_greyscale_invert() {
+        let pixels = RgbaImage::from_pixel(2, 2, Pixel([200, 50, 50, 128]));
+        let same = adjust(&pixels, &Adjust::default()).unwrap();
+        assert_eq!(same, pixels);
+        let grey = adjust(
+            &pixels,
+            &Adjust {
+                grayscale: true,
+                ..Adjust::default()
+            },
+        )
+        .unwrap();
+        let p = grey.get_pixel(0, 0).0;
+        assert!(p[0] == p[1] && p[1] == p[2] && p[3] == 128, "{p:?}");
+        let inverted = adjust(
+            &pixels,
+            &Adjust {
+                invert: true,
+                ..Adjust::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(inverted.get_pixel(0, 0).0, [55, 205, 205, 128]);
+        let bright = adjust(
+            &pixels,
+            &Adjust {
+                brightness: 100.0,
+                ..Adjust::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(bright.get_pixel(0, 0).0, [255, 255, 255, 128]);
+        assert!(
+            adjust(
+                &pixels,
+                &Adjust {
+                    contrast: f64::NAN,
+                    ..Adjust::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]

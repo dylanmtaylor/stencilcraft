@@ -300,6 +300,12 @@ pub enum Command {
     },
 
     /// Make the image's border-connected background transparent (`tolerance` 0–100 %).
+    #[serde(rename = "image.adjust")]
+    ImageAdjust {
+        id: u64,
+        #[serde(flatten)]
+        adjust: stencilcraft_raster::Adjust,
+    },
     #[serde(rename = "image.remove-background")]
     ImageRemoveBackground { id: u64, tolerance: f64 },
     /// Break a shape's path at one node: a closed contour opens there, an open one splits in
@@ -802,6 +808,7 @@ impl Engine {
                 | Command::ImageSetBounds { .. }
                 | Command::ImageTrace { .. }
                 | Command::ImageRemoveBackground { .. }
+                | Command::ImageAdjust { .. }
                 | Command::PathBreak { .. }
                 | Command::PathJoin { .. }
                 | Command::PathClose { .. }
@@ -1497,6 +1504,20 @@ impl Engine {
                 area,
                 compound,
             } => self.trace_image(id, &options, style, area, compound),
+            Command::ImageAdjust { id, adjust } => {
+                let image = self
+                    .doc
+                    .get_image(id)
+                    .ok_or_else(|| no_image("image.adjust", id))?;
+                let adjusted = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| stencilcraft_raster::adjust(&pixels, &adjust))
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid("image.adjust"))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = adjusted;
+                }
+                Ok(Effect::ImageChanged { id })
+            }
             Command::ImageRemoveBackground { id, tolerance } => {
                 let image = self
                     .doc

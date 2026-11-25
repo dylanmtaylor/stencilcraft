@@ -16,7 +16,7 @@ use stencilcraft_engine::text::{TextAdd, TextEdit};
 use stencilcraft_engine::{Command, Effect};
 use stencilcraft_geom::{BezPath, Point, Shape as _};
 
-use crate::panels::{hint, labelled, number};
+use crate::panels::{button, hint, labelled, number};
 use crate::{ActiveTool, StencilApp, WorkspacePanel};
 
 /// Silhouette's Character Spacing: each 100 % above normal adds this share of the em between
@@ -61,6 +61,8 @@ pub struct TextStyle {
     pub kerning: bool,
     /// The Text Style panel's font search.
     pub query: String,
+    /// The font style (Bold, Italic…); empty is the family's regular style.
+    pub font_style: String,
 }
 
 impl Default for TextStyle {
@@ -71,6 +73,7 @@ impl Default for TextStyle {
             line_pct: 100.0,
             kerning: true,
             query: String::new(),
+            font_style: String::new(),
         }
     }
 }
@@ -193,6 +196,7 @@ impl StencilApp {
 
     /// The font for `text_family`: its Regular style, else its first.
     fn text_font(&self) -> FontSpec {
+        let wanted = self.text_style.font_style.as_str();
         let style = self
             .text_fonts
             .iter()
@@ -200,7 +204,8 @@ impl StencilApp {
             .and_then(|f| {
                 f.styles
                     .iter()
-                    .find(|s| s.eq_ignore_ascii_case("regular"))
+                    .find(|s| !wanted.is_empty() && s.eq_ignore_ascii_case(wanted))
+                    .or_else(|| f.styles.iter().find(|s| s.eq_ignore_ascii_case("regular")))
                     .or_else(|| f.styles.first())
             })
             .cloned()
@@ -292,8 +297,20 @@ impl StencilApp {
         }
     }
 
+    /// Put `family` first in the recently used fonts (at most six).
+    fn note_recent_font(&mut self, family: &str) {
+        if family.is_empty() || self.prefs.recent_fonts.first().is_some_and(|f| f == family) {
+            return;
+        }
+        self.prefs.recent_fonts.retain(|f| f != family);
+        self.prefs.recent_fonts.insert(0, family.to_string());
+        self.prefs.recent_fonts.truncate(6);
+        self.save_prefs();
+    }
+
     fn load_text_style(&mut self, spec: &TextSpec) {
         self.text_family = spec.font.family.clone();
+        self.text_style.font_style = spec.font.style.clone();
         self.text_size = spec.size;
         self.text_style.align = spec.alignment;
         self.text_style.char_pct = char_spacing_pct(spec.letter_spacing);
@@ -632,6 +649,15 @@ impl StencilApp {
             .filter(|name| query.is_empty() || name.to_lowercase().contains(&query))
             .collect();
         let targets = self.text_style_targets().len();
+        let recent = self.prefs.recent_fonts.clone();
+        let styles: Vec<String> = self
+            .text_fonts
+            .iter()
+            .find(|f| f.family == self.text_family)
+            .map(|f| f.styles.clone())
+            .unwrap_or_default();
+        let before_style = self.text_font().style;
+        let mut font_style = before_style.clone();
         let before_flow = self
             .text_style_targets()
             .first()
@@ -650,6 +676,16 @@ impl StencilApp {
             {
                 style.query = value;
             }
+            if !recent.is_empty() {
+                ui.label("Recently used");
+                ui.horizontal_wrapped(|ui| {
+                    for name in &recent {
+                        if button(ui, name, true) {
+                            family = name.clone();
+                        }
+                    }
+                });
+            }
             let mut select = Select::new("text-font", "Font", &mut family);
             if !matching.contains(&before_family) {
                 select = select.option(before_family.clone(), &before_family);
@@ -658,6 +694,15 @@ impl StencilApp {
                 select = select.option(name.clone(), name);
             }
             let _ = select.show(ui);
+            if styles.len() > 1 {
+                labelled(ui, "Style", |ui| {
+                    let mut select = Select::new("text-font-style", "Font style", &mut font_style);
+                    for s in &styles {
+                        select = select.option(s.clone(), s);
+                    }
+                    let _ = select.show(ui);
+                });
+            }
             labelled(ui, "Size", |ui| {
                 number(
                     ui,
@@ -718,7 +763,15 @@ impl StencilApp {
         let mut edit = TextEdit::default();
         let mut changed = false;
         if family != before_family {
-            self.text_family = family;
+            self.text_family = family.clone();
+            self.text_style.font_style.clear();
+            style.font_style.clear();
+            edit.font = Some(self.text_font());
+            changed = true;
+            self.note_recent_font(&family);
+        } else if font_style != before_style {
+            self.text_style.font_style = font_style.clone();
+            style.font_style = font_style;
             edit.font = Some(self.text_font());
             changed = true;
         }
@@ -1051,5 +1104,34 @@ mod flow_tests {
             app.text_spec_of(text).map(|s| s.text),
             Some("Path★!".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn font_style_and_recent_fonts() {
+        let mut app = StencilApp::new(None);
+        app.text_fonts = vec![stencilcraft_engine::text::FontFamily {
+            family: "Demo".into(),
+            styles: vec!["Regular".into(), "Bold".into(), "Italic".into()],
+            single_line: false,
+        }];
+        app.text_family = "Demo".into();
+        assert_eq!(app.text_font().style, "Regular");
+        app.text_style.font_style = "bold".into();
+        assert_eq!(app.text_font().style, "Bold", "matched without case");
+        app.text_style.font_style = "Heavy".into();
+        assert_eq!(
+            app.text_font().style,
+            "Regular",
+            "a missing style falls back"
+        );
+        for name in ["A", "B", "A", "C", "D", "E", "F", "G"] {
+            app.note_recent_font(name);
+        }
+        assert_eq!(app.prefs.recent_fonts, ["G", "F", "E", "D", "C", "A"]);
     }
 }

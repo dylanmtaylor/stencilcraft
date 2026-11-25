@@ -138,8 +138,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     text is 72 pt in Arial (or another installed outline font). The Text Style panel sets
     font (with search), size, justification, line spacing, character spacing (SS's %
     scale, measured: each 100 % adds 0.366 em) and kerning for the text being typed or
-    selected. Missing: selecting a range of letters and styling it, bold/italic/underline
-    and style choice, the frequently/recently used font lists, the wrap bar, dragging
+    selected, with a Style choice (Bold, Italic… as the font has them) and recently used
+    fonts. Missing: selecting a range of letters and styling it, underline, the wrap bar, dragging
     text onto a path (engine-only today), vertical text in the UI, and a glyphs panel.
 20. **Replicate and nesting**: engine commands and desktop panels cover directional,
     mirrored, array, radial and fill-page copies. Production mat planning has nesting;

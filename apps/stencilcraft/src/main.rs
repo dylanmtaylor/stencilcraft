@@ -105,6 +105,8 @@ pub struct UserPrefs {
     pub media_id: Option<u16>,
     /// The cutting mat last used (`Mat::id`).
     pub mat_id: Option<String>,
+    /// Text Style › Recently used font families, newest first.
+    pub recent_fonts: Vec<String>,
     pub rail_columns: u8,
     pub link_aspect: bool,
     pub recent_files: Vec<String>,
@@ -131,6 +133,7 @@ impl Default for UserPrefs {
             machine_model: None,
             media_id: None,
             mat_id: None,
+            recent_fonts: Vec::new(),
             rail_columns: 1,
             link_aspect: false,
             recent_files: Vec::new(),

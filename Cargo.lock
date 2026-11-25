@@ -5883,6 +5883,7 @@ dependencies = [
  "craft-ui",
  "egui",
  "kurbo 0.13.1",
+ "serde",
  "stencilcraft-doc",
  "stencilcraft-geom",
  "stencilcraft-kerf",

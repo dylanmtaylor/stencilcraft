@@ -59,6 +59,8 @@ pub struct TextStyle {
     /// Line Spacing, percent of the normal line distance.
     pub line_pct: f64,
     pub kerning: bool,
+    /// Letters stacked top to bottom (Silhouette's vertical text direction).
+    pub vertical: bool,
     /// The Text Style panel's font search.
     pub query: String,
     /// The font style (Bold, Italic…); empty is the family's regular style.
@@ -72,6 +74,7 @@ impl Default for TextStyle {
             char_pct: 100.0,
             line_pct: 100.0,
             kerning: true,
+            vertical: false,
             query: String::new(),
             font_style: String::new(),
         }
@@ -228,7 +231,7 @@ impl StencilApp {
             letter_spacing: letter_spacing_for(self.text_style.char_pct),
             line_spacing: self.text_style.line_pct,
             kerning: self.text_style.kerning,
-            vertical: false,
+            vertical: self.text_style.vertical,
             weld: false,
             flow: stencilcraft_doc::TextFlow::Straight,
             letters: Vec::new(),
@@ -316,6 +319,7 @@ impl StencilApp {
         self.text_style.char_pct = char_spacing_pct(spec.letter_spacing);
         self.text_style.line_pct = spec.line_spacing;
         self.text_style.kerning = spec.kerning;
+        self.text_style.vertical = spec.vertical;
     }
 
     /// Make the session's text `text` with the caret at `caret`: the first letter creates the
@@ -745,6 +749,11 @@ impl StencilApp {
                     );
                 });
                 let _ = Checkbox::bool("Kerning", &mut style.kerning).show(ui);
+                let _ = Segmented::new("text-direction", "Direction", &mut style.vertical)
+                    .item(false, "Horizontal")
+                    .item(true, "Vertical")
+                    .size(ControlSize::Sm)
+                    .show(ui);
             });
             if let Some(flow) = flow.as_mut() {
                 let _ = SectionHeader::new("text-flow", "Flow").show(ui, |ui| {
@@ -794,6 +803,10 @@ impl StencilApp {
         }
         if style.kerning != self.text_style.kerning {
             edit.kerning = Some(style.kerning);
+            changed = true;
+        }
+        if style.vertical != self.text_style.vertical {
+            edit.vertical = Some(style.vertical);
             changed = true;
         }
         if flow != before_flow
@@ -1061,6 +1074,35 @@ mod tests {
 #[cfg(test)]
 mod flow_tests {
     use super::*;
+
+    #[test]
+    fn vertical_text_stacks_the_letters() {
+        let mut app = StencilApp::new(None);
+        app.text_family = stencilcraft_engine::text::SINGLE_LINE_FAMILY.to_string();
+        app.begin_text_at(Point::new(10.0, 40.0));
+        app.text_insert("ABC");
+        let text = app.text_session.as_ref().and_then(|s| s.id).expect("text");
+        app.end_text_session();
+        app.set_selection([text]);
+        let wide = app
+            .engine
+            .doc
+            .get_shape(text)
+            .expect("text")
+            .path
+            .bounding_box();
+        app.apply_text_style(TextEdit {
+            vertical: Some(true),
+            ..TextEdit::default()
+        });
+        let shape = app.engine.doc.get_shape(text).expect("text");
+        assert!(shape.text.as_ref().is_some_and(|s| s.vertical));
+        let tall = shape.path.bounding_box();
+        assert!(
+            tall.height() > tall.width() && wide.width() > wide.height(),
+            "{wide:?} → {tall:?}"
+        );
+    }
 
     #[test]
     fn type_on_path_curve_and_glyphs() {

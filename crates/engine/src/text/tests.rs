@@ -243,7 +243,9 @@ fn curve_bends_one_line_round_a_circle() {
             .map(|g| g.origin.x + g.advance)
             .fold(f64::MIN, f64::max);
         assert!(((lo + hi) / 2.0).abs() < 1.0, "centred on the anchor");
-        let centre = Point::new(s.x + (lo + hi) / 2.0, s.y - diameter.signum() * r);
+        // A positive diameter arches the line like a rainbow: the circle's centre is below it
+        // on the page (larger y, the document being y down).
+        let centre = Point::new(s.x + (lo + hi) / 2.0, s.y + diameter.signum() * r);
         for (g, xf) in glyphs.iter().zip(placements(&s, &glyphs)) {
             let foot = xf * Point::new(g.origin.x + g.advance / 2.0, 0.0);
             assert!((foot.distance(centre) - r).abs() < 1e-6);
@@ -713,4 +715,67 @@ fn bad_text_input_is_refused_calmly() {
         panic!()
     };
     assert_eq!(engine.doc.get_shape(id).unwrap().style, CutStyle::Engrave);
+}
+
+#[test]
+fn carets_follow_letters_line_ends_and_empty_lines() {
+    for font in [font(), pen()] {
+        let s = spec("Ab\n\ncd", font);
+        let carets = carets(&s).expect("carets");
+        // One per character boundary, including the end.
+        assert_eq!(
+            carets.iter().map(|c| c.byte).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5, 6]
+        );
+        let at = |b: usize| carets.iter().find(|c| c.byte == b).expect("caret");
+        // The first caret is the anchor; carets on a line move right; the caret stands up.
+        assert!(
+            (at(0).base - Point::new(10.0, 20.0)).hypot() < 1e-6,
+            "{:?}",
+            at(0)
+        );
+        assert!(at(1).base.x > at(0).base.x && at(2).base.x > at(1).base.x);
+        assert!((at(1).base.y - 20.0).abs() < 1e-6);
+        assert!((at(0).top.y - at(0).base.y).abs() > 1.0);
+        // Line 2 is empty: its caret is at the alignment point, one line pitch on.
+        let pitch = (at(4).base.y - at(0).base.y).abs();
+        assert!((at(3).base.x - 10.0).abs() < 1e-6, "{:?}", at(3));
+        assert!(((at(3).base.y - at(0).base.y).abs() - pitch / 2.0).abs() < 1e-6);
+        assert!((at(4).base.x - 10.0).abs() < 0.5, "{:?}", at(4));
+        assert!(at(6).base.x > at(5).base.x);
+    }
+    let empty = carets(&spec("", pen())).expect("empty text");
+    assert_eq!(empty.len(), 1);
+    assert!((empty[0].base - Point::new(10.0, 20.0)).hypot() < 1e-6);
+}
+
+#[test]
+fn letters_stand_upright_on_the_y_down_page() {
+    // "F": its long bar is at the top, so above the baseline (smaller y) on the page.
+    for font in [pen(), font()] {
+        let mut engine = Engine::default();
+        let id = add(&mut engine, spec("F", font.clone()));
+        let b = kurbo::Shape::bounding_box(&engine.doc.get_shape(id).unwrap().path);
+        assert!(b.y1 <= 20.0 + 1e-6 && b.y0 < 15.0, "{} {b:?}", font.family);
+        // Ungrouping keeps every letter where it was.
+        let id = add(&mut engine, spec("Fy\nFy", font.clone()));
+        let before = kurbo::Shape::bounding_box(&engine.doc.get_shape(id).unwrap().path);
+        for to in [UngroupTo::Lines, UngroupTo::Letters] {
+            let Effect::ShapesAdded { ids } = engine.run(Command::TextUngroup { id, to }).unwrap()
+            else {
+                panic!("pieces");
+            };
+            let after = ids
+                .iter()
+                .map(|i| kurbo::Shape::bounding_box(&engine.doc.get_shape(*i).unwrap().path))
+                .reduce(|a, b| a.union(b))
+                .unwrap();
+            assert!(
+                (after.y0 - before.y0).abs() < 0.05 && (after.y1 - before.y1).abs() < 0.05,
+                "{to:?} {} {before:?} {after:?}",
+                font.family
+            );
+            engine.undo();
+        }
+    }
 }

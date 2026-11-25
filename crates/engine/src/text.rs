@@ -312,6 +312,70 @@ struct Glyph {
     len: usize,
 }
 
+/// A caret position in document mm: `base` on the baseline, `top` above it by most of the
+/// em, so the line between them is the caret drawn while typing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Caret {
+    /// The character boundary (byte index into the text) the caret stands before.
+    pub byte: usize,
+    pub base: Point,
+    pub top: Point,
+}
+
+/// Every caret position of `spec`'s text, in byte order, laid out as the shape's path is.
+/// A caret before a letter stands at its pen position; one at a line's end after the last
+/// letter's advance; one on an empty line at the line's alignment point.
+pub fn carets(spec: &TextSpec) -> Result<Vec<Caret>, EngineError> {
+    const NAME: &str = "text.carets";
+    let glyphs = straight(spec, NAME)?;
+    let xfs = placements(spec, &glyphs);
+    let em = spec.size / POINTS_PER_MM;
+    let pitch = 1.2 * em * spec.line_spacing / 100.0;
+    let up = Vec2::new(0.0, 0.75 * em);
+    let base_xf = Affine::new(spec.transform) * Affine::translate((spec.x, spec.y)) * UPRIGHT;
+    let starts = spec.text.char_indices().map(|(b, _)| b);
+    let mut out = Vec::new();
+    for byte in starts.chain(std::iter::once(spec.text.len())) {
+        let at_line_end = byte == spec.text.len()
+            || spec
+                .text
+                .get(byte..)
+                .is_some_and(|rest| rest.starts_with('\n'));
+        let before = || {
+            glyphs
+                .iter()
+                .zip(&xfs)
+                .find(|(g, _)| g.byte == byte)
+                .map(|(g, xf)| (*xf, g.origin))
+        };
+        let after = || {
+            glyphs
+                .iter()
+                .zip(&xfs)
+                .rfind(|(g, _)| g.byte.saturating_add(g.len) == byte)
+                .map(|(g, xf)| (*xf, g.origin + Vec2::new(g.advance, 0.0)))
+        };
+        let found = if at_line_end {
+            after().or_else(before)
+        } else {
+            before().or_else(after)
+        };
+        let (xf, point) = found.unwrap_or_else(|| {
+            let line = spec
+                .text
+                .get(..byte)
+                .map_or(0, |head| head.matches('\n').count());
+            (base_xf, Point::new(0.0, -(line as f64) * pitch))
+        });
+        out.push(Caret {
+            byte,
+            base: xf * point,
+            top: xf * (point + up),
+        });
+    }
+    Ok(out)
+}
+
 /// Lays a spec out to its cut path in document mm.
 fn layout(spec: &TextSpec, command: &str) -> Result<BezPath, EngineError> {
     let glyphs = straight(spec, command)?;
@@ -502,9 +566,13 @@ fn justify(glyphs: &mut [Glyph]) {
 }
 
 /// Each glyph's transform from straight text space to the document.
+/// Text space is y up and the document y down (the canvas, SVG and the cutter all draw y
+/// downwards), so letters turn over at the anchor to stand upright on the page.
+const UPRIGHT: Affine = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+
 fn placements(spec: &TextSpec, glyphs: &[Glyph]) -> Vec<Affine> {
     let doc = Affine::new(spec.transform);
-    let anchor = Affine::translate((spec.x, spec.y));
+    let anchor = Affine::translate((spec.x, spec.y)) * UPRIGHT;
     let starts: Vec<usize> = spec.text.char_indices().map(|(b, _)| b).collect();
     let char_index = |byte: usize| starts.partition_point(|&b| b < byte);
     let nudge = |g: &Glyph| {
@@ -564,9 +632,11 @@ fn placements(spec: &TextSpec, glyphs: &[Glyph]) -> Vec<Affine> {
                 .map(|g| {
                     let gx = centre(g);
                     let (at, tangent) = track.at(from + gx);
-                    let normal = Vec2::new(-tangent.y, tangent.x);
-                    doc * Affine::translate(at.to_vec2() + normal * *offset_mm)
+                    // Letters stand on the side the page shows as above the path.
+                    let above = Vec2::new(tangent.y, -tangent.x);
+                    doc * Affine::translate(at.to_vec2() + above * *offset_mm)
                         * Affine::rotate(tangent.y.atan2(tangent.x))
+                        * UPRIGHT
                         * Affine::translate((-gx, 0.0))
                         * nudge(g)
                 })
@@ -935,7 +1005,8 @@ fn ungroup(engine: &mut Engine, id: u64, to: UngroupTo) -> Result<Effect, Engine
                 let at = whole * Point::ZERO;
                 letter.x = at.x;
                 letter.y = at.y;
-                letter.transform = (whole * Affine::translate(-at.to_vec2())).as_coeffs();
+                // Its own layout turns it upright again, so undo that turn here.
+                letter.transform = (whole * UPRIGHT * Affine::translate(-at.to_vec2())).as_coeffs();
                 fold_translation(&mut letter);
                 pieces.push(letter);
             }
@@ -962,7 +1033,7 @@ fn ungroup(engine: &mut Engine, id: u64, to: UngroupTo) -> Result<Effect, Engine
                 }
                 let shift = first.origin - first_origin(&line, NAME)?;
                 line.x = spec.x + shift.x;
-                line.y = spec.y + shift.y;
+                line.y = spec.y - shift.y;
                 line.transform = spec.transform;
                 pieces.push(line);
             }

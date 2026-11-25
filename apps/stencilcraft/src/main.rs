@@ -8439,6 +8439,60 @@ mod tests {
     }
 
     #[test]
+    fn text_style_segments_keep_their_whole_labels_in_a_narrow_panel() {
+        // Regression: in the default panel width the pin narrowed the Justification and
+        // Direction strips and elided their segments ("Ce…", "R…", "Horizo…", "Vert…").
+        use egui::accesskit::Role;
+        let labels = ["Left", "Centre", "Right", "Justify", "Horizontal", "Vertical"];
+        let widths = |width: f32| {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            crate::framework::install_headless(&ctx).unwrap();
+            let mut app = StencilApp::new(None);
+            let mut out = None;
+            for pass in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1000.0, 800.0),
+                        )),
+                        time: Some(f64::from(pass) * 0.5),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.allocate_ui(egui::vec2(width, 800.0), |ui| {
+                            ui.set_max_width(width);
+                            app.text_style_panel(ui);
+                        });
+                    },
+                );
+                out = Some(output);
+            }
+            let out = out.unwrap();
+            let tree = out.platform_output.accesskit_update.as_ref().unwrap();
+            labels.map(|label| {
+                let node = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == Role::RadioButton && node.label() == Some(label))
+                    .unwrap_or_else(|| panic!("missing segment {label}"))
+                    .1;
+                let bounds = node.bounds().unwrap();
+                (bounds.x1 - bounds.x0) as f32
+            })
+        };
+        let wide = widths(900.0);
+        let narrow = widths(180.0);
+        for ((label, wide), narrow) in labels.iter().zip(wide).zip(narrow) {
+            assert!(
+                (narrow - wide).abs() < 0.5,
+                "{label}: {narrow} px in a narrow panel, {wide} px with room"
+            );
+        }
+    }
+
+    #[test]
     fn a_guide_drag_previews_its_updates_and_changes_the_document_once() {
         // Regression: one drag out of the left ruler added a guide per drag update (four).
         use craft_behavior::{Axis, EditEvent, EditEvents, GestureId, Mixed};

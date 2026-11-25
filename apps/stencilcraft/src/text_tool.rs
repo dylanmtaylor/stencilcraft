@@ -741,14 +741,16 @@ impl StencilApp {
                         &numbers,
                     );
                 });
-                let _ = Segmented::new(
-                    "Justification",
-                    Bind::bound(&mut style.align),
-                    &align_entries,
-                )
-                .id_salt("text-align")
-                .size(ControlSize::Sm)
-                .show(ui);
+                whole_width(ui, "text-align-strip", |ui| {
+                    let _ = Segmented::new(
+                        "Justification",
+                        Bind::bound(&mut style.align),
+                        &align_entries,
+                    )
+                    .id_salt("text-align")
+                    .size(ControlSize::Sm)
+                    .show(ui);
+                });
                 let _ = Section::new("Spacing")
                     .id_salt("text-spacing")
                     .show(ui, |ui, _| {
@@ -777,14 +779,16 @@ impl StencilApp {
                         let _ = Checkbox::new(Bind::bound(&mut style.kerning))
                             .label("Kerning")
                             .show(ui);
-                        let _ = Segmented::new(
-                            "Direction",
-                            Bind::bound(&mut style.vertical),
-                            &direction_entries,
-                        )
-                        .id_salt("text-direction")
-                        .size(ControlSize::Sm)
-                        .show(ui);
+                        whole_width(ui, "text-direction-strip", |ui| {
+                            let _ = Segmented::new(
+                                "Direction",
+                                Bind::bound(&mut style.vertical),
+                                &direction_entries,
+                            )
+                            .id_salt("text-direction")
+                            .size(ControlSize::Sm)
+                            .show(ui);
+                        });
                     });
                 if let Some(flow) = flow.as_mut() {
                     let _ = Section::new("Flow").id_salt("text-flow").show(ui, |ui, _| {
@@ -1079,6 +1083,17 @@ fn flow_controls(
                 .show(ui);
         }
     }
+}
+
+/// Shows `add` (a segmented strip) at its whole width, its labels in full as before the pin:
+/// the pin narrows a control wider than the room its row leaves, eliding the segments
+/// ("Ce…", "Horizo…"). In a horizontal scroll area the room is unbounded (egui gives its
+/// content no width limit along a scrolling axis), so the strip keeps its natural width; the
+/// area is as wide as the strip where it fits and scrolls where the panel is narrower.
+fn whole_width(ui: &mut egui::Ui, salt: &str, add: impl FnOnce(&mut egui::Ui)) {
+    egui::ScrollArea::horizontal()
+        .id_salt(salt)
+        .show(ui, add);
 }
 
 #[cfg(test)]

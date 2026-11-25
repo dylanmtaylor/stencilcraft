@@ -149,11 +149,14 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     validation. Desktop USB and paired BLE discovery and submission are available; live status, active Bluetooth scanning, interactive mat preview,
     multi-cutter output and batch jobs remain open. Cricut hardware control is out of
     scope without a public protocol.
-23. **Path editing tools**: shape creation has a live drag outline matching the committed geometry. missing freehand and smoothed freehand, arc, knife, eraser,
-    break/join/close path, release compound path, simplify, flip/mirror buttons, a
-    clipboard, Paste in Front, Select by Color, Detach Lines, a rotation handle on the
-    selection, a reference-point picker for the X/Y fields, a preference for what a tool
-    does after use, a node-count readout, and warp.
+23. **Path editing tools**: the desktop now has Silhouette's drawing set — Line, Polyline,
+    Curve, Arc, Freehand, Smooth Freehand, Knife and Eraser — with Shift/Alt modifiers,
+    polygon/star/corner options, and point editing with click-to-add, a right-click point
+    menu, drag-an-end-to-join, break/join/close, corner/smooth, flat/curve, simplify and a
+    node count (Points panel). Still to check or build against Silhouette: on-canvas
+    rounded-corner handles (needs parametric rounded rectangles), clipboard and Paste in
+    Front, Select by Color, Detach Lines, a rotation handle on the selection, a preference
+    for what a tool does after use, and warp.
 24. **Trace**: engine/MCP support filtering, outer-edge and detach modes and background
     removal; the desktop trace workflow still needs these controls and a live preview.
     Multi-colour tracing to layers remains missing. Observed in SS 5.0.556 (2026-11-23,

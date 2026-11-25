@@ -181,6 +181,15 @@ pub struct PanelState {
     pub star_inner_pct: f64,
     /// A new rounded rectangle's corner radius, capped at half its shorter side.
     pub corner_radius_mm: f64,
+    /// Knife: Solid (closed pieces) or Outline (open lines, Silhouette's default).
+    pub knife_solid: bool,
+    /// Knife: the gap left along the cut.
+    pub knife_gap_mm: f64,
+    /// Eraser: Solid (Silhouette's default) removes area; Outline removes lines.
+    pub eraser_solid: bool,
+    /// Eraser: a round brush, else square.
+    pub eraser_round: bool,
+    pub eraser_size_mm: f64,
 }
 
 impl PanelState {
@@ -244,6 +253,11 @@ impl Default for PanelState {
             star_points: 5.0,
             star_inner_pct: 50.0,
             corner_radius_mm: 5.0,
+            knife_solid: false,
+            knife_gap_mm: 0.0,
+            eraser_solid: true,
+            eraser_round: true,
+            eraser_size_mm: 5.0,
         }
     }
 }

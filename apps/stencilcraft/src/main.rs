@@ -184,6 +184,8 @@ pub enum ActiveTool {
     Arc,
     Freehand,
     SmoothFreehand,
+    Knife,
+    Eraser,
     Rect,
     RoundedRect,
     Ellipse,
@@ -210,6 +212,8 @@ impl ActiveTool {
             Self::Arc => Icon::RouteCurved,
             Self::Freehand => Icon::Pencil,
             Self::SmoothFreehand => Icon::Brush,
+            Self::Knife => Icon::SliceKnife,
+            Self::Eraser => Icon::Eraser,
             Self::Rect => Icon::Square,
             Self::RoundedRect => Icon::FramePlaceholder,
             Self::Ellipse => Icon::Circle,
@@ -236,6 +240,8 @@ impl ActiveTool {
             Self::Arc => "Arc",
             Self::Freehand => "Freehand",
             Self::SmoothFreehand => "Smooth Freehand",
+            Self::Knife => "Knife",
+            Self::Eraser => "Eraser",
             Self::Rect => "Rectangle",
             Self::RoundedRect => "Rounded Rectangle",
             Self::Ellipse => "Ellipse",
@@ -328,6 +334,14 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
                 RailTool::new(ActiveTool::Freehand, Icon::Pencil, "Freehand").shortcut("N"),
                 RailTool::new(ActiveTool::SmoothFreehand, Icon::Brush, "Smooth Freehand"),
             ],
+        ),
+        ToolSlot::new(
+            8,
+            vec![RailTool::new(ActiveTool::Eraser, Icon::Eraser, "Eraser").shortcut("E")],
+        ),
+        ToolSlot::new(
+            9,
+            vec![RailTool::new(ActiveTool::Knife, Icon::SliceKnife, "Knife").shortcut("K")],
         ),
         ToolSlot::new(
             4,
@@ -1438,6 +1452,86 @@ impl StencilApp {
         }
     }
 
+    /// The Knife: cut the selected shapes along `from` → `to` with the options bar's mode and gap.
+    /// Like Silhouette it needs a selection; the pieces become the new selection.
+    pub fn knife_cut(&mut self, from: stencilcraft_geom::Point, to: stencilcraft_geom::Point) {
+        if self.selected_shapes.is_empty() {
+            self.status = "select the shapes to cut first".to_string();
+            return;
+        }
+        let mode = if self.panels.knife_solid {
+            stencilcraft_engine::cut_tools::CutMode::Solid
+        } else {
+            stencilcraft_engine::cut_tools::CutMode::Outline
+        };
+        let gap_mm = if self.panels.knife_gap_mm.is_finite() {
+            self.panels.knife_gap_mm.clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+        self.run_cut(Command::ShapesKnife {
+            ids: self.selected_shapes.clone(),
+            from: [from.x, from.y],
+            to: [to.x, to.y],
+            mode,
+            gap_mm,
+        });
+    }
+
+    /// The Eraser: erase along `points` from the selected shapes, or from every visible,
+    /// unlocked shape when nothing is selected.
+    pub fn erase_stroke(&mut self, points: &[stencilcraft_geom::Point]) {
+        let ids = if self.selected_shapes.is_empty() {
+            self.engine
+                .doc
+                .layers
+                .iter()
+                .filter(|layer| layer.visible && !layer.locked && !layer.template)
+                .flat_map(|layer| layer.shapes.iter())
+                .filter(|shape| !shape.hidden && !shape.locked)
+                .map(|shape| shape.id)
+                .collect()
+        } else {
+            self.selected_shapes.clone()
+        };
+        if ids.is_empty() || points.is_empty() {
+            return;
+        }
+        let size_mm = if self.panels.eraser_size_mm.is_finite() {
+            self.panels.eraser_size_mm.clamp(0.01, 500.0)
+        } else {
+            5.0
+        };
+        self.run_cut(Command::ShapesErase {
+            ids,
+            points: points.iter().map(|p| [p.x, p.y]).collect(),
+            size_mm,
+            brush: if self.panels.eraser_round {
+                stencilcraft_engine::cut_tools::BrushShape::Round
+            } else {
+                stencilcraft_engine::cut_tools::BrushShape::Square
+            },
+            mode: if self.panels.eraser_solid {
+                stencilcraft_engine::cut_tools::CutMode::Solid
+            } else {
+                stencilcraft_engine::cut_tools::CutMode::Outline
+            },
+        });
+    }
+
+    fn run_cut(&mut self, command: Command) {
+        match self.engine.run(command) {
+            Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => {
+                self.path_selection = PathSelection::default();
+                self.set_selection(ids);
+                self.status = "cut".to_string();
+            }
+            Ok(_) => self.status = "done".to_string(),
+            Err(error) => self.status = error.to_string(),
+        }
+        self.retain_valid_selection();
+    }
+
     /// Place the arc being swept as an open cut path; the Arc tool stays active.
     pub fn commit_arc_draft(&mut self) {
         if let Some(path) = self.arc_draft.take().and_then(|draft| draft.path()) {
@@ -1679,6 +1773,10 @@ impl StencilApp {
             self.active_tool = ActiveTool::Line;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::N)) {
             self.active_tool = ActiveTool::Freehand;
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::E)) {
+            self.active_tool = ActiveTool::Eraser;
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::K)) {
+            self.active_tool = ActiveTool::Knife;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::R)) {
             self.active_tool = ActiveTool::Rect;
         } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::U)) {
@@ -2602,6 +2700,11 @@ impl StencilApp {
         let mut new_kerf = None;
         let mut do_unite = false;
         let mut do_minus = false;
+        let mut knife_solid = self.panels.knife_solid;
+        let mut knife_gap = self.panels.knife_gap_mm;
+        let mut eraser_solid = self.panels.eraser_solid;
+        let mut eraser_round = self.panels.eraser_round;
+        let mut eraser_size = self.panels.eraser_size_mm;
         let mut shape_options = (
             self.panels.polygon_sides,
             self.panels.star_points,
@@ -2648,6 +2751,40 @@ impl StencilApp {
                             }
                             ActiveTool::RoundedRect => {
                                 field(ui, "opt-corner", "Corner", corner, 0.0..=500.0, "{n} mm");
+                                true
+                            }
+                            ActiveTool::Knife => {
+                                let _ = ui.add(
+                                    ToggleButton::new("Solid", &mut knife_solid)
+                                        .size(ControlSize::Sm),
+                                );
+                                field(
+                                    ui,
+                                    "opt-knife-gap",
+                                    "Gap",
+                                    &mut knife_gap,
+                                    0.0..=100.0,
+                                    "{n} mm",
+                                );
+                                true
+                            }
+                            ActiveTool::Eraser => {
+                                let _ = ui.add(
+                                    ToggleButton::new("Solid", &mut eraser_solid)
+                                        .size(ControlSize::Sm),
+                                );
+                                let _ = ui.add(
+                                    ToggleButton::new("Round", &mut eraser_round)
+                                        .size(ControlSize::Sm),
+                                );
+                                field(
+                                    ui,
+                                    "opt-eraser-size",
+                                    "Size",
+                                    &mut eraser_size,
+                                    0.1..=500.0,
+                                    "{n} mm",
+                                );
                                 true
                             }
                             _ => false,
@@ -2787,6 +2924,11 @@ impl StencilApp {
             self.panels.star_inner_pct,
             self.panels.corner_radius_mm,
         ) = shape_options;
+        self.panels.knife_solid = knife_solid;
+        self.panels.knife_gap_mm = knife_gap;
+        self.panels.eraser_solid = eraser_solid;
+        self.panels.eraser_round = eraser_round;
+        self.panels.eraser_size_mm = eraser_size;
         if let Some(k) = new_kerf {
             self.run_command(Command::KerfSet { width_mm: k });
         }
@@ -4260,8 +4402,109 @@ impl StencilApp {
                 self.commit_freehand(&stroke, smooth, px_mm);
                 ui.ctx().request_repaint();
             }
-        } else {
+        } else if self.active_tool != ActiveTool::Eraser {
             self.freehand_stroke = None;
+        }
+
+        // Knife: drag the cut line across the selection (Shift snaps to 45°).
+        if self.active_tool == ActiveTool::Knife && !overlay_claimed {
+            let mods = DragMods::from(ui.input(|input| input.modifiers));
+            if response.drag_started()
+                && let Some(press) = ui.input(|input| input.pointer.press_origin())
+            {
+                let world_pt = self.view.screen_to_world(press.to_vec2());
+                self.shape_drag_start = Some(world_pt);
+                self.shape_drag_current = Some(world_pt);
+            }
+            if response.dragged()
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                self.shape_drag_current = Some(self.view.screen_to_world(pointer.to_vec2()));
+            }
+            if let (Some(start), Some(current)) = (self.shape_drag_start, self.shape_drag_current) {
+                let end = line_end(start, current, mods);
+                let mut cut = stencilcraft_geom::BezPath::new();
+                cut.move_to(start);
+                cut.line_to(end);
+                stencilcraft_ui_egui::paint_preview_paths(
+                    &painter,
+                    &view,
+                    &[cut],
+                    stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+                );
+                if let Some(pointer) = response.interact_pointer_pos() {
+                    Readout::new("knife-readout")
+                        .row("L", format!("{:.1} mm", (end - start).hypot()))
+                        .show(ui.ctx(), pointer);
+                }
+            }
+            if response.drag_stopped()
+                && let (Some(start), Some(current)) =
+                    (self.shape_drag_start.take(), self.shape_drag_current.take())
+            {
+                self.knife_cut(start, line_end(start, current, mods));
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // Eraser: the stroke follows the pointer; the brush is shown under it.
+        if self.active_tool == ActiveTool::Eraser {
+            let px_mm = 1.0 / f64::from(view.zoom.max(f32::EPSILON));
+            if !overlay_claimed && response.drag_started() {
+                let mut stroke = freehand::Stroke::default();
+                if let Some(press) = ui.input(|input| input.pointer.press_origin()) {
+                    stroke.push(self.view.screen_to_world(press.to_vec2()), 0.0);
+                }
+                self.freehand_stroke = Some(stroke);
+            }
+            if let (Some(stroke), Some(pointer)) = (
+                self.freehand_stroke.as_mut(),
+                response.interact_pointer_pos(),
+            ) && response.dragged()
+            {
+                stroke.push(self.view.screen_to_world(pointer.to_vec2()), px_mm);
+            }
+            let brush = if self.panels.eraser_round {
+                stencilcraft_engine::cut_tools::BrushShape::Round
+            } else {
+                stencilcraft_engine::cut_tools::BrushShape::Square
+            };
+            let size = if self.panels.eraser_size_mm.is_finite() {
+                self.panels.eraser_size_mm.clamp(0.01, 500.0)
+            } else {
+                5.0
+            };
+            let mut preview = Vec::new();
+            if let Some(stroke) = &self.freehand_stroke {
+                preview.push(stencilcraft_engine::cut_tools::brush_region(
+                    &stroke.points,
+                    size,
+                    brush,
+                ));
+            } else if let Some(pointer) = response.hover_pos() {
+                let at = self.view.screen_to_world(pointer.to_vec2());
+                preview.push(stencilcraft_engine::cut_tools::brush_region(
+                    &[at],
+                    size,
+                    brush,
+                ));
+                ui.ctx().request_repaint();
+            }
+            stencilcraft_ui_egui::paint_preview_paths(
+                &painter,
+                &view,
+                &preview,
+                stencilcraft_ui_egui::Palette::for_theme(self.theme).kerf_line,
+            );
+            if response.drag_stopped()
+                && let Some(mut stroke) = self.freehand_stroke.take()
+            {
+                if let Some(pointer) = ui.input(|input| input.pointer.latest_pos()) {
+                    stroke.push(self.view.screen_to_world(pointer.to_vec2()), px_mm);
+                }
+                self.erase_stroke(&stroke.points);
+                ui.ctx().request_repaint();
+            }
         }
 
         // Live shape creation via drag
@@ -4356,7 +4599,11 @@ impl StencilApp {
             && self.active_tool.click_kind().is_none()
             && !matches!(
                 self.active_tool,
-                ActiveTool::Arc | ActiveTool::Freehand | ActiveTool::SmoothFreehand
+                ActiveTool::Arc
+                    | ActiveTool::Freehand
+                    | ActiveTool::SmoothFreehand
+                    | ActiveTool::Knife
+                    | ActiveTool::Eraser
             )
         {
             if response.drag_started()
@@ -5821,6 +6068,34 @@ mod tests {
         dot.push(Point::new(1.0, 1.0), 0.1);
         app.commit_freehand(&dot, false, 0.1);
         assert_eq!(app.engine.doc.shape_count(), 2);
+    }
+
+    #[test]
+    fn knife_needs_a_selection_and_eraser_defaults_to_every_shape() {
+        use stencilcraft_geom::Point;
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 10.0,
+        });
+        app.set_selection([]);
+        app.knife_cut(Point::new(10.0, -5.0), Point::new(10.0, 15.0));
+        assert_eq!(app.engine.doc.shape_count(), 1, "no selection, no cut");
+
+        app.set_selection([1]);
+        app.panels.knife_solid = true;
+        app.knife_cut(Point::new(10.0, -5.0), Point::new(10.0, 15.0));
+        assert_eq!(app.engine.doc.shape_count(), 2, "Solid: two closed halves");
+        assert_eq!(app.selected_shapes.len(), 2, "the pieces are selected");
+
+        // Nothing selected: a solid square brush across both halves trims each.
+        app.set_selection([]);
+        app.panels.eraser_round = false;
+        app.panels.eraser_size_mm = 2.0;
+        app.erase_stroke(&[Point::new(-5.0, 5.0), Point::new(25.0, 5.0)]);
+        assert_eq!(app.engine.doc.shape_count(), 4, "each half split in two");
     }
 
     #[test]

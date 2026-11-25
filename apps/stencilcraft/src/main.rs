@@ -538,7 +538,9 @@ fn main() -> Result<(), String> {
         });
     }
 
-    let viewport = craft_window::policy::apply(viewport, &decision.frame);
+    let viewport = craft_window::policy::apply(viewport, &decision.frame)
+        .with_min_inner_size([960.0, 640.0])
+        .with_maximized(true);
 
     let mut app = StencilApp::new(open_path.as_deref());
     app.window_frame = decision.frame;
@@ -564,7 +566,8 @@ pub enum WorkspacePanel {
     Canvas,
     Tools,
     Inspector,
-    Layers,
+    Geometry,
+    Operations,
     Transform,
     Replicate,
     Offset,
@@ -582,7 +585,8 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Canvas => self.app.canvas_body(ui),
             WorkspacePanel::Tools => self.app.tools_panel(ui),
             WorkspacePanel::Inspector => self.app.inspector_panel(ui),
-            WorkspacePanel::Layers => self.app.layers_panel(ui),
+            WorkspacePanel::Geometry => self.app.geometry_panel(ui),
+            WorkspacePanel::Operations => self.app.operations_panel(ui),
             WorkspacePanel::Transform => self.app.transform_panel(ui),
             WorkspacePanel::Replicate => self.app.replicate_panel(ui),
             WorkspacePanel::Offset => self.app.offset_panel(ui),
@@ -596,7 +600,8 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Canvas => "Canvas",
             WorkspacePanel::Tools => "Tools",
             WorkspacePanel::Inspector => "Properties",
-            WorkspacePanel::Layers => "Layers",
+            WorkspacePanel::Geometry => "Geometry",
+            WorkspacePanel::Operations => "Operations",
             WorkspacePanel::Transform => "Transform",
             WorkspacePanel::Replicate => "Replicate",
             WorkspacePanel::Offset => "Offset",
@@ -1015,7 +1020,8 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                 side: Side::End,
                 columns: vec![Column::new(
                     vec![
-                        Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Layers], 0),
+                        Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Geometry], 1),
+                        Group::new(vec![WorkspacePanel::Operations], 0),
                         // Silhouette's right-hand panel strip.
                         Group::new(
                             vec![
@@ -5500,7 +5506,7 @@ mod tests {
         app.workspace
             .apply_all(
                 [Action::Move {
-                    panel: WorkspacePanel::Layers,
+                    panel: WorkspacePanel::Operations,
                     anchor: WorkspacePanel::Inspector,
                     placement: Placement::Group {
                         below: true,

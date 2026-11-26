@@ -2185,20 +2185,33 @@ impl StencilApp {
             self.status = format!("{path} is open");
             return;
         }
-        match stencilcraft_doc::load_from(path) {
-            Ok(doc) => {
+        // A Silhouette Studio document opens as a new, unsaved StencilCraft document, so Save
+        // never overwrites the Silhouette file.
+        let loaded = match stencilcraft_studio::import_path(path) {
+            Ok(Some(imported)) => Ok((imported.doc, false)),
+            Ok(None) => stencilcraft_doc::load_from(path)
+                .map(|doc| (doc, true))
+                .map_err(|e| e.to_string()),
+            Err(error) => Err(error),
+        };
+        match loaded {
+            Ok((doc, native)) => {
                 if !self.tab_for_new_document() {
                     return;
                 }
                 self.engine = stencilcraft_engine::Engine::new(doc);
                 self.saved_document = self.engine.doc.clone();
                 self.set_selection([]);
-                self.open_path = Some(path.to_string());
+                self.open_path = native.then(|| path.to_string());
                 self.view_initialized = false;
                 self.last_board = None;
                 self.kerf_preview_cache = None;
                 self.record_recent_file(path.to_string());
-                self.status = format!("opened {path}");
+                self.status = if native {
+                    format!("opened {path}")
+                } else {
+                    format!("opened {path} (Silhouette Studio); Save writes a StencilCraft file")
+                };
             }
             Err(error) => self.status = format!("open: {error}"),
         }
@@ -3953,6 +3966,7 @@ impl StencilApp {
             TopMenuAction::OpenDoc => {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("StencilCraft", &[stencilcraft_doc::FORMAT_EXTENSION])
+                    .add_filter("Silhouette Studio", &["studio3", "studio"])
                     .pick_file()
                 {
                     self.open_document(&path.to_string_lossy());
@@ -8517,6 +8531,37 @@ mod tests {
             app.send.firmware.as_ref().map(String::len),
             Some(64),
             "capped"
+        );
+    }
+
+    /// A rectangle saved in Silhouette Studio 5.0.556 (not committed: `STUDIO_SAMPLES` names
+    /// the folder), 53.47 mm from the left and 51.19 mm from the top.
+    #[test]
+    fn silhouette_documents_open_upright_as_new_unsaved_documents() {
+        let Some(path) = std::env::var("STUDIO_SAMPLES")
+            .ok()
+            .map(|d| std::path::Path::new(&d).join("r2.studio3"))
+            .filter(|p| p.exists())
+        else {
+            return;
+        };
+        let mut app = StencilApp::new(None);
+        app.open_document(&path.to_string_lossy());
+        assert_eq!(app.engine.doc.shape_count(), 1, "{}", app.status);
+        assert_eq!(
+            app.open_path, None,
+            "Save must not overwrite the Silhouette file"
+        );
+        let b = app
+            .engine
+            .doc
+            .layers
+            .iter()
+            .find_map(|l| l.bounds())
+            .unwrap();
+        assert!(
+            (b.x0 - 53.467).abs() < 0.01 && (b.y0 - 51.191).abs() < 0.01,
+            "y down: {b:?}"
         );
     }
 

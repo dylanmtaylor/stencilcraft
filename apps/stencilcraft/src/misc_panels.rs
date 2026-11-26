@@ -122,6 +122,19 @@ impl StencilApp {
                     .id_salt("pref-units")
                     .show(ui);
                 ui.separator();
+                ui.label("Import");
+                hint(ui, "DXF files open:");
+                let _ = Segmented::new(
+                    "DXF: Open",
+                    Bind::bound(&mut prefs.dxf_fit_to_page),
+                    &[Entry::new(true, "Fit to Page"), Entry::new(false, "As-is")],
+                )
+                .id_salt("pref-dxf-open")
+                .show(ui);
+                let _ = Checkbox::new(Bind::bound(&mut prefs.import_join_lines))
+                    .label("Join lines into polylines")
+                    .show(ui);
+                ui.separator();
                 ui.label("Tools");
                 let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))
                     .label("Return to the Select tool after drawing a shape")

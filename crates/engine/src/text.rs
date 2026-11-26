@@ -1212,6 +1212,12 @@ pub fn glyph_preview(family: &str, style: &str, c: char) -> Option<GlyphPreview>
     })
 }
 
+/// Loads the font file at `path` (TTF, OTF or TTC, at most 64 MiB) for text; returns the
+/// families it holds. The family list of [`fonts`] includes them afterwards.
+pub fn load_font(path: &str) -> Result<Vec<String>, String> {
+    load_font_file(FontDb::global(), path)
+}
+
 /// Reads a font file (at most 64 MiB) into `db`; returns the families it holds.
 fn load_font_file(db: &FontDb, path: &str) -> Result<Vec<String>, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;

@@ -1411,6 +1411,9 @@ pub struct StencilApp {
     pub text_family: String,
     pub text_size: f64,
     pub text_fonts: Vec<stencilcraft_engine::text::FontFamily>,
+    /// Font files loaded with Text Style › Load Font File…: family → file, so new text in
+    /// that family records the file and reloads it wherever the design is opened.
+    pub font_files: std::collections::BTreeMap<String, String>,
     /// The Glyphs panel's category, zoom and recent glyphs.
     pub glyphs_settings: craft_font_manager::glyphs::GlyphsPanelSettings,
     /// The rest of the Text Style panel's settings.
@@ -1746,6 +1749,7 @@ impl StencilApp {
             text_family: String::new(),
             text_size: text_tool::DEFAULT_TEXT_SIZE_PT,
             text_fonts: Vec::new(),
+            font_files: std::collections::BTreeMap::new(),
             glyphs_settings: craft_font_manager::glyphs::GlyphsPanelSettings::default(),
             text_style: text_tool::TextStyle::default(),
             text_session: None,

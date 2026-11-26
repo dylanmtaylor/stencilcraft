@@ -139,7 +139,7 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
 }
 
 /// The document as a `.studio3` file Silhouette Studio opens: the board as the page, each
-/// visible shape's contours as outlines (curves flattened), with their line colour, line
+/// visible shape as one Silhouette shape with its contours and curves, its line colour, line
 /// width and fill. Placed images, text styling and cut settings are not written.
 pub fn export(doc: &Document) -> Result<Vec<u8>, StudioError> {
     let to_page = Affine::IDENTITY;
@@ -160,17 +160,11 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, StudioError> {
                 .or(layer.color.as_deref()));
             let fill_rgb = hex(shape.production.fill_color.as_deref());
             let width_mm = shape.production.stroke_width_mm.unwrap_or(0.0);
-            for line in stencilcraft_geom::path_to_polylines(
-                &path,
-                stencilcraft_geom::DEFAULT_FLATTEN_STEPS,
-            ) {
-                let points: Vec<(f64, f64)> = line.points.iter().map(|p| (p.x, p.y)).collect();
-                if points.len() < 2 {
-                    continue;
-                }
+            // One Silhouette shape per StencilCraft shape: its contours with their curves.
+            let contours = craft_silhouette_studio::WriteContour::from_path(&path);
+            if !contours.is_empty() {
                 shapes.push(craft_silhouette_studio::WriteShape {
-                    points,
-                    closed: line.closed,
+                    contours,
                     line_rgb,
                     fill_rgb,
                     width_mm,
@@ -337,6 +331,33 @@ mod tests {
         let dir = std::env::var("STUDIO_SAMPLES").ok()?;
         let bytes = std::fs::read(std::path::Path::new(&dir).join(name)).ok()?;
         import(&bytes, name).ok()
+    }
+
+    #[test]
+    fn exported_curves_stay_curves() {
+        let mut doc = Document::default();
+        let circle = kurbo::Shape::to_path(&kurbo::Circle::new((50.0, 50.0), 20.0), 0.1);
+        doc.push_shape(0, circle, CutStyle::Cut).unwrap();
+        let back = import(&export(&doc).unwrap(), "circle.studio3").unwrap();
+        let shape = back
+            .doc
+            .layers
+            .iter()
+            .flat_map(|l| &l.shapes)
+            .next()
+            .unwrap();
+        let curves = shape
+            .path
+            .elements()
+            .iter()
+            .filter(|e| matches!(e, kurbo::PathEl::CurveTo(..)))
+            .count();
+        assert!(curves >= 4, "{curves} curves");
+        let b = kurbo::Shape::bounding_box(&shape.path);
+        assert!(
+            (b.x0 - 30.0).abs() < 0.01 && (b.y1 - 70.0).abs() < 0.01,
+            "{b:?}"
+        );
     }
 
     #[test]

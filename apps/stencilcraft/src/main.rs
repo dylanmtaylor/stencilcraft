@@ -376,11 +376,11 @@ const MAX_GROUP_NAME: usize = 120;
 
 /// How near (screen points) the pointer must be to a selection box handle or a guide to be on it.
 const CONTROL_REACH_PX: f32 = 10.0;
-/// How far outside a selection box corner its rotate band reaches, in screen points.
-const ROTATE_BAND_PX: f32 = 24.0;
+/// How far out from the box the rotate knob's stem may reach, in screen points.
+const KNOB_REACH_PX: f32 = 60.0;
 
 /// Whether `at` (screen) is on the selection box of `bounds` (millimetres): one of its eight
-/// handles, or the rotate band just outside a corner. The app's canvas widget leaves those
+/// handles, or the rotate knob on its stem above (or below) the box. The app's canvas widget leaves those
 /// presses to the framework's transform box.
 fn over_selection_box_part(
     view: &stencilcraft_ui_egui::View,
@@ -402,8 +402,16 @@ fn over_selection_box_part(
     {
         return true;
     }
-    let screen = egui::Rect::from_points(&corners);
-    !screen.contains(at) && corners.iter().any(|c| c.distance(at) <= ROTATE_BAND_PX)
+    // Silhouette's rotate knob: on a stem out from the middle of the top side (the bottom side
+    // when there is no room above). The stem's whole reach counts, whatever the theme's length.
+    let centre = corners[0].lerp(corners[2], 0.5);
+    let on_stem = |mid: egui::Pos2| {
+        let out = (mid - centre).normalized();
+        let end = mid + out * KNOB_REACH_PX;
+        let along = (at - mid).dot(out).clamp(0.0, KNOB_REACH_PX);
+        (mid + out * along).distance(at) <= CONTROL_REACH_PX + 2.0 && (end - mid).length() > 0.0
+    };
+    on_stem(mids[0]) || on_stem(mids[2])
 }
 
 /// Whether `at` (screen) is on one of `guides`.
@@ -6067,7 +6075,7 @@ impl StencilApp {
                 })
                 .is_some()
             };
-            // The same for the selection box's handles and rotate band, and the guides.
+            // The same for the selection box's handles and rotate knob, and the guides.
             let press_or_hover = ui.input(|input| {
                 input
                     .pointer
@@ -6473,7 +6481,7 @@ impl StencilApp {
             }
 
             // The selection box: corner handles scale in proportion and edge handles stretch (as in
-            // Silhouette Studio), the band just outside a corner rotates (Shift snaps 15°). Presses
+            // Silhouette Studio), the knob above the box rotates (Shift snaps 15°). Presses
             // inside stay with the move-drag below, which snaps. One `shapes.affine` on release.
             if self.active_tool == ActiveTool::Select
                 && !overlay_claimed
@@ -6501,7 +6509,7 @@ impl StencilApp {
                     0.0,
                 )
                 .rules(rules)
-                .rotate_zone(craft_draw::ui::RotateZone::Band)
+                .rotate_zone(craft_draw::ui::RotateZone::Knob)
                 .inside_moves(false)
                 .reference_point(false)
                 .show_at(ui, body.rect);
@@ -8791,10 +8799,16 @@ mod tests {
             over_selection_box_part(&view, bounds, at(10.0, 10.0)),
             "corner"
         );
+        // The rotate knob above the middle of the top side.
+        let top_mid = at(30.0, 10.0);
+        assert!(
+            over_selection_box_part(&view, bounds, top_mid - egui::vec2(0.0, 30.0)),
+            "rotate knob"
+        );
         let corner = at(50.0, 40.0);
         assert!(
-            over_selection_box_part(&view, bounds, corner + egui::vec2(15.0, 12.0)),
-            "rotate band"
+            !over_selection_box_part(&view, bounds, corner + egui::vec2(15.0, 12.0)),
+            "the corner band no longer rotates"
         );
         assert!(
             !over_selection_box_part(&view, bounds, at(30.0, 25.0)),

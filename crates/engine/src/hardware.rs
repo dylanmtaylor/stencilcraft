@@ -57,6 +57,9 @@ pub enum HardwareCommand {
         /// Roller track enhancing.
         #[serde(default)]
         track_enhancing: bool,
+        /// Bytes per write to the machine (Silhouette's packet size); omitted is Auto, 1000.
+        #[serde(default)]
+        packet_bytes: Option<usize>,
     },
 }
 
@@ -114,6 +117,7 @@ fn execute(
         overcut_mm,
         weld,
         track_enhancing,
+        packet_bytes,
     } = command
     else {
         return devices();
@@ -211,7 +215,12 @@ fn execute(
     if let Some(target) = bluetooth {
         send_bluetooth(caps, target, &job)
     } else {
-        send_usb(caps, location, &job)
+        send_usb(
+            caps,
+            location,
+            &job,
+            packet_bytes.unwrap_or(machine::AUTO_PACKET_BYTES),
+        )
     }
 }
 
@@ -233,6 +242,7 @@ fn send_usb(
     caps: &machine::Capabilities,
     location: &str,
     job: &machine::CutJob,
+    packet: usize,
 ) -> Result<serde_json::Value, machine::MachineError> {
     let devices = machine::list_usb_devices()?;
     let device = devices
@@ -247,7 +257,8 @@ fn send_usb(
             "Selected USB device does not match the job model".into(),
         ));
     }
-    let transport = machine::UsbTransport::open(Some(location))?;
+    let transport =
+        machine::PacketTransport::new(machine::UsbTransport::open(Some(location))?, packet);
     let mut driver = machine::MachineDriver::new(caps.clone(), Box::new(transport));
     let report = driver.send(job, &mut machine::NoHooks)?;
     Ok(serde_json::json!({"sent":true,"bytes":report.bytes,"firmware":report.version}))
@@ -257,6 +268,7 @@ fn send_usb(
     _: &machine::Capabilities,
     _: &str,
     _: &machine::CutJob,
+    _: usize,
 ) -> Result<serde_json::Value, machine::MachineError> {
     devices()
 }
@@ -341,6 +353,7 @@ mod tests {
             overcut_mm: 0.0,
             weld: false,
             track_enhancing: false,
+            packet_bytes: None,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
     }
@@ -372,6 +385,7 @@ mod tests {
             overcut_mm: 0.0,
             weld: false,
             track_enhancing: false,
+            packet_bytes: None,
         };
         assert!(run(&engine.doc, &command).is_ok());
         if let HardwareCommand::Cut { force, .. } = &mut command {
@@ -439,6 +453,7 @@ mod tests {
             overcut_mm: 0.0,
             weld: false,
             track_enhancing: false,
+            packet_bytes: None,
         };
         assert!(run(&engine.doc, &command).is_err());
         engine.run(crate::Command::DocumentSetBoard {
@@ -484,6 +499,7 @@ mod tests {
             overcut_mm: 0.0,
             weld: false,
             track_enhancing: false,
+            packet_bytes: None,
         };
         let first = execute(&engine.doc, &command)?;
         if let HardwareCommand::Cut { passes, .. } = &mut command {

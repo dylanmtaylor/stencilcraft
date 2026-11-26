@@ -291,6 +291,38 @@ impl StencilApp {
                 .id_salt("pref-drag-select")
                 .show(ui);
                 ui.separator();
+                ui.label("Sending");
+                let mut auto = prefs.packet_bytes.is_none();
+                let _ = Segmented::new(
+                    "Packet size",
+                    Bind::bound(&mut auto),
+                    &[Entry::new(true, "Auto (1000)"), Entry::new(false, "Custom")],
+                )
+                .id_salt("pref-packet-size")
+                .show(ui);
+                if auto {
+                    prefs.packet_bytes = None;
+                } else {
+                    let mut bytes = prefs
+                        .packet_bytes
+                        .unwrap_or(stencilcraft_machine::AUTO_PACKET_BYTES)
+                        as f64;
+                    crate::panels::number(
+                        ui,
+                        "pref-packet-bytes",
+                        "Packet size",
+                        &mut bytes,
+                        64.0..=65_536.0,
+                        "{n} bytes",
+                        &numbers,
+                    );
+                    prefs.packet_bytes = Some(bytes.round().clamp(64.0, 65_536.0) as usize);
+                }
+                hint(
+                    ui,
+                    "Bytes sent to the cutter per write; lower it if a machine stops mid-job.",
+                );
+                ui.separator();
                 ui.label("Maintenance");
                 if button(ui, "Restore Factory Defaults…", true) {
                     restore = true;

@@ -48,11 +48,12 @@ pub use protocol::{
 pub use registry::{BUILTIN_MACHINES_TOML, DeviceRegistry, USB_VENDORS, UsbIds};
 #[cfg(feature = "serial")]
 pub use transport::SerialTransport;
+pub use transport::{
+    AUTO_PACKET_BYTES, FileTransport, MockTransport, PACKET_BYTES, PacketTransport,
+    RecordingTransport, TcpTransport, Transport, TransportSpec,
+};
 #[cfg(all(feature = "bluetooth", target_os = "linux"))]
 pub use transport::{BleTransport, BluetoothTransport, list_ble_devices};
-pub use transport::{
-    FileTransport, MockTransport, RecordingTransport, TcpTransport, Transport, TransportSpec,
-};
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 pub use transport::{UsbTransport, list_usb_devices};
 

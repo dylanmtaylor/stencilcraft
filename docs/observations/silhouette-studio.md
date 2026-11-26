@@ -290,3 +290,24 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 - Single: opening Panels › Modify after Panels › Transform leaves only Modify open.
 - Multiple: the same two open stacked in one column, Modify above Transform, each with its own
   header and close box.
+
+## GSP files (2026-11-26, SS 5.0.556)
+
+Saved from File › Save As with "Save as type: GSP" (the list offers Silhouette Studio V3,
+Silhouette Studio V2 and GSP). A 1 in square saves as 1220 bytes. Layout, from saving one line
+or rectangle at a time and comparing:
+
+- 0x00: the ASCII magic `GRAPHTEC PRT&CUT`, then little-endian u32 fields. At 0x80, eight
+  u32s: the length of the cut program below, the design's bounding box (x min, y min, x max,
+  y max, in 1/20 mm: a 2.188 in line reads 1111), the mat size (6096 × 6100, 12 in), then 1.
+- From 0x100 everything is XOR 0xA9.
+- The decoded body starts with a Graphtec GP-GL cut program, commands ended by 0x03: `TG1`,
+  `FN0`, `TB50,0`, `TR0,1`, `\0,20`, `Z6096,6100`, `J1`, `FC0,1,1`, `!0,1`, `APS30`, `FE0,1`,
+  `FF0,0,1`, then per path `M y,x` (absolute, 1/20 mm) and a binary relative draw: `BE1`
+  (2 bytes), `BE2` (3 bytes) or `BD3` (5 bytes) per segment, by length. Lines start at
+  their top or left end. Then `L0`, `\0,0`, `M0,0`, `TR0,0`, `J0`, `FN0`, `TB50,0`.
+- In a `BE2` code (the 3 bytes as a little-endian u24) the high 12 bits are 0x900 plus the
+  horizontal step × 1.07 (signed); the low 12 bits follow the vertical step but are not yet
+  decoded. The design itself has no other coordinates: after the program come tagged records
+  (page 297 × 210 mm, "Graphtec CC330L", "ISO A4", blade settings as f64), a `TD` record and
+  a 40 × 40 one-bit thumbnail.

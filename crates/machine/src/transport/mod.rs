@@ -75,6 +75,99 @@ pub trait Transport {
     }
 }
 
+/// Silhouette's Preferences › Advanced › Packet Size: "Auto" sends 1000 bytes per write.
+pub const AUTO_PACKET_BYTES: usize = 1000;
+/// The packet sizes a person may choose.
+pub const PACKET_BYTES: std::ops::RangeInclusive<usize> = 64..=65_536;
+
+/// A transport that hands its inner one at most `packet` bytes per write, as Silhouette
+/// Studio's packet size setting does for machines that drop long writes.
+pub struct PacketTransport<T: Transport> {
+    inner: T,
+    packet: usize,
+}
+
+impl<T: Transport> PacketTransport<T> {
+    /// `packet` is clamped to [`PACKET_BYTES`].
+    pub fn new(inner: T, packet: usize) -> Self {
+        let packet = packet.clamp(*PACKET_BYTES.start(), *PACKET_BYTES.end());
+        Self { inner, packet }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T: Transport> Transport for PacketTransport<T> {
+    fn write(&mut self, data: &[u8]) -> Result<usize, MachineError> {
+        let mut sent = 0usize;
+        for chunk in data.chunks(self.packet) {
+            sent = sent.saturating_add(self.inner.write(chunk)?);
+        }
+        Ok(sent)
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, MachineError> {
+        self.inner.read(buf)
+    }
+
+    fn read_timeout(&mut self, buf: &mut [u8], timeout: Duration) -> Result<usize, MachineError> {
+        self.inner.read_timeout(buf, timeout)
+    }
+
+    fn interactive(&self) -> bool {
+        self.inner.interactive()
+    }
+
+    fn is_open(&self) -> bool {
+        self.inner.is_open()
+    }
+
+    fn close(&mut self) -> Result<(), MachineError> {
+        self.inner.close()
+    }
+
+    fn describe(&self) -> String {
+        format!("{} ({} byte packets)", self.inner.describe(), self.packet)
+    }
+}
+
+#[cfg(test)]
+mod packet_tests {
+    use super::*;
+
+    /// Counts the writes it is given.
+    #[derive(Default)]
+    struct Writes(Vec<usize>);
+
+    impl Transport for Writes {
+        fn write(&mut self, data: &[u8]) -> Result<usize, MachineError> {
+            self.0.push(data.len());
+            Ok(data.len())
+        }
+        fn read(&mut self, _buf: &mut [u8]) -> Result<usize, MachineError> {
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn writes_go_out_in_packets() {
+        let mut t = PacketTransport::new(Writes::default(), AUTO_PACKET_BYTES);
+        assert_eq!(t.write(&[0; 2500]).unwrap(), 2500);
+        assert_eq!(t.into_inner().0, vec![1000, 1000, 500]);
+        let mut tiny = PacketTransport::new(Writes::default(), 1);
+        tiny.write(&[0; 100]).unwrap();
+        assert_eq!(
+            tiny.into_inner().0,
+            vec![64, 36],
+            "clamped to the smallest packet"
+        );
+        let mut empty = PacketTransport::new(Writes::default(), 1000);
+        assert_eq!(empty.write(&[]).unwrap(), 0);
+    }
+}
+
 /// Dry-run transport: records every write exactly as it would be sent.
 /// (Queries answer nothing; callers handle empty reads.)
 #[derive(Debug, Clone, Default)]

@@ -138,10 +138,59 @@ impl StencilApp {
                     .label("PNG: Autotrace (cut round transparency)")
                     .show(ui);
                 ui.separator();
-                ui.label("Tools");
-                let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))
-                    .label("Return to the Select tool after drawing a shape")
+                ui.label("Tools: action after tool use");
+                for (label, id, value, keep) in [
+                    (
+                        "After creating a shape",
+                        "pref-after-shape",
+                        &mut prefs.select_after_drawing,
+                        "Continue drawing",
+                    ),
+                    (
+                        "After drawing freehand",
+                        "pref-after-freehand",
+                        &mut prefs.select_after_freehand,
+                        "Continue drawing",
+                    ),
+                    (
+                        "After using the Eraser",
+                        "pref-after-eraser",
+                        &mut prefs.select_after_eraser,
+                        "Continue erasing",
+                    ),
+                    (
+                        "After using the Knife",
+                        "pref-after-knife",
+                        &mut prefs.select_after_knife,
+                        "Continue cutting",
+                    ),
+                    (
+                        "After using Zoom",
+                        "pref-after-zoom",
+                        &mut prefs.select_after_zoom,
+                        "Continue zooming",
+                    ),
+                ] {
+                    hint(ui, label);
+                    let _ = Segmented::new(
+                        label,
+                        Bind::bound(value),
+                        &[Entry::new(false, keep), Entry::new(true, "Choose Select")],
+                    )
+                    .id_salt(id)
                     .show(ui);
+                }
+                hint(ui, "When drag selecting");
+                let _ = Segmented::new(
+                    "When drag selecting",
+                    Bind::bound(&mut prefs.drag_select_inside),
+                    &[
+                        Entry::new(false, "Shapes touching the box"),
+                        Entry::new(true, "Shapes fully inside"),
+                    ],
+                )
+                .id_salt("pref-drag-select")
+                .show(ui);
                 hint(
                     ui,
                     "Designs are always stored in millimetres; Units sets what you read and type. \

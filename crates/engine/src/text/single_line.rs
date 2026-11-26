@@ -33,6 +33,14 @@ pub(super) fn glyph(c: char) -> (f64, BezPath) {
     parse(source).unwrap_or((SPACE, BezPath::new()))
 }
 
+/// The characters the family draws, in code point order.
+pub(super) fn chars() -> Vec<char> {
+    let mut out: Vec<char> = GLYPHS.iter().map(|(c, _)| *c).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 /// Parses one glyph's source: its advance, then its strokes. `None` on malformed source.
 fn parse(source: &str) -> Option<(f64, BezPath)> {
     // Ops are written glued to their first number ("M1 0 L6 14"), so split a leading letter off.

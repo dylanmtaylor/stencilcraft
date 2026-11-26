@@ -809,3 +809,27 @@ fn vertical_outline_text_keeps_letters_upright() {
     assert!(b.y1 < a.y1, "y is up: B is lower: {a:?} {b:?}");
     assert!((a.center().x - b.center().x).abs() < 72.0 / POINTS_PER_MM / 2.0);
 }
+
+#[test]
+fn glyph_chars_and_previews() {
+    let chars = glyph_chars(SINGLE_LINE_FAMILY, "Regular");
+    assert!(chars.contains(&'A') && chars.contains(&'~'));
+    assert!(chars.windows(2).all(|w| w[0] < w[1]), "code point order");
+    let a = glyph_preview(SINGLE_LINE_FAMILY, "Regular", 'A').expect("A");
+    assert!(a.stroked && a.advance > 0.0);
+    // y down: the cap height is above the baseline.
+    let b = kurbo::Shape::bounding_box(&a.outline);
+    assert!(b.y0 < -0.5 && b.y1 <= 0.05, "{b:?}");
+    assert!(glyph_preview(SINGLE_LINE_FAMILY, "Regular", '\u{4e00}').is_none());
+    // An outline face (built in code) draws its characters filled.
+    let spec = font();
+    let chars = glyph_chars(&spec.family, &spec.style);
+    assert!(!chars.is_empty() && chars.iter().all(|c| !c.is_control()));
+    let c = chars
+        .iter()
+        .copied()
+        .find(char::is_ascii_alphabetic)
+        .expect("a letter");
+    let g = glyph_preview(&spec.family, &spec.style, c).expect("mapped");
+    assert!(!g.stroked && g.advance > 0.0);
+}

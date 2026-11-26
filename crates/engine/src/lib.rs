@@ -342,6 +342,10 @@ pub enum Command {
     /// become transparent (`tolerance` 0–100 %), the connected region only when `contiguous`.
     /// Upload cleanup's Erase brush: the pixels within `radius_mm` of the stroke through
     /// `points_mm` (document millimetres) become transparent, one undo step a stroke.
+    /// Upload cleanup's Reduce Colours: every pixel of the image snapped to its `colours`
+    /// (1–16) main colours.
+    #[serde(rename = "image.reduce-colours")]
+    ImageReduceColours { id: u64, colours: u32 },
     #[serde(rename = "image.erase-brush")]
     ImageEraseBrush {
         id: u64,
@@ -879,6 +883,7 @@ impl Engine {
                 | Command::ImageRemoveBackground { .. }
                 | Command::ImageEraseColour { .. }
                 | Command::ImageEraseBrush { .. }
+                | Command::ImageReduceColours { .. }
                 | Command::ImageAdjust { .. }
                 | Command::ImageRectify { .. }
                 | Command::PathBreak { .. }
@@ -1661,6 +1666,19 @@ impl Engine {
                     .and_then(|pixels| stencilcraft_raster::remove_background(&pixels, tolerance))
                     .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
                     .map_err(invalid("image.remove-background"))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = pixels;
+                }
+                Ok(Effect::ImageChanged { id })
+            }
+            Command::ImageReduceColours { id, colours } => {
+                const NAME: &str = "image.reduce-colours";
+                let image = self.doc.get_image(id).ok_or_else(|| no_image(NAME, id))?;
+                let count = usize::try_from(colours).unwrap_or(usize::MAX);
+                let pixels = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| stencilcraft_raster::reduce_colours(&pixels, count))
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid(NAME))?;
                 if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
                     *slot = pixels;
                 }
@@ -5102,6 +5120,38 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn reduce_colours_snaps_an_image_to_its_main_colours_in_one_step() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let pixels = Pixels::from_fn(30, 10, |x, _| match x / 10 {
+            0 => Pixel([200, 10, 10, 255]),
+            1 => Pixel([205, 15, 12, 255]),
+            _ => Pixel([10, 10, 200, 255]),
+        });
+        let placed = stencilcraft_raster::place(&pixels, "three", 100.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        engine
+            .run(Command::ImageReduceColours { id, colours: 2 })
+            .unwrap();
+        let after = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(
+            after.get_pixel(2, 2),
+            after.get_pixel(12, 2),
+            "the two reds become one"
+        );
+        assert_ne!(after.get_pixel(2, 2), after.get_pixel(25, 2));
+        assert!(engine.undo());
+        assert!(
+            engine
+                .run(Command::ImageReduceColours { id, colours: 0 })
+                .is_err()
+        );
     }
 
     #[test]

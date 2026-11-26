@@ -33,6 +33,7 @@ pub enum EffectKind {
     Bridges,
     ImageEffects,
     Lattice,
+    ReduceColours,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -53,6 +54,7 @@ pub enum EffectMenu {
     Bridges,
     ImageEffects,
     Lattice,
+    ReduceColours,
 }
 
 impl EffectMenu {
@@ -77,6 +79,7 @@ impl EffectMenu {
             Self::Bridges => (EffectKind::Bridges, Vec::new()),
             Self::ImageEffects => (EffectKind::ImageEffects, Vec::new()),
             Self::Lattice => (EffectKind::Lattice, Vec::new()),
+            Self::ReduceColours => (EffectKind::ReduceColours, Vec::new()),
         }
     }
 }
@@ -380,6 +383,13 @@ const EFFECTS: &[EffectDef] = &[
         target: Target::Image,
         fields: &[num("tolerance", "Tolerance", 0.0, 100.0, "%")],
     },
+    EffectDef {
+        kind: EffectKind::ReduceColours,
+        title: "Reduce Colours",
+        command: "image.reduce-colours",
+        target: Target::Image,
+        fields: &[int("colours", "Colours", 1.0, 16.0)],
+    },
 ];
 
 fn def(kind: EffectKind) -> Option<&'static EffectDef> {
@@ -418,6 +428,7 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
             serde_json::to_value(stencilcraft_generate::weed::WeedParams::default())
         }
         EffectKind::RemoveBackground => Ok(json!({"tolerance": 10.0})),
+        EffectKind::ReduceColours => Ok(json!({"colours": 4})),
         EffectKind::Bridges => Ok(json!({"width_mm": 1.5, "direction": "vertical"})),
         EffectKind::Lattice => {
             Ok(json!({"hole": "square", "hole_mm": 5.0, "wall_mm": 1.5, "border_mm": 3.0}))

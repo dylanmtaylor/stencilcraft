@@ -148,6 +148,26 @@ pub fn colour_masks(
     Ok(masks)
 }
 
+/// Upload cleanup's Reduce Colours: every opaque pixel set to the nearest of the image's
+/// `count` (1–16) main colours ([`palette`]), its alpha kept; transparent pixels stay.
+pub fn reduce_colours(pixels: &RgbaImage, count: usize) -> Result<RgbaImage, RasterError> {
+    let colours = palette(pixels, count)?;
+    let mut out = pixels.clone();
+    if colours.is_empty() {
+        return Ok(out);
+    }
+    for p in out.pixels_mut() {
+        if p.0[3] < OPAQUE {
+            continue;
+        }
+        let rgb = [p.0[0], p.0[1], p.0[2]];
+        if let Some(c) = colours.iter().min_by_key(|c| distance(rgb, **c)) {
+            p.0 = [c[0], c[1], c[2], p.0[3]];
+        }
+    }
+    Ok(out)
+}
+
 /// `#rrggbb` for a colour.
 pub fn hex(colour: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2])
@@ -184,6 +204,20 @@ mod tests {
         });
         let two = palette(&soft, 4).unwrap();
         assert_eq!(two.len(), 2, "{two:?}");
+        // Reduce Colours: a noisy two-colour image comes back as exactly two colours.
+        let noisy = RgbaImage::from_fn(40, 10, |x, y| {
+            let n = u8::try_from((x * 7 + y * 13) % 9).unwrap_or(0);
+            if x < 20 {
+                Pixel([200 + n, 10, 10, 255])
+            } else {
+                Pixel([10, 10 + n, 200, 255])
+            }
+        });
+        let reduced = reduce_colours(&noisy, 2).unwrap();
+        let mut seen: Vec<[u8; 4]> = reduced.pixels().map(|p| p.0).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 2, "{seen:?}");
         // Asking for more colours than there are gives what there is.
         assert_eq!(palette(&image, 8).unwrap().len(), 3);
         assert!(palette(&image, 0).is_err());

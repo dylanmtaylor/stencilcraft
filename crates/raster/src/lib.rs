@@ -12,7 +12,7 @@ mod trace;
 use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
 use stencilcraft_doc::RasterImage;
 
-pub use palette::{MAX_COLOURS, colour_masks, hex, palette};
+pub use palette::{MAX_COLOURS, colour_masks, hex, palette, reduce_colours};
 
 pub use trace::{
     ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace, trace_mask,

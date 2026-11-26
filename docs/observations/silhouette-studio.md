@@ -311,3 +311,9 @@ or rectangle at a time and comparing:
   decoded. The design itself has no other coordinates: after the program come tagged records
   (page 297 × 210 mm, "Graphtec CC330L", "ISO A4", blade settings as f64), a `TD` record and
   a 40 × 40 one-bit thumbnail.
+
+## Cut border on send (2026-11-26, SS 5.0.556)
+
+- A rectangle drawn half off the page's left edge shows in the Send view as two parts. The part
+  inside the cut border is bold red (cut): its top, right and bottom edges. The part outside is
+  pale (not cut). No line is added along the border, so the clipped shape is cut open.

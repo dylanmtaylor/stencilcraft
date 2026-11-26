@@ -31,6 +31,10 @@ fn cmd_alt() -> Modifiers {
     Modifiers::COMMAND | Modifiers::ALT
 }
 
+fn shift_alt() -> Modifiers {
+    Modifiers::SHIFT | Modifiers::ALT
+}
+
 fn kbd(modifiers: Modifiers, key: Key) -> KeyboardShortcut {
     KeyboardShortcut::new(modifiers, key)
 }
@@ -519,19 +523,123 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
         sub(
             "Replicate",
             vec![
-                edit("Duplicate Left", E::Duplicate(ScreenSide::Left), any),
-                edit("Duplicate Right", E::Duplicate(ScreenSide::Right), any),
-                edit("Duplicate Above", E::Duplicate(ScreenSide::Above), any),
-                edit("Duplicate Below", E::Duplicate(ScreenSide::Below), any),
-                edit("Row of Copies", E::Array(DistributionAxis::Horizontal), any),
-                edit(
-                    "Column of Copies",
-                    E::Array(DistributionAxis::Vertical),
+                // Silhouette's Object › Replicate, with its shortcuts (SS 5.0.556).
+                edit_key(
+                    "Duplicate Left",
+                    E::Duplicate(ScreenSide::Left),
                     any,
+                    CMD,
+                    Key::ArrowLeft,
                 ),
-                edit("Fill Page", E::FillPage, any),
-                edit("Mirror Copies", E::Mirror(ScreenSide::Right), any),
-                edit("Rotate Copies", E::RotateCopies, any),
+                edit_key(
+                    "Duplicate Right",
+                    E::Duplicate(ScreenSide::Right),
+                    any,
+                    CMD,
+                    Key::ArrowRight,
+                ),
+                edit_key(
+                    "Duplicate Above",
+                    E::Duplicate(ScreenSide::Above),
+                    any,
+                    CMD,
+                    Key::ArrowUp,
+                ),
+                edit_key(
+                    "Duplicate Below",
+                    E::Duplicate(ScreenSide::Below),
+                    any,
+                    CMD,
+                    Key::ArrowDown,
+                ),
+                SEP,
+                edit_key(
+                    "Mirror Left",
+                    E::Mirror(ScreenSide::Left),
+                    any,
+                    shift_alt(),
+                    Key::ArrowLeft,
+                ),
+                edit_key(
+                    "Mirror Right",
+                    E::Mirror(ScreenSide::Right),
+                    any,
+                    shift_alt(),
+                    Key::ArrowRight,
+                ),
+                edit_key(
+                    "Mirror Above",
+                    E::Mirror(ScreenSide::Above),
+                    any,
+                    shift_alt(),
+                    Key::ArrowUp,
+                ),
+                edit_key(
+                    "Mirror Below",
+                    E::Mirror(ScreenSide::Below),
+                    any,
+                    shift_alt(),
+                    Key::ArrowDown,
+                ),
+                SEP,
+                edit_key(
+                    "Rotate One Copy",
+                    E::RotatePreset(1),
+                    any,
+                    cmd_shift(),
+                    Key::F1,
+                ),
+                edit_key(
+                    "Rotate Two Copies",
+                    E::RotatePreset(2),
+                    any,
+                    cmd_shift(),
+                    Key::F2,
+                ),
+                edit_key(
+                    "Rotate Three Copies",
+                    E::RotatePreset(3),
+                    any,
+                    cmd_shift(),
+                    Key::F3,
+                ),
+                edit_key(
+                    "Rotate Five Copies",
+                    E::RotatePreset(5),
+                    any,
+                    cmd_shift(),
+                    Key::F5,
+                ),
+                SEP,
+                edit_key(
+                    "Row of Three",
+                    E::ArrayOf(DistributionAxis::Horizontal, 3),
+                    any,
+                    cmd_shift(),
+                    Key::ArrowRight,
+                ),
+                edit_key(
+                    "Row of Four",
+                    E::ArrayOf(DistributionAxis::Horizontal, 4),
+                    any,
+                    cmd_alt(),
+                    Key::ArrowRight,
+                ),
+                edit_key(
+                    "Column of Three",
+                    E::ArrayOf(DistributionAxis::Vertical, 3),
+                    any,
+                    cmd_shift(),
+                    Key::ArrowDown,
+                ),
+                edit_key(
+                    "Column of Four",
+                    E::ArrayOf(DistributionAxis::Vertical, 4),
+                    any,
+                    cmd_alt(),
+                    Key::ArrowDown,
+                ),
+                edit_key("Fill Page", E::FillPage, any, cmd_shift(), Key::F),
                 SEP,
                 item("Replicate Options…", A::ShowPanel(P::Replicate)).into(),
             ],
@@ -1173,7 +1281,10 @@ mod tests {
         for wired in [
             "Duplicate Left",
             "Fill Page",
-            "Rotate Copies",
+            "Rotate Three Copies",
+            "Row of Four",
+            "Column of Three",
+            "Mirror Above",
             "Lock",
             "Unlock All",
             "Hide",

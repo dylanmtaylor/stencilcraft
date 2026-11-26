@@ -221,3 +221,15 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   opaque shape (circle, rectangle, triangle, bar), hugging the edge of the opaque pixels.
   Autotrace traces the outline of a PNG's opaque area; it does nothing on a PNG without
   transparency.
+
+## Object › Replicate presets (2026-11-26, SS 5.0.556)
+
+- Menu: Duplicate Left/Right/Above/Below (Ctrl+Arrow); Mirror Left/Right/Above/Below
+  (Shift+Alt+Arrow); Rotate One/Two/Three/Five Copies (Ctrl+Shift+F1/F2/F3/F5); Row of Three
+  (Ctrl+Shift+Right), Row of Four (Ctrl+Alt+Right), Column of Three (Ctrl+Shift+Down), Column of
+  Four (Ctrl+Alt+Down), Fill Page (Ctrl+Shift+F).
+- Row of Three on a 2.188 in square: three objects in all, 6.563 in wide (3 × 2.188 = 6.564):
+  the copies touch, no gap.
+- Rotate Three Copies on a 2 × 0.16 in bar: four bars about the bar's own centre at 0°, 45°,
+  90°, 135°; Rotate Five Copies: six bars 30° apart. n copies are 180°/(n+1) apart (they fan
+  over half a turn).

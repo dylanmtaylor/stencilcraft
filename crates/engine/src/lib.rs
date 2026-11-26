@@ -226,9 +226,16 @@ pub enum Command {
         gap_mm: f64,
     },
     /// A radial array: `count` items in total, the selection being the first, rotated
-    /// in equal steps of 360°/count about the selection's bounds centre.
+    /// in equal steps of 360°/count about the selection's bounds centre. With `half_turn`
+    /// the steps are 180°/count (Silhouette's Rotate One/Two/Three/Five Copies: the copies
+    /// fan over half a turn).
     #[serde(rename = "shapes.rotate-copies")]
-    ShapesRotateCopies { ids: Vec<u64>, count: u32 },
+    ShapesRotateCopies {
+        ids: Vec<u64>,
+        count: u32,
+        #[serde(default)]
+        half_turn: bool,
+    },
     /// Add an offset outline of each selected shape (the originals stay): positive
     /// `distance_mm` grows the solid, negative is an internal offset. `join` is
     /// `miter` (default), `round` or `bevel`; `miter_limit` (≥ 1, default 4) is the
@@ -1440,14 +1447,23 @@ impl Engine {
                     * kurbo::Affine::translate(-center);
                 self.add_replicas(&shapes, &[mirror], C)
             }
-            Command::ShapesRotateCopies { ids, count } => {
+            Command::ShapesRotateCopies {
+                ids,
+                count,
+                half_turn,
+            } => {
                 const C: &str = "shapes.rotate-copies";
                 let (shapes, bounds) = self.replication_source(&ids, 0.0, C)?;
                 validate_count(count, C)?;
                 let center = bounds.center().to_vec2();
                 let transforms = (1..count)
                     .map(|k| {
-                        let angle = std::f64::consts::TAU * f64::from(k) / f64::from(count);
+                        let turn = if half_turn {
+                            std::f64::consts::PI
+                        } else {
+                            std::f64::consts::TAU
+                        };
+                        let angle = turn * f64::from(k) / f64::from(count);
                         kurbo::Affine::translate(center)
                             * kurbo::Affine::rotate(angle)
                             * kurbo::Affine::translate(-center)
@@ -5862,6 +5878,28 @@ mod tests {
     }
 
     #[test]
+    fn half_turn_rotate_copies_fan_over_180_degrees() {
+        // Silhouette's Rotate Three Copies: four in all, 45° apart.
+        let mut engine = one_rect();
+        let ids = run_undoable(
+            &mut engine,
+            Command::ShapesRotateCopies {
+                ids: vec![1],
+                count: 4,
+                half_turn: true,
+            },
+        );
+        assert_eq!(ids.len(), 3);
+        // The second copy is the quarter turn; the others are diagonal (wider than both).
+        assert_rect(bounds_of(&engine, ids[1]), (12.5, 17.5, 17.5, 27.5));
+        let diagonal = bounds_of(&engine, ids[0]);
+        assert!(
+            diagonal.width() > 10.0 && diagonal.height() > 10.0,
+            "{diagonal:?}"
+        );
+    }
+
+    #[test]
     fn rotate_copies_spin_about_the_selection_centre() {
         let mut engine = one_rect();
         let ids = run_undoable(
@@ -5869,6 +5907,7 @@ mod tests {
             Command::ShapesRotateCopies {
                 ids: vec![1],
                 count: 4,
+                half_turn: false,
             },
         );
         assert_eq!(ids.len(), 3);
@@ -6014,10 +6053,12 @@ mod tests {
             Command::ShapesRotateCopies {
                 ids: vec![1],
                 count: 0,
+                half_turn: false,
             },
             Command::ShapesRotateCopies {
                 ids: vec![],
                 count: 4,
+                half_turn: false,
             },
             Command::ShapesMirrorCopy {
                 ids: vec![1],

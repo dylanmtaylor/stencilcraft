@@ -75,6 +75,10 @@ pub enum EditAction {
     FillPage,
     /// A radial array of the Replicate panel's count.
     RotateCopies,
+    /// Silhouette's Row/Column of Three/Four: `n` in all along `axis`.
+    ArrayOf(DistributionAxis, u32),
+    /// Silhouette's Rotate One/Two/Three/Five Copies: `n` copies over half a turn.
+    RotatePreset(u32),
     Lock,
     UnlockAll,
     Hide,
@@ -244,7 +248,8 @@ fn whole_in(value: f64, min: u32, max: u32) -> u32 {
 impl Default for PanelState {
     fn default() -> Self {
         Self {
-            gap_mm: 1.0,
+            // Silhouette's presets leave no gap: a Row of Three is the shape's width × 3.
+            gap_mm: 0.0,
             copies: 3.0,
             rotate_count: 4.0,
             offset: OffsetDraft::default(),
@@ -589,10 +594,30 @@ impl StencilApp {
                 true,
                 "page filled",
             ),
+            EditAction::ArrayOf(axis, n) => self.run_adding(
+                Command::ShapesReplicateArray {
+                    ids,
+                    axis,
+                    count: n.clamp(2, 1000),
+                    gap_mm,
+                },
+                true,
+                "copies added",
+            ),
+            EditAction::RotatePreset(n) => self.run_adding(
+                Command::ShapesRotateCopies {
+                    ids,
+                    count: n.clamp(1, 999) + 1,
+                    half_turn: true,
+                },
+                true,
+                "rotated copies added",
+            ),
             EditAction::RotateCopies => self.run_adding(
                 Command::ShapesRotateCopies {
                     ids,
                     count: self.panels.rotate_count.clamp(2.0, 1000.0) as u32,
+                    half_turn: false,
                 },
                 true,
                 "rotated copies added",

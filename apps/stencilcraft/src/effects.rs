@@ -54,6 +54,7 @@ pub enum EffectMenu {
     WarpFlag,
     WarpBulge,
     WarpPerspective,
+    WarpConical,
     PopupCard,
     Puzzle,
     WeedLines,
@@ -82,6 +83,7 @@ impl EffectMenu {
             Self::WarpArc => warp("arc"),
             Self::WarpFlag => warp("flag"),
             Self::WarpBulge => warp("bulge"),
+            Self::WarpConical => warp("conical"),
             Self::WarpPerspective => (
                 EffectKind::Warp,
                 vec![("style", json!("none")), ("vertical", json!(0.3))],
@@ -221,6 +223,7 @@ const WARP_STYLES: &[(&str, &str)] = &[
     ("inflate", "Inflate"),
     ("squeeze", "Squeeze"),
     ("twist", "Twist"),
+    ("conical", "Conical (cup wrap)"),
     ("none", "Perspective (distort only)"),
 ];
 const LATTICE_HOLES: &[(&str, &str)] = &[
@@ -433,6 +436,15 @@ const EFFECTS: &[EffectDef] = &[
             num("bend", "Bend", -1.0, 1.0, ""),
             num("horizontal", "Horizontal distortion", -1.0, 1.0, ""),
             num("vertical", "Vertical distortion", -1.0, 1.0, ""),
+            num("cone_top_mm", "Conical: top diameter", 1.0, 2000.0, "mm"),
+            num(
+                "cone_bottom_mm",
+                "Conical: bottom diameter",
+                1.0,
+                2000.0,
+                "mm",
+            ),
+            num("cone_slant_mm", "Conical: slant height", 1.0, 2000.0, "mm"),
         ],
     },
     EffectDef {

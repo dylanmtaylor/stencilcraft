@@ -911,6 +911,7 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 eff("Flag", M::WarpFlag),
                 eff("Bulge", M::WarpBulge),
                 eff("Perspective…", M::WarpPerspective),
+                eff("Conical…", M::WarpConical),
             ],
         ),
         sub(

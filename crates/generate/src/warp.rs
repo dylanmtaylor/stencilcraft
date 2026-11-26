@@ -47,10 +47,14 @@ pub enum WarpStyle {
     Squeeze,
     /// Rotates the centre more than the edges.
     Twist,
+    /// Wraps the design onto the flattened side of a cone (a tapered cup or tumbler): the top
+    /// edge keeps its length on the cone's top circle, lower rows shrink towards the bottom.
+    /// Uses the `cone_*` sizes, not `bend`.
+    Conical,
 }
 
 impl WarpStyle {
-    pub const ALL: [WarpStyle; 16] = [
+    pub const ALL: [WarpStyle; 17] = [
         WarpStyle::None,
         WarpStyle::Arc,
         WarpStyle::ArcLower,
@@ -67,6 +71,7 @@ impl WarpStyle {
         WarpStyle::Inflate,
         WarpStyle::Squeeze,
         WarpStyle::Twist,
+        WarpStyle::Conical,
     ];
 }
 
@@ -78,6 +83,11 @@ pub struct WarpParams {
     pub bend: f64,
     pub horizontal: f64,
     pub vertical: f64,
+    /// Conical: the cone's top and bottom diameters and its slant height (the side's length
+    /// from rim to base), in millimetres.
+    pub cone_top_mm: f64,
+    pub cone_bottom_mm: f64,
+    pub cone_slant_mm: f64,
 }
 
 impl Default for WarpParams {
@@ -87,6 +97,9 @@ impl Default for WarpParams {
             bend: 0.5,
             horizontal: 0.0,
             vertical: 0.0,
+            cone_top_mm: 90.0,
+            cone_bottom_mm: 65.0,
+            cone_slant_mm: 150.0,
         }
     }
 }
@@ -129,7 +142,38 @@ fn map(style: WarpStyle, b: f64, u: f64, v: f64) -> (f64, f64) {
             let (s, c) = a.sin_cos();
             (u * c - v * s, u * s + v * c)
         }
+        // Mapped in page millimetres by `cone_map`, not here.
+        WarpStyle::Conical => (u, v),
     }
+}
+
+/// The radius of the cone's top circle once its side is laid flat, signed: positive when the
+/// top is the wider end (the flat pattern's centre lies below the design), negative when the
+/// bottom is. `None` for a cylinder (equal diameters), which needs no warp.
+fn cone_radius(params: &WarpParams) -> Result<Option<f64>> {
+    let top = check_range(params.cone_top_mm, 1.0, 10_000.0, "cone top diameter")?;
+    let bottom = check_range(params.cone_bottom_mm, 1.0, 10_000.0, "cone bottom diameter")?;
+    let slant = check_range(params.cone_slant_mm, 1.0, 10_000.0, "cone slant height")?;
+    let taper = top - bottom;
+    if taper.abs() < 1e-6 {
+        return Ok(None);
+    }
+    if slant <= (taper / 2.0).abs() {
+        return Err(GenError(
+            "the slant height must be longer than the radius change".into(),
+        ));
+    }
+    Ok(Some(slant * top / taper))
+}
+
+/// A document point (y up) on the flattened cone whose top circle has radius `r`, with the
+/// design's top edge at `top` and its middle at `cx`: the top edge becomes an arc of radius `r`
+/// round a centre `r` below it, lower rows arcs of smaller radius.
+fn cone_map(r: f64, cx: f64, top: f64, p: Point) -> Point {
+    let rho = r - (top - p.y);
+    let angle = (p.x - cx) / r;
+    let (s, c) = angle.sin_cos();
+    Point::new(cx + rho * s, top - r + rho * c)
 }
 
 /// Warps `path` inside its bounds. Closed contours stay closed; the output is a polyline
@@ -144,6 +188,19 @@ pub fn warp(path: &BezPath, params: &WarpParams) -> Result<BezPath> {
         return Err(GenError("warp needs a shape with width and height".into()));
     }
     let c = bounds.center();
+    let cone = if params.style == WarpStyle::Conical {
+        match cone_radius(params)? {
+            Some(r) if bounds.height() >= r.abs() * 0.999 && r > 0.0 => {
+                return Err(GenError(
+                    "the design is taller than the flattened cone can hold".into(),
+                ));
+            }
+            Some(r) => Some(r),
+            None => return Ok(path.clone()),
+        }
+    } else {
+        None
+    };
     let step = (hw.hypot(hh) * 2.0) / 200.0;
     let mut out = BezPath::new();
     let mut total = 0usize;
@@ -173,6 +230,9 @@ pub fn warp(path: &BezPath, params: &WarpParams) -> Result<BezPath> {
         let warped: Vec<Point> = pts
             .iter()
             .map(|p| {
+                if let Some(r) = cone {
+                    return cone_map(r, c.x, bounds.y1, *p);
+                }
                 let (u, v) = ((p.x - c.x) / hw, (p.y - c.y) / hh);
                 let (u, v) = map(params.style, bend, u, v);
                 // Perspective: height grows to the right (h > 0), width grows upward (v > 0).
@@ -195,12 +255,16 @@ mod tests {
     #[test]
     fn zero_amounts_keep_the_shape() {
         let sq = rect(0.0, 0.0, 20.0, 10.0);
-        for style in WarpStyle::ALL {
+        for style in WarpStyle::ALL
+            .into_iter()
+            .filter(|s| *s != WarpStyle::Conical)
+        {
             let p = WarpParams {
                 style,
                 bend: 0.0,
                 horizontal: 0.0,
                 vertical: 0.0,
+                ..WarpParams::default()
             };
             let out = warp(&sq, &p).unwrap();
             let b = out.bounding_box();
@@ -225,6 +289,7 @@ mod tests {
                     bend,
                     horizontal: 0.3,
                     vertical: -0.2,
+                    ..WarpParams::default()
                 };
                 let c = flatten(&warp(&sq, &p).unwrap()).unwrap();
                 assert_eq!(c.len(), 1);
@@ -269,5 +334,62 @@ mod tests {
         line.move_to((0.0, 0.0));
         line.line_to((10.0, 0.0));
         assert!(warp(&line, &WarpParams::default()).is_err());
+    }
+
+    #[test]
+    fn conical_wraps_onto_a_flattened_cone() {
+        // A 100 × 20 mm band for a cup 90 mm across the top, 60 at the bottom, 150 mm slant.
+        let band = rect(0.0, 0.0, 100.0, 20.0);
+        let params = WarpParams {
+            style: WarpStyle::Conical,
+            cone_top_mm: 90.0,
+            cone_bottom_mm: 60.0,
+            cone_slant_mm: 150.0,
+            ..WarpParams::default()
+        };
+        let out = warp(&band, &params).unwrap();
+        let b = out.bounding_box();
+        // The top edge keeps its arc length, so the chord is a little shorter than 100.
+        assert!(b.width() < 100.0 && b.width() > 97.0, "{}", b.width());
+        // The ends drop as the band curves round the centre below it; the top stays put.
+        assert!(b.height() > 20.5, "{}", b.height());
+        assert!(
+            (b.y1 - 20.0).abs() < 1e-3,
+            "the middle of the top edge stays: {}",
+            b.y1
+        );
+        assert!(b.y0 < 0.0, "the ends hang below the band: {}", b.y0);
+        let r = cone_radius(&params).unwrap().unwrap();
+        assert!((r - 450.0).abs() < 1e-9, "R = L·D/(D−d) = 150·90/30");
+        let middle_top = cone_map(r, 50.0, 20.0, Point::new(50.0, 20.0));
+        assert!(middle_top.distance(Point::new(50.0, 20.0)) < 1e-9);
+        // A cylinder needs no warp; nonsense sizes and a too-tall design are errors.
+        let cylinder = WarpParams {
+            cone_bottom_mm: 90.0,
+            ..params
+        };
+        assert_eq!(warp(&band, &cylinder).unwrap(), band);
+        for bad in [f64::NAN, 0.0, -5.0] {
+            assert!(
+                warp(
+                    &band,
+                    &WarpParams {
+                        cone_slant_mm: bad,
+                        ..params
+                    }
+                )
+                .is_err()
+            );
+        }
+        let short = WarpParams {
+            cone_slant_mm: 10.0,
+            ..params
+        };
+        assert!(
+            warp(&band, &short).is_err(),
+            "slant shorter than the radius change"
+        );
+        let tall = rect(0.0, 0.0, 10.0, 500.0);
+        assert!(warp(&tall, &params).is_err());
     }
 }

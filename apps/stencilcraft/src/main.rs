@@ -59,6 +59,7 @@ mod colour_panels;
 mod control;
 mod distort_tool;
 mod effects;
+mod erase_colour;
 mod file_menu;
 mod framework;
 mod freehand;
@@ -1107,6 +1108,7 @@ pub enum WorkspacePanel {
     Actions,
     PixScan,
     PrintCut,
+    EraseColour,
 }
 
 struct WorkspaceContent<'a> {
@@ -1192,6 +1194,7 @@ impl DockPanels<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::GraphicStyles => self.app.graphic_styles_panel(ui),
             WorkspacePanel::Actions => self.app.actions_panel(ui),
             WorkspacePanel::PixScan => self.app.pixscan_panel(ui),
+            WorkspacePanel::EraseColour => self.app.erase_colour_panel(ui),
             WorkspacePanel::PrintCut => self.app.print_cut_panel(ui),
         }
     }
@@ -1226,6 +1229,7 @@ fn panel_label(panel: WorkspacePanel) -> &'static str {
         WorkspacePanel::GraphicStyles => "Graphic Styles",
         WorkspacePanel::Actions => "Actions",
         WorkspacePanel::PixScan => "PixScan",
+        WorkspacePanel::EraseColour => "Erase Colour",
         WorkspacePanel::PrintCut => "Print & Cut",
     }
 }
@@ -1323,6 +1327,8 @@ pub struct StencilApp {
     pub distort: Option<distort_tool::DistortDraft>,
     /// PixScan: corners picked on a photo of the page.
     pub pixscan: pixscan::PixScanState,
+    /// Effect › Erase Colour: clicks on an image erase a colour.
+    pub erase_colour: erase_colour::EraseColourState,
     pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
@@ -1505,6 +1511,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::Actions,
     WorkspacePanel::PixScan,
     WorkspacePanel::PrintCut,
+    WorkspacePanel::EraseColour,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,
@@ -1624,6 +1631,7 @@ impl StencilApp {
             action_name_draft: String::new(),
             distort: None,
             pixscan: pixscan::PixScanState::default(),
+            erase_colour: erase_colour::EraseColourState::default(),
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -6093,6 +6101,7 @@ impl StencilApp {
             overlay_claimed |= self.text_canvas(ui, &response, &painter);
             overlay_claimed |= self.distort_canvas(ui, &response, &painter);
             overlay_claimed |= self.pixscan_canvas(ui, &response, &painter);
+            overlay_claimed |= self.erase_colour_canvas(ui, &response);
             self.paint_effect_preview(&painter);
 
             // Interactive BezierOverlay for node editing

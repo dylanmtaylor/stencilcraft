@@ -761,6 +761,8 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Erase…", A::ShowPanel(P::EraseColour)).into(),
         eff("Image Effects…", M::ImageEffects),
         eff("Reduce Colours…", M::ReduceColours),
+        eff("Despeckle…", M::Despeckle),
+        eff("Smooth…", M::Smooth),
         SEP,
         eff("Sketch Fill…", M::SketchFill),
         eff("Stipple…", M::Stipple),

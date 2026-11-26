@@ -9,7 +9,9 @@
 mod palette;
 mod trace;
 
-use craft_raster_codecs::common::{self, DecodeLimits, Pixels as RgbaImage};
+/// The RGBA pixel buffer the raster functions take and return.
+pub use craft_raster_codecs::common::Pixels as RgbaImage;
+use craft_raster_codecs::common::{self, DecodeLimits};
 use stencilcraft_doc::RasterImage;
 
 pub use palette::{MAX_COLOURS, colour_masks, hex, palette, reduce_colours};
@@ -289,6 +291,106 @@ pub fn adjust(pixels: &RgbaImage, a: &Adjust) -> Result<RgbaImage, RasterError> 
     Ok(out)
 }
 
+/// Largest median radius, pixels.
+pub const MAX_SMOOTH_RADIUS: u32 = 10;
+
+/// Upload cleanup's Despeckle: opaque islands (four-way connected) of fewer than `area` pixels
+/// made transparent: the specks a background removal leaves.
+pub fn despeckle(pixels: &RgbaImage, area: u32) -> Result<RgbaImage, RasterError> {
+    if area == 0 || area > 1_000_000 {
+        return Err(bad(format!("despeckle area {area} is outside 1–1000000")));
+    }
+    let (w, h) = (pixels.width(), pixels.height());
+    let opaque = |x: u32, y: u32| {
+        pixels
+            .get_pixel_checked(x, y)
+            .is_some_and(|p| p.0[3] >= 128)
+    };
+    let index = |x: u32, y: u32| (y as usize) * (w as usize) + x as usize;
+    let mut seen = vec![false; (w as usize) * (h as usize)];
+    let mut out = pixels.clone();
+    let clear = common::Pixel([0, 0, 0, 0]);
+    for sy in 0..h {
+        for sx in 0..w {
+            if seen.get(index(sx, sy)).copied().unwrap_or(true) || !opaque(sx, sy) {
+                continue;
+            }
+            // Gather the island.
+            let mut island = Vec::new();
+            let mut stack = vec![(sx, sy)];
+            while let Some((x, y)) = stack.pop() {
+                let Some(slot) = seen.get_mut(index(x, y)) else {
+                    continue;
+                };
+                if *slot || !opaque(x, y) {
+                    continue;
+                }
+                *slot = true;
+                island.push((x, y));
+                if x > 0 {
+                    stack.push((x - 1, y));
+                }
+                if y > 0 {
+                    stack.push((x, y - 1));
+                }
+                if x + 1 < w {
+                    stack.push((x + 1, y));
+                }
+                if y + 1 < h {
+                    stack.push((x, y + 1));
+                }
+            }
+            if island.len() < area as usize {
+                for (x, y) in island {
+                    if let Some(p) = out.get_pixel_mut_checked(x, y) {
+                        *p = clear;
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Upload cleanup's Smooth: each channel the median of the `radius` square around it (1–10
+/// pixels), which removes noise and keeps edges.
+pub fn smooth(pixels: &RgbaImage, radius: u32) -> Result<RgbaImage, RasterError> {
+    if radius == 0 || radius > MAX_SMOOTH_RADIUS {
+        return Err(bad(format!(
+            "smooth radius {radius} is outside 1–{MAX_SMOOTH_RADIUS}"
+        )));
+    }
+    let (w, h) = (pixels.width(), pixels.height());
+    let r = i64::from(radius);
+    let mut window: Vec<u8> = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
+    let mut out = pixels.clone();
+    for y in 0..h {
+        for x in 0..w {
+            let mut median = [0u8; 4];
+            for (c, slot) in median.iter_mut().enumerate() {
+                window.clear();
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (nx, ny) = (i64::from(x) + dx, i64::from(y) + dy);
+                        if let (Ok(nx), Ok(ny)) = (u32::try_from(nx), u32::try_from(ny))
+                            && let Some(p) = pixels.get_pixel_checked(nx, ny)
+                            && let Some(v) = p.0.get(c)
+                        {
+                            window.push(*v);
+                        }
+                    }
+                }
+                window.sort_unstable();
+                *slot = window.get(window.len() / 2).copied().unwrap_or(0);
+            }
+            if let Some(p) = out.get_pixel_mut_checked(x, y) {
+                p.0 = median;
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Most stroke points an erase brush stroke takes.
 pub const MAX_BRUSH_POINTS: usize = 10_000;
 
@@ -518,6 +620,41 @@ mod tests {
                 decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
             assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
+    }
+
+    #[test]
+    fn despeckle_removes_small_islands_and_keeps_large_ones() {
+        let image = RgbaImage::from_fn(30, 20, |x, y| {
+            let big = (2..12).contains(&x) && (2..12).contains(&y);
+            let speck = (20..22).contains(&x) && (5..7).contains(&y);
+            if big || speck {
+                Pixel([0, 0, 0, 255])
+            } else {
+                Pixel([0, 0, 0, 0])
+            }
+        });
+        let out = despeckle(&image, 10).unwrap();
+        assert_eq!(out.get_pixel(5, 5).0[3], 255, "the 100 px island stays");
+        assert_eq!(out.get_pixel(20, 5).0[3], 0, "the 4 px speck goes");
+        assert!(despeckle(&image, 0).is_err());
+    }
+
+    #[test]
+    fn smooth_removes_lone_noise_and_keeps_edges() {
+        let image = RgbaImage::from_fn(20, 20, |x, y| {
+            if (x, y) == (5, 5) {
+                Pixel([255, 255, 255, 255])
+            } else if x < 10 {
+                Pixel([0, 0, 0, 255])
+            } else {
+                Pixel([200, 200, 200, 255])
+            }
+        });
+        let out = smooth(&image, 1).unwrap();
+        assert_eq!(out.get_pixel(5, 5).0[0], 0, "the lone white pixel is gone");
+        assert_eq!(out.get_pixel(8, 10).0[0], 0, "left of the edge stays dark");
+        assert_eq!(out.get_pixel(11, 10).0[0], 200, "right of it stays light");
+        assert!(smooth(&image, 0).is_err() && smooth(&image, 99).is_err());
     }
 
     #[test]

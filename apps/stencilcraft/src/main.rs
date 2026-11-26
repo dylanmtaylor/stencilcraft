@@ -370,6 +370,9 @@ pub fn guide_drag(
     })
 }
 
+/// Longest group name, in characters.
+const MAX_GROUP_NAME: usize = 120;
+
 /// How near (screen points) the pointer must be to a selection box handle or a guide to be on it.
 const CONTROL_REACH_PX: f32 = 10.0;
 /// How far outside a selection box corner its rotate band reaches, in screen points.
@@ -1278,6 +1281,8 @@ pub struct StencilApp {
     pub snap_lines: Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
     /// Holding Ctrl (Cmd on macOS) suspends snapping for this frame.
     pub snap_suspended: bool,
+    /// The Inspector's group name field while it is being edited: the group and the text.
+    pub group_name_draft: Option<(u64, String)>,
     /// This pass the app's canvas widget only hovers: the pointer is over a framework canvas
     /// control's part (the node overlay, the selection box, a guide).
     pub canvas_hover_only: bool,
@@ -1605,6 +1610,7 @@ impl StencilApp {
             drag_origin: None,
             snap_lines: Vec::new(),
             snap_suspended: false,
+            group_name_draft: None,
             canvas_hover_only: false,
             status,
             open_path: open_path.clone(),
@@ -1990,6 +1996,25 @@ impl StencilApp {
             preview,
         });
         true
+    }
+
+    /// The group the selection is, when it is exactly one whole outermost group.
+    pub fn selected_group(&self) -> Option<u64> {
+        let first = *self.selected_shapes.first()?;
+        let group = self.outer_group(first)?;
+        let mut members = self.engine.doc.group_shapes(group);
+        let mut selected = self.selected_shapes.clone();
+        members.sort_unstable();
+        selected.sort_unstable();
+        (members == selected).then_some(group)
+    }
+
+    /// Rename group `id` (one undo step); a blank name clears it.
+    pub fn rename_group(&mut self, id: u64, name: &str) {
+        let name: String = name.trim().chars().take(MAX_GROUP_NAME).collect();
+        let selection = self.selected_shapes.clone();
+        self.run_command(Command::Document(DocumentCommand::GroupRename { id, name }));
+        self.set_selection(selection);
     }
 
     /// The outermost group holding shape `id`, if it is grouped.
@@ -5238,6 +5263,40 @@ impl StencilApp {
                     });
                 }
             });
+        }
+
+        // A group selected on its own: its name (Silhouette's Objects panel names groups).
+        if let Some(group) = self.selected_group() {
+            let current = self
+                .engine
+                .doc
+                .groups
+                .iter()
+                .find(|g| g.id == group)
+                .map(|g| g.name.clone())
+                .unwrap_or_default();
+            let mut draft = match &self.group_name_draft {
+                Some((id, name)) if *id == group => name.clone(),
+                _ => current.clone(),
+            };
+            let mut rename = false;
+            let _ = Section::new("Group")
+                .id_salt("inspector-group")
+                .show(ui, |ui, _| {
+                    let _ = craft_ui::text::TextField::new("Group name", Bind::bound(&mut draft))
+                        .id_salt("inspector-group-name")
+                        .show(ui);
+                    rename = panels::button(ui, "Rename", draft.trim() != current);
+                });
+            if draft.chars().count() > MAX_GROUP_NAME {
+                draft = draft.chars().take(MAX_GROUP_NAME).collect();
+            }
+            if rename {
+                self.rename_group(group, &draft);
+                self.group_name_draft = None;
+            } else {
+                self.group_name_draft = Some((group, draft));
+            }
         }
 
         // A live Combine's operation can change later (Object › Combine (live)).
@@ -8665,6 +8724,46 @@ mod tests {
             1,
             "Cut removes the pasted copy"
         );
+    }
+
+    #[test]
+    fn a_selected_group_can_be_renamed_in_one_step() {
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 30.0, 60.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            });
+        }
+        let ids: Vec<u64> = app.engine.doc.shapes().map(|(_, s)| s.id).collect();
+        app.set_selection([ids[0], ids[1]]);
+        assert!(
+            app.selected_group().is_none(),
+            "two loose shapes are no group"
+        );
+        app.handle_menu_action(TopMenuAction::Group);
+        let group = app.selected_group().expect("the new group is selected");
+        app.rename_group(group, "  Lettering  ");
+        let name = |app: &StencilApp| {
+            app.engine
+                .doc
+                .groups
+                .iter()
+                .find(|g| g.id == group)
+                .map(|g| g.name.clone())
+        };
+        assert_eq!(name(&app).as_deref(), Some("Lettering"));
+        assert_eq!(
+            app.selected_group(),
+            Some(group),
+            "the group stays selected"
+        );
+        assert!(app.engine.undo());
+        assert_eq!(name(&app).as_deref(), Some(""), "one undo step");
+        app.set_selection([ids[2]]);
+        assert!(app.selected_group().is_none());
     }
 
     #[test]

@@ -43,6 +43,42 @@ impl StencilApp {
         Some(out)
     }
 
+    /// Detect Corners: find the page in the picked photo and set its four corners, which can
+    /// still be picked again by hand.
+    pub fn detect_pixscan_corners(&mut self) {
+        let Some(image) = self
+            .selected_image
+            .and_then(|id| self.engine.doc.get_image(id))
+            .cloned()
+        else {
+            self.status = "pick the photo first".to_string();
+            return;
+        };
+        let found = stencilcraft_raster::image_pixels(&image)
+            .ok()
+            .and_then(|pixels| stencilcraft_raster::detect_page_corners(&pixels));
+        let Some(px) = found else {
+            self.status = "no page found; click its corners instead".to_string();
+            return;
+        };
+        if !(image.width_px > 0 && image.height_px > 0) {
+            return;
+        }
+        let (sx, sy) = (
+            image.width_mm / f64::from(image.width_px),
+            image.height_mm / f64::from(image.height_px),
+        );
+        self.pixscan = PixScanState {
+            picking: false,
+            corners: px
+                .iter()
+                .map(|[x, y]| Point::new(image.x_mm + x * sx, image.y_mm + y * sy))
+                .collect(),
+        };
+        self.status =
+            "found the page's corners; Straighten to Page, or pick them again".to_string();
+    }
+
     /// Straighten to Page: warp the picked image's page to the document page.
     pub fn straighten_to_page(&mut self) {
         let (Some(id), Some(corners)) = (self.selected_image, self.pixscan_corners_px()) else {
@@ -112,7 +148,7 @@ impl StencilApp {
         let has_image = self.selected_image.is_some();
         let picked = self.pixscan.corners.len();
         let picking = self.pixscan.picking;
-        let (mut pick, mut reset, mut straighten) = (false, false, false);
+        let (mut pick, mut reset, mut straighten, mut detect) = (false, false, false, false);
         let _ = Panel::new("PixScan")
             .id_salt("stencilcraft-pixscan-panel")
             .show(ui, |ui, _| {
@@ -122,6 +158,7 @@ impl StencilApp {
                  its four corners: top left, top right, bottom right, bottom left.",
             );
             ui.horizontal(|ui| {
+                detect = button(ui, "Detect Corners", has_image && !picking);
                 pick = button(ui, "Pick Corners", has_image && !picking);
                 reset = button(ui, "Reset", picked > 0 || picking);
             });
@@ -146,6 +183,9 @@ impl StencilApp {
         if reset {
             self.pixscan = PixScanState::default();
         }
+        if detect {
+            self.detect_pixscan_corners();
+        }
         if straighten {
             self.straighten_to_page();
         }
@@ -155,6 +195,26 @@ impl StencilApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_corners_finds_the_page_in_a_photo() {
+        use craft_raster_codecs::common::Pixel;
+        let mut photo =
+            stencilcraft_raster::RgbaImage::from_pixel(120, 90, Pixel([30, 30, 30, 255]));
+        for y in 15..75 {
+            for x in 20..100 {
+                photo.put_pixel(x, y, Pixel([240, 240, 235, 255]));
+            }
+        }
+        let mut app = StencilApp::new(None);
+        app.detect_pixscan_corners();
+        assert!(app.status.contains("pick the photo"));
+        let image = stencilcraft_raster::place(&photo, "photo", 96.0).expect("placed");
+        app.place_image(image);
+        app.detect_pixscan_corners();
+        assert_eq!(app.pixscan.corners.len(), 4, "{}", app.status);
+        assert!(app.pixscan_corners_px().is_some(), "ready to straighten");
+    }
 
     #[test]
     fn corners_map_to_image_pixels_and_straighten() {

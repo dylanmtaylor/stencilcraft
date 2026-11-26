@@ -16,6 +16,8 @@ use stencilcraft_doc::RasterImage;
 
 pub use palette::{MAX_COLOURS, colour_masks, hex, palette, reduce_colours};
 
+mod corners;
+pub use corners::detect_page_corners;
 pub use trace::{
     ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, has_transparency,
     trace, trace_mask,

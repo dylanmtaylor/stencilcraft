@@ -34,6 +34,31 @@ pub struct SavedSelection {
     pub ids: Vec<u64>,
 }
 
+/// A row of the colour panels' swatches bound to `value`; with `none`, a first "Default"
+/// choice for no colour.
+fn swatch_row(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, none: bool) {
+    use craft_ui::choice::Swatch;
+    ui.horizontal_wrapped(|ui| {
+        if none && crate::panels::button(ui, "Default", value.is_some()) {
+            *value = None;
+        }
+        for (i, colour) in crate::colour_panels::PALETTE.iter().enumerate() {
+            let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) else {
+                continue;
+            };
+            if Swatch::new(*colour, craft_theme::Srgba::from(c))
+                .id_salt(format!("{id}-{i}"))
+                .size(craft_theme::ControlSize::Sm)
+                .selected(value.as_deref() == Some(*colour))
+                .show(ui)
+                .clicked
+            {
+                *value = Some((*colour).to_string());
+            }
+        }
+    });
+}
+
 impl StencilApp {
     /// Step undo/redo until `done` commands are applied.
     pub fn history_go_to(&mut self, done: usize) {
@@ -123,6 +148,28 @@ impl StencilApp {
                 let _ = Segmented::new("Units", Bind::bound(&mut prefs.length_unit), &unit_entries)
                     .id_salt("pref-units")
                     .show(ui);
+                ui.separator();
+                ui.label("Defaults: new shapes");
+                let mut solid = prefs.default_fill.is_some();
+                let _ = Segmented::new(
+                    "Default fill style",
+                    Bind::bound(&mut solid),
+                    &[
+                        Entry::new(false, "Outline only"),
+                        Entry::new(true, "Solid fill"),
+                    ],
+                )
+                .id_salt("pref-default-fill")
+                .show(ui);
+                if solid != prefs.default_fill.is_some() {
+                    prefs.default_fill = solid.then(|| "#000000".to_string());
+                }
+                if solid {
+                    hint(ui, "Fill");
+                    swatch_row(ui, "pref-fill", &mut prefs.default_fill, false);
+                }
+                hint(ui, "Line");
+                swatch_row(ui, "pref-line", &mut prefs.default_line, true);
                 ui.separator();
                 ui.label("Print");
                 let _ = Checkbox::new(Bind::bound(&mut prefs.show_print_preview))

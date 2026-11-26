@@ -135,6 +135,11 @@ pub struct UserPrefs {
     /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
     /// larger than the mat's usable area.
     pub constrain_media: bool,
+    /// Preferences › Defaults › Default Fill Style: the fill drawn shapes start with
+    /// (`#rrggbb`); `None` is Silhouette's default, Outline Only.
+    pub default_fill: Option<String>,
+    /// The line colour drawn shapes start with; `None` keeps the default cut line.
+    pub default_line: Option<String>,
     /// Preferences › General › Print Resolution (Silhouette: 600 dpi).
     pub print_dpi: f64,
     /// Preferences › General › Show Print Preview (Silhouette: on).
@@ -204,6 +209,8 @@ impl Default for UserPrefs {
             constrain_media: true,
             page_colour: None,
             page_transparency: 0.0,
+            default_fill: None,
+            default_line: None,
             print_dpi: 600.0,
             show_print_preview: true,
             dxf_fit_to_page: true,
@@ -7769,6 +7776,11 @@ impl eframe::App for StencilApp {
         }
         content.app.workspace = workspace;
         content.app.panel_specs = specs;
+        // Preferences › Defaults: the colours drawn shapes start with, for every document.
+        content.app.engine.new_shape_style = stencilcraft_engine::NewShapeStyle {
+            fill_color: content.app.prefs.default_fill.clone(),
+            line_color: content.app.prefs.default_line.clone(),
+        };
         if let Some(panel) = content.app.pending_panel.take() {
             content
                 .app

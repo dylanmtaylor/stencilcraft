@@ -630,12 +630,39 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
             vec![
                 item("Make", A::ClipMake)
                     .shortcut(kbd(CMD, Key::Num7))
-                    .enabled(app.selected_shapes.len() == 2)
+                    .enabled(app.selected_shapes.len() >= 2)
                     .into(),
                 item("Release", A::ClipRelease)
                     .shortcut(kbd(cmd_alt(), Key::Num7))
                     .enabled(any)
                     .into(),
+            ],
+        ),
+        sub(
+            "Combine (live)",
+            vec![
+                when(
+                    "Unite",
+                    A::LiveCombine(stencilcraft_doc::CombineOp::Unite),
+                    app.selected_shapes.len() >= 2,
+                ),
+                when(
+                    "Subtract",
+                    A::LiveCombine(stencilcraft_doc::CombineOp::Subtract),
+                    app.selected_shapes.len() >= 2,
+                ),
+                when(
+                    "Intersect",
+                    A::LiveCombine(stencilcraft_doc::CombineOp::Intersect),
+                    app.selected_shapes.len() >= 2,
+                ),
+                when(
+                    "Exclude",
+                    A::LiveCombine(stencilcraft_doc::CombineOp::Exclude),
+                    app.selected_shapes.len() >= 2,
+                ),
+                SEP,
+                when("Uncombine", A::Uncombine, app.selected_combine().is_some()),
             ],
         ),
         edit_key("Simplify", E::Simplify, any, CMD, Key::J),

@@ -1442,6 +1442,8 @@ pub struct StencilApp {
     pub home: home::HomeState,
     /// The Measure tool's line (millimetres), shown until the next measurement.
     pub measure_line: Option<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
+    /// Preferences › Restore Factory Defaults is waiting for its confirmation.
+    pub confirm_restore_defaults: bool,
     /// Type › Spelling…, while open.
     pub spelling: Option<craft_text::ui::spelling::CheckSpellingDialog>,
     pub selection_name_draft: String,
@@ -1753,6 +1755,7 @@ impl StencilApp {
             home: home::HomeState::default(),
             measure_line: None,
             spelling: None,
+            confirm_restore_defaults: false,
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -1973,6 +1976,28 @@ impl StencilApp {
             self.prefs.mat_id = mat;
             self.save_prefs();
         }
+    }
+
+    /// Preferences › Restore Factory Defaults (Silhouette's Advanced tab): every setting back
+    /// to its default and the panels reset. The person's own things stay: recent files and
+    /// fonts, saved New Document presets, graphic styles, recorded actions and dictionary words.
+    pub fn restore_factory_defaults(&mut self) {
+        let old = std::mem::take(&mut self.prefs);
+        self.prefs.recent_files = old.recent_files;
+        self.prefs.recent_fonts = old.recent_fonts;
+        self.prefs.recent_new = old.recent_new;
+        self.prefs.saved_new = old.saved_new;
+        self.prefs.graphic_styles = old.graphic_styles;
+        self.prefs.actions = old.actions;
+        self.prefs.spelling_words = old.spelling_words;
+        self.theme = if self.prefs.dark_theme {
+            stencilcraft_ui_egui::ColorTheme::Dark
+        } else {
+            stencilcraft_ui_egui::ColorTheme::Light
+        };
+        self.reset_workspace();
+        self.save_prefs();
+        self.status = "preferences restored to their defaults".to_string();
     }
 
     pub fn reset_workspace(&mut self) {
@@ -7733,6 +7758,7 @@ impl eframe::App for StencilApp {
         content.app.retain_valid_selection();
         content.app.new_document_dialog(ui);
         content.app.spelling_dialog(ui);
+        content.app.restore_defaults_dialog(ui);
         ui.ctx().request_repaint();
     }
 }
@@ -8330,6 +8356,23 @@ mod tests {
         app.import_image(clear_path);
         assert_eq!(shapes(&app), 1, "off: only placed");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn restoring_factory_defaults_keeps_the_persons_own_things() {
+        let mut app = StencilApp::new(None);
+        app.prefs.show_grid = false;
+        app.prefs.select_after_zoom = false;
+        app.prefs.spelling_words = vec!["Stencilcrafty".into()];
+        app.recent_files = vec!["/designs/a.stencilcraft".into()];
+        app.prefs.recent_files = app.recent_files.clone();
+        app.restore_factory_defaults();
+        assert!(
+            app.prefs.show_grid && app.prefs.select_after_zoom,
+            "settings reset"
+        );
+        assert_eq!(app.prefs.spelling_words, ["Stencilcrafty"]);
+        assert_eq!(app.prefs.recent_files, ["/designs/a.stencilcraft"]);
     }
 
     #[test]

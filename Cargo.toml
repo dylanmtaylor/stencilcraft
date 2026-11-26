@@ -46,6 +46,7 @@ craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "90e14
 craft-window = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-host = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-font-manager = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
+craft-text = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 craft-i18n = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its

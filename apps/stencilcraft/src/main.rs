@@ -147,6 +147,16 @@ pub struct UserPrefs {
     pub png_autotrace: bool,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
+    /// Preferences › Tools: return to Select after drawing freehand (Silhouette: continue).
+    pub select_after_freehand: bool,
+    /// After using the Eraser (Silhouette: continue).
+    pub select_after_eraser: bool,
+    /// After using the Knife (Silhouette: continue).
+    pub select_after_knife: bool,
+    /// After a Zoom tool click (Silhouette: Choose Select).
+    pub select_after_zoom: bool,
+    /// When drag selecting: only shapes fully inside the box (Silhouette: touching).
+    pub drag_select_inside: bool,
     /// Page Setup › Smart Snap only within media: off the page only the grid and guides snap.
     pub snap_within_media: bool,
     /// Panels › Graphic Styles: saved line/fill/operation sets.
@@ -193,6 +203,11 @@ impl Default for UserPrefs {
             import_join_lines: true,
             png_autotrace: true,
             select_after_drawing: false,
+            select_after_freehand: false,
+            select_after_eraser: false,
+            select_after_knife: false,
+            select_after_zoom: true,
+            drag_select_inside: false,
             snap_within_media: false,
             graphic_styles: Vec::new(),
             actions: Vec::new(),
@@ -6856,6 +6871,9 @@ impl StencilApp {
                 }
                 let smooth = self.active_tool == ActiveTool::SmoothFreehand;
                 self.commit_freehand(&stroke, smooth, px_mm);
+                if self.prefs.select_after_freehand {
+                    self.active_tool = ActiveTool::Select;
+                }
                 ui.ctx().request_repaint();
             }
         } else if self.active_tool != ActiveTool::Eraser {
@@ -6874,6 +6892,9 @@ impl StencilApp {
                 1.5
             };
             self.view.zoom_at(factor, pointer);
+            if self.prefs.select_after_zoom {
+                self.active_tool = ActiveTool::Select;
+            }
         }
 
         // Measure: drag a line; its length and angle stay shown until the next one.
@@ -6917,6 +6938,9 @@ impl StencilApp {
                     (self.shape_drag_start.take(), self.shape_drag_current.take())
             {
                 self.knife_cut(start, line_end(start, current, mods));
+                if self.prefs.select_after_knife {
+                    self.active_tool = ActiveTool::Select;
+                }
                 ui.ctx().request_repaint();
             }
         }
@@ -6977,6 +7001,9 @@ impl StencilApp {
                     stroke.push(self.view.screen_to_world(pointer.to_vec2()), px_mm);
                 }
                 self.erase_stroke(&stroke.points);
+                if self.prefs.select_after_eraser {
+                    self.active_tool = ActiveTool::Select;
+                }
                 ui.ctx().request_repaint();
             }
         }
@@ -7253,6 +7280,12 @@ impl StencilApp {
                 && let Some(start) = self.canvas_selection_start
                 && let Some(end) = response.interact_pointer_pos()
             {
+                // Preferences › Tools › When Drag Selecting.
+                let drag_mode = if self.prefs.drag_select_inside {
+                    stencilcraft_ui_egui::SelectionMode::Contain
+                } else {
+                    stencilcraft_ui_egui::SelectionMode::Intersect
+                };
                 let found = if self.active_tool == ActiveTool::LassoSelect {
                     if self
                         .canvas_selection_points
@@ -7265,17 +7298,12 @@ impl StencilApp {
                         &doc,
                         &view,
                         &self.canvas_selection_points,
-                        stencilcraft_ui_egui::SelectionMode::Intersect,
+                        drag_mode,
                     )
                 } else {
                     // Silhouette's default: shapes the box touches, whichever way it is drawn.
                     let rect = egui::Rect::from_two_pos(start, end);
-                    stencilcraft_ui_egui::select_shapes_in_rect(
-                        &doc,
-                        &view,
-                        rect,
-                        stencilcraft_ui_egui::SelectionMode::Intersect,
-                    )
+                    stencilcraft_ui_egui::select_shapes_in_rect(&doc, &view, rect, drag_mode)
                 };
                 // From the selection before the drag, so sweeping back drops shapes again.
                 let mut ids = self.canvas_selection_base.clone();
@@ -9143,6 +9171,41 @@ mod tests {
         assert!(app.engine.undo());
         let b = stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &[1]).unwrap();
         assert!((b.width() - 40.0).abs() < 1e-6, "one undo step: {b:?}");
+    }
+
+    #[test]
+    fn zoom_returns_to_select_unless_the_preference_keeps_it() {
+        let ctx = egui::Context::default();
+        crate::framework::install_headless(&ctx).unwrap();
+        let canvas: fn(&mut StencilApp, &mut egui::Ui) = |app, ui| app.canvas_body(ui);
+        for keep in [false, true] {
+            let mut app = StencilApp::new(None);
+            app.prefs.select_after_zoom = !keep;
+            app.active_tool = ActiveTool::Zoom;
+            frame(&ctx, &mut app, vec![], canvas);
+            frame(&ctx, &mut app, vec![], canvas);
+            let at = app
+                .view
+                .world_to_screen(stencilcraft_geom::Point::new(40.0, 40.0));
+            let zoom = app.view.zoom;
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], canvas);
+            frame(&ctx, &mut app, vec![button(true)], canvas);
+            frame(&ctx, &mut app, vec![button(false)], canvas);
+            frame(&ctx, &mut app, vec![], canvas);
+            assert!(app.view.zoom > zoom, "the click zoomed in");
+            let expected = if keep {
+                ActiveTool::Zoom
+            } else {
+                ActiveTool::Select
+            };
+            assert_eq!(app.active_tool, expected);
+        }
     }
 
     #[test]

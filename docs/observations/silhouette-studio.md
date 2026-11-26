@@ -233,3 +233,28 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 - Rotate Three Copies on a 2 × 0.16 in bar: four bars about the bar's own centre at 0°, 45°,
   90°, 135°; Rotate Five Copies: six bars 30° apart. n copies are 180°/(n+1) apart (they fan
   over half a turn).
+
+## Preferences: Defaults, Display, Tools, Advanced (2026-11-26, SS 5.0.556)
+
+- Defaults: Page Orientation (Choose Automatically), Blade Type (Choose Automatically),
+  Default Page Color (swatch), Default Fill Style (Solid Fill | Outline Only (chosen), with fill
+  and line colour swatches, black and red), Default Text Style (Arial, 72.00, B/I/U), Always
+  Display Mat (off), Cut to Edge of Page (off), Registration Marks (off), Scrollbar Position
+  (Left | Right (chosen)), Panel Mode (Flexible Panel Mode).
+- Display: Antialiasing (8 Sample, restart required), Current Theme (Light), Background Color
+  (Current Theme), Button Size (Small–Large slider), Animation (Slow–Fast slider), Curve Quality
+  (0–12 slider, restart required).
+- Tools › Action After Tool Use: After Creating a Shape (Continue Drawing Shapes), After Drawing
+  Freehand (Continue Drawing Freehand), After Using Eraser (Continue Using Eraser), After Using
+  Knife (Continue Using Knife), After Using Zoom (Choose Select), After Using Eyedropper (Choose
+  Select). Selection Tools: When Drag Selecting (Select shapes touching drag box), When Many
+  Shapes Selected (Single Bounding Box), When Right-clicking Subsequent Shapes (New Shape Becomes
+  Selected). Editing Tools: Show Bezier Control Handles for (Selected points only), When Using
+  Subtract and Subtract All (Convert thick lines to polygons), When Using Eraser and Knife
+  (Maintain thick lines as lines), When Pasting an Object (New Shape Becomes Selected), Offset
+  Lines (Set to 0pt red lines).
+- Advanced: Restore Factory Defaults…, Restore Pre-loaded Designs…, Unhide All Dialogs, Set
+  Library Permissions…, OpenGL Settings…; Packet Size (Auto (1000)); Use IME (on), Software
+  Overcut (on), Include Cut Data (on); Enable Performance Improvement data collection (off);
+  Silhouette Device Connections: Do not auto-release connections (chosen) | Auto-release when
+  connections are not in use; OpenGL Configure (WGL_SWAP_COPY / EXCHANGE / UNDEFINED / None).

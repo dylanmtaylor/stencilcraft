@@ -27,6 +27,10 @@ pub struct FileStores {
     pub last_snapshot: Option<std::time::Instant>,
     pub query: String,
     pub save_name: String,
+    /// The library folder the panel shows (`""` is the top).
+    pub folder: String,
+    /// The New Folder field.
+    pub new_folder: String,
     /// Snapshots of earlier sessions, listed once at start.
     pub recovered: Vec<RecoveryEntry>,
 }
@@ -57,6 +61,8 @@ impl FileStores {
             last_snapshot: None,
             query: String::new(),
             save_name: "design".to_string(),
+            folder: String::new(),
+            new_folder: String::new(),
             recovered,
         }
     }
@@ -131,7 +137,10 @@ impl StencilApp {
             return Vec::new();
         };
         if self.stores.query.trim().is_empty() {
-            library.list("").map(|l| l.items).unwrap_or_default()
+            library
+                .list(&self.stores.folder)
+                .map(|l| l.items)
+                .unwrap_or_default()
         } else {
             library.search(self.stores.query.trim()).unwrap_or_default()
         }
@@ -163,7 +172,15 @@ impl StencilApp {
             self.status = "name the design first".to_string();
             return;
         }
-        let rel = format!("{name}.{}", stencilcraft_doc::FORMAT_EXTENSION);
+        let rel = if self.stores.folder.is_empty() {
+            format!("{name}.{}", stencilcraft_doc::FORMAT_EXTENSION)
+        } else {
+            format!(
+                "{}/{name}.{}",
+                self.stores.folder,
+                stencilcraft_doc::FORMAT_EXTENSION
+            )
+        };
         let saved = self
             .stores
             .library
@@ -215,6 +232,81 @@ impl StencilApp {
         };
     }
 
+    /// The folders inside the shown one.
+    fn library_folders(&self) -> Vec<String> {
+        self.stores
+            .library
+            .as_ref()
+            .and_then(|l| l.list(&self.stores.folder).ok())
+            .map(|l| l.folders)
+            .unwrap_or_default()
+    }
+
+    /// New Folder: a folder inside the shown one; names keep to letters, digits, spaces, `-`, `_`.
+    pub fn create_library_folder(&mut self, name: &str) {
+        let name: String = name
+            .trim()
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ' '))
+            .collect();
+        if name.is_empty() {
+            self.status = "name the folder first".to_string();
+            return;
+        }
+        let rel = if self.stores.folder.is_empty() {
+            name
+        } else {
+            format!("{}/{name}", self.stores.folder)
+        };
+        self.status = match self.stores.library.as_ref().map(|l| l.create_folder(&rel)) {
+            Some(Ok(())) => format!("made the folder {rel}"),
+            Some(Err(e)) => e.to_string(),
+            None => "no library folder".to_string(),
+        };
+    }
+
+    /// The library action of a button, run after the panel is drawn.
+    pub fn library_action(&mut self, action: LibraryAction) {
+        let Some(library) = self.stores.library.as_ref() else {
+            return;
+        };
+        let result = match &action {
+            LibraryAction::Enter(folder) => {
+                self.stores.folder.clone_from(folder);
+                Ok(String::new())
+            }
+            LibraryAction::Up => {
+                self.stores.folder = self
+                    .stores
+                    .folder
+                    .rsplit_once('/')
+                    .map_or_else(String::new, |(parent, _)| parent.to_string());
+                Ok(String::new())
+            }
+            LibraryAction::Favourite(rel, on) => library.set_favourite(rel, *on).map(|()| {
+                if *on {
+                    format!("{rel} is a favourite")
+                } else {
+                    format!("{rel} is no longer a favourite")
+                }
+            }),
+            LibraryAction::Trash(rel) => library
+                .trash(rel)
+                .map(|_| format!("moved {rel} to the Recycle Bin")),
+            LibraryAction::Restore(name) => {
+                library.restore(name).map(|rel| format!("restored {rel}"))
+            }
+            LibraryAction::EmptyBin => library
+                .empty_trash()
+                .map(|()| "emptied the Recycle Bin".to_string()),
+        };
+        match result {
+            Ok(message) if message.is_empty() => {}
+            Ok(message) => self.status = message,
+            Err(e) => self.status = e.to_string(),
+        }
+    }
+
     pub fn library_panel(&mut self, ui: &mut egui::Ui) {
         let recovered: Vec<(String, String)> = self
             .stores
@@ -232,6 +324,23 @@ impl StencilApp {
             })
             .collect();
         let items = self.library_items();
+        let folders = self.library_folders();
+        let favourites = self
+            .stores
+            .library
+            .as_ref()
+            .map(Library::favourites)
+            .unwrap_or_default();
+        let bin = self
+            .stores
+            .library
+            .as_ref()
+            .map(Library::trash_list)
+            .unwrap_or_default();
+        let folder = self.stores.folder.clone();
+        let mut action = None;
+        let mut new_folder = self.stores.new_folder.clone();
+        let mut make_folder = false;
         let has_library = self.stores.library.is_some();
         let mut open_recovered = None;
         let mut discard = None;
@@ -267,21 +376,81 @@ impl StencilApp {
                     .id_salt("library-search")
                     .limit(200)
                     .show(ui);
-                if items.is_empty() {
-                    hint(ui, "No designs yet: save one below.");
+                if !favourites.is_empty() {
+                    hint(ui, "Favourites");
+                    for item in &favourites {
+                        ui.horizontal(|ui| {
+                            ui.label(item_title(item));
+                            if button(ui, "Open", !item.damaged) {
+                                open_item = Some(item.path.clone());
+                            }
+                        });
+                    }
+                }
+                ui.horizontal(|ui| {
+                    ui.label(if folder.is_empty() {
+                        "Library".to_string()
+                    } else {
+                        format!("Library / {folder}")
+                    });
+                    if !folder.is_empty() && button(ui, "Up", true) {
+                        action = Some(LibraryAction::Up);
+                    }
+                });
+                for sub in &folders {
+                    ui.horizontal(|ui| {
+                        let name = sub.rsplit('/').next().unwrap_or(sub);
+                        ui.label(format!("{name}/"));
+                        if button(ui, "Open folder", true) {
+                            action = Some(LibraryAction::Enter(sub.clone()));
+                        }
+                    });
+                }
+                if items.is_empty() && folders.is_empty() {
+                    hint(ui, "No designs here yet: save one below.");
                 }
                 for item in &items {
                     ui.horizontal(|ui| {
-                        let title = if item.title.is_empty() {
-                            item.path.as_str()
-                        } else {
-                            item.title.as_str()
-                        };
-                        ui.label(title);
+                        ui.label(item_title(item));
                         if button(ui, "Open", !item.damaged) {
                             open_item = Some(item.path.clone());
                         }
+                        // Plain words: the interface font has no star glyphs.
+                        let star = if item.favourite {
+                            "Unfavourite"
+                        } else {
+                            "Favourite"
+                        };
+                        if button(ui, star, true) {
+                            action =
+                                Some(LibraryAction::Favourite(item.path.clone(), !item.favourite));
+                        }
+                        if button(ui, "Delete", true) {
+                            action = Some(LibraryAction::Trash(item.path.clone()));
+                        }
                     });
+                }
+                ui.horizontal(|ui| {
+                    let _ = TextField::new("New folder name", Bind::bound(&mut new_folder))
+                        .id_salt("library-new-folder")
+                        .limit(80)
+                        .show(ui);
+                    make_folder = button(ui, "New Folder", true);
+                });
+                if !bin.is_empty() {
+                    ui.separator();
+                    hint(ui, &format!("Recycle Bin ({})", bin.len()));
+                    for entry in &bin {
+                        ui.horizontal(|ui| {
+                            ui.label(&entry.original);
+                            if button(ui, "Restore", true) {
+                                action = Some(LibraryAction::Restore(entry.name.clone()));
+                            }
+                        });
+                    }
+                    if button(ui, "Empty Recycle Bin", true) {
+                        action = Some(LibraryAction::EmptyBin);
+                    }
                 }
                 ui.separator();
                 let _ = TextField::new("Design name", Bind::bound(&mut save_name))
@@ -292,6 +461,14 @@ impl StencilApp {
             });
         self.stores.query = query;
         self.stores.save_name = save_name;
+        self.stores.new_folder = new_folder;
+        if make_folder {
+            let name = std::mem::take(&mut self.stores.new_folder);
+            self.create_library_folder(&name);
+        }
+        if let Some(action) = action {
+            self.library_action(action);
+        }
         if let Some(id) = open_recovered {
             self.open_recovered(&id);
         }
@@ -305,6 +482,26 @@ impl StencilApp {
             let name = self.stores.save_name.clone();
             self.save_to_library(&name);
         }
+    }
+}
+
+/// A Library panel button's action.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LibraryAction {
+    Enter(String),
+    Up,
+    Favourite(String, bool),
+    Trash(String),
+    Restore(String),
+    EmptyBin,
+}
+
+/// An item's shown name: its title, else its path.
+fn item_title(item: &stencilcraft_doc::library::LibraryItem) -> String {
+    if item.title.is_empty() {
+        item.path.clone()
+    } else {
+        item.title.clone()
     }
 }
 
@@ -345,6 +542,58 @@ mod tests {
             ..FileStores::default()
         };
         app
+    }
+
+    #[test]
+    fn library_folders_favourites_and_the_bin() {
+        let dir = std::env::temp_dir().join(format!("sc-lib-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = app_in(&dir);
+        app.create_library_folder("Cards / Birthday!");
+        assert!(app.status.contains("Cards  Birthday"), "{}", app.status);
+        app.create_library_folder("Cards");
+        app.library_action(LibraryAction::Enter("Cards".into()));
+        app.run_command(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        });
+        app.save_to_library("tag");
+        assert!(
+            app.status.contains("Cards/tag"),
+            "saved into the folder: {}",
+            app.status
+        );
+        let items = app.library_items();
+        assert_eq!(items.len(), 1);
+        let rel = items[0].path.clone();
+        app.library_action(LibraryAction::Favourite(rel.clone(), true));
+        assert!(app.library_items()[0].favourite);
+        app.library_action(LibraryAction::Trash(rel.clone()));
+        assert!(app.library_items().is_empty());
+        let bin = app
+            .stores
+            .library
+            .as_ref()
+            .map(Library::trash_list)
+            .unwrap_or_default();
+        assert_eq!(bin.len(), 1);
+        app.library_action(LibraryAction::Restore(bin[0].name.clone()));
+        assert_eq!(app.library_items().len(), 1, "restored");
+        app.library_action(LibraryAction::Trash(rel));
+        app.library_action(LibraryAction::EmptyBin);
+        assert!(
+            app.stores
+                .library
+                .as_ref()
+                .map(Library::trash_list)
+                .unwrap_or_default()
+                .is_empty()
+        );
+        app.library_action(LibraryAction::Up);
+        assert!(app.stores.folder.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

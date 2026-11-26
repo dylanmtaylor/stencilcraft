@@ -436,3 +436,14 @@ Silhouette, replacing Silhouette's bytes one record at a time.
 
   The three enclosing record lengths follow from what they hold. A fill adds a flag and an
   RGBA colour after the cap name (fillA → fillC).
+- **A whole shape object generated (2026-11-26).** A rectangle object (771 bytes) is now
+  generated from fields: line style, fill and pattern defaults, the "Default Layer"
+  reference, the outline in object coordinates, the transform, the selection frame, the page
+  copy of the outline, its ids, its name and the `create_rectangle` tag. It matches
+  Silhouette's own record byte for byte, apart from the geometry floats: Silhouette's file
+  carries a scaled transform, where ours writes the identity transform.
+  - **Opened in Silhouette:** put into a saved document in place of the original rectangle,
+    a generated 30 × 40 mm rectangle at (120, 150) mm with a 2 pt line opens with exactly
+    W 1.181, H 1.575, X 4.724 and Y 5.906 in and a 2.00 pt line.
+  - **Next:** the layer objects ("Layer 0", "Layer 1", 670 bytes each), so a whole document
+    can be generated, then curves.

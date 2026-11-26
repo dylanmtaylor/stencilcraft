@@ -121,7 +121,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     object and layer locks. The Layers panel shows, locks, renames, reorders and
     deletes layers and makes guide layers (shown, never cut); Object › Arrange › Send to
     Layer moves objects between layers, and Attach/Detach and Contour have desktop
-    controls. Still missing: renaming groups (the craft-libs document has no group or shape names).
+    controls; the Inspector renames a selected group.
 18. **Snapping and guides**: guides, grid and snap settings, snapping and measuring are
     engine commands, and the desktop wires them: guides drag out of the rulers, move and
     drop off to remove; moving a selection snaps (grid, guides, objects, spacing, points)

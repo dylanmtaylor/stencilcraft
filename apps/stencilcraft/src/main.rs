@@ -5845,6 +5845,8 @@ impl StencilApp {
             }
         }
 
+        self.send_assign_ui(ui);
+        ui.separator();
         let _ = Text::new("Model").show(ui);
         if self.send.connection_mode == 2 || self.send.device.is_empty() {
             let models: Vec<Entry<stencilcraft_machine::Model>> = MODEL_CHOICES

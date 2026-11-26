@@ -59,6 +59,8 @@ impl StencilApp {
             fill_color: style.fill_color.clone(),
             material: None,
             send: None,
+            fill_pattern: None,
+            fill_gradient: None,
             clear,
         }));
         self.run_command(Command::ShapesSetStyle {

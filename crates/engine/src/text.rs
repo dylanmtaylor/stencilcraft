@@ -1279,6 +1279,8 @@ fn add_monogram(engine: &mut Engine, m: TextMonogram) -> Result<Effect, EngineEr
         vertical: false,
         weld: false,
         flow: TextFlow::Straight,
+        wrap_width_mm: None,
+        underline: false,
         letters: Vec::new(),
         transform: IDENTITY_TRANSFORM,
     };

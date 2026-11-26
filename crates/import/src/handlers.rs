@@ -157,16 +157,47 @@ fn output_scene(
                 ),
                 close_open_contours: dxf
                     && matches!((style, layer.kind), (CutStyle::Cut, _) | (_, CutStyle::Cut)),
+                fill_rgb: shape.production.fill_color.as_deref().and_then(hex_rgb),
             });
         }
     }
+    let images = doc
+        .images
+        .iter()
+        .take(craft_file_import::write::MAX_IMAGES)
+        .filter_map(|image| {
+            // A picture whose pixels do not decode is left out rather than failing the export.
+            let pixels = stencilcraft_raster::image_pixels(image).ok()?;
+            Some(craft_file_import::write::OutputImage {
+                x: image.x_mm,
+                y: image.y_mm,
+                width: image.width_mm,
+                height: image.height_mm,
+                width_px: pixels.width(),
+                height_px: pixels.height(),
+                rgba: pixels.into_raw(),
+            })
+        })
+        .filter(craft_file_import::write::OutputImage::is_valid)
+        .collect();
     Ok(craft_file_import::write::OutputScene {
         width_mm,
         height_mm,
         view_box,
         layers,
         paths,
+        images,
     })
+}
+
+/// `#rrggbb` (or `rrggbb`) as R, G, B.
+fn hex_rgb(hex: &str) -> Option<[u8; 3]> {
+    let digits = hex.trim().trim_start_matches('#');
+    if digits.len() != 6 || !digits.is_ascii() {
+        return None;
+    }
+    let channel = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
 fn layer_color(kind: CutStyle) -> i32 {

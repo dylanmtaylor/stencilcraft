@@ -764,6 +764,7 @@ pub fn paint_document(
     let CanvasLayers {
         backdrop,
         image_textures,
+        pattern_textures,
     } = layers;
     let palette = Palette::for_theme(options.theme);
     // Canvas backing, then (optionally) the cutting mat, then the design
@@ -879,12 +880,22 @@ pub fn paint_document(
             {
                 color = line;
             }
-            if !options.outline_view
-                && let Some(fill) = shape
-                    .production
-                    .fill_color
-                    .as_deref()
-                    .and_then(parse_hex_colour)
+            let pattern = shape
+                .production
+                .fill_pattern
+                .as_deref()
+                .zip(pattern_textures.get(&shape.id).copied());
+            let solid = shape
+                .production
+                .fill_color
+                .as_deref()
+                .and_then(parse_hex_colour);
+            let gradient = shape
+                .production
+                .fill_gradient
+                .as_deref()
+                .and_then(|g| Some((g, parse_hex_colour(&g.from)?, parse_hex_colour(&g.to)?)));
+            if !options.outline_view && (pattern.is_some() || gradient.is_some() || solid.is_some())
             {
                 let polygons: Vec<Vec<egui::Pos2>> = stencilcraft_geom::path_to_polylines(
                     &shape.path,
@@ -895,7 +906,18 @@ pub fn paint_document(
                 .filter(|(i, pl)| pl.closed && !shape.production.hidden_contours.contains(i))
                 .map(|(_, pl)| pl.points.iter().map(|p| view.world_to_screen(*p)).collect())
                 .collect();
-                painter.add(egui::Shape::mesh(even_odd_fill(&polygons, clip, fill)));
+                if let Some((pattern, (texture, aspect))) = pattern {
+                    let mut mesh = even_odd_fill(&polygons, clip, egui::Color32::WHITE);
+                    map_pattern(&mut mesh, view, texture, pattern, aspect);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else if let Some((g, from, to)) = gradient {
+                    let mut mesh = even_odd_fill(&polygons, clip, egui::Color32::WHITE);
+                    let bounds = kurbo::Shape::bounding_box(&shape.path);
+                    shade_gradient(&mut mesh, view, bounds, g.angle_deg, from, to);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else if let Some(fill) = solid {
+                    painter.add(egui::Shape::mesh(even_odd_fill(&polygons, clip, fill)));
+                }
             }
             if options.outline_view {
                 width = 1.0;
@@ -1453,6 +1475,62 @@ const MAX_FILL_ROWS: usize = 4096;
 
 /// Fill closed screen polygons by the even-odd rule, one pixel row at a time, clipped to
 /// `clip`: concave shapes and holes fill correctly, which egui's convex fill cannot do.
+/// Texture `mesh` (a fill in screen space) with a pattern tile repeated in page millimetres:
+/// one tile is `tile_mm` wide and `aspect` times that tall, turned by the pattern's angle.
+pub fn map_pattern(
+    mesh: &mut egui::Mesh,
+    view: &View,
+    texture: egui::TextureId,
+    pattern: &stencilcraft_doc::FillPattern,
+    aspect: f32,
+) {
+    let width = pattern.tile_mm.max(0.5);
+    let height = width * f64::from(aspect.max(0.01));
+    let (sin, cos) = (-pattern.angle_deg.to_radians()).sin_cos();
+    mesh.texture_id = texture;
+    for vertex in &mut mesh.vertices {
+        let world = view.screen_to_world(vertex.pos.to_vec2());
+        let (x, y) = (world.x * cos - world.y * sin, world.x * sin + world.y * cos);
+        vertex.uv = egui::pos2((x / width) as f32, (y / height) as f32);
+        vertex.color = egui::Color32::WHITE;
+    }
+}
+
+/// Where `point` falls along a gradient across `bounds` at `angle_deg` (0 left to right,
+/// 90 bottom to top on the y-down page), from 0 to 1.
+pub fn gradient_position(
+    bounds: kurbo::Rect,
+    angle_deg: f64,
+    point: stencilcraft_geom::Point,
+) -> f64 {
+    let (sin, cos) = angle_deg.to_radians().sin_cos();
+    let centre = bounds.center();
+    // Half the extent of the bounds along the direction.
+    let half = (bounds.width() * cos.abs() + bounds.height() * sin.abs()) / 2.0;
+    if !(half.is_finite() && half > 1e-9) {
+        return 0.0;
+    }
+    let along = (point.x - centre.x) * cos - (point.y - centre.y) * sin;
+    (along / (2.0 * half) + 0.5).clamp(0.0, 1.0)
+}
+
+/// Colour `mesh` (a fill in screen space) with a gradient from `from` to `to` across the
+/// shape's `bounds` in page millimetres.
+pub fn shade_gradient(
+    mesh: &mut egui::Mesh,
+    view: &View,
+    bounds: kurbo::Rect,
+    angle_deg: f64,
+    from: egui::Color32,
+    to: egui::Color32,
+) {
+    for vertex in &mut mesh.vertices {
+        let world = view.screen_to_world(vertex.pos.to_vec2());
+        let t = gradient_position(bounds, angle_deg, world) as f32;
+        vertex.color = from.lerp_to_gamma(to, t);
+    }
+}
+
 pub fn even_odd_fill(
     polygons: &[Vec<egui::Pos2>],
     clip: egui::Rect,
@@ -1506,6 +1584,8 @@ pub fn even_odd_fill(
 pub struct CanvasLayers<'a> {
     pub backdrop: Option<&'a MatBackdrop>,
     pub image_textures: &'a std::collections::HashMap<u64, egui::TextureId>,
+    /// Pattern fill tiles by shape id: a repeating texture and the tile's height ÷ width.
+    pub pattern_textures: &'a std::collections::HashMap<u64, (egui::TextureId, f32)>,
 }
 
 /// Selection state painted over the canvas.
@@ -1922,6 +2002,56 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
 #[cfg(test)]
 mod fill_tests {
     use super::*;
+
+    #[test]
+    fn a_gradient_runs_across_the_bounds_at_its_angle() {
+        let b = kurbo::Rect::new(0.0, 0.0, 20.0, 10.0);
+        let p = stencilcraft_geom::Point::new;
+        assert!((gradient_position(b, 0.0, p(0.0, 5.0))).abs() < 1e-9);
+        assert!((gradient_position(b, 0.0, p(20.0, 5.0)) - 1.0).abs() < 1e-9);
+        assert!((gradient_position(b, 0.0, p(10.0, 0.0)) - 0.5).abs() < 1e-9);
+        // The page is y-down: 90° ends at the top edge.
+        assert!((gradient_position(b, 90.0, p(3.0, 0.0)) - 1.0).abs() < 1e-9);
+        assert!(gradient_position(b, 90.0, p(3.0, 10.0)).abs() < 1e-9);
+        assert_eq!(gradient_position(kurbo::Rect::ZERO, 0.0, p(1.0, 1.0)), 0.0);
+    }
+
+    #[test]
+    fn a_pattern_repeats_in_page_millimetres() {
+        let view = View::default();
+        let mut mesh = egui::Mesh::default();
+        mesh.add_colored_rect(
+            egui::Rect::from_min_max(
+                view.world_to_screen(stencilcraft_geom::Point::new(0.0, 0.0)),
+                view.world_to_screen(stencilcraft_geom::Point::new(20.0, 10.0)),
+            ),
+            egui::Color32::RED,
+        );
+        let pattern = stencilcraft_doc::FillPattern {
+            png_base64: "x".into(),
+            tile_mm: 10.0,
+            angle_deg: 0.0,
+        };
+        map_pattern(&mut mesh, &view, egui::TextureId::User(7), &pattern, 0.5);
+        assert_eq!(mesh.texture_id, egui::TextureId::User(7));
+        let far = mesh
+            .vertices
+            .iter()
+            .map(|v| v.uv)
+            .fold(egui::pos2(f32::MIN, f32::MIN), |a, b| {
+                egui::pos2(a.x.max(b.x), a.y.max(b.y))
+            });
+        // 20 mm across is two 10 mm tiles; 10 mm down is two 5 mm tall tiles.
+        assert!(
+            (far.x - 2.0).abs() < 1e-3 && (far.y - 2.0).abs() < 1e-3,
+            "{far:?}"
+        );
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.color == egui::Color32::WHITE)
+        );
+    }
 
     #[test]
     fn even_odd_fill_leaves_holes_and_respects_clip() {
@@ -2652,6 +2782,7 @@ mod tests {
                     CanvasLayers {
                         backdrop: None,
                         image_textures: &std::collections::HashMap::new(),
+                        pattern_textures: &std::collections::HashMap::new(),
                     },
                     CanvasOptions::default(),
                     &SelectionState::default(),
@@ -2693,6 +2824,7 @@ mod tests {
                 CanvasLayers {
                     backdrop: None,
                     image_textures: &std::collections::HashMap::new(),
+                    pattern_textures: &std::collections::HashMap::new(),
                 },
                 CanvasOptions::default(),
                 &SelectionState::default(),

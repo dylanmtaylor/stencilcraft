@@ -590,6 +590,8 @@ impl StencilApp {
                 fill_color: None,
                 material: None,
                 send: assign,
+                fill_pattern: None,
+                fill_gradient: None,
                 clear: if assign.is_none() {
                     vec![stencilcraft_engine::ProductionField::Send]
                 } else {

@@ -23,32 +23,32 @@ egui = "0.37"
 eframe = { version = "0.37", features = ["persistence"] }
 rfd = "0.17"
 # Every craft-libs crate comes from storytold/craft-libs main (formats, codecs, protocols, UI).
-craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-behavior = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-theme = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-atomic = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-draw = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7", features = ["ui"] }
-craft-raster-codecs = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-stencilcraft-format = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-stencilcraft-document = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-jsonrpc = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-mcp = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-dxf = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-eps = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7", features = ["paths"] }
-craft-gcode = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-plotter = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7", features = ["serde"] }
-craft-pdf = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7", features = ["write", "paths"] }
-craft-silhouette-studio = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-file-formats = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-file-import = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-svg = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-settings = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-window = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-host = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-font-manager = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-text = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-craft-i18n = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
+craft-ui = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-behavior = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-theme = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-atomic = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-draw = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb", features = ["ui"] }
+craft-raster-codecs = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-stencilcraft-format = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-stencilcraft-document = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-jsonrpc = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-mcp = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-dxf = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-eps = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb", features = ["paths"] }
+craft-gcode = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-plotter = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb", features = ["serde"] }
+craft-pdf = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb", features = ["write", "paths"] }
+craft-silhouette-studio = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-file-formats = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-file-import = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-svg = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-settings = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-window = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-host = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-font-manager = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-text = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-keymap = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+craft-i18n = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
 # Reuse VectorCraft's Session command engine and curve-preserving geometry. StencilCraft adapts its
 # flat millimetre document at the engine boundary; keep the full engine's optional font bundle off.
 vectorcraft-engine = { git = "https://github.com/storytold/vectorcraft", rev = "6b3a6b8788ebcb420d69449199cbdf323888d27e", default-features = false }
@@ -111,12 +111,16 @@ codegen-units = 1
 # craft-ui uses the suite's egui and winit forks for shared IME and docking support.
 [patch.crates-io]
 # VectorCraft's PDF import/export dependencies use the matching Craft-Libs API revisions.
-hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-hayro-interpret = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-hayro-cmap = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-hayro-postscript = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
-krilla = { git = "https://github.com/storytold/craft-libs", rev = "90e14375a4a461fb42eba802846250b2473366f7" }
+hayro-syntax = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+hayro = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+linesweeper = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+vello_common = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+vello_cpu = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+hayro-interpret = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+hayro-jbig2 = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+hayro-cmap = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+hayro-postscript = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
+krilla = { git = "https://github.com/dylanmtaylor/craft-libs", rev = "920b721647ee4817bcf928a6d6aea104769f27cb" }
 ecolor = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f304896f9658d239a7b29cf8af1564" }
 emath = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f304896f9658d239a7b29cf8af1564" }
 epaint = { git = "https://github.com/storytold/egui.git", rev = "b9770908e0f304896f9658d239a7b29cf8af1564" }

@@ -66,6 +66,7 @@ mod freehand;
 mod glyph_source;
 mod graphic_styles;
 mod home;
+mod measure_tool;
 mod spelling;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
@@ -560,6 +561,8 @@ pub enum ActiveTool {
     TraceImage,
     Hand,
     Zoom,
+    /// Measure: drag a line to read its length and angle.
+    Measure,
 }
 
 impl ActiveTool {
@@ -593,6 +596,7 @@ impl ActiveTool {
             Self::TraceImage => "image",
             Self::Hand => "hand",
             Self::Zoom => "zoom_in",
+            Self::Measure => "ruler",
         }
     }
 
@@ -621,6 +625,7 @@ impl ActiveTool {
             Self::TraceImage => "Trace Image",
             Self::Hand => "Hand",
             Self::Zoom => "Zoom",
+            Self::Measure => "Measure",
         }
     }
 
@@ -709,6 +714,7 @@ fn build_tool_slots() -> Vec<ToolSlot<ActiveTool>> {
                 tool(ActiveTool::Zoom, "Zoom").shortcut("Z"),
             ],
         ),
+        ToolSlot::new(10, vec![tool(ActiveTool::Measure, "Measure")]),
     ]
 }
 
@@ -1375,6 +1381,8 @@ pub struct StencilApp {
     pub erase_colour: erase_colour::EraseColourState,
     /// Home: the start screen in place of the design.
     pub home: home::HomeState,
+    /// The Measure tool's line (millimetres), shown until the next measurement.
+    pub measure_line: Option<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
     /// Type › Spelling…, while open.
     pub spelling: Option<craft_text::ui::spelling::CheckSpellingDialog>,
     pub selection_name_draft: String,
@@ -1684,6 +1692,7 @@ impl StencilApp {
             pixscan: pixscan::PixScanState::default(),
             erase_colour: erase_colour::EraseColourState::default(),
             home: home::HomeState::default(),
+            measure_line: None,
             spelling: None,
             selection_name_draft: String::new(),
             mat_before_unload: None,
@@ -6812,6 +6821,11 @@ impl StencilApp {
                 1.5
             };
             self.view.zoom_at(factor, pointer);
+        }
+
+        // Measure: drag a line; its length and angle stay shown until the next one.
+        if self.active_tool == ActiveTool::Measure && !overlay_claimed {
+            self.measure_canvas(ui, &response, &painter);
         }
 
         // Knife: drag the cut line across the selection (Shift snaps to 45°).

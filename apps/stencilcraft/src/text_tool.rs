@@ -746,6 +746,22 @@ impl StencilApp {
                     pick_font = true;
                 }
                 if styles.len() > 1 {
+                    // Silhouette's B and I: the family's bold or italic face, when it has one.
+                    ui.horizontal(|ui| {
+                        let (bold, italic) = style_traits(&font_style);
+                        let to_bold = styled_face(&styles, !bold, italic);
+                        if button(ui, if bold { "B ✓" } else { "B" }, to_bold.is_some())
+                            && let Some(face) = to_bold
+                        {
+                            font_style = face;
+                        }
+                        let to_italic = styled_face(&styles, bold, !italic);
+                        if button(ui, if italic { "I ✓" } else { "I" }, to_italic.is_some())
+                            && let Some(face) = to_italic
+                        {
+                            font_style = face;
+                        }
+                    });
                     labelled(ui, "Style", |ui| {
                         let _ =
                             Select::new("Font style", Bind::bound(&mut font_style), &style_entries)
@@ -1262,5 +1278,63 @@ mod style_tests {
             app.note_recent_font(name);
         }
         assert_eq!(app.prefs.recent_fonts, ["G", "F", "E", "D", "C", "A"]);
+    }
+}
+
+/// Whether a face name reads as bold and as italic (oblique counts as italic).
+pub fn style_traits(style: &str) -> (bool, bool) {
+    let s = style.to_lowercase();
+    (
+        s.contains("bold"),
+        s.contains("italic") || s.contains("oblique"),
+    )
+}
+
+/// The face of `styles` that is bold and italic as asked: the shortest such name, so "Bold"
+/// wins over "Semibold Condensed"; `None` when the family has none.
+pub fn styled_face(styles: &[String], bold: bool, italic: bool) -> Option<String> {
+    styles
+        .iter()
+        .filter(|s| style_traits(s) == (bold, italic))
+        .min_by_key(|s| {
+            let plain = matches!(
+                s.to_lowercase().as_str(),
+                "regular" | "bold" | "italic" | "bold italic"
+            );
+            (!plain, s.len())
+        })
+        .cloned()
+}
+
+#[cfg(test)]
+mod bold_italic_tests {
+    use super::*;
+
+    #[test]
+    fn bold_and_italic_pick_the_matching_face() {
+        let styles: Vec<String> = [
+            "Regular",
+            "Semibold Condensed",
+            "Bold",
+            "Italic",
+            "Bold Italic",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(styled_face(&styles, true, false).as_deref(), Some("Bold"));
+        assert_eq!(
+            styled_face(&styles, true, true).as_deref(),
+            Some("Bold Italic")
+        );
+        assert_eq!(
+            styled_face(&styles, false, false).as_deref(),
+            Some("Regular")
+        );
+        assert_eq!(style_traits("Oblique"), (false, true));
+        assert_eq!(
+            styled_face(&["Regular".to_string()], true, false),
+            None,
+            "no bold face"
+        );
     }
 }

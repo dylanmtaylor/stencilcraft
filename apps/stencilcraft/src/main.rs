@@ -67,6 +67,7 @@ mod glyph_source;
 mod graphic_styles;
 mod home;
 mod measure_tool;
+mod print_preview;
 mod spelling;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
@@ -134,6 +135,10 @@ pub struct UserPrefs {
     /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
     /// larger than the mat's usable area.
     pub constrain_media: bool,
+    /// Preferences › General › Print Resolution (Silhouette: 600 dpi).
+    pub print_dpi: f64,
+    /// Preferences › General › Show Print Preview (Silhouette: on).
+    pub show_print_preview: bool,
     /// Page Setup › page colour (`#rrggbb`); paper white when `None`. View only.
     pub page_colour: Option<String>,
     /// Page Setup › Transparency, 0 (opaque) to 100 %. View only.
@@ -199,6 +204,8 @@ impl Default for UserPrefs {
             constrain_media: true,
             page_colour: None,
             page_transparency: 0.0,
+            print_dpi: 600.0,
+            show_print_preview: true,
             dxf_fit_to_page: true,
             import_join_lines: true,
             png_autotrace: true,
@@ -1442,6 +1449,10 @@ pub struct StencilApp {
     pub home: home::HomeState,
     /// The Measure tool's line (millimetres), shown until the next measurement.
     pub measure_line: Option<(stencilcraft_geom::Point, stencilcraft_geom::Point)>,
+    /// File › Print's preview, while open.
+    pub print_preview: Option<print_preview::PrintPreview>,
+    /// File › Print was chosen; the next frame (which has the context) shows the preview.
+    pub print_requested: bool,
     /// Preferences › Restore Factory Defaults is waiting for its confirmation.
     pub confirm_restore_defaults: bool,
     /// Type › Spelling…, while open.
@@ -1756,6 +1767,8 @@ impl StencilApp {
             measure_line: None,
             spelling: None,
             confirm_restore_defaults: false,
+            print_preview: None,
+            print_requested: false,
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -4299,7 +4312,7 @@ impl StencilApp {
             TopMenuAction::ImportVector(kind) => self.import_vector_dialog(kind),
             TopMenuAction::Export(kind) => self.export_dialog(kind),
             TopMenuAction::SaveSelectionAs => self.save_selection_dialog(),
-            TopMenuAction::Print => self.print_via_pdf(),
+            TopMenuAction::Print => self.print_requested = true,
             TopMenuAction::TypeOnPath => self.type_on_path(),
             TopMenuAction::Machine(action) => self.queue_machine_action(action),
             TopMenuAction::ToggleMatPreview => {
@@ -7759,6 +7772,10 @@ impl eframe::App for StencilApp {
         content.app.new_document_dialog(ui);
         content.app.spelling_dialog(ui);
         content.app.restore_defaults_dialog(ui);
+        if std::mem::take(&mut content.app.print_requested) {
+            content.app.request_print(ui.ctx());
+        }
+        content.app.print_preview_dialog(ui);
         ui.ctx().request_repaint();
     }
 }

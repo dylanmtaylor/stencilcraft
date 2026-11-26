@@ -222,7 +222,7 @@ impl StencilApp {
             self.save_prefs();
         }
         if print {
-            self.print_via_pdf();
+            self.print_requested = true;
         }
     }
 }

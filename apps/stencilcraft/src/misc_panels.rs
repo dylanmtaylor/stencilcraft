@@ -83,6 +83,7 @@ impl StencilApp {
     }
 
     pub fn preferences_panel(&mut self, ui: &mut egui::Ui) {
+        let numbers = self.locale_numbers.clone();
         let mut restore = false;
         let mut prefs = self.prefs.clone();
         let mut theme = self.theme;
@@ -122,6 +123,41 @@ impl StencilApp {
                 let _ = Segmented::new("Units", Bind::bound(&mut prefs.length_unit), &unit_entries)
                     .id_salt("pref-units")
                     .show(ui);
+                ui.separator();
+                ui.label("Print");
+                let _ = Checkbox::new(Bind::bound(&mut prefs.show_print_preview))
+                    .label("Show print preview")
+                    .show(ui);
+                hint(ui, "Print resolution");
+                let mut preset = [300.0, 600.0, 1200.0]
+                    .into_iter()
+                    .find(|d| (prefs.print_dpi - d).abs() < 1e-9)
+                    .map_or(0, |d| d as u32);
+                let _ = Segmented::new(
+                    "Print resolution",
+                    Bind::bound(&mut preset),
+                    &[
+                        Entry::new(300, "300 dpi"),
+                        Entry::new(600, "600 dpi"),
+                        Entry::new(1200, "1200 dpi"),
+                        Entry::new(0, "Custom"),
+                    ],
+                )
+                .id_salt("pref-print-dpi")
+                .show(ui);
+                if preset != 0 {
+                    prefs.print_dpi = f64::from(preset);
+                } else {
+                    crate::panels::number(
+                        ui,
+                        "pref-print-dpi-custom",
+                        "Custom print resolution",
+                        &mut prefs.print_dpi,
+                        72.0..=2400.0,
+                        "{n} dpi",
+                        &numbers,
+                    );
+                }
                 ui.separator();
                 ui.label("Import");
                 hint(ui, "DXF files open:");

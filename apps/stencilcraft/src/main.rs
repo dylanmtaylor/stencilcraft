@@ -135,6 +135,9 @@ pub struct UserPrefs {
     /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
     /// larger than the mat's usable area.
     pub constrain_media: bool,
+    /// Preferences › Defaults › Cut to Edge of Page (Silhouette: off): the cut border is the
+    /// page edge instead of 1.5 mm inside it.
+    pub cut_to_page_edge: bool,
     /// Preferences › Defaults › Default Fill Style: the fill drawn shapes start with
     /// (`#rrggbb`); `None` is Silhouette's default, Outline Only.
     pub default_fill: Option<String>,
@@ -209,6 +212,7 @@ impl Default for UserPrefs {
             constrain_media: true,
             page_colour: None,
             page_transparency: 0.0,
+            cut_to_page_edge: false,
             default_fill: None,
             default_line: None,
             print_dpi: 600.0,
@@ -6385,6 +6389,7 @@ impl StencilApp {
                     theme: self.theme,
                     outline_view: self.prefs.outline_view,
                     cut_border: self.prefs.show_cut_border,
+                    cut_to_page_edge: self.prefs.cut_to_page_edge,
                     print_border: self.prefs.show_print_border,
                     show_dimensions: self.prefs.show_dimensions,
                 },

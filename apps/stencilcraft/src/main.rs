@@ -1611,6 +1611,9 @@ pub struct SendTab {
     pub queue: Vec<send_modes::QueuedJob>,
     /// How many times Add to Queue adds the current design.
     pub queue_repeat: u8,
+    /// Send cut goes to every recognised USB cutter, one after another (Silhouette
+    /// Business's multiple cutters).
+    pub all_cutters: bool,
 }
 
 impl Default for SendTab {
@@ -1649,6 +1652,7 @@ impl Default for SendTab {
             track_enhancing: false,
             queue: Vec::new(),
             queue_repeat: 1,
+            all_cutters: false,
         }
     }
 }
@@ -5929,6 +5933,12 @@ impl StencilApp {
             )
             .id_salt("cutter-device")
             .show(ui);
+            if self.send.connection_mode == 0 && self.send.devices.len() > 1 {
+                let count = self.send.devices.len();
+                let _ = Checkbox::new(Bind::bound(&mut self.send.all_cutters))
+                    .label(format!("Send to all {count} cutters"))
+                    .show(ui);
+            }
             if self.send.connection_mode == 0
                 && !self.send.device.is_empty()
                 && Button::new("Check status")

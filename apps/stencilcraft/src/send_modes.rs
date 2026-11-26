@@ -242,6 +242,34 @@ impl StencilApp {
         self.status = format!("{} in the queue", self.send.queue.len());
     }
 
+    /// `jobs` for every recognised USB cutter when Send to all cutters is on (each with its own
+    /// location and model), else unchanged.
+    pub fn for_all_cutters(
+        &self,
+        jobs: Vec<(Document, stencilcraft_engine::HardwareCommand)>,
+    ) -> Vec<(Document, stencilcraft_engine::HardwareCommand)> {
+        if !self.send.all_cutters || self.send.connection_mode != 0 || self.send.devices.len() < 2 {
+            return jobs;
+        }
+        let mut out = Vec::new();
+        for (location, model, _) in &self.send.devices {
+            for (doc, command) in &jobs {
+                let mut command = command.clone();
+                if let stencilcraft_engine::HardwareCommand::Cut {
+                    location: at,
+                    model: m,
+                    ..
+                } = &mut command
+                {
+                    at.clone_from(location);
+                    m.clone_from(model);
+                }
+                out.push((doc.clone(), command));
+            }
+        }
+        out
+    }
+
     /// Every queued job in order, each repeated as asked.
     pub fn queue_jobs(&self) -> Vec<(Document, stencilcraft_engine::HardwareCommand)> {
         self.send
@@ -292,7 +320,7 @@ impl StencilApp {
                 .clicked()
             {
                 if self.cutter_chosen() {
-                    let jobs = self.queue_jobs();
+                    let jobs = self.for_all_cutters(self.queue_jobs());
                     self.send.queue.clear();
                     self.start_hardware_jobs(jobs, ui.ctx().clone());
                 } else {
@@ -594,6 +622,40 @@ impl StencilApp {
 
 #[cfg(test)]
 mod send_assign_tests {
+
+    #[test]
+    fn send_to_all_cutters_repeats_each_job_per_cutter() {
+        let mut app = StencilApp::new(None);
+        app.send.devices = vec![
+            ("1-1".into(), "cameo4".into(), "Cameo 4".into()),
+            ("1-2".into(), "portrait3".into(), "Portrait 3".into()),
+        ];
+        let jobs = app.send_jobs(true);
+        assert_eq!(
+            app.for_all_cutters(jobs.clone()).len(),
+            jobs.len(),
+            "off: unchanged"
+        );
+        app.send.all_cutters = true;
+        let all = app.for_all_cutters(jobs.clone());
+        assert_eq!(all.len(), jobs.len() * 2);
+        let targets: Vec<_> = all
+            .iter()
+            .filter_map(|(_, c)| match c {
+                stencilcraft_engine::HardwareCommand::Cut {
+                    location, model, ..
+                } => Some((location.clone(), model.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            targets,
+            vec![
+                ("1-1".into(), "cameo4".into()),
+                ("1-2".into(), "portrait3".into())
+            ]
+        );
+    }
 
     #[test]
     fn the_job_queue_keeps_designs_in_order_with_their_copies() {

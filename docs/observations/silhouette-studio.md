@@ -447,3 +447,10 @@ Silhouette, replacing Silhouette's bytes one record at a time.
     W 1.181, H 1.575, X 4.724 and Y 5.906 in and a 2.00 pt line.
   - **Next:** the layer objects ("Layer 0", "Layer 1", 670 bytes each), so a whole document
     can be generated, then curves.
+- **A whole document generated (2026-11-26).** The layer objects ("Layer 0", "Layer 1") are
+  now generated from fields too. They share the shape's style, paint and Default Layer pieces
+  and are told apart by an object type byte: 0x24 for a layer, 0x01 for a shape, 0x25 for the
+  Default Layer. A document built entirely from generated records, with our own ids (the root
+  of the empty document plus two layers and a rectangle), opens in Silhouette with an
+  80 × 50 mm rectangle at (60, 40) mm exactly. Only the Default Layer record is still taken
+  from a sample, and it is the next to generate.

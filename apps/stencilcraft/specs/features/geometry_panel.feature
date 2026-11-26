@@ -13,7 +13,7 @@ Feature: Geometry panel
   Scenario: clicking a shape row selects that shape
     Given a nested fixture with groups "outer" and "inner"
     And all groups are expanded
-    When I click the geometry row "#2, #1"
+    When I click the geometry row "#2"
     Then the selected shapes are 2
 
   Scenario: clicking a group row deep-selects every member

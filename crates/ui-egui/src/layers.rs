@@ -1,9 +1,9 @@
 //! Pure helpers behind the Geometry and Operations panels (D-08/D-09).
 //!
 //! Everything here is derived from the document on each frame: the Unassigned
-//! group, pass numbers, operation tags and the view-only filter are never
-//! persisted into the document — the UI reads `Document.groups` and
-//! `Document.operations` directly, with no adapter layer.
+//! group, pass numbers and operation tags are never persisted into the document
+//! — the UI reads `Document.groups` and `Document.operations` directly, with no
+//! adapter layer.
 
 use std::collections::BTreeSet;
 
@@ -177,19 +177,6 @@ pub fn operation_tags(doc: &Document, shape_id: u64) -> Vec<usize> {
         .collect()
 }
 
-/// The view-only filter (never persisted): a shape is hidden when it belongs
-/// to at least one operation and every one of those operations is filtered out.
-/// Shapes with no operation stay visible.
-pub fn shape_filtered_out(doc: &Document, shape_id: u64, hidden_ops: &BTreeSet<u64>) -> bool {
-    let tags = operation_tags(doc, shape_id);
-    !tags.is_empty()
-        && tags.iter().all(|i| {
-            doc.operations
-                .get(*i)
-                .is_some_and(|op| hidden_ops.contains(&op.id))
-        })
-}
-
 /// Display icon-name hint for an operation kind in the operations panel.
 pub fn icon_name_for_kind(kind: OperationKind) -> Option<&'static str> {
     Some(match kind {
@@ -326,35 +313,5 @@ mod tests {
         assert_eq!(operation_tags(&doc, 2), vec![0, 1]);
         assert_eq!(operation_tags(&doc, 3), vec![2]);
         assert!(operation_tags(&doc, 4).is_empty());
-    }
-
-    #[test]
-    fn filter_hides_a_shape_only_when_all_its_operations_are_filtered_out() {
-        let document = fixture();
-        let none: BTreeSet<u64> = BTreeSet::new();
-        assert!(!shape_filtered_out(&document, 2, &none));
-
-        let mut hidden: BTreeSet<u64> = [1].into_iter().collect();
-        assert!(
-            !shape_filtered_out(&document, 2, &hidden),
-            "shape 2 also runs in op 2 (guide), which is not filtered"
-        );
-        hidden.insert(2);
-        assert!(
-            shape_filtered_out(&document, 2, &hidden),
-            "both its operations are out"
-        );
-        assert!(
-            shape_filtered_out(&document, 1, &hidden),
-            "shape 1's only operation is out"
-        );
-        assert!(
-            !shape_filtered_out(&document, 3, &hidden),
-            "shape 3 keeps op 3"
-        );
-        assert!(
-            !shape_filtered_out(&document, 4, &hidden),
-            "a shape with no operation is never hidden by the filter"
-        );
     }
 }

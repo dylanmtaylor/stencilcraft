@@ -653,6 +653,15 @@ pub enum OpKey {
     Member { op: u64, shape: u64 },
 }
 
+/// Which operation-tag control opened the geometry tag menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagTarget {
+    /// A specific operation pill: only that operation's actions.
+    Operation(u64),
+    /// The overflow button: one submenu per operation after the first three.
+    Overflow,
+}
+
 /// Pre-built display data for one tree row; the panel never reads the doc mid-pass.
 struct RowVisual {
     label: String,
@@ -660,8 +669,9 @@ struct RowVisual {
     icon: Option<Icon>,
     eye: Option<bool>,
     swatch: Option<egui::Color32>,
-    /// Operation pills shown at the trailing edge of a geometry row.
-    pills: Vec<(String, egui::Color32)>,
+    /// Operation pills shown at the trailing edge of a geometry row:
+    /// `(operation id, name, fill)`.
+    pills: Vec<(u64, String, egui::Color32)>,
     /// Operations beyond the pills, reachable through the overflow popup.
     extra_ops: usize,
     dimmed: bool,
@@ -732,11 +742,10 @@ fn parent_group(doc: &stencilcraft_doc::Document, id: u64) -> Option<u64> {
     })
 }
 
-/// Append one geometry shape row (skipped when the view-only filter hides it),
-/// with its operation tags as the row detail: `#id #id …` chips (D-09).
+/// Append one geometry shape row with its operation tags as trailing pills.
+/// The row carries no operation ids in its detail: the pills are the tags.
 fn push_shape_row(
     doc: &stencilcraft_doc::Document,
-    hidden_ops: &std::collections::BTreeSet<u64>,
     row_infos: &mut Vec<RowInfo<GeoKey>>,
     visuals: &mut Vec<(GeoKey, RowVisual)>,
     id: u64,
@@ -744,17 +753,8 @@ fn push_shape_row(
     theme: stencilcraft_ui_egui::ColorTheme,
 ) {
     use stencilcraft_ui_egui::layers;
-    if layers::shape_filtered_out(doc, id, hidden_ops) {
-        return;
-    }
     let key = GeoKey::Shape(id);
     let tags = layers::operation_tags(doc, id);
-    let detail = tags
-        .iter()
-        .filter_map(|i| doc.operations.get(*i))
-        .map(|op| format!("#{}", op.id))
-        .collect::<Vec<_>>()
-        .join(" ");
     let mut pills = Vec::new();
     let mut extra_ops = 0;
     for index in &tags {
@@ -763,6 +763,7 @@ fn push_shape_row(
         };
         if pills.len() < 3 {
             pills.push((
+                op.id,
                 op.name.clone(),
                 stencilcraft_ui_egui::operation_swatch_color(op, theme),
             ));
@@ -775,13 +776,13 @@ fn push_shape_row(
         key,
         RowVisual {
             label: format!("#{id}"),
-            detail,
+            detail: String::new(),
             icon: Some(Icon::Spline),
             eye: None,
             swatch: None,
             pills,
             extra_ops,
-            dimmed: tags.is_empty(),
+            dimmed: false,
         },
     ));
 }
@@ -900,21 +901,16 @@ pub struct StencilApp {
     pub geo_selection: Selection<GeoKey>,
     /// The operations list's selection.
     pub op_selection: Selection<OpKey>,
-    /// View-only filter: operation ids whose shapes are hidden in the geometry
-    /// panel. Never persisted into the document (D-09).
-    pub hidden_ops: std::collections::BTreeSet<u64>,
     /// Operation ids whose member rows are expanded (OP-01).
     pub open_ops: std::collections::BTreeSet<u64>,
     /// A bulk action waiting for its confirm gate (D-07).
     pub pending_bulk: Option<PendingBulk>,
     /// The bulk confirm dialog's state.
     pub bulk_dialog: DialogState,
-    /// The open tag-overflow popup: the shape row and the anchor it hangs from.
-    pub tag_popup: Option<(u64, egui::Response)>,
+    /// The open tag popup: the shape row, which control opened it, and the anchor.
+    pub tag_popup: Option<(u64, TagTarget, egui::Response)>,
     /// One-frame open command for the tag popup.
     pub tag_popup_open: bool,
-    /// Shapes the hammer was clicked for, dispatched after the UI pass.
-    pub pending_hammer: Option<Vec<u64>>,
     /// The open colour-picker popup (UI-05): the operation id it targets and the anchor.
     pub color_popup: Option<(u64, egui::Response)>,
     /// Working colour while the colour popup is open; committed on close when dirty.
@@ -1150,13 +1146,11 @@ impl StencilApp {
             entered_group: None,
             geo_selection: Selection::default(),
             op_selection: Selection::default(),
-            hidden_ops: Default::default(),
             open_ops: Default::default(),
             pending_bulk: None,
             bulk_dialog: DialogState::new(),
             tag_popup: None,
             tag_popup_open: false,
-            pending_hammer: None,
             color_popup: None,
             color_popup_value: egui::Color32::WHITE,
             color_popup_hex: String::new(),
@@ -2991,11 +2985,8 @@ impl StencilApp {
         use stencilcraft_ui_egui::layers::{self, GeoRow};
 
         let mut events: Vec<ListEvent<GeoKey>> = Vec::new();
-        // Hammer click: the member shapes the new operation is scoped to.
-        let hammer_click: std::cell::RefCell<Option<(Vec<u64>, egui::Response)>> =
-            std::cell::RefCell::new(None);
-        // Tag "…" click: the shape row whose operation tags overflow.
-        let tag_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
+        // Tag click: which control opened the popup on which shape row.
+        let tag_click: std::cell::RefCell<Option<(u64, TagTarget, egui::Response)>> =
             std::cell::RefCell::new(None);
         let mut make_group = false;
         let mut ungroup = false;
@@ -3008,11 +2999,9 @@ impl StencilApp {
             let parent = self.entered_group.and_then(|id| parent_group(doc, id));
             (rows, parent)
         };
-        let hidden_ops = self.hidden_ops.clone();
         let doc = &self.engine.doc;
         let mut row_infos: Vec<RowInfo<GeoKey>> = Vec::with_capacity(geo_rows.len());
         let mut visuals: Vec<(GeoKey, RowVisual)> = Vec::with_capacity(geo_rows.len());
-        let mut hammer_targets: Vec<(GeoKey, Vec<u64>)> = Vec::new();
         for row in &geo_rows {
             match *row {
                 GeoRow::Up => {
@@ -3058,31 +3047,12 @@ impl StencilApp {
                             dimmed: false,
                         },
                     ));
-                    hammer_targets.push((GeoKey::Group(id), members));
                 }
                 GeoRow::Shape { id, depth } => {
-                    push_shape_row(
-                        doc,
-                        &hidden_ops,
-                        &mut row_infos,
-                        &mut visuals,
-                        id,
-                        depth,
-                        self.theme,
-                    );
-                    hammer_targets.push((GeoKey::Shape(id), vec![id]));
+                    push_shape_row(doc, &mut row_infos, &mut visuals, id, depth, self.theme);
                 }
                 GeoRow::UnassignedShape { id } => {
-                    push_shape_row(
-                        doc,
-                        &hidden_ops,
-                        &mut row_infos,
-                        &mut visuals,
-                        id,
-                        1,
-                        self.theme,
-                    );
-                    hammer_targets.push((GeoKey::Shape(id), vec![id]));
+                    push_shape_row(doc, &mut row_infos, &mut visuals, id, 1, self.theme);
                 }
                 GeoRow::UnassignedGroup => {
                     row_infos.push(RowInfo::group(
@@ -3158,7 +3128,7 @@ impl StencilApp {
                             }
                             // Operation pills (LY-01): coloured, named by operation.
                             if let GeoKey::Shape(shape) = key {
-                                for (name, fill) in v.pills.iter().cloned() {
+                                for (op_id, name, fill) in v.pills.iter().cloned() {
                                     let hit = &tag_click;
                                     row = row.trailing_item(46.0, move |ui| {
                                         let (rect, resp) = ui.allocate_exact_size(
@@ -3190,7 +3160,11 @@ impl StencilApp {
                                             ink,
                                         );
                                         if resp.clicked() {
-                                            *hit.borrow_mut() = Some((shape, resp.clone()));
+                                            *hit.borrow_mut() = Some((
+                                                shape,
+                                                TagTarget::Operation(op_id),
+                                                resp.clone(),
+                                            ));
                                         }
                                     });
                                 }
@@ -3205,32 +3179,11 @@ impl StencilApp {
                                             .size(ControlSize::Sm),
                                         );
                                         if btn.clicked() {
-                                            *hit.borrow_mut() = Some((shape, btn));
+                                            *hit.borrow_mut() =
+                                                Some((shape, TagTarget::Overflow, btn));
                                         }
                                     });
                                 }
-                            }
-                            // Hammer on a geometry node: create an operation scoped to it.
-                            if let Some(members) = hammer_targets
-                                .iter()
-                                .find(|(k, _)| *k == key)
-                                .map(|(_, m)| m.clone())
-                                && !members.is_empty()
-                            {
-                                let hit = &hammer_click;
-                                let label = v.label.clone();
-                                row = row.trailing_item(20.0, move |ui| {
-                                    let btn = ui.add(
-                                        IconButton::new(
-                                            Icon::Settings,
-                                            format!("New operation from {label}"),
-                                        )
-                                        .size(ControlSize::Sm),
-                                    );
-                                    if btn.clicked() {
-                                        *hit.borrow_mut() = Some((members.clone(), btn));
-                                    }
-                                });
                             }
                             row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
                         }
@@ -3311,25 +3264,9 @@ impl StencilApp {
                 }
             }
         }
-        if let Some((members, _anchor)) = hammer_click.into_inner() {
-            self.pending_hammer = Some(members);
-        }
-        if let Some((shape, anchor)) = tag_click.into_inner() {
-            self.tag_popup = Some((shape, anchor));
+        if let Some((shape, target, anchor)) = tag_click.into_inner() {
+            self.tag_popup = Some((shape, target, anchor));
             self.tag_popup_open = true;
-        }
-        // The hammer dispatches after show(): one operation scoped to the node.
-        if let Some(members) = self.pending_hammer.take() {
-            let n = self.engine.doc.operations.len() + 1;
-            let cut = operations::OperationPreset::Cut;
-            self.run_command(Command::Document(DocumentCommand::OperationCreate {
-                name: format!("{} {n}", cut.label()),
-                kind: cut.kind(),
-                settings: Default::default(),
-                color: None,
-                icon: Some(cut.icon_name().to_string()),
-                members,
-            }));
         }
     }
 
@@ -3473,6 +3410,16 @@ impl StencilApp {
                                         on,
                                     ));
                                 }
+                                // Lock column: the visible control that used to be a
+                                // checkbox in the settings popover.
+                                if let OpKey::Op(index) = key
+                                    && let Some(op) = doc.operations.get(index)
+                                {
+                                    row = row.toggle(ToggleColumn::lock(
+                                        format!("Lock {}", op.name),
+                                        op.locked,
+                                    ));
+                                }
                                 // Colour swatch: opens the colour picker for this operation.
                                 if let (Some(col), OpKey::Op(index)) = (v.swatch, key)
                                     && let Some(op) = doc.operations.get(index)
@@ -3572,13 +3519,31 @@ impl StencilApp {
                 )) => {
                     if let OpKey::Op(index) = value.row
                         && let Some(op) = self.engine.doc.operations.get(index)
-                        && value.column == 0
                     {
-                        self.run_command(Command::Document(DocumentCommand::OperationSetVisible {
-                            id: op.id,
-                            visible: value.on,
-                        }));
+                        match value.column {
+                            0 => {
+                                self.run_command(Command::Document(
+                                    DocumentCommand::OperationSetVisible {
+                                        id: op.id,
+                                        visible: value.on,
+                                    },
+                                ));
+                            }
+                            1 => {
+                                self.run_command(Command::Document(
+                                    DocumentCommand::OperationSetLocked {
+                                        id: op.id,
+                                        locked: value.on,
+                                    },
+                                ));
+                            }
+                            _ => {}
+                        }
                     }
+                }
+                // Double-clicking a member row selects that shape (OP-01).
+                ListEvent::Activate(OpKey::Member { shape, .. }) => {
+                    self.set_selection([shape]);
                 }
                 ListEvent::Reorder(
                     EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
@@ -3741,11 +3706,12 @@ impl StencilApp {
         }
     }
 
-    /// The operation-tag overflow menu on a geometry row: remove membership,
-    /// toggle visibility, select members (D-09).
+    /// The operation-tag popup on a geometry row. A pill lists only that
+    /// operation's actions; the overflow opens one submenu per operation after
+    /// the first three pills (D-09, LY-01).
     fn tag_overflow_popup(&mut self, ui: &mut egui::Ui) {
         use stencilcraft_ui_egui::layers;
-        let Some((shape, anchor)) = self.tag_popup.clone() else {
+        let Some((shape, target, anchor)) = self.tag_popup.clone() else {
             return;
         };
         let open_cmd = self
@@ -3757,50 +3723,43 @@ impl StencilApp {
             Remove(u64),
             ToggleVisible(u64),
             SelectMembers(u64),
-            Filter(u64),
-            Unfilter(u64),
         }
+        let actions_for = |op: &stencilcraft_doc::Operation| -> Vec<MenuEntry<TagAction>> {
+            let name = &op.name;
+            vec![
+                MenuItem::new(
+                    format!("Remove #{shape} from {name}"),
+                    TagAction::Remove(op.id),
+                )
+                .into(),
+                MenuItem::new(
+                    format!("{} {name}", if op.visible { "Hide" } else { "Show" }),
+                    TagAction::ToggleVisible(op.id),
+                )
+                .into(),
+                MenuItem::new(
+                    format!("Select members of {name}"),
+                    TagAction::SelectMembers(op.id),
+                )
+                .into(),
+            ]
+        };
         let doc = &self.engine.doc;
         let tags = layers::operation_tags(doc, shape);
-        let entries: Vec<MenuEntry<TagAction>> = tags
-            .iter()
-            .filter_map(|i| doc.operations.get(*i))
-            .flat_map(|op| {
-                // The operation's name: ids are canonical, the name is unique per document.
-                let name = &op.name;
-                let filtered = self.hidden_ops.contains(&op.id);
-                [
-                    MenuItem::new(
-                        format!("Remove #{shape} from {name}"),
-                        TagAction::Remove(op.id),
-                    )
-                    .into(),
-                    MenuItem::new(
-                        format!("{} {name}", if op.visible { "Hide" } else { "Show" }),
-                        TagAction::ToggleVisible(op.id),
-                    )
-                    .into(),
-                    MenuItem::new(
-                        format!("Select members of {name}"),
-                        TagAction::SelectMembers(op.id),
-                    )
-                    .into(),
-                    // View-only filter, never persisted into the document (D-09).
-                    MenuItem::new(
-                        format!(
-                            "{} {name} from the geometry view",
-                            if filtered { "Show" } else { "Hide" }
-                        ),
-                        if filtered {
-                            TagAction::Unfilter(op.id)
-                        } else {
-                            TagAction::Filter(op.id)
-                        },
-                    )
-                    .into(),
-                ]
-            })
-            .collect();
+        let entries: Vec<MenuEntry<TagAction>> = match target {
+            TagTarget::Operation(op_id) => doc
+                .operations
+                .iter()
+                .find(|op| op.id == op_id)
+                .map(actions_for)
+                .unwrap_or_default(),
+            TagTarget::Overflow => tags
+                .iter()
+                .filter_map(|i| doc.operations.get(*i))
+                .skip(3)
+                .map(|op| MenuItem::submenu(op.name.clone(), actions_for(op)).into())
+                .collect(),
+        };
         let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
         if let Some(action) = shown.chosen {
             match action {
@@ -3834,16 +3793,10 @@ impl StencilApp {
                         .unwrap_or_default();
                     self.set_selection(members);
                 }
-                TagAction::Filter(op_id) => {
-                    self.hidden_ops.insert(op_id);
-                }
-                TagAction::Unfilter(op_id) => {
-                    self.hidden_ops.remove(&op_id);
-                }
             }
             self.tag_popup = None;
         } else if shown.open {
-            self.tag_popup = Some((shape, anchor));
+            self.tag_popup = Some((shape, target, anchor));
         } else {
             self.tag_popup = None;
         }
@@ -4081,10 +4034,7 @@ impl StencilApp {
             .then_some(egui::SetOpenCommand::Bool(true));
         self.op_settings_open = false;
 
-        let name = op.name.clone();
         let mut kind = op.kind;
-        let mut locked = op.locked;
-        let mut visible_in_view = !self.hidden_ops.contains(&id);
         let mut settings = op.settings.clone();
         let mut close = false;
         let shown = egui::Popup::from_response(&anchor)
@@ -4096,12 +4046,6 @@ impl StencilApp {
                     select = select.option(preset.kind(), preset.label());
                 }
                 let _ = select.show(ui);
-                let _ = Checkbox::bool(format!("Lock {name}"), &mut locked).show(ui);
-                let _ = Checkbox::bool(
-                    format!("Show {name} in geometry view"),
-                    &mut visible_in_view,
-                )
-                .show(ui);
                 let row = |ui: &mut egui::Ui, label: &str, value: &mut f64| {
                     let word = ui.label(label);
                     ui.add(egui::DragValue::new(value).speed(0.5))
@@ -4126,19 +4070,6 @@ impl StencilApp {
                 id,
                 kind,
             }));
-        }
-        if locked != op.locked {
-            self.run_command(Command::Document(DocumentCommand::OperationSetLocked {
-                id,
-                locked,
-            }));
-        }
-        if visible_in_view != !self.hidden_ops.contains(&id) {
-            if visible_in_view {
-                self.hidden_ops.remove(&id);
-            } else {
-                self.hidden_ops.insert(id);
-            }
         }
         if settings != op.settings {
             self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
@@ -8047,7 +7978,7 @@ mod ui_e2e {
         expand_all(h.state_mut());
         h.run();
 
-        raw_click_label(&mut h, "#2, #1");
+        raw_click_label(&mut h, "#2");
         assert_eq!(
             h.state().selected_shapes,
             vec![2],
@@ -8062,47 +7993,6 @@ mod ui_e2e {
             selected,
             vec![1, 2],
             "a group click deep-selects its members"
-        );
-    }
-
-    #[test]
-    fn hammer_on_a_geometry_row_creates_an_operation_with_membership() {
-        let mut h = boot();
-        add_nested_fixture(h.state_mut());
-        expand_all(h.state_mut());
-        h.run();
-        let before = h.state().engine.doc.operations.len();
-
-        // Hammer on the outer group: an operation scoped to every member shape.
-        click(&mut h, "New operation from outer");
-
-        let doc = &h.state().engine.doc;
-        assert_eq!(
-            doc.operations.len(),
-            before + 1,
-            "one operation was created"
-        );
-        let op = doc.operations.last().expect("the new operation");
-        assert_eq!(op.kind, stencilcraft_doc::OperationKind::Cut);
-        let mut members = op.members.clone();
-        members.sort_unstable();
-        assert_eq!(
-            members,
-            vec![1, 2, 3],
-            "membership landed on the group's shapes"
-        );
-        assert!(
-            has_row_containing(&h, &op.name),
-            "the operation row is on screen"
-        );
-        assert!(
-            has_row_containing(&h, "Pass 2"),
-            "the derived pass badge renumbers after the auto cut pass"
-        );
-        // The geometry rows now carry the tag chip of the new operation.
-        assert!(
-            has_row_containing(&h, "#3, #1 #2"),
-            "shape rows show their operation tags"
         );
     }
 
@@ -8162,53 +8052,50 @@ mod ui_e2e {
     }
 
     #[test]
-    fn view_only_filter_hides_geometry_assigned_to_the_filtered_operation() {
+    fn lock_toggle_locks_the_operation() {
         let mut h = boot();
-        // Two rects, both unassigned (no groups): the auto cut pass covers them.
-        for (x, y) in [(5.0, 5.0), (20.0, 5.0)] {
-            h.state_mut().run_command(Command::ShapeAddRect {
-                x,
-                y,
-                width: 10.0,
-                height: 10.0,
-            });
-        }
-        h.state_mut().open_geo_groups.insert(UNASSIGNED_GROUP);
+        add_nested_fixture(h.state_mut());
         h.run();
-        assert!(has_row_containing(&h, "#1, #1"));
-        assert!(has_row_containing(&h, "#2, #1"));
+        let name = h.state().engine.doc.operations[0].name.clone();
+        assert!(!h.state().engine.doc.operations[0].locked);
 
-        // A second operation over shape #1 only, via the row hammer.
-        click(&mut h, "New operation from #1");
-        assert_eq!(h.state().engine.doc.operations.len(), 2);
-        let cut_name = h.state().engine.doc.operations[0].name.clone();
+        raw_click_label(&mut h, &format!("Lock {name}"));
 
-        // Filter the auto cut operation out of the geometry view through the tag
-        // overflow menu: #2's only operation is filtered, so its row hides; #1
-        // still runs in the hammered pass and stays.
-        click(&mut h, &format!("Operation {cut_name} on #1"));
-        click_menu(&mut h, &format!("Hide {cut_name} from the geometry view"));
-
-        // "#2, #1" is shape #2's row label (label + its only tag chip); row #1's
-        // label "#1, #1 #2" must not match it.
         assert!(
-            !has_row_containing(&h, "#2, #1"),
-            "the shape whose only operation is filtered out is hidden"
+            h.state().engine.doc.operations[0].locked,
+            "the visible lock toggle locks the operation"
         );
-        assert!(
-            has_row_containing(&h, "#1, #1 #2"),
-            "the shape with another operation stays"
-        );
-        // The filter is view-only: the document is untouched.
-        assert_eq!(h.state().engine.doc.operations.len(), 2);
-        assert!(h.state().engine.doc.operations[0].visible);
-        assert_eq!(h.state().engine.doc.operations[0].members.len(), 2);
+    }
 
-        click(&mut h, &format!("Operation {cut_name} on #1"));
-        click_menu(&mut h, &format!("Show {cut_name} from the geometry view"));
-        assert!(
-            has_row_containing(&h, "#2, #1"),
-            "unfiltering shows the shape again"
+    #[test]
+    fn double_clicking_a_member_row_selects_the_shape() {
+        let mut h = boot();
+        add_nested_fixture(h.state_mut());
+        let op_id = h.state().engine.doc.operations[0].id;
+        h.state_mut().open_ops.insert(op_id);
+        h.run();
+        let name = h.state().engine.doc.operations[0].name.clone();
+        let pos = h
+            .get_by_label(&format!("Member #2 of {name}"))
+            .rect()
+            .center();
+        for _ in 0..2 {
+            h.event(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run();
+        }
+
+        assert_eq!(
+            h.state().selected_shapes,
+            vec![2],
+            "double-clicking a member row selects that shape"
         );
     }
 
@@ -8234,8 +8121,10 @@ mod ui_e2e {
         let mut h = boot();
         add_nested_fixture(h.state_mut());
         expand_all(h.state_mut());
+        h.state_mut().set_selection([1, 2, 3]);
         h.run();
-        click(&mut h, "New operation from outer");
+        // Create a second operation from the plus button, not a geometry hammer.
+        click(&mut h, "New operation from all selected");
         let op = h.state().engine.doc.operations.last().expect("op").clone();
 
         click(&mut h, &format!("Operation {} on #1", op.name));

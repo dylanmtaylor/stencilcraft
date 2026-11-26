@@ -454,3 +454,9 @@ Silhouette, replacing Silhouette's bytes one record at a time.
   of the empty document plus two layers and a rectangle), opens in Silhouette with an
   80 × 50 mm rectangle at (60, 40) mm exactly. Only the Default Layer record is still taken
   from a sample, and it is the next to generate.
+- **Fully from scratch (2026-11-26).** The Default Layer record is generated too. The first
+  RGBA in a style record is a tint: (1, 0, 0, 1) for shapes, (167/255, 202/255, 1, 1) for the
+  Default Layer, which also carries a 0.5 mm width. So every byte of an empty document's root
+  now comes from fields. A document generated with no sample bytes at all (our own ids, a
+  150 mm page, the layers and a 100 × 60 mm rectangle with a 1 pt line) opens in Silhouette
+  with exactly that page and rectangle. Next: the Rust `write()` in craft-libs.

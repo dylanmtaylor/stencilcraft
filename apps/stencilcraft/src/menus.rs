@@ -641,6 +641,11 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 ),
                 edit_key("Fill Page", E::FillPage, any, cmd_shift(), Key::F),
                 SEP,
+                eff(
+                    "Advanced Replicate…",
+                    crate::effects::EffectMenu::AdvancedReplicate,
+                ),
+                eff("Object on Path…", crate::effects::EffectMenu::ObjectOnPath),
                 item("Replicate Options…", A::ShowPanel(P::Replicate)).into(),
             ],
         ),
@@ -896,6 +901,8 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
         eff("Stipple…", M::Stipple),
         eff("Emboss / Deboss Patterns…", M::EmbossPattern),
         eff("Rhinestone…", M::Rhinestone),
+        eff("Leather Punch…", M::LeatherPunch),
+        eff("Release Effects", M::ReleaseEffects),
         sub(
             "Warp",
             vec![

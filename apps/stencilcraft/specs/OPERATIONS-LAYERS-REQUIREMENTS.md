@@ -22,14 +22,28 @@ This file is the contract for the next UI waves. Specs live beside it under
 - Tags are a trailing pill cluster, not inline inside the row label:
   `craft_ui::ListRow` cannot host widgets in its label, and extending craft-ui
   is a separate change.
-- Profiles use a dedicated dock panel (`WorkspacePanel::Profiles`) with an
-  explicit empty state; there is no profile model yet.
+- **Geometry never creates operations.** The per-row cog/hammer and the
+  `New operation from {label}` control are removed; operations are created only
+  from the Operations footer `+` (or the Inspector's "Add to operation").
+- **Pills are contextual.** Clicking a pill opens only that operation's actions
+  (remove membership, hide/show, select members). The `…` overflow opens one
+  submenu per operation after the first three pills; there is no flat
+  all-operations list.
+- **No view-only filter.** `hidden_ops`, the `Filter`/`Unfilter` tag actions, the
+  `Show {name} in geometry view` checkbox and `shape_filtered_out` are removed.
+  Geometry rows carry no operation ids in their detail.
+- **Lock is a visible list toggle.** The Operations list has an eye (visibility)
+  and a lock column; the lock checkbox leaves the settings popover.
+- **Colour popup is palette-backed.** It offers 40 palette swatches plus the
+  inline RGB sliders, `Hex`, `Clear colour` and `Close`.
+- Profiles list the base Cut, Score and Engrave profiles (no Guide, no "New
+  profile"). A new operation links to Cut; editing its numeric settings unlinks
+  it (`Profile none`). Profile values are provisional.
 - `+` main click creates one operation over every selected shape. Shift+click
-  (or the chevron) opens the menu: each selected, all selected, by colour.
-  "Filter" in the review maps to the existing by-colour grouping.
+  (or the chevron) opens the menu: each selected, all selected, by appearance.
+  The appearance chooser lists existing stroke/fill/both values from Geometry and
+  creates one operation over every matching shape.
 - Deleting an operation needs no confirmation: `operation.delete` is undoable.
-- The second eye (view-only filter) leaves the row; it moves into the settings
-  popover as "Show {name} in geometry view".
 
 ## Requirements
 
@@ -143,13 +157,13 @@ memberships.
 
 | ID | Spec | UI | Status |
 | --- | --- | --- | --- |
-| OP-01 | passing | expandable member tree + remove | done |
-| OP-02 | passing | colour picker popup | done |
-| OP-03 | passing | Profiles dock panel stub | done |
-| OP-04 | passing | row actions, trash, `+` / chevron menu | done |
-| OP-05 | passing | settings popover | done |
-| OP-06 | passing | drag + Ctrl+[ / ] reorder | done |
-| OP-07 | passing | assignment dialog | done |
-| LY-01 | passing | operation pills + overflow | done |
+| OP-01 | wip | expandable member tree + remove + member double-click | wip |
+| OP-02 | wip | colour picker popup + 40-swatch palette | wip |
+| OP-03 | wip | Profiles dock panel: Cut/Score/Engrave + provisional link | wip |
+| OP-04 | wip | row actions, trash, `+` / chevron menu + appearance popup | wip |
+| OP-05 | wip | settings popover (no lock, no view filter) | wip |
+| OP-06 | wip | drag + Ctrl+[ / ] reorder | wip |
+| OP-07 | wip | assignment dialog | wip |
+| LY-01 | wip | contextual pills + per-operation overflow submenus | wip |
 
 Update the Status column as each wave lands: `todo` → `wip` → `done`.

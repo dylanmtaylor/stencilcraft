@@ -9,13 +9,16 @@ Feature: Bulk operation creation
     And the document has 2 operations
     And the last operation has members 1, 2
 
-  Scenario: over the threshold asks before creating one operation per shape
+  Scenario: the plus menu offers an appearance popup
     Given a nested fixture with groups "outer" and "inner"
-    And the bulk confirm threshold is 2
-    And shapes 1, 2, 3 are selected
+    And shape 1 has stroke "#ff0000"
+    And shape 2 has stroke "#00ff00"
     When I open the "More new operation actions" menu
-    And I choose "New operation: each selected"
-    Then "Create 3 operations?" is on screen
-    And the document has 1 operation
-    When I click "Continue"
-    Then the document has 4 operations
+    And I choose "New operation by appearance"
+    Then "Stroke" is on screen
+    And "Fill" is on screen
+    And "Both" is on screen
+    When I choose the appearance value "Stroke #ff0000"
+    Then the selected shapes are 1
+    And the document has 2 operations
+    And the last operation has members 1

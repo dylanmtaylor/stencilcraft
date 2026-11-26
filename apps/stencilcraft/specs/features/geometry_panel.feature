@@ -29,11 +29,33 @@ Feature: Geometry panel
     Then the document has 1 group
 
   @LY-01
-  Scenario: operation tags appear as coloured pills on the shape row
+  Scenario: operation tags are contextual pills
     Given a nested fixture with groups "outer" and "inner"
     And all groups are expanded
-    When I hammer the geometry row "outer"
-    Then "Operation cut on #1" is on screen
-    And "Operations of #1" is not on screen
     When I click "Operation cut on #1"
     Then "Remove #1 from cut" is on screen
+    And "Operations of #1" is not on screen
+
+  @LY-01
+  Scenario: geometry offers no operation creation
+    Given a nested fixture with groups "outer" and "inner"
+    And all groups are expanded
+    Then "New operation from outer" is not on screen
+    And "New operation from #1" is not on screen
+
+  @LY-01
+  Scenario: geometry rows show no operation ids
+    Given a nested fixture with groups "outer" and "inner"
+    And all groups are expanded
+    And an operation "Cut 2" over shapes 1
+    Then the geometry panel does not show "#1 #2"
+
+  @LY-01
+  Scenario: the tag overflow opens per-operation submenus
+    Given a nested fixture with groups "outer" and "inner"
+    And all groups are expanded
+    And an operation "Cut 2" over shapes 1
+    And an operation "Cut 3" over shapes 1
+    And an operation "Cut 4" over shapes 1
+    When I click "More operations for #1"
+    Then the menu item "Cut 4" is on screen

@@ -331,3 +331,29 @@ Tested by opening edited copies of documents saved here (not shipped anywhere):
   settings, the objects block, and the run of cut-layer and material records (`layer_@cnon`,
   `@ccut`, `@cced`, `@cper`, `@cped`, `@weed`…, about 8 KB), plus the 2.5 KB that follows
   the root block.
+
+## `.studio3` section 0 map, empty document (2026-11-26, SS 5.0.556)
+
+Groundwork for a writer that generates every byte itself (no bytes copied from Silhouette's
+output). An empty Letter document's section 0 is `silhouette05;` then one root record
+(`01`, u32 length counting itself) of about 5.8 KB. Records within it are read in this order.
+Offsets are into section 0.
+
+| At | Length | What it appears to be (from contents; to confirm by saving variations) |
+| --- | --- | --- |
+| 18 | 56 | Default line style: f32 25.4 (`33 33 cb 41`), counts, the join name "square", RGBA f32 colours (0.5 grey, alpha 1) |
+| 79 | 518 | Page and mat: four f32 15.875 (`00 00 7e 41`, page margins?), sub-records of 67, 5, 5, 160, 24, 17, 29 and 6 bytes, the mat name `constant:12x12`, "auto", RGBA white |
+| 602 | 69 | View or transform state: f32 1.0 values, a 32-byte sub-record |
+| 676 | 283 | Document info: "default", the tab name "Untitled-1", f32 3.175 (`33 33 4b 40`), machine "Cameo5" (`…meo5`), "auto" twice |
+| 964 | 4 | The objects record. Empty here (`ff ff ff ff`); with shapes, a count, then one record per object (665–766 bytes for a rectangle) |
+| 973 | 35 | A setting "off", f32 10.0 ×4 |
+| 1013 | 3154 | Cut layers: count 9, then one record per layer named `layer_@cnon`, `@ccut`, `@cced`, `@cper`, `@cped`, `@ccu2`, `@cce2`, `@cpf2`, `@cpe2`, `@weed`, each with a run of `2` (0x32) bytes and a 96- or 252-byte sub-record |
+| 4172 | 98 | The `@all` group: ids and `ff ff ff ff` placeholders |
+| 4275 | 873 | Identity transforms (f32 1, 0, 0, 1) and a 703-byte sub-record |
+| 5153 | 19 | Small flags record |
+| 5182–5826 | about 640 | The trailer: a 571-byte record with "score" and a hex id string, then small records (f32 1.27, 1.5, 20.0) |
+
+Next experiments, one change per saved file: page size and margins (record 79), the
+document's name and machine (676), one layer's settings (1013), and an object with each
+property changed alone (964). Then generate each record and confirm by opening the result in
+Silhouette, replacing Silhouette's bytes one record at a time.

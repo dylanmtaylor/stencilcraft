@@ -96,7 +96,7 @@ impl StencilApp {
                 }
             }
             MachineAction::Cut => {
-                let jobs = self.send_jobs(true);
+                let jobs = self.for_all_cutters(self.send_jobs(true));
                 self.start_hardware_jobs(jobs, ctx.clone());
             }
         }

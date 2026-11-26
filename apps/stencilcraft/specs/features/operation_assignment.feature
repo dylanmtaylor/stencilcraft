@@ -30,3 +30,30 @@ Feature: Operation assignment
     Given a document with 1 shape
     When I click the "Add shape" button
     Then "Choose an operation" is on screen
+
+  @OP-07
+  Scenario: the operations footer adds the selected geometry to the current operation
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1
+    And shape 2 is selected
+    When I select operation 2
+    And I click "Add selected to current operation"
+    Then operation 2 has members 1, 2
+
+  @OP-07
+  Scenario: the chevron adds all selected geometry to the current operation
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1
+    And shapes 2, 3 are selected
+    When I select operation 2
+    And I open the "More new operation actions" menu
+    And I choose "All selected to current operation"
+    Then operation 2 has members 1, 2, 3
+
+  @OP-07
+  Scenario: dragging a geometry row onto an operation adds it
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1
+    And all groups are expanded
+    When I drag the geometry row "#2" onto the operation row "Cut 2"
+    Then operation 2 has members 1, 2

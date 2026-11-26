@@ -14,7 +14,7 @@ use craft_draw::ui::pen::{
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
 use craft_theme::{ControlSize, TypeRole};
-use craft_ui::behavior::{Axis, DropPosition, Move, Reorder, RowInfo, Selection};
+use craft_ui::behavior::{Axis, DropPosition, ListDrag, Move, Reorder, RowInfo, Selection};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
@@ -800,6 +800,8 @@ enum BulkKind {
     ByAppearance,
     AllSelected,
     EachSelected,
+    /// Add the geometry selection to the current operation (not a new operation).
+    AddToCurrent,
 }
 
 impl BulkKind {
@@ -808,11 +810,13 @@ impl BulkKind {
             Self::ByAppearance => "New operation by appearance",
             Self::AllSelected => "New operation: all selected",
             Self::EachSelected => "New operation: each selected",
+            Self::AddToCurrent => "All selected to current operation",
         }
     }
 
     /// The operations this action creates over `shapes`, as (name, color, members).
-    /// The appearance action opens its own dialog, so it plans nothing here.
+    /// The appearance action opens its own dialog and `AddToCurrent` edits an
+    /// existing operation, so they plan nothing here.
     fn plan(
         self,
         _doc: &stencilcraft_doc::Document,
@@ -830,7 +834,7 @@ impl BulkKind {
                 .iter()
                 .map(|id| (format!("Cut #{id}"), None, vec![*id]))
                 .collect(),
-            Self::ByAppearance => Vec::new(),
+            Self::ByAppearance | Self::AddToCurrent => Vec::new(),
         }
     }
 }
@@ -3137,6 +3141,10 @@ impl StencilApp {
                     .show(ui, |_| {});
                 let out = List::new("geometry-tree", "Geometry", row_infos.as_slice())
                     .tree(true)
+                    // Shape rows drag as a `ListDrag<GeoKey>` payload the
+                    // Operations panel takes; the list itself never reorders.
+                    .can_drag(|key| matches!(key, GeoKey::Shape(_)))
+                    .reorder(Reorder::new(Axis::Vertical).accepts(|_, _| false))
                     .selection(&mut selection)
                     .show(ui, |_, &key| {
                         let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
@@ -3293,6 +3301,52 @@ impl StencilApp {
         }
     }
 
+    /// The operation under the operation selection: the row itself or the
+    /// operation one of its expanded member rows belongs to.
+    fn current_operation_id(&self) -> Option<u64> {
+        let key = self
+            .op_selection
+            .lead
+            .or_else(|| self.op_selection.items.first().copied())?;
+        match key {
+            OpKey::Op(index) => self.engine.doc.operations.get(index).map(|op| op.id),
+            OpKey::Member { op, .. } => Some(op),
+        }
+    }
+
+    /// Add `ids` to operation `id`; the command skips ids already present.
+    fn add_shapes_to_operation(&mut self, id: u64, ids: &[u64]) {
+        let Some(op) = self.engine.doc.operations.iter().find(|op| op.id == id) else {
+            self.status = "the target operation no longer exists".to_string();
+            return;
+        };
+        if op.locked {
+            self.status = format!("{} is locked", op.name);
+            return;
+        }
+        if ids.is_empty() {
+            self.status = "select geometry to add to the operation".to_string();
+            return;
+        }
+        let name = op.name.clone();
+        self.run_command(Command::Document(DocumentCommand::OperationAddMembers {
+            id,
+            ids: ids.to_vec(),
+        }));
+        self.status = format!("added {} shape(s) to {name}", ids.len());
+    }
+
+    /// Add the geometry selection to the current operation (footer button and
+    /// the chevron's "All selected to current operation").
+    fn add_selected_to_current_operation(&mut self) {
+        let Some(id) = self.current_operation_id() else {
+            self.status = "select an operation to add the shapes to".to_string();
+            return;
+        };
+        let ids = self.selected_shapes.clone();
+        self.add_shapes_to_operation(id, &ids);
+    }
+
     /// The Operations panel: `Document.operations` with icon, derived pass
     /// number, colour swatch, baked profile and member count. The eye is the
     /// document's visibility; the filter toggle is view-only (D-09).
@@ -3309,6 +3363,9 @@ impl StencilApp {
         let menu_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
             std::cell::RefCell::new(None);
         let mut bulk: Option<BulkKind> = None;
+        let current_op = self.current_operation_id();
+        let add_to_current = std::cell::Cell::new(false);
+        let drop_add: std::cell::RefCell<Option<(u64, Vec<u64>)>> = std::cell::RefCell::new(None);
 
         let doc = &self.engine.doc;
         let op_count = doc.operations.len();
@@ -3376,6 +3433,14 @@ impl StencilApp {
                         if chevron.clicked() {
                             *bulk_menu_click.borrow_mut() = Some(chevron);
                         }
+                        let add = ui.add(
+                            IconButton::new(Icon::Plus, "Add selected to current operation")
+                                .size(ControlSize::Sm)
+                                .enabled(current_op.is_some() && !self.selected_shapes.is_empty()),
+                        );
+                        if add.clicked() {
+                            add_to_current.set(true);
+                        }
                     });
                 });
             })
@@ -3402,6 +3467,11 @@ impl StencilApp {
                             let hit = &member_remove;
                             ListRow::new(key, format!("#{shape}"))
                                 .icon(Icon::Spline)
+                                // Reserve the swatch (16) and settings (20)
+                                // slots so this trash lines up with the
+                                // operation rows' trash.
+                                .trailing_item(16.0, |_| {})
+                                .trailing_item(20.0, |_| {})
                                 .trailing_item(20.0, move |ui| {
                                     let btn = ui.add(
                                         IconButton::new(
@@ -3521,10 +3591,51 @@ impl StencilApp {
                             row
                         }
                     });
+                let rows = out.rows.clone();
                 events.extend(out.events);
+                // A geometry row drag released over an operation row adds the
+                // dragged shapes to that operation (alternate to the button).
+                if let Some(drag) = egui::DragAndDrop::payload::<ListDrag<GeoKey>>(ui.ctx())
+                    && ui.input(|i| i.pointer.any_released())
+                {
+                    let pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+                    if let Some(pos) = pos {
+                        let ids: Vec<u64> = drag
+                            .items
+                            .iter()
+                            .filter_map(|key| match key {
+                                GeoKey::Shape(id) => Some(*id),
+                                _ => None,
+                            })
+                            .collect();
+                        if !ids.is_empty() {
+                            let hit = rows.iter().find_map(|(key, rect)| {
+                                if rect.contains(pos)
+                                    && let OpKey::Op(index) = key
+                                {
+                                    doc.operations.get(*index).map(|op| op.id)
+                                } else {
+                                    None
+                                }
+                            });
+                            if let Some(id) = hit {
+                                *drop_add.borrow_mut() = Some((id, ids));
+                                let _ =
+                                    egui::DragAndDrop::take_payload::<ListDrag<GeoKey>>(ui.ctx());
+                            }
+                        }
+                    }
+                }
             });
 
         self.op_selection = selection;
+
+        if add_to_current.get() {
+            self.add_selected_to_current_operation();
+        }
+        if let Some((id, ids)) = drop_add.into_inner() {
+            self.add_shapes_to_operation(id, &ids);
+        }
 
         for ev in events {
             match ev {
@@ -4191,6 +4302,7 @@ impl StencilApp {
             .then_some(egui::SetOpenCommand::Bool(true));
         self.bulk_menu_open = false;
         let entries: Vec<MenuEntry<BulkKind>> = [
+            BulkKind::AddToCurrent,
             BulkKind::EachSelected,
             BulkKind::AllSelected,
             BulkKind::ByAppearance,
@@ -4200,7 +4312,9 @@ impl StencilApp {
         .collect();
         let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
         if let Some(kind) = shown.chosen {
-            if matches!(kind, BulkKind::ByAppearance) {
+            if matches!(kind, BulkKind::AddToCurrent) {
+                self.add_selected_to_current_operation();
+            } else if matches!(kind, BulkKind::ByAppearance) {
                 // Group the current selection, or the whole document when none
                 // is selected: the dialog is about appearances, not a selection.
                 let shapes = if self.selected_shapes.is_empty() {
@@ -8191,6 +8305,35 @@ mod ui_e2e {
             .map(|n| n.rect().center())
             .unwrap_or_else(|| panic!("no row containing {needle:?}"));
         raw_click(h, pos);
+    }
+
+    /// Drag the first row containing `from` onto the first row containing `to`
+    /// with real pointer events, so the source list starts its `ListDrag`
+    /// payload and the target panel takes it on release.
+    pub(crate) fn drag_row_containing(h: &mut App, from: &str, to: &str) {
+        let center = |h: &App, needle: &str| {
+            h.query_all_by_label_contains(needle)
+                .find(|n| is_row(n, |l| l.contains(needle)))
+                .map(|n| n.rect().center())
+                .unwrap_or_else(|| panic!("no row containing {needle:?}"))
+        };
+        let start = center(h, from);
+        let end = center(h, to);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        h.event(egui::Event::PointerMoved(start));
+        h.event(button(start, true));
+        h.run();
+        h.event(egui::Event::PointerMoved(start + (end - start) * 0.5));
+        h.run();
+        h.event(egui::Event::PointerMoved(end));
+        h.run();
+        h.event(button(end, false));
+        h.run();
     }
 
     /// `query_by_label` panics on multiple matches, so presence checks go through

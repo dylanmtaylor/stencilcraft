@@ -21,8 +21,8 @@ use stencilcraft_engine::ProductionCommand;
 
 use crate::ui_e2e::{
     App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_ops_profiles, boot_profiles,
-    boot_workspace, click, click_menu, expand_all, has, has_row_containing, raw_click_label,
-    raw_click_row_containing,
+    boot_workspace, click, click_menu, drag_row_containing, expand_all, has, has_row_containing,
+    raw_click_label, raw_click_row_containing,
 };
 use crate::*;
 
@@ -565,6 +565,13 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         let (_, name) = op_at(w, n)?;
         open_op_menu(w, &name);
         click_menu(w.h(), &format!("Delete {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I drag the geometry row \"")
+        && let Some((from, tail)) = rest.split_once("\" onto the operation row \"")
+        && let Some(to) = tail.strip_suffix('"')
+    {
+        drag_row_containing(w.h(), from, to);
         return Ok(());
     }
     if let Some(label) = between(text, "I click the geometry row \"", "\"") {

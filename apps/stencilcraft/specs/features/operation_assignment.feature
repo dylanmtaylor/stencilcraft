@@ -18,14 +18,19 @@ Feature: Operation assignment
     And the document has 2 operations
     And operation 1 is visible
 
-  @gap @UI-03
+  @UI-03
   Scenario: assigning the selection to an existing operation
-    Given a document with 2 shapes
-    And shapes 1, 2 are selected
-    When I click the "Add to operation" button
+    Given the workspace is open
+    And a nested fixture with groups "outer" and "inner"
+    And all groups are expanded
+    And a second operation "Cut 2" over all shapes
+    When shape 3 is selected
+    And I click "Add to operation"
     Then "Choose an operation" is on screen
+    When I click "Add to Cut 2"
+    Then operation 2 has members 1, 2, 3
 
-  @gap @UI-01
+  @UI-01
   Scenario: adding geometry requires choosing its operation
     Given a document with 1 shape
     When I click the "Add shape" button

@@ -651,6 +651,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
             A::ShowPanel(crate::WorkspacePanel::Operations),
         )
         .into(),
+        item("Profiles", A::ShowPanel(crate::WorkspacePanel::Profiles)).into(),
         SEP,
         item("Properties", A::ShowPanel(crate::WorkspacePanel::Inspector)).into(),
         item("Tools", A::ShowPanel(crate::WorkspacePanel::Tools)).into(),

@@ -315,7 +315,6 @@ pub fn sheet_to_png(sheet: &PrintSheet, dpi: f64) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::tests::rect;
-    use stencilcraft_doc::Operation;
 
     fn ptc_doc() -> Document {
         let mut doc = Document::default();

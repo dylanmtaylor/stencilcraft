@@ -1545,6 +1545,8 @@ type HardwareResult =
 
 #[derive(Debug, Clone)]
 pub struct SendTab {
+    /// The firmware version the cutter reported on the last send (Silhouette's machine card).
+    pub firmware: Option<String>,
     pub media_index: usize,
     pub model: stencilcraft_machine::Model,
     pub pressure_override: u8,
@@ -1586,6 +1588,7 @@ pub struct SendTab {
 impl Default for SendTab {
     fn default() -> Self {
         SendTab {
+            firmware: None,
             media_index: machine_index_of_media(102),
             model: stencilcraft_machine::Model::Cameo4Pro,
             pressure_override: 10,
@@ -2000,6 +2003,16 @@ impl StencilApp {
             self.prefs.mat_id = mat;
             self.save_prefs();
         }
+    }
+
+    /// Keep the firmware version a send reported (trimmed, at most 64 characters).
+    pub fn note_firmware(&mut self, value: &serde_json::Value) -> Option<String> {
+        let firmware = value["firmware"]
+            .as_str()
+            .map(|f| f.trim().chars().take(64).collect::<String>())
+            .filter(|f| !f.is_empty())?;
+        self.send.firmware = Some(firmware.clone());
+        Some(firmware)
     }
 
     /// Preferences › Restore Factory Defaults (Silhouette's Advanced tab): every setting back
@@ -5742,12 +5755,15 @@ impl StencilApp {
                         }
                     } else {
                         let bytes = value["bytes"].as_u64().unwrap_or_default();
+                        let firmware = self.note_firmware(&value);
                         self.send.summary = Some(if value["sent"].as_bool() == Some(true) {
-                            vec![
+                            let mut lines = vec![
                                 format!("Sent {bytes} bytes to the cutter."),
                                 "Sending finished; physical cutting may still be in progress."
                                     .into(),
-                            ]
+                            ];
+                            lines.extend(firmware.map(|f| format!("Machine firmware: {f}")));
+                            lines
                         } else {
                             vec![
                                 format!(
@@ -5859,6 +5875,9 @@ impl StencilApp {
         self.send_assign_ui(ui);
         ui.separator();
         let _ = Text::new("Model").show(ui);
+        if let Some(firmware) = &self.send.firmware {
+            let _ = Text::new(format!("Firmware: {firmware}")).show(ui);
+        }
         if self.send.connection_mode == 2 || self.send.device.is_empty() {
             let models: Vec<Entry<stencilcraft_machine::Model>> = MODEL_CHOICES
                 .iter()
@@ -8391,6 +8410,26 @@ mod tests {
         app.import_image(clear_path);
         assert_eq!(shapes(&app), 1, "off: only placed");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_sends_firmware_report_is_kept_for_the_machine_card() {
+        let mut app = StencilApp::new(None);
+        assert_eq!(
+            app.note_firmware(&serde_json::json!({"sent": true, "bytes": 10})),
+            None
+        );
+        assert_eq!(app.send.firmware, None);
+        let reported = app.note_firmware(&serde_json::json!({"firmware": "  CAMEO 4 V1.10 \u{3}"}));
+        assert_eq!(reported.as_deref(), Some("CAMEO 4 V1.10 \u{3}".trim()));
+        assert!(app.send.firmware.is_some());
+        let long = "x".repeat(500);
+        app.note_firmware(&serde_json::json!({ "firmware": long }));
+        assert_eq!(
+            app.send.firmware.as_ref().map(String::len),
+            Some(64),
+            "capped"
+        );
     }
 
     #[test]

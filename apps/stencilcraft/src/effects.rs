@@ -181,6 +181,7 @@ const SKETCH_PATTERNS: &[(&str, &str)] = &[
     ("grid", "Grid"),
     ("concentric", "Concentric"),
     ("spiral", "Spiral"),
+    ("cross-stitch", "Cross-stitch"),
 ];
 const STIPPLE_PATTERNS: &[(&str, &str)] = &[
     ("stipple-random", "Random dots"),

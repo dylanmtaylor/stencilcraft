@@ -31,6 +31,9 @@ pub enum FillPattern {
     StippleGrid,
     /// Dots jittered at random (seeded) within each grid cell.
     StippleRandom,
+    /// An X stitch in every grid cell (rotated by `angle_deg`) whose centre is inside: the
+    /// cross-stitch pattern, drawn with a pen.
+    CrossStitch,
 }
 
 /// Fill parameters, millimetres and degrees.
@@ -113,6 +116,7 @@ pub fn fill(shape: &BezPath, params: &FillParams) -> Result<BezPath> {
             dot,
             (params.pattern == FillPattern::StippleRandom).then_some(params.seed),
         )?,
+        FillPattern::CrossStitch => cross_stitch(&region, spacing, angle)?,
     };
     Ok(out)
 }
@@ -209,6 +213,56 @@ fn stipple(
     Ok(out)
 }
 
+/// The share of a cell an X leaves clear at each corner, so stitches don't touch.
+const STITCH_MARGIN: f64 = 0.12;
+
+fn cross_stitch(region: &[Vec<Point>], spacing: f64, angle: f64) -> Result<BezPath> {
+    let rot = kurbo::Affine::rotate(angle.to_radians());
+    let inv = rot.inverse();
+    let local: Vec<Vec<Point>> = region
+        .iter()
+        .map(|p| p.iter().map(|q| inv * *q).collect())
+        .collect();
+    let Some(b) = bounds(&local) else {
+        return Ok(BezPath::new());
+    };
+    let (cols, rows) = ((b.width() / spacing).ceil(), (b.height() / spacing).ceil());
+    let edges: usize = local.iter().map(Vec::len).sum();
+    if cols * rows > 50.0 * MAX_ITEMS as f64 || cols * rows * edges as f64 > 2e8 {
+        return Err(GenError(
+            "cross-stitch too dense for this shape; raise spacing_mm".into(),
+        ));
+    }
+    let m = spacing * STITCH_MARGIN;
+    let mut out = BezPath::new();
+    let mut count = 0usize;
+    // Within the checked bounds above, so the casts are exact.
+    for j in 0..rows as usize {
+        for i in 0..cols as usize {
+            let (x0, y0) = (b.x0 + i as f64 * spacing, b.y0 + j as f64 * spacing);
+            let centre = Point::new(x0 + spacing / 2.0, y0 + spacing / 2.0);
+            if !inside(&local, centre) {
+                continue;
+            }
+            count += 1;
+            if count > MAX_ITEMS {
+                return Err(GenError(format!(
+                    "more than {MAX_ITEMS} stitches; raise spacing_mm"
+                )));
+            }
+            let (x1, y1) = (x0 + spacing, y0 + spacing);
+            for (a, z) in [
+                (Point::new(x0 + m, y0 + m), Point::new(x1 - m, y1 - m)),
+                (Point::new(x1 - m, y0 + m), Point::new(x0 + m, y1 - m)),
+            ] {
+                out.move_to(rot * a);
+                out.line_to(rot * z);
+            }
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +328,27 @@ mod tests {
         inside_shape(&out, &ring);
         let lines = fill(&ring, &params(FillPattern::Lines)).unwrap();
         inside_shape(&lines, &ring);
+    }
+
+    #[test]
+    fn cross_stitch_puts_an_x_in_every_inside_cell() {
+        let sq = rect(0.0, 0.0, 10.0, 10.0);
+        let mut p = params(FillPattern::CrossStitch);
+        p.spacing_mm = 2.0;
+        let out = flatten(&fill(&sq, &p).unwrap()).unwrap();
+        assert_eq!(out.len(), 2 * 25, "two strokes for each of the 5 × 5 cells");
+        assert!(
+            out.iter()
+                .all(|line| !line.closed && line.points.len() == 2)
+        );
+        // A ring keeps its hole clear.
+        let ring = {
+            let mut r = rect(0.0, 0.0, 10.0, 10.0);
+            r.extend(rect(3.0, 3.0, 4.0, 4.0));
+            r
+        };
+        let holed = flatten(&fill(&ring, &p).unwrap()).unwrap();
+        assert!(holed.len() < out.len(), "fewer stitches around the hole");
     }
 
     #[test]

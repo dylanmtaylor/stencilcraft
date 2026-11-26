@@ -17,7 +17,8 @@ use stencilcraft_doc::RasterImage;
 pub use palette::{MAX_COLOURS, colour_masks, hex, palette, reduce_colours};
 
 pub use trace::{
-    ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, trace, trace_mask,
+    ColourRange, Contour, TraceMode, TraceOptions, TraceOutput, contour_path, has_transparency,
+    trace, trace_mask,
 };
 
 /// Largest encoded file accepted.

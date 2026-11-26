@@ -65,6 +65,9 @@ pub struct TraceOptions {
     /// Vertices turning at least this many degrees (0–180) stay sharp corners.
     pub corner_threshold: f64,
     pub mode: TraceMode,
+    /// Trace the opaque area (alpha at least half) whatever its colour: Silhouette's PNG
+    /// Autotrace. Brightness, filters and colour range are ignored when set.
+    pub alpha: bool,
 }
 
 impl Default for TraceOptions {
@@ -78,6 +81,7 @@ impl Default for TraceOptions {
             smoothing: 1.0,
             corner_threshold: 60.0,
             mode: TraceMode::AllEdges,
+            alpha: false,
         }
     }
 }
@@ -140,6 +144,11 @@ pub fn trace_mask(pixels: &RgbaImage, options: &TraceOptions) -> Result<Vec<bool
     Ok(mask)
 }
 
+/// Whether any pixel of `pixels` is less than fully opaque.
+pub fn has_transparency(pixels: &RgbaImage) -> bool {
+    pixels.pixels().any(|p| p[3] < 255)
+}
+
 pub fn trace(pixels: &RgbaImage, options: &TraceOptions) -> Result<TraceOutput, RasterError> {
     options.validate()?;
     let (w, h) = (pixels.width() as usize, pixels.height() as usize);
@@ -180,6 +189,9 @@ pub fn trace(pixels: &RgbaImage, options: &TraceOptions) -> Result<TraceOutput, 
 }
 
 fn foreground(pixels: &RgbaImage, options: &TraceOptions) -> Vec<bool> {
+    if options.alpha {
+        return pixels.pixels().map(|p| p[3] >= 128).collect();
+    }
     if let Some(range) = options.colour_range {
         return pixels
             .pixels()
@@ -517,6 +529,37 @@ pub fn contour_path(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn alpha_trace_follows_the_opaque_area_whatever_its_colour() {
+        // A white square (invisible to a brightness trace) on a transparent background.
+        let mut img = RgbaImage::from_pixel(20, 20, Pixel([255, 255, 255, 0]));
+        for y in 5..15 {
+            for x in 5..15 {
+                img.put_pixel(x, y, Pixel([255, 255, 255, 255]));
+            }
+        }
+        assert!(has_transparency(&img));
+        let brightness = trace(&img, &TraceOptions::default()).unwrap();
+        assert!(brightness.contours.is_empty());
+        let alpha = trace(
+            &img,
+            &TraceOptions {
+                alpha: true,
+                ..TraceOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(alpha.contours.len(), 1);
+        let area = stencilcraft_geom::signed_area(&alpha.contours[0].points).abs();
+        assert!((area - 100.0).abs() < 1.0, "{area}");
+        assert!(!has_transparency(&RgbaImage::from_pixel(
+            2,
+            2,
+            Pixel([0, 0, 0, 255])
+        )));
+    }
+
     use super::*;
     use craft_raster_codecs::common::Pixel;
 

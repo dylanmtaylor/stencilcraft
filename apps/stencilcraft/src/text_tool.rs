@@ -217,7 +217,27 @@ impl StencilApp {
         FontSpec {
             family: self.text_family.clone(),
             style,
-            file: None,
+            file: self.font_files.get(&self.text_family).cloned(),
+        }
+    }
+
+    /// Text Style › Load Font File…: read a TTF/OTF/TTC file and make its first family the
+    /// text font.
+    pub fn load_font_file(&mut self, path: &str) {
+        match stencilcraft_engine::text::load_font(path) {
+            Ok(families) => {
+                for family in &families {
+                    self.font_files.insert(family.clone(), path.to_string());
+                }
+                self.text_fonts.clear();
+                self.ensure_fonts();
+                if let Some(first) = families.first() {
+                    self.text_family.clone_from(first);
+                    self.text_style.font_style.clear();
+                }
+                self.status = format!("loaded {}", families.join(", "));
+            }
+            Err(e) => self.status = format!("font file: {e}"),
         }
     }
 
@@ -654,6 +674,7 @@ impl StencilApp {
         let mut size = self.text_size;
         let mut style = self.text_style.clone();
         let mut family = self.text_family.clone();
+        let mut pick_font = false;
         let query = style.query.to_lowercase();
         let matching: Vec<String> = self
             .text_fonts
@@ -721,6 +742,9 @@ impl StencilApp {
                 let _ = Select::new("Font", Bind::bound(&mut family), &family_entries)
                     .id_salt("text-font")
                     .show(ui);
+                if button(ui, "Load Font File…", true) {
+                    pick_font = true;
+                }
                 if styles.len() > 1 {
                     labelled(ui, "Style", |ui| {
                         let _ =
@@ -848,6 +872,21 @@ impl StencilApp {
         self.text_style = style;
         if changed {
             self.apply_text_style(edit);
+        }
+        if pick_font
+            && let Some(path) = rfd::FileDialog::new()
+                .add_filter("Fonts", &["ttf", "otf", "ttc"])
+                .pick_file()
+        {
+            let before = self.text_family.clone();
+            self.load_font_file(&path.to_string_lossy());
+            if self.text_family != before {
+                // Like choosing the family in the list: the selected text takes it too.
+                self.apply_text_style(TextEdit {
+                    font: Some(self.text_font()),
+                    ..TextEdit::default()
+                });
+            }
         }
     }
 
@@ -1182,6 +1221,24 @@ mod flow_tests {
 #[cfg(test)]
 mod style_tests {
     use super::*;
+
+    #[test]
+    fn a_loaded_font_file_becomes_the_text_font_and_travels_with_the_text() {
+        let dir = std::env::temp_dir().join(format!("sc-font-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test-font.ttf");
+        let bytes = vectorcraft_text::test_fonts::variable_font().expect("test font builds");
+        std::fs::write(&path, bytes).unwrap();
+        let mut app = StencilApp::new(None);
+        app.load_font_file(&path.to_string_lossy());
+        assert!(app.status.starts_with("loaded"), "{}", app.status);
+        assert!(app.text_fonts.iter().any(|f| f.family == app.text_family));
+        let spec = app.text_font();
+        assert_eq!(spec.file.as_deref(), Some(path.to_string_lossy().as_ref()));
+        app.load_font_file("/no/such/font.ttf");
+        assert!(app.status.starts_with("font file:"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn font_style_and_recent_fonts() {

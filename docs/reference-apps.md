@@ -407,7 +407,7 @@ Owner goal: support every format the source apps support.
 | HEIC | DS | upload (listed in one help article) | missing | replicate |
 | WebP | DS | not documented in the help articles we found | partial: placed raster import; desktop display/print incomplete | verify, then replicate if supported |
 | Embroidery: PES, DST, EXP, JEF, XXX | SS Designer Plus | open | missing | replicate (outline only) |
-| Fonts: TTF/OTF (system fonts) | SS, DS | used for text | partial: installed families and built-in single-line font in the desktop text dialog; file picker missing | replicate through system/user fonts; none bundled |
+| Fonts: TTF/OTF (system fonts) | SS, DS | used for text | have: installed families, the built-in single-line font, and Text Style › Load Font File… (TTF, OTF, TTC); text made in a loaded family records the file and reloads it when the design is opened | replicate through system/user fonts; none bundled |
 | Pattern images (JPG/PNG) | SS Designer+, DS | imported as fill patterns | missing | replicate |
 | Design Space projects | DS | cloud-only; no local project file | n/a (we save `.stencilcraft` locally) | won't do: account system |
 | G-code (Grbl) | StencilCraft | export | have | ours |

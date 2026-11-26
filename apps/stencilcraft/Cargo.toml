@@ -47,6 +47,8 @@ kurbo = { workspace = true }
 tiny-skia = { workspace = true }
 
 [dev-dependencies]
+# A font built in code for the font-file test (no font file in this repository).
+vectorcraft-text = { workspace = true, features = ["test-fonts"] }
 # The menu-label test reads labels with the pin's own mnemonic reader, which takes a Folder.
 craft-i18n = { workspace = true }
 

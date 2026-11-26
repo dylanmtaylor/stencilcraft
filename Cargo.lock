@@ -6059,6 +6059,7 @@ dependencies = [
  "stencilcraft-tiling",
  "stencilcraft-ui-egui",
  "tiny-skia 0.11.4",
+ "vectorcraft-text",
 ]
 
 [[package]]

@@ -145,6 +145,8 @@ pub struct UserPrefs {
     pub default_fill: Option<String>,
     /// The line colour drawn shapes start with; `None` keeps the default cut line.
     pub default_line: Option<String>,
+    /// Preferences › Advanced › Packet Size in bytes; `None` is Auto (1000), as in Silhouette.
+    pub packet_bytes: Option<usize>,
     /// Preferences › General › Print Resolution (Silhouette: 600 dpi).
     pub print_dpi: f64,
     /// Preferences › General › Show Print Preview (Silhouette: on).
@@ -219,6 +221,7 @@ impl Default for UserPrefs {
             default_fill: None,
             default_line: None,
             print_dpi: 600.0,
+            packet_bytes: None,
             show_print_preview: true,
             dxf_fit_to_page: true,
             import_join_lines: true,
@@ -5757,6 +5760,7 @@ impl StencilApp {
             overcut_mm: self.send.overcut_mm,
             weld: self.send.weld,
             track_enhancing: self.send.track_enhancing,
+            packet_bytes: self.prefs.packet_bytes,
         }
     }
 

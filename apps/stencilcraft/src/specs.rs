@@ -286,25 +286,25 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         w.run();
         return Ok(());
     }
-    if let Some(rest) = text.strip_prefix("an operation \"") {
-        if let Some((name, tail)) = rest.split_once("\" over shapes ") {
-            let members = nums(tail);
-            if members.is_empty() {
-                return fail(format!("expected at least one shape id in {tail:?}"));
-            }
-            let cut = operations::OperationPreset::Cut;
-            w.state_mut()
-                .run_command(Command::Document(DocumentCommand::OperationCreate {
-                    name: name.to_string(),
-                    kind: cut.kind(),
-                    settings: Default::default(),
-                    color: None,
-                    icon: Some(cut.icon_name().to_string()),
-                    members,
-                }));
-            w.run();
-            return Ok(());
+    if let Some(rest) = text.strip_prefix("an operation \"")
+        && let Some((name, tail)) = rest.split_once("\" over shapes ")
+    {
+        let members = nums(tail);
+        if members.is_empty() {
+            return fail(format!("expected at least one shape id in {tail:?}"));
         }
+        let cut = operations::OperationPreset::Cut;
+        w.state_mut()
+            .run_command(Command::Document(DocumentCommand::OperationCreate {
+                name: name.to_string(),
+                kind: cut.kind(),
+                settings: Default::default(),
+                color: None,
+                icon: Some(cut.icon_name().to_string()),
+                members,
+            }));
+        w.run();
+        return Ok(());
     }
     if let Some(rest) = text.strip_prefix("shape ") {
         if let Some((left, right)) = rest.split_once(" has stroke \"") {

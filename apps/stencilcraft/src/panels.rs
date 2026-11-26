@@ -82,6 +82,8 @@ pub enum EditAction {
     ToPath,
     MakeCompound,
     ReleaseCompound,
+    /// Object › Modify › Detach Lines: the line becomes its own filled shape.
+    DetachLines,
     /// With the Point Editing panel's tolerance.
     Simplify,
     /// Join the first two selected shapes' open ends.
@@ -640,6 +642,15 @@ impl StencilApp {
                 Command::ShapesReleaseCompound { ids },
                 false,
                 "compound path released",
+            ),
+            // The line width is the Outline Stroke width until shapes carry their own.
+            EditAction::DetachLines => self.run_adding(
+                Command::ShapesDetachLines {
+                    ids,
+                    width_mm: self.panels.stroke_mm,
+                },
+                false,
+                "lines detached",
             ),
             EditAction::Simplify => self.run_adding(
                 Command::PathSimplify {

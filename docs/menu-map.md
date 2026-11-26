@@ -116,7 +116,7 @@ Expand and Offset Path.
 | Modify › Crop | — | SS | have | `shape.pathfinder` crop |
 | Modify › Outline | — | AI | have | `shape.pathfinder` outline |
 | Modify › Minus Back | — | AI | have | `shape.pathfinder` minus-back |
-| Modify › Detach Lines | — | SS | missing | *proposed `shapes.detach-lines`* |
+| Modify › Detach Lines | — | SS | partial | `shapes.detach-lines` (width from Outline Stroke) |
 | Group | Ctrl+G | SS | missing | *proposed `shapes.group`* |
 | Ungroup | Ctrl+Shift+G | SS | missing | *proposed `shapes.ungroup`* |
 | Attach / Detach (keep positions on the mat) | — | DS | missing | *proposed `shapes.attach`* |

@@ -196,5 +196,9 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 
 - Object › Modify › Detach Lines is enabled with one closed rectangle selected. Running it on
   the rectangle (with or without a stroke weight) leaves one object: dragging its top edge
-  afterwards moves the whole rectangle. Its effect on other kinds of shapes is still to be
-  observed, so StencilCraft keeps the item as a placeholder.
+  afterwards moves the whole rectangle.
+- With a fill and a line (rectangle 4.813 × 4.375 in, yellow fill, blue line 20 pt): Detach
+  Lines leaves two objects, selected together. The line becomes its own shape: the stroke's
+  outline as a closed ring (5.091 × 4.653 in, i.e. half the 20 pt = 0.278 in line width on each
+  side), filled with the old line colour, line width 0, no line colour. The original keeps its
+  fill and its size and no longer shows a line. Dragging the ring afterwards moves it alone.

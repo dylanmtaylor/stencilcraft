@@ -421,3 +421,108 @@ mod tests {
         assert_eq!(app.send_jobs(false).len(), 1);
     }
 }
+
+/// The Send view's buttons for the selected lines (Silhouette's cut-preview buttons).
+pub const SEND_ASSIGN_BUTTONS: &[(&str, Option<stencilcraft_doc::SendAssign>)] = &[
+    (
+        "Tool 1: Use all selected lines",
+        Some(stencilcraft_doc::SendAssign::Tool1),
+    ),
+    (
+        "Tool 1: Use outline of selection",
+        Some(stencilcraft_doc::SendAssign::Tool1Outline),
+    ),
+    (
+        "Tool 2: Use all selected lines",
+        Some(stencilcraft_doc::SendAssign::Tool2),
+    ),
+    (
+        "Tool 2: Use outline of selection",
+        Some(stencilcraft_doc::SendAssign::Tool2Outline),
+    ),
+    (
+        "Ignore selected lines",
+        Some(stencilcraft_doc::SendAssign::Ignore),
+    ),
+    ("Clear tool choice", None),
+];
+
+impl StencilApp {
+    /// Assign the selected shapes to a tool holder, their outline only, or nothing (`None`
+    /// clears the choice back to the layer's settings).
+    pub fn assign_send(&mut self, assign: Option<stencilcraft_doc::SendAssign>) {
+        if self.selected_shapes.is_empty() {
+            self.status = "select the lines to assign first".to_string();
+            return;
+        }
+        let ids = self.selected_shapes.clone();
+        self.run_command(stencilcraft_engine::Command::Production(
+            stencilcraft_engine::ProductionCommand::SetProduction {
+                ids,
+                operation: None,
+                line_color: None,
+                fill_color: None,
+                material: None,
+                send: assign,
+                clear: if assign.is_none() {
+                    vec![stencilcraft_engine::ProductionField::Send]
+                } else {
+                    Vec::new()
+                },
+            },
+        ));
+        if let Some((label, _)) = SEND_ASSIGN_BUTTONS.iter().find(|(_, a)| *a == assign) {
+            self.status = format!("{} ({} shapes)", label, self.selected_shapes.len());
+        }
+    }
+
+    /// The Send view's "selected lines" buttons.
+    pub fn send_assign_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label("Selected lines");
+        let any = !self.selected_shapes.is_empty();
+        let mut chosen = None;
+        ui.horizontal_wrapped(|ui| {
+            for (label, assign) in SEND_ASSIGN_BUTTONS {
+                if crate::panels::button(ui, label, any) {
+                    chosen = Some(*assign);
+                }
+            }
+        });
+        if let Some(assign) = chosen {
+            self.assign_send(assign);
+        }
+    }
+}
+
+#[cfg(test)]
+mod send_assign_tests {
+    use super::*;
+
+    #[test]
+    fn selected_lines_go_to_a_tool_or_are_ignored() {
+        let mut app = StencilApp::new(None);
+        app.run_command(stencilcraft_engine::Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        });
+        app.assign_send(Some(stencilcraft_doc::SendAssign::Tool2));
+        assert!(app.status.contains("select"), "nothing selected");
+        app.select_latest_shape();
+        let id = app.selected_shapes[0];
+        let send = |app: &StencilApp| app.engine.doc.get_shape(id).and_then(|s| s.production.send);
+        app.assign_send(Some(stencilcraft_doc::SendAssign::Tool2Outline));
+        assert_eq!(send(&app), Some(stencilcraft_doc::SendAssign::Tool2Outline));
+        app.assign_send(Some(stencilcraft_doc::SendAssign::Ignore));
+        assert_eq!(send(&app), Some(stencilcraft_doc::SendAssign::Ignore));
+        app.assign_send(None);
+        assert_eq!(send(&app), None, "cleared");
+        assert!(app.engine.undo());
+        assert_eq!(
+            send(&app),
+            Some(stencilcraft_doc::SendAssign::Ignore),
+            "one undo step each"
+        );
+    }
+}

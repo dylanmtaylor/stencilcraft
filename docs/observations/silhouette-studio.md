@@ -317,3 +317,17 @@ or rectangle at a time and comparing:
 - A rectangle drawn half off the page's left edge shows in the Send view as two parts. The part
   inside the cut border is bold red (cut): its top, right and bottom edges. The part outside is
   pale (not cut). No line is added along the border, so the clipped shape is cut open.
+
+## What a `.studio3` writer must produce (2026-11-26, SS 5.0.556)
+
+Tested by opening edited copies of documents saved here (not shipped anywhere):
+
+- The u32 at 0x3E8 is the same constant (0x1DCD672C) in every file, not a checksum.
+- Of the 13 sections listed at 0x10 (u64 lengths), only section 0, the objects, is needed. A
+  copy with every other length set to 0 and those sections removed opens with all its shapes.
+- Section 0 is read in a fixed order. Keeping only the page block and the objects block (or
+  the objects block alone) gives "The file you are attempting to access could not be loaded.
+  It may be corrupt." So a writer must emit every root block in order: page, document
+  settings, the objects block, and the run of cut-layer and material records (`layer_@cnon`,
+  `@ccut`, `@cced`, `@cper`, `@cped`, `@weed`…, about 8 KB), plus the 2.5 KB that follows
+  the root block.

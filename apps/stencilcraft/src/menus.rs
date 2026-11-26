@@ -965,6 +965,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Recolor Artwork", A::ShowPanel(P::SelectByColor)).into(),
         item("Graphic Styles", A::ShowPanel(P::GraphicStyles)).into(),
         item("Actions", A::ShowPanel(P::Actions)).into(),
+        item("Templates", A::ShowPanel(P::Templates)).into(),
         item("Libraries", A::ShowPanel(P::Library)).into(),
         SEP,
         item("Reset Panels to Default", A::ResetWorkspace).into(),

@@ -269,8 +269,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
 44. **Offset UI**: the desktop Offset panel previews and applies `shapes.offset` with
     join style and miter limit, and can weld overlapping offsets into one outline.
 45. **Templates and Guide layers**: a layer can be a guide layer (Layers panel: shown,
-    never cut). Missing: built-in sizing backgrounds (shirt, mug, card blanks) and document
-    presets ("base type").
+    never cut). Panels › Templates adds sizing backgrounds (shirts, mug wraps, card blanks, a
+    tote) on a Templates guide layer. Missing: document presets ("base type").
 46. **Make-screen validation**: missing checks for each machine's limits: Smart Materials
     minimum and maximum lengths, card mats (2×2, 1×2, Joy), Print Then Cut usable area
     and page size, and roller margins. Also missing: per-machine default load type and

@@ -81,6 +81,7 @@ mod panels;
 mod pixscan;
 mod print_marks;
 mod send_modes;
+mod sizing_templates;
 mod text_tool;
 mod tool_rail;
 mod trace_panel;
@@ -1109,6 +1110,7 @@ pub enum WorkspacePanel {
     PixScan,
     PrintCut,
     EraseColour,
+    Templates,
 }
 
 struct WorkspaceContent<'a> {
@@ -1195,6 +1197,7 @@ impl DockPanels<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Actions => self.app.actions_panel(ui),
             WorkspacePanel::PixScan => self.app.pixscan_panel(ui),
             WorkspacePanel::EraseColour => self.app.erase_colour_panel(ui),
+            WorkspacePanel::Templates => self.app.sizing_templates_panel(ui),
             WorkspacePanel::PrintCut => self.app.print_cut_panel(ui),
         }
     }
@@ -1230,6 +1233,7 @@ fn panel_label(panel: WorkspacePanel) -> &'static str {
         WorkspacePanel::Actions => "Actions",
         WorkspacePanel::PixScan => "PixScan",
         WorkspacePanel::EraseColour => "Erase",
+        WorkspacePanel::Templates => "Templates",
         WorkspacePanel::PrintCut => "Print & Cut",
     }
 }
@@ -1512,6 +1516,7 @@ const FULL_PANELS: &[WorkspacePanel] = &[
     WorkspacePanel::PixScan,
     WorkspacePanel::PrintCut,
     WorkspacePanel::EraseColour,
+    WorkspacePanel::Templates,
 ];
 
 /// Starter Mode's few panels, as in Silhouette (Page Setup, Fill, Line Style, Trace,

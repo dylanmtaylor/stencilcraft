@@ -12,6 +12,10 @@ pub enum HardwareCommand {
     /// Discover paired Bluetooth LE cutters from the system Bluetooth service.
     #[serde(rename = "hardware.bluetooth_devices")]
     BluetoothDevices,
+    /// Ask the USB cutter at `location` whether it is ready, busy or without media, and for its
+    /// firmware version. Nothing moves.
+    #[serde(rename = "hardware.status")]
+    Status { location: String },
     /// Validate the current visible document; only send when `send` is true.
     #[serde(rename = "hardware.cut")]
     Cut {
@@ -97,6 +101,9 @@ fn execute(
 ) -> Result<serde_json::Value, machine::MachineError> {
     if matches!(command, HardwareCommand::BluetoothDevices) {
         return bluetooth_devices();
+    }
+    if let HardwareCommand::Status { location } = command {
+        return usb_status(location);
     }
     let HardwareCommand::Cut {
         model,
@@ -237,6 +244,30 @@ fn devices() -> Result<serde_json::Value, machine::MachineError> {
         "USB support is disabled in this build".into(),
     ))
 }
+/// A device status as the Send tab shows it.
+pub fn status_label(status: &machine::DeviceStatus) -> String {
+    match status {
+        machine::DeviceStatus::Ready => "ready".to_string(),
+        machine::DeviceStatus::Moving => "busy".to_string(),
+        machine::DeviceStatus::Unloaded => "no media loaded".to_string(),
+        machine::DeviceStatus::Unknown(byte) => format!("unknown (status byte {byte})"),
+    }
+}
+
+#[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
+fn usb_status(location: &str) -> Result<serde_json::Value, machine::MachineError> {
+    let mut transport = machine::UsbTransport::open(Some(location))?;
+    use machine::Transport as _;
+    transport.write(machine::ESC_INIT.as_bytes())?;
+    let status = machine::query_status(&mut transport)?;
+    let firmware = machine::query_version(&mut transport).ok();
+    Ok(serde_json::json!({"status": status_label(&status), "firmware": firmware}))
+}
+#[cfg(not(all(feature = "usb", not(target_arch = "wasm32"))))]
+fn usb_status(_: &str) -> Result<serde_json::Value, machine::MachineError> {
+    devices()
+}
+
 #[cfg(all(feature = "usb", not(target_arch = "wasm32")))]
 fn send_usb(
     caps: &machine::Capabilities,
@@ -331,6 +362,27 @@ fn send_bluetooth(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn statuses_read_as_words_and_the_command_round_trips() {
+        assert_eq!(status_label(&machine::DeviceStatus::Ready), "ready");
+        assert_eq!(status_label(&machine::DeviceStatus::Moving), "busy");
+        assert_eq!(
+            status_label(&machine::DeviceStatus::Unloaded),
+            "no media loaded"
+        );
+        assert!(status_label(&machine::DeviceStatus::Unknown(9)).contains('9'));
+        let command = HardwareCommand::Status {
+            location: "1-2".into(),
+        };
+        let json = serde_json::to_string(&command).unwrap();
+        assert!(json.contains("hardware.status"), "{json}");
+        assert_eq!(
+            serde_json::from_str::<HardwareCommand>(&json).unwrap(),
+            command
+        );
+    }
+
     use super::*;
     #[test]
     fn empty_cut_refused_before_usb() {

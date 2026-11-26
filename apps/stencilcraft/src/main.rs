@@ -5807,6 +5807,11 @@ impl StencilApp {
                         if let Some(summary) = &mut self.send.summary {
                             summary.extend(unsupported);
                         }
+                    } else if let Some(status) = value["status"].as_str() {
+                        let firmware = self.note_firmware(&value);
+                        let mut lines = vec![format!("Cutter status: {status}.")];
+                        lines.extend(firmware.map(|f| format!("Machine firmware: {f}")));
+                        self.send.summary = Some(lines);
                     } else {
                         let bytes = value["bytes"].as_u64().unwrap_or_default();
                         let firmware = self.note_firmware(&value);
@@ -5919,6 +5924,18 @@ impl StencilApp {
             )
             .id_salt("cutter-device")
             .show(ui);
+            if self.send.connection_mode == 0
+                && !self.send.device.is_empty()
+                && Button::new("Check status")
+                    .id_salt("send-status")
+                    .show(ui)
+                    .clicked()
+            {
+                let command = stencilcraft_engine::HardwareCommand::Status {
+                    location: self.send.device.clone(),
+                };
+                self.start_hardware(command, ui.ctx().clone());
+            }
             if let Some((_, model, _)) = self.send.devices.iter().find(|d| d.0 == self.send.device)
                 && let Some(model) = stencilcraft_machine::Model::by_id(model)
             {

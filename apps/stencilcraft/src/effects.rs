@@ -34,6 +34,8 @@ pub enum EffectKind {
     ImageEffects,
     Lattice,
     ReduceColours,
+    Despeckle,
+    Smooth,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -55,6 +57,8 @@ pub enum EffectMenu {
     ImageEffects,
     Lattice,
     ReduceColours,
+    Despeckle,
+    Smooth,
 }
 
 impl EffectMenu {
@@ -80,6 +84,8 @@ impl EffectMenu {
             Self::ImageEffects => (EffectKind::ImageEffects, Vec::new()),
             Self::Lattice => (EffectKind::Lattice, Vec::new()),
             Self::ReduceColours => (EffectKind::ReduceColours, Vec::new()),
+            Self::Despeckle => (EffectKind::Despeckle, Vec::new()),
+            Self::Smooth => (EffectKind::Smooth, Vec::new()),
         }
     }
 }
@@ -390,6 +396,20 @@ const EFFECTS: &[EffectDef] = &[
         target: Target::Image,
         fields: &[int("colours", "Colours", 1.0, 16.0)],
     },
+    EffectDef {
+        kind: EffectKind::Despeckle,
+        title: "Despeckle",
+        command: "image.despeckle",
+        target: Target::Image,
+        fields: &[int("area_px", "Smaller than (pixels)", 1.0, 100_000.0)],
+    },
+    EffectDef {
+        kind: EffectKind::Smooth,
+        title: "Smooth",
+        command: "image.smooth",
+        target: Target::Image,
+        fields: &[int("radius_px", "Radius (pixels)", 1.0, 10.0)],
+    },
 ];
 
 fn def(kind: EffectKind) -> Option<&'static EffectDef> {
@@ -429,6 +449,8 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
         }
         EffectKind::RemoveBackground => Ok(json!({"tolerance": 10.0})),
         EffectKind::ReduceColours => Ok(json!({"colours": 4})),
+        EffectKind::Despeckle => Ok(json!({"area_px": 20})),
+        EffectKind::Smooth => Ok(json!({"radius_px": 1})),
         EffectKind::Bridges => Ok(json!({"width_mm": 1.5, "direction": "vertical"})),
         EffectKind::Lattice => {
             Ok(json!({"hole": "square", "hole_mm": 5.0, "wall_mm": 1.5, "border_mm": 3.0}))

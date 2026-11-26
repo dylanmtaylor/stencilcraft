@@ -346,6 +346,12 @@ pub enum Command {
     /// (1–16) main colours.
     #[serde(rename = "image.reduce-colours")]
     ImageReduceColours { id: u64, colours: u32 },
+    /// Upload cleanup's Despeckle: opaque islands under `area_px` pixels become transparent.
+    #[serde(rename = "image.despeckle")]
+    ImageDespeckle { id: u64, area_px: u32 },
+    /// Upload cleanup's Smooth: a median filter of `radius_px` (1–10) pixels.
+    #[serde(rename = "image.smooth")]
+    ImageSmooth { id: u64, radius_px: u32 },
     #[serde(rename = "image.erase-brush")]
     ImageEraseBrush {
         id: u64,
@@ -884,6 +890,8 @@ impl Engine {
                 | Command::ImageEraseColour { .. }
                 | Command::ImageEraseBrush { .. }
                 | Command::ImageReduceColours { .. }
+                | Command::ImageDespeckle { .. }
+                | Command::ImageSmooth { .. }
                 | Command::ImageAdjust { .. }
                 | Command::ImageRectify { .. }
                 | Command::PathBreak { .. }
@@ -1671,6 +1679,16 @@ impl Engine {
                 }
                 Ok(Effect::ImageChanged { id })
             }
+            Command::ImageDespeckle { id, area_px } => {
+                self.edit_image_pixels(id, "image.despeckle", |pixels| {
+                    stencilcraft_raster::despeckle(pixels, area_px)
+                })
+            }
+            Command::ImageSmooth { id, radius_px } => {
+                self.edit_image_pixels(id, "image.smooth", |pixels| {
+                    stencilcraft_raster::smooth(pixels, radius_px)
+                })
+            }
             Command::ImageReduceColours { id, colours } => {
                 const NAME: &str = "image.reduce-colours";
                 let image = self.doc.get_image(id).ok_or_else(|| no_image(NAME, id))?;
@@ -2416,6 +2434,27 @@ impl Engine {
             }
         }
         Ok(Effect::ShapesAdded { ids })
+    }
+
+    /// Replace image `id`'s pixels with `edit` of them (one undo step, like every command).
+    fn edit_image_pixels(
+        &mut self,
+        id: u64,
+        name: &'static str,
+        edit: impl FnOnce(
+            &stencilcraft_raster::RgbaImage,
+        )
+            -> Result<stencilcraft_raster::RgbaImage, stencilcraft_raster::RasterError>,
+    ) -> Result<Effect, EngineError> {
+        let image = self.doc.get_image(id).ok_or_else(|| no_image(name, id))?;
+        let pixels = stencilcraft_raster::image_pixels(image)
+            .and_then(|pixels| edit(&pixels))
+            .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+            .map_err(invalid(name))?;
+        if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+            *slot = pixels;
+        }
+        Ok(Effect::ImageChanged { id })
     }
 
     fn trace_colours(
@@ -5120,6 +5159,37 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn despeckle_and_smooth_edit_the_image_in_one_step_each() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let pixels = Pixels::from_fn(20, 20, |x, y| match (x, y) {
+            (3, 3) => Pixel([0, 0, 0, 255]),
+            _ if x >= 10 => Pixel([0, 0, 0, 255]),
+            _ => Pixel([0, 0, 0, 0]),
+        });
+        let placed = stencilcraft_raster::place(&pixels, "specks", 100.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        engine
+            .run(Command::ImageDespeckle { id, area_px: 4 })
+            .unwrap();
+        let after = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(after.get_pixel(3, 3).0[3], 0, "the speck is gone");
+        assert_eq!(after.get_pixel(15, 5).0[3], 255, "the block stays");
+        engine
+            .run(Command::ImageSmooth { id, radius_px: 1 })
+            .unwrap();
+        assert!(engine.undo() && engine.undo(), "one undo step each");
+        assert!(
+            engine
+                .run(Command::ImageSmooth { id, radius_px: 0 })
+                .is_err()
+        );
     }
 
     #[test]

@@ -810,6 +810,10 @@ pub enum TopMenuAction {
     /// Object › Clipping Mask › Make / Release.
     ClipMake,
     ClipRelease,
+    /// Object › Combine (live), with its operation.
+    LiveCombine(stencilcraft_doc::CombineOp),
+    /// Object › Combine › Uncombine.
+    Uncombine,
     /// An Effect menu item: the Effects panel on that effect.
     OpenEffect(effects::EffectMenu),
     /// Effect › Apply Last Effect.
@@ -2072,6 +2076,12 @@ impl StencilApp {
             Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => {
                 self.path_selection = PathSelection::default();
                 self.set_selection(ids);
+                self.status = "done".to_string();
+            }
+            // One new shape (a Combine, a Flatten): select it too.
+            Ok(stencilcraft_engine::Effect::ShapeAdded { id }) => {
+                self.path_selection = PathSelection::default();
+                self.set_selection([id]);
                 self.status = "done".to_string();
             }
             Ok(_) => self.status = "done".to_string(),
@@ -4124,6 +4134,8 @@ impl StencilApp {
             TopMenuAction::Flatten => self.flatten_selection(),
             TopMenuAction::ClipMake => self.make_clipping_mask(),
             TopMenuAction::ClipRelease => self.release_clipping_mask(),
+            TopMenuAction::LiveCombine(operation) => self.live_combine(operation),
+            TopMenuAction::Uncombine => self.release_clipping_mask(),
             TopMenuAction::ApplyLastEffect => self.apply_last_effect(),
             TopMenuAction::ToggleOutlineView => {
                 self.prefs.outline_view = !self.prefs.outline_view;
@@ -5226,6 +5238,42 @@ impl StencilApp {
                     });
                 }
             });
+        }
+
+        // A live Combine's operation can change later (Object › Combine (live)).
+        if let Some((id, op)) = self.selected_combine() {
+            let mut picked = op;
+            let entries = [
+                Entry::new(stencilcraft_doc::CombineOp::Unite, "Unite"),
+                Entry::new(stencilcraft_doc::CombineOp::Subtract, "Subtract"),
+                Entry::new(stencilcraft_doc::CombineOp::Intersect, "Intersect"),
+                Entry::new(stencilcraft_doc::CombineOp::Exclude, "Exclude"),
+            ];
+            let mut uncombine = false;
+            let _ = Section::new("Combine")
+                .id_salt("inspector-combine")
+                .show(ui, |ui, _| {
+                    let _ = craft_ui::pickers::Select::new(
+                        "Combine operation",
+                        Bind::bound(&mut picked),
+                        &entries,
+                    )
+                    .id_salt("inspector-combine-op")
+                    .show(ui);
+                    uncombine = panels::button(ui, "Uncombine", true);
+                });
+            if picked != op {
+                self.run_command(Command::Production(
+                    stencilcraft_engine::ProductionCommand::SetCombine {
+                        id,
+                        operation: picked,
+                    },
+                ));
+                self.set_selection([id]);
+            }
+            if uncombine {
+                self.release_clipping_mask();
+            }
         }
 
         let kerf_width = self.kerf_draft.unwrap_or(self.engine.doc.kerf.width_mm);

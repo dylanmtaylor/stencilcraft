@@ -69,26 +69,87 @@ impl StencilApp {
         }
     }
 
-    /// Object › Clipping Mask › Make: the top shape clips the one under it (kept, so Release
-    /// gives both back).
+    /// Object › Clipping Mask › Make: the topmost selected shape clips every other selected
+    /// shape (each keeps its own copy of the mask, so Release gives each back with its mask).
     pub fn make_clipping_mask(&mut self) {
-        if self.selected_shapes.len() != 2 {
-            self.status = "select a shape and the mask above it".to_string();
+        if self.selected_shapes.len() < 2 {
+            self.status = "select the shapes and the mask above them".to_string();
+            return;
+        }
+        // Paint order: the last selected shape in the document is the topmost.
+        let order: Vec<u64> = self
+            .engine
+            .doc
+            .shapes()
+            .map(|(_, s)| s.id)
+            .filter(|id| self.selected_shapes.contains(id))
+            .collect();
+        let Some((&mask, clipped)) = order.split_last() else {
+            return;
+        };
+        let mut results = Vec::new();
+        for (n, &shape) in clipped.iter().enumerate() {
+            // The last clipped shape takes the mask itself; the others take copies.
+            let mask_for = if n + 1 == clipped.len() {
+                Some(mask)
+            } else {
+                match self.engine.run(Command::ShapesDuplicate {
+                    ids: vec![mask],
+                    dx_mm: 0.0,
+                    dy_mm: 0.0,
+                }) {
+                    Ok(stencilcraft_engine::Effect::ShapesAdded { ids }) => ids.first().copied(),
+                    Ok(stencilcraft_engine::Effect::ShapeAdded { id }) => Some(id),
+                    _ => None,
+                }
+            };
+            let Some(mask_for) = mask_for else {
+                self.status = "the mask could not be copied".to_string();
+                break;
+            };
+            match self
+                .engine
+                .run(Command::Production(ProductionCommand::Combine {
+                    ids: vec![shape, mask_for],
+                    operation: stencilcraft_doc::CombineOp::Intersect,
+                })) {
+                Ok(stencilcraft_engine::Effect::ShapeAdded { id }) => results.push(id),
+                Ok(_) => {}
+                Err(e) => {
+                    self.status = e.to_string();
+                    break;
+                }
+            }
+        }
+        if !results.is_empty() {
+            self.status = format!("clipping mask made ({} shapes)", results.len());
+            self.set_selection(results);
+        }
+    }
+
+    /// Object › Combine (live): the selection as one shape that keeps its members, so the
+    /// operation can be changed or undone later (Uncombine).
+    pub fn live_combine(&mut self, operation: stencilcraft_doc::CombineOp) {
+        if self.selected_shapes.len() < 2 {
+            self.status = "select two or more shapes to combine".to_string();
             return;
         }
         let ids = self.selected_shapes.clone();
-        match self
-            .engine
-            .run(Command::Production(ProductionCommand::Combine {
-                ids,
-                operation: stencilcraft_doc::CombineOp::Intersect,
-            })) {
-            Ok(stencilcraft_engine::Effect::ShapeAdded { id }) => {
-                self.set_selection([id]);
-                self.status = "clipping mask made".to_string();
-            }
-            Ok(_) => self.status = "clipping mask made".to_string(),
-            Err(e) => self.status = e.to_string(),
+        self.select_added(Command::Production(ProductionCommand::Combine {
+            ids,
+            operation,
+        }));
+    }
+
+    /// The live Combine operation of the one selected shape, if it is one.
+    pub fn selected_combine(&self) -> Option<(u64, stencilcraft_doc::CombineOp)> {
+        let [id] = self.selected_shapes.as_slice() else {
+            return None;
+        };
+        let shape = self.engine.doc.get_shape(*id)?;
+        match shape.production.group.as_deref()?.kind {
+            stencilcraft_doc::GroupKind::Combine(op) => Some((*id, op)),
+            stencilcraft_doc::GroupKind::Flatten => None,
         }
     }
 
@@ -159,6 +220,62 @@ impl StencilApp {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_mask_clips_several_shapes_and_live_combines_change() {
+        use stencilcraft_doc::CombineOp;
+        let mut app = StencilApp::new(None);
+        for (x, y, w) in [(0.0, 0.0, 20.0), (30.0, 0.0, 20.0), (10.0, 5.0, 40.0)] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y,
+                width: w,
+                height: 10.0,
+            });
+        }
+        let ids: Vec<u64> = app.engine.doc.shapes().map(|(_, s)| s.id).collect();
+        // The third rectangle (topmost) clips the first two.
+        app.set_selection(ids.clone());
+        app.make_clipping_mask();
+        assert_eq!(app.selected_shapes.len(), 2, "{}", app.status);
+        for id in app.selected_shapes.clone() {
+            let b = stencilcraft_geom::Shape::bounding_box(
+                &app.engine.doc.get_shape(id).expect("clip").path,
+            );
+            assert!(b.y0 >= 5.0 - 1e-6, "clipped to the mask: {b:?}");
+        }
+        // Live combine, then change its operation and undo it.
+        let mut app = StencilApp::new(None);
+        for x in [0.0, 10.0] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y: 0.0,
+                width: 20.0,
+                height: 20.0,
+            });
+        }
+        let ids: Vec<u64> = app.engine.doc.shapes().map(|(_, s)| s.id).collect();
+        app.set_selection(ids);
+        app.live_combine(CombineOp::Unite);
+        let (id, op) = app.selected_combine().expect("a live combine");
+        assert_eq!(op, CombineOp::Unite);
+        app.run_command(Command::Production(ProductionCommand::SetCombine {
+            id,
+            operation: CombineOp::Intersect,
+        }));
+        app.set_selection([id]);
+        assert_eq!(
+            app.selected_combine().map(|(_, op)| op),
+            Some(CombineOp::Intersect)
+        );
+        app.release_clipping_mask();
+        assert_eq!(
+            app.engine.doc.shapes().count(),
+            2,
+            "uncombine gives both back"
+        );
+    }
+
     use super::*;
 
     fn rects(app: &mut StencilApp, n: usize) -> Vec<u64> {

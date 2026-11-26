@@ -220,7 +220,7 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     another as a hole. Per-row cutting is untested on hardware.
 32. **Path construction**: Join, Average, Break, Close, Merge/Delete Points, compound
     paths and Clipping Mask › Make/Release (a non-destructive intersect of two shapes) are
-    in the Object menu. Clipping more than one shape with one mask is missing.
+    in the Object menu; one mask clips several shapes.
 33. **Transform power tools**: Transform Again, Transform Each, shear, flip, align to a
     key object and distribute spacing by value now run from the menus and the Transform
     panel, which also has Silhouette's 33/50/100/200/300 % Scale presets. Missing: a
@@ -264,8 +264,9 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     creation, print rendering and hardware depth validation remain open. See the
     [Cricut library](cricut-design-space/edit-bar.md#create-sticker).
 43. **Live (non-destructive) shape operations**: engine/MCP Combine retains source
-    shapes for Unite, Subtract, Intersect and Exclude and can uncombine them; the
-    desktop Pathfinder remains destructive and needs a live-combine workflow.
+    shapes for Unite, Subtract, Intersect and Exclude and can uncombine them; the desktop
+    has Object › Combine (live) and the Inspector changes a combine's operation. Pathfinder
+    stays destructive, as in Silhouette.
 44. **Offset UI**: the desktop Offset panel previews and applies `shapes.offset` with
     join style and miter limit, and can weld overlapping offsets into one outline.
 45. **Templates and Guide layers**: a layer can be a guide layer (Layers panel: shown,

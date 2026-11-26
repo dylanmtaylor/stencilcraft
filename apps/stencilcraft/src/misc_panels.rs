@@ -173,6 +173,18 @@ impl StencilApp {
                 let _ = Checkbox::new(Bind::bound(&mut prefs.cut_to_page_edge))
                     .label("Cut to edge of page")
                     .show(ui);
+                hint(ui, "Panel mode");
+                let _ = Segmented::new(
+                    "Panel mode",
+                    Bind::bound(&mut prefs.panel_mode),
+                    &[
+                        Entry::new(crate::PanelMode::Flexible, "Flexible"),
+                        Entry::new(crate::PanelMode::Single, "Single"),
+                        Entry::new(crate::PanelMode::Multiple, "Multiple"),
+                    ],
+                )
+                .id_salt("pref-panel-mode")
+                .show(ui);
                 ui.separator();
                 ui.label("Print");
                 let _ = Checkbox::new(Bind::bound(&mut prefs.show_print_preview))

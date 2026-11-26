@@ -135,6 +135,8 @@ pub struct UserPrefs {
     /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
     /// larger than the mat's usable area.
     pub constrain_media: bool,
+    /// Preferences › Defaults › Panel Mode (Silhouette's, Flexible by default).
+    pub panel_mode: PanelMode,
     /// Preferences › Defaults › Cut to Edge of Page (Silhouette: off): the cut border is the
     /// page edge instead of 1.5 mm inside it.
     pub cut_to_page_edge: bool,
@@ -212,6 +214,7 @@ impl Default for UserPrefs {
             constrain_media: true,
             page_colour: None,
             page_transparency: 0.0,
+            panel_mode: PanelMode::Flexible,
             cut_to_page_edge: false,
             default_fill: None,
             default_line: None,
@@ -237,6 +240,18 @@ impl Default for UserPrefs {
             saved_new: Vec::new(),
         }
     }
+}
+
+/// Silhouette's Preferences › Defaults › Panel Mode: how opening a panel treats the others.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PanelMode {
+    /// Panels open as tabs where they last were (the default).
+    #[default]
+    Flexible,
+    /// Opening a panel closes the other panels of its group: one at a time.
+    Single,
+    /// A newly opened panel stacks under the one opened before it.
+    Multiple,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1467,6 +1482,8 @@ pub struct StencilApp {
     pub print_preview: Option<print_preview::PrintPreview>,
     /// File › Print was chosen; the next frame (which has the context) shows the preview.
     pub print_requested: bool,
+    /// The panel shown last (Panel Mode › Multiple stacks the next one under it).
+    pub last_shown_panel: Option<WorkspacePanel>,
     /// Preferences › Restore Factory Defaults is waiting for its confirmation.
     pub confirm_restore_defaults: bool,
     /// Type › Spelling…, while open.
@@ -1785,6 +1802,7 @@ impl StencilApp {
             measure_line: None,
             spelling: None,
             confirm_restore_defaults: false,
+            last_shown_panel: None,
             print_preview: None,
             print_requested: false,
             selection_name_draft: String::new(),
@@ -2007,6 +2025,39 @@ impl StencilApp {
             self.prefs.mat_id = mat;
             self.save_prefs();
         }
+    }
+
+    /// Show `panel` as Preferences › Panel Mode says: as a tab (Flexible), alone in its group
+    /// (Single), or stacked under the panel shown before it (Multiple).
+    pub fn show_panel(&mut self, panel: WorkspacePanel) {
+        use craft_behavior::dock::{Action, DockPlacement};
+        let present = self.workspace.layout().contains(&panel);
+        let previous = self
+            .last_shown_panel
+            .filter(|p| *p != panel && self.workspace.layout().contains(p));
+        let mut actions = vec![match (present, self.prefs.panel_mode, previous) {
+            // Multiple: even a panel that is already a tab moves into its own group below.
+            (true, PanelMode::Multiple, Some(anchor)) => {
+                Action::move_beside(panel, anchor, DockPlacement::group(true, None))
+            }
+            (true, _, _) => Action::activate(panel),
+            (false, PanelMode::Multiple, Some(anchor)) => {
+                Action::open_at(panel, anchor, DockPlacement::group(true, None))
+            }
+            (false, _, _) => Action::open(panel, None),
+        }];
+        if self.prefs.panel_mode == PanelMode::Single {
+            actions.push(Action::close_others(panel));
+        }
+        for action in actions {
+            if let Err(error) =
+                Arc::make_mut(&mut self.workspace).apply(action, false, panel_permissions)
+            {
+                self.status = format!("could not show panel: {error}");
+                return;
+            }
+        }
+        self.last_shown_panel = Some(panel);
     }
 
     /// Keep the firmware version a send reported (trimmed, at most 64 characters).
@@ -4237,18 +4288,7 @@ impl StencilApp {
             }
             TopMenuAction::ShowDesign => self.send_mode = false,
             TopMenuAction::ShowSend => self.send_mode = true,
-            TopMenuAction::ShowPanel(panel) => {
-                let action = if self.workspace.layout().contains(&panel) {
-                    craft_behavior::dock::Action::activate(panel)
-                } else {
-                    craft_behavior::dock::Action::open(panel, None)
-                };
-                if let Err(error) =
-                    Arc::make_mut(&mut self.workspace).apply(action, false, panel_permissions)
-                {
-                    self.status = format!("could not show panel: {error}");
-                }
-            }
+            TopMenuAction::ShowPanel(panel) => self.show_panel(panel),
             TopMenuAction::DirectSelectTool => self.active_tool = ActiveTool::DirectSelect,
             TopMenuAction::DryRun => {
                 self.send_mode = true;
@@ -8434,6 +8474,30 @@ mod tests {
             app.send.firmware.as_ref().map(String::len),
             Some(64),
             "capped"
+        );
+    }
+
+    #[test]
+    fn panel_modes_show_one_panel_or_stack_them() {
+        let mut app = StencilApp::new(None);
+        app.prefs.panel_mode = PanelMode::Single;
+        app.show_panel(WorkspacePanel::Transform);
+        app.show_panel(WorkspacePanel::Glyphs);
+        let layout = app.workspace.layout();
+        assert!(layout.contains(&WorkspacePanel::Glyphs));
+        assert!(
+            !layout.contains(&WorkspacePanel::Transform),
+            "Single closes the others"
+        );
+        app.prefs.panel_mode = PanelMode::Multiple;
+        app.show_panel(WorkspacePanel::PixScan);
+        // A panel already present (Transform's tab group) moves under the last one too.
+        app.show_panel(WorkspacePanel::Modify);
+        let layout = app.workspace.layout();
+        assert!(layout.contains(&WorkspacePanel::Modify));
+        assert!(
+            layout.contains(&WorkspacePanel::Glyphs) && layout.contains(&WorkspacePanel::PixScan),
+            "Multiple keeps both"
         );
     }
 

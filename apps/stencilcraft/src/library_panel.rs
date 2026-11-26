@@ -189,7 +189,14 @@ impl StencilApp {
                 }
             }
         } else {
-            match self.export_bytes(crate::file_menu::ExportKind::Pdf) {
+            let dpi = if self.prefs.print_dpi.is_finite() {
+                self.prefs.print_dpi.clamp(72.0, 2400.0)
+            } else {
+                600.0
+            };
+            match stencilcraft_import::write_document(&self.engine.doc, "pdf", dpi)
+                .map_err(|e| e.to_string())
+            {
                 Ok(bytes) => (bytes, "stencilcraft-print.pdf"),
                 Err(e) => {
                     self.status = format!("print: {e}");

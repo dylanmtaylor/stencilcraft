@@ -809,11 +809,21 @@ impl History {
     }
 }
 
+/// The colours a drawn shape starts with: `#rrggbb`, or `None` for none (outline only).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NewShapeStyle {
+    pub fill_color: Option<String>,
+    pub line_color: Option<String>,
+}
+
 /// VectorCraft supplies the actual editing session and reusable geometry commands. StencilCraft
 /// keeps its production document as the stable public model and adapts operations at this boundary.
 pub struct Engine {
     pub doc: Document,
     history: History,
+    /// The fill and line colours drawn shapes start with (Silhouette's Preferences › Defaults ›
+    /// Default Fill Style). Applied in the same undo step as the shape.
+    pub new_shape_style: NewShapeStyle,
     /// While set, every successful undoable command is recorded here as JSON (an action
     /// being recorded for replay).
     pub recorder: Option<Vec<serde_json::Value>>,
@@ -836,6 +846,7 @@ impl Engine {
         let mut engine = Self {
             doc,
             history: History::new(100),
+            new_shape_style: NewShapeStyle::default(),
             recorder: None,
             session: VectorCraftSession::new(),
             shape_nodes: BTreeMap::new(),
@@ -932,6 +943,15 @@ impl Engine {
                 | Command::TextMonogram(_)
                 | Command::Production(_)
         );
+        let drawn = matches!(
+            command,
+            Command::ShapeAddRect { .. }
+                | Command::ShapeAddEllipse { .. }
+                | Command::ShapeAddRoundedRect { .. }
+                | Command::ShapeAddPolygon { .. }
+                | Command::ShapeAddStar { .. }
+                | Command::ShapeAddPath { .. }
+        );
         let before = self.capture_history_entry(false, false);
         let document_before = self.session.active().map(|state| Arc::clone(&state.doc));
         if !rebuild_session {
@@ -946,6 +966,17 @@ impl Engine {
         }
         match self.execute(command) {
             Ok(effect) => {
+                if drawn && let Effect::ShapeAdded { id } = effect {
+                    let style = self.new_shape_style.clone();
+                    if let Some(shape) = self.doc.get_shape_mut(id) {
+                        if style.fill_color.is_some() {
+                            shape.production.fill_color = style.fill_color;
+                        }
+                        if style.line_color.is_some() {
+                            shape.production.line_color = style.line_color;
+                        }
+                    }
+                }
                 if !rebuild_session {
                     self.session
                         .execute("edit.undoGroup.end", &json!({}))
@@ -3841,6 +3872,50 @@ mod tests {
         );
         assert!(engine.undo());
         assert_eq!(engine.doc.shape_count(), 2);
+    }
+
+    #[test]
+    fn drawn_shapes_take_the_default_style_in_their_own_undo_step() {
+        let mut engine = Engine {
+            new_shape_style: NewShapeStyle {
+                fill_color: Some("#000000".into()),
+                line_color: Some("#ff0000".into()),
+            },
+            ..Engine::default()
+        };
+        let Ok(Effect::ShapeAdded { id }) = engine.run(Command::ShapeAddRect {
+            x: 0.0,
+            y: 0.0,
+            width: 5.0,
+            height: 5.0,
+        }) else {
+            panic!("added")
+        };
+        let p = &engine.doc.get_shape(id).unwrap().production;
+        assert_eq!(p.fill_color.as_deref(), Some("#000000"));
+        assert_eq!(p.line_color.as_deref(), Some("#ff0000"));
+        assert!(engine.undo());
+        assert_eq!(
+            engine.doc.shape_count(),
+            0,
+            "one undo removes shape and style"
+        );
+        // Imports keep their own look.
+        let mut path = BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((5.0, 5.0));
+        engine
+            .run(Command::ShapeAddPaths {
+                shapes: vec![(path, CutStyle::Cut)],
+            })
+            .unwrap();
+        let imported = engine
+            .doc
+            .shapes()
+            .next()
+            .map(|(_, s)| s.production.clone())
+            .unwrap();
+        assert_eq!(imported.fill_color, None);
     }
 
     #[test]

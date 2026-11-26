@@ -158,9 +158,9 @@ memberships.
 | ID | Spec | UI | Status |
 | --- | --- | --- | --- |
 | OP-01 | wip | expandable member tree + remove + member double-click | wip |
-| OP-02 | wip | colour picker popup + 40-swatch palette | wip |
-| OP-03 | wip | Profiles dock panel: Cut/Score/Engrave + provisional link | wip |
-| OP-04 | wip | row actions, trash, `+` / chevron menu + appearance popup | wip |
+| OP-02 | wip | colour picker popup + 40-swatch palette | done |
+| OP-03 | wip | Profiles dock panel: Cut/Score/Engrave + provisional link | done |
+| OP-04 | wip | row actions, trash, `+` / chevron menu + appearance popup | done |
 | OP-05 | wip | settings popover (no lock, no view filter) | wip |
 | OP-06 | wip | drag + Ctrl+[ / ] reorder | wip |
 | OP-07 | wip | assignment dialog | wip |

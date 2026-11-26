@@ -797,7 +797,7 @@ pub struct PendingBulk {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BulkKind {
-    ByColour,
+    ByAppearance,
     AllSelected,
     EachSelected,
 }
@@ -805,16 +805,17 @@ enum BulkKind {
 impl BulkKind {
     fn label(self) -> &'static str {
         match self {
-            Self::ByColour => "New operation by colour",
+            Self::ByAppearance => "New operation by appearance",
             Self::AllSelected => "New operation: all selected",
             Self::EachSelected => "New operation: each selected",
         }
     }
 
     /// The operations this action creates over `shapes`, as (name, color, members).
+    /// The appearance action opens its own dialog, so it plans nothing here.
     fn plan(
         self,
-        doc: &stencilcraft_doc::Document,
+        _doc: &stencilcraft_doc::Document,
         shapes: &[u64],
     ) -> Vec<(String, Option<String>, Vec<u64>)> {
         match self {
@@ -829,36 +830,55 @@ impl BulkKind {
                 .iter()
                 .map(|id| (format!("Cut #{id}"), None, vec![*id]))
                 .collect(),
-            Self::ByColour => {
-                // Group the shapes by their effective operation's colour; ids are
-                // canonical, colour is only the grouping/filter label here (D-06).
-                let mut order: Vec<Option<String>> = Vec::new();
-                let mut groups: Vec<(Option<String>, Vec<u64>)> = Vec::new();
-                for id in shapes {
-                    let color = doc.operation_of_shape(*id).and_then(|op| op.color.clone());
-                    match groups.iter_mut().find(|(c, _)| *c == color) {
-                        Some((_, members)) => members.push(*id),
-                        None => {
-                            order.push(color.clone());
-                            groups.push((color.clone(), vec![*id]));
-                        }
-                    }
-                }
-                let _ = order;
-                groups
-                    .into_iter()
-                    .map(|(color, members)| {
-                        let name = match &color {
-                            Some(c) => format!("Cut {c}"),
-                            None => "Cut".to_string(),
-                        };
-                        (name, color, members)
-                    })
-                    .collect()
-            }
+            Self::ByAppearance => Vec::new(),
         }
     }
 }
+
+/// The built-in operation profiles (OP-03): a base kind and the settings a
+/// freshly created operation of that kind carries. `Guide` is canvas-only and
+/// has no profile.
+pub(crate) const BASE_PROFILES: [(stencilcraft_doc::OperationKind, &str); 3] = [
+    (stencilcraft_doc::OperationKind::Cut, "Cut"),
+    (stencilcraft_doc::OperationKind::Score, "Score"),
+    (stencilcraft_doc::OperationKind::Engrave, "Engrave"),
+];
+
+/// The base profile an operation still matches, if any: same kind and settings
+/// unchanged from the defaults. Editing the settings unlinks it ("Profile none").
+fn operation_profile(op: &stencilcraft_doc::Operation) -> Option<&'static str> {
+    BASE_PROFILES
+        .iter()
+        .find(|(kind, _)| {
+            *kind == op.kind && op.settings == stencilcraft_doc::OperationSettings::default()
+        })
+        .map(|(_, name)| *name)
+}
+
+/// The name and colour of the Cut operation an appearance value creates;
+/// `label` reads "Stroke #rrggbb", "Fill #rrggbb" or "Both #rrggbb/#rrggbb".
+fn appearance_operation(label: &str) -> (String, Option<String>) {
+    if let Some(value) = label.strip_prefix("Stroke ") {
+        (format!("Cut {value}"), Some(value.to_string()))
+    } else if let Some(value) = label.strip_prefix("Fill ") {
+        (format!("Cut {value}"), Some(value.to_string()))
+    } else if let Some(pair) = label.strip_prefix("Both ")
+        && let Some((stroke, fill)) = pair.split_once('/')
+    {
+        (format!("Cut {stroke} {fill}"), Some(stroke.to_string()))
+    } else {
+        (String::new(), None)
+    }
+}
+
+/// The operation colour palette (UI-05): 40 swatches; index 1 is `#000000`.
+pub(crate) const OPERATION_PALETTE: [&str; 40] = [
+    "#000000", "#ffffff", "#7f7f7f", "#c0c0c0", "#ff0000", "#ff8000", "#ffff00", "#80ff00",
+    "#00ff00", "#00ff80", "#00ffff", "#0080ff", "#0000ff", "#8000ff", "#ff00ff", "#ff0080",
+    "#800000", "#804000", "#808000", "#408000", "#008000", "#008040", "#008080", "#004080",
+    "#000080", "#400080", "#800080", "#800040", "#ffcccc", "#ffd9b3", "#ffffcc", "#e6ffcc",
+    "#ccffcc", "#ccffe6", "#ccffff", "#cce6ff", "#ccccff", "#e6ccff", "#ffccff", "#ffcce6",
+];
 
 pub struct StencilApp {
     pub workspace: Layout<WorkspacePanel>,
@@ -933,6 +953,8 @@ pub struct StencilApp {
     pub bulk_menu: Option<egui::Response>,
     /// One-frame open command for the new-operation menu.
     pub bulk_menu_open: bool,
+    /// The "new operation by appearance" dialog's shape snapshot (OP-04).
+    pub appearance_shapes: Option<Vec<u64>>,
     /// Inspector "Add to operation" dialog (OP-07).
     pub assign_dialog: bool,
     pub text_dialog: bool,
@@ -1162,6 +1184,7 @@ impl StencilApp {
             op_settings_open: false,
             bulk_menu: None,
             bulk_menu_open: false,
+            appearance_shapes: None,
             assign_dialog: false,
             text_dialog: false,
             quit_requested: false,
@@ -3305,10 +3328,11 @@ impl StencilApp {
                 detail = format!("Pass {n} · {detail}");
             }
             detail = format!(
-                "{detail} · {} members · {}% @ {} mm/min",
+                "{detail} · {} members · {}% @ {} mm/min · Profile {}",
                 op.members.len(),
                 op.settings.power,
-                op.settings.speed_mm_per_min
+                op.settings.speed_mm_per_min,
+                operation_profile(op).unwrap_or("none")
             );
             visuals.push((
                 key,
@@ -3634,14 +3658,17 @@ impl StencilApp {
         }
     }
 
-    /// Operation profiles panel (OP-03): an explicit stub until profiles have a
-    /// data model. It is a dock panel so it can grow without crowding Operations.
+    /// Operation profiles panel (OP-03): the built-in base profiles. An
+    /// operation shows its profile while its kind and settings still match it;
+    /// editing the settings unlinks it ("Profile none" in the Operations row).
     pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
         Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
             let _ = SectionHeader::new("profiles-header", "Profiles")
                 .collapsible(false)
                 .show(ui, |_| {});
-            ui.add(Text::new("No operation profiles yet").content(Content::Muted));
+            for (_, name) in BASE_PROFILES {
+                ui.label(format!("Profile {name}"));
+            }
         });
     }
 
@@ -3829,6 +3856,7 @@ impl StencilApp {
         let mut dirty = self.color_popup_dirty;
         let mut clear = false;
         let mut close = false;
+        let mut picked: Option<egui::Color32> = None;
         let shown = egui::Popup::from_response(&anchor)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .open_memory(open_cmd)
@@ -3866,6 +3894,39 @@ impl StencilApp {
                         dirty = true;
                     }
                 });
+                ui.separator();
+                egui::Grid::new("operation-palette")
+                    .spacing([4.0, 4.0])
+                    .show(ui, |ui| {
+                        for (index, code) in OPERATION_PALETTE.iter().enumerate() {
+                            let n = index + 1;
+                            let swatch = stencilcraft_doc::canvas::parse_hex_color(code)
+                                .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+                                .unwrap_or(egui::Color32::BLACK);
+                            let (rect, resp) = ui
+                                .allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
+                            let label = format!("Palette colour {n}");
+                            resp.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::accesskit::Role::Button,
+                                    true,
+                                    &label,
+                                )
+                            });
+                            ui.painter().rect_filled(rect, 2.0, swatch);
+                            if resp.clicked() {
+                                picked = Some(swatch);
+                            }
+                            if n % 8 == 0 {
+                                ui.end_row();
+                            }
+                        }
+                    });
+                if let Some(col) = picked {
+                    value = col;
+                    dirty = true;
+                    hex = stencilcraft_doc::canvas::format_hex_color([col.r(), col.g(), col.b()]);
+                }
                 if ui.button("Clear colour").clicked() {
                     clear = true;
                 }
@@ -3909,6 +3970,7 @@ impl StencilApp {
         self.operation_menu_popup(ui);
         self.operation_settings_popup(ui);
         self.bulk_menu_popup(ui);
+        self.appearance_dialog(ui);
         self.assign_operation_dialog(ui);
     }
 
@@ -4096,20 +4158,153 @@ impl StencilApp {
         let entries: Vec<MenuEntry<BulkKind>> = [
             BulkKind::EachSelected,
             BulkKind::AllSelected,
-            BulkKind::ByColour,
+            BulkKind::ByAppearance,
         ]
         .into_iter()
         .map(|kind| MenuItem::new(kind.label(), kind).into())
         .collect();
         let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
         if let Some(kind) = shown.chosen {
-            self.request_bulk(kind);
+            if matches!(kind, BulkKind::ByAppearance) {
+                // Group the current selection, or the whole document when none
+                // is selected: the dialog is about appearances, not a selection.
+                let shapes = if self.selected_shapes.is_empty() {
+                    self.engine
+                        .doc
+                        .shapes
+                        .iter()
+                        .filter(|s| stencilcraft_ui_egui::is_selectable(s))
+                        .map(|s| s.id)
+                        .collect()
+                } else {
+                    self.selected_shapes.clone()
+                };
+                self.appearance_shapes = Some(shapes);
+            } else {
+                self.request_bulk(kind);
+            }
             self.bulk_menu = None;
         } else if shown.open {
             self.bulk_menu = Some(anchor);
         } else {
             self.bulk_menu = None;
         }
+    }
+
+    /// The "new operation by appearance" dialog (OP-04): the selected shapes'
+    /// distinct stroke, fill and stroke+fill values, one button per value.
+    /// Choosing one creates a Cut operation over the shapes carrying it and
+    /// selects them.
+    fn appearance_dialog(&mut self, ui: &mut egui::Ui) {
+        let Some(shapes) = self.appearance_shapes.clone() else {
+            return;
+        };
+        if shapes.is_empty() {
+            self.appearance_shapes = None;
+            return;
+        }
+        let mut strokes: Vec<String> = Vec::new();
+        let mut fills: Vec<String> = Vec::new();
+        let mut both: Vec<(String, String)> = Vec::new();
+        for id in &shapes {
+            let Some(shape) = self.engine.doc.get_shape(*id) else {
+                continue;
+            };
+            let stroke = shape.production.line_color.clone();
+            let fill = shape.production.fill_color.clone();
+            if let Some(code) = &stroke
+                && !strokes.contains(code)
+            {
+                strokes.push(code.clone());
+            }
+            if let Some(code) = &fill
+                && !fills.contains(code)
+            {
+                fills.push(code.clone());
+            }
+            if let (Some(s), Some(f)) = (&stroke, &fill)
+                && !both.contains(&(s.clone(), f.clone()))
+            {
+                both.push((s.clone(), f.clone()));
+            }
+        }
+        let mut chosen: Option<String> = None;
+        let mut close = false;
+        egui::Window::new("New operation by appearance")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label("Stroke");
+                for code in &strokes {
+                    let label = format!("Stroke {code}");
+                    if ui.button(label.clone()).clicked() {
+                        chosen = Some(label);
+                    }
+                }
+                ui.separator();
+                ui.label("Fill");
+                for code in &fills {
+                    let label = format!("Fill {code}");
+                    if ui.button(label.clone()).clicked() {
+                        chosen = Some(label);
+                    }
+                }
+                ui.separator();
+                ui.label("Both");
+                for (stroke, fill) in &both {
+                    let label = format!("Both {stroke}/{fill}");
+                    if ui.button(label.clone()).clicked() {
+                        chosen = Some(label);
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        if let Some(label) = chosen {
+            let members = self.appearance_members(&shapes, &label);
+            if !members.is_empty() {
+                let (name, color) = appearance_operation(&label);
+                self.run_command(Command::Document(DocumentCommand::OperationCreate {
+                    name,
+                    kind: stencilcraft_doc::OperationKind::Cut,
+                    settings: Default::default(),
+                    color,
+                    icon: Some(operations::OperationPreset::Cut.icon_name().to_string()),
+                    members: members.clone(),
+                }));
+                self.set_selection(members);
+            }
+            self.appearance_shapes = None;
+        } else if close {
+            self.appearance_shapes = None;
+        }
+    }
+
+    /// The shapes among `shapes` whose production colours match `label`, which
+    /// reads "Stroke #rrggbb", "Fill #rrggbb" or "Both #rrggbb/#rrggbb".
+    fn appearance_members(&self, shapes: &[u64], label: &str) -> Vec<u64> {
+        let doc = &self.engine.doc;
+        let matches = |production: &stencilcraft_doc::ShapeProduction| {
+            if let Some(value) = label.strip_prefix("Stroke ") {
+                return production.line_color.as_deref() == Some(value);
+            }
+            if let Some(value) = label.strip_prefix("Fill ") {
+                return production.fill_color.as_deref() == Some(value);
+            }
+            if let Some(pair) = label.strip_prefix("Both ")
+                && let Some((stroke, fill)) = pair.split_once('/')
+            {
+                return production.line_color.as_deref() == Some(stroke)
+                    && production.fill_color.as_deref() == Some(fill);
+            }
+            false
+        };
+        shapes
+            .iter()
+            .copied()
+            .filter(|id| doc.get_shape(*id).is_some_and(|s| matches(&s.production)))
+            .collect()
     }
 
     /// Inspector's "Add to operation" dialog (OP-07).

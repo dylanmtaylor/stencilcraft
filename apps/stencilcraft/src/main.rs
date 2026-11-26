@@ -2371,6 +2371,15 @@ impl StencilApp {
     ) -> craft_behavior::kurbo::Affine {
         use craft_behavior::kurbo::Affine;
         let [sx, b, c, sy, _, _] = affine.as_coeffs();
+        // A move (the arrow keys' nudge) keeps its exact step and leaves no smart guides.
+        if (sx - 1.0).abs() < 1e-12
+            && (sy - 1.0).abs() < 1e-12
+            && b.abs() < 1e-12
+            && c.abs() < 1e-12
+        {
+            self.snap_lines.clear();
+            return affine;
+        }
         if b.abs() > 1e-9 || c.abs() > 1e-9 || !(sx > 0.0 && sy > 0.0) {
             return affine;
         }
@@ -6533,9 +6542,10 @@ impl StencilApp {
                 // Update's value too, which would apply the box per drag update).
                 if let Some(after) = r.edit.events.committed() {
                     self.box_preview = None;
+                    let affine = box_affine(bounds, after).map(|a| self.snap_box_scale(bounds, a));
+                    // The snap above draws its guides; once the edit lands none stay.
                     self.snap_lines.clear();
-                    if let Some(affine) =
-                        box_affine(bounds, after).map(|a| self.snap_box_scale(bounds, a))
+                    if let Some(affine) = affine
                         && affine != craft_behavior::kurbo::Affine::IDENTITY
                     {
                         self.run_command(Command::ShapesAffine {
@@ -9685,6 +9695,22 @@ mod tests {
             (snapped.x - 10.0).abs() < 1e-9 && (snapped.y - 20.0).abs() < 1e-9,
             "{snapped:?}"
         );
+    }
+
+    #[test]
+    fn a_nudge_keeps_its_step_and_leaves_no_smart_guides() {
+        use craft_behavior::kurbo::Affine;
+        let mut app = StencilApp::new(None);
+        app.handle_menu_action(TopMenuAction::ToggleSnapGrid);
+        let bounds = stencilcraft_geom::Rect::new(0.0, 0.0, 20.0, 10.0);
+        // 9.7 mm right would snap to the 10 mm grid line if moves snapped.
+        let nudge = Affine::translate((9.7, 0.0));
+        app.snap_lines = vec![(
+            stencilcraft_geom::Point::new(0.0, 0.0),
+            stencilcraft_geom::Point::new(1.0, 0.0),
+        )];
+        assert_eq!(app.snap_box_scale(bounds, nudge), nudge);
+        assert!(app.snap_lines.is_empty(), "no guide is left behind");
     }
 
     #[test]

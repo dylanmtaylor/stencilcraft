@@ -357,3 +357,21 @@ Next experiments, one change per saved file: page size and margins (record 79), 
 document's name and machine (676), one layer's settings (1013), and an object with each
 property changed alone (964). Then generate each record and confirm by opening the result in
 Silhouette, replacing Silhouette's bytes one record at a time.
+
+### Decoded so far (2026-11-26)
+
+- **Record 18 (line style), confirmed byte for byte by generating it from these fields:**
+  f32 25.4, u32 4, u32 1, two flag bytes (0, 0), the length-prefixed join name `square`,
+  then two RGBA f32 colours (0.5, 0.5, 0.5, 1).
+- **Record 79 (page and mat), first reading only, not yet confirmed by variations:**
+  - four f32 15.875 mm (the page margins);
+  - the page size, f32 304.8 × 304.8 mm (12 × 12 in);
+  - f32 20, 0.5 and 2;
+  - the mat name `12x12` (length-prefixed), its outer size f32 324.8 × 344.8 mm, f32 10 and
+    20, and its colour RGBA (0.62, 0.63, 0.64, 1);
+  - `constant:12x12`;
+  - a `media` sub-record with f32 25.4 sizes, 271.6 × 184.6, 15.875 ×4, 246.2 × 159.2;
+  - "auto" and RGBA white.
+
+  Next: save the page as Letter, as 100 × 150 mm and as landscape, and the 12x24 mat, one per
+  file, and confirm which fields change.

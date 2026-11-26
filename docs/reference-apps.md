@@ -283,7 +283,7 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | --- | --- | --- | --- | --- | --- |
 | Material presets | both | Choose the material; force, speed and passes fill in from the preset | have: `MEDIA_PRESETS` (27 entries) with a Send-panel chooser | replicate with our own numbers; never import their preset data files | 2026-11-02, SS 5.0.539: Standard sub-tab: material, action and tool dropdowns per tool holder; a long built-in material list; a notice when the material has no action for that holder. DS: docs only (sign-in required) |
 | Force, speed, passes override | both | Change the preset values for this job | partial: force and speed are overridable; passes are not exposed for the cutter (G-code has `--passes`) | replicate | 2026-11-02, SS 5.0.539: Material Settings: force, speed, passes, acceleration and a blade-depth dial, each a slider plus a number. DS: docs only (sign-in required) |
-| Advanced material settings | SS | Per-material settings beyond force and speed: tracking, kraft-blade loop corners, smart cut | missing | replicate the documented behaviours from our own testing | 2026-11-02, SS 5.0.539: Track Enhancing checkbox; the kraft blade adds loop force, loop blade height, loop overcut, loop radius and a smart-cut toggle |
+| Advanced material settings | SS | Per-material settings beyond force and speed: tracking, kraft-blade loop corners, smart cut | partial: Send › Advanced: track enhancing, overcut, weld on cut, cut order; no kraft-blade loop settings (loop force, height, overcut, radius, smart cut) | replicate the documented behaviours from our own testing | 2026-11-02, SS 5.0.539: Track Enhancing checkbox; the kraft blade adds loop force, loop blade height, loop overcut, loop radius and a smart-cut toggle |
 | Blade depth / tool type | SS | Pick the tool (ratchet, auto blade, kraft, rotary, pen) and blade depth | have: Send › Tool (AutoBlade, ratchet, deep-cut, pen) and Set AutoBlade depth | replicate | 2026-11-02, SS 5.0.539: the tool is detected from the holder (it shows awaiting connection without a machine); blade-depth dial for ratchet/auto blades; the kraft blade has its own sub-tab; blade type defaults to automatic |
 | Custom user materials | both | Save your own material presets | have: Send › My materials saves, applies and deletes named cut settings | replicate | 2026-11-02, SS 5.0.539: +/− buttons in the material list, Create New…, and Revert / Save As… in Material Settings. DS: docs only (sign-in required) |
 | Per-layer/per-colour settings | SS | Different settings per line colour or layer | have: Send › mode by Line Color, Fill Color or Layer with a settings row each (send modes) | replicate | 2026-11-02, SS 5.0.539: Cut by Line Color / Cut by Fill Color tables, one row per colour (own row: Send sub-modes) |
@@ -337,10 +337,10 @@ Sources: [Cricut, *How to Print Then Cut*](https://help.cricut.com/hc/en-us/arti
 | Embroidery formats (PES, DST, …) | SS (Designer Plus) | Import embroidery outlines | missing | replicate (outline only) | 2026-11-02, SS 5.0.539: not present in Basic |
 | Native `.studio`/`.studio3` | SS | The vendor's own formats: Basic saves `.studio3`, `.studio` and GSP and opens those plus GSD | partial: lossy reader imports every object outline (open/closed paths, compound paths, text as outlines) and the page size; no colours, groups or live text; no writer, GSD or GSP | reimagine: import needs a public spec or a clean-room study of files users own (owner decision); until then users export DXF | 2026-11-02, SS 5.0.539: Basic's save types: Studio V3 (.studio3), V2 (.studio), GSP; GSD open options: as-is, convert white lines to black, join lines into polylines |
 | SVG export | SS (Business) | Save as SVG | have | replicate | 2026-11-02, SS 5.0.539: Basic has no SVG export (and no DXF, PDF or PNG) |
-| PDF/PNG/JPG export | SS (Business) | Save as PDF or image | partial: CLI/MCP export vector PDF and rendered PNG/JPEG; desktop workflow and PDF artwork fidelity remain incomplete | replicate (PDF first) | 2026-11-02, SS 5.0.539: not present in Basic |
+| PDF/PNG/JPG export | SS (Business) | Save as PDF or image | partial: File › Export › PDF…, PNG…, JPEG… (and CLI/MCP); PNG and JPEG render fills and placed images; PDF has the lines only (placed images: craft-libs #3655; fills to do) | replicate (PDF first) | 2026-11-02, SS 5.0.539: not present in Basic |
 | DXF export | — | StencilCraft's own | have (R14, flattened) | — | — |
 | G-code export | — | StencilCraft's own | have | — | — |
-| Plugins for external design tools | SS (Silhouette Connect) | Send straight from Illustrator/CorelDRAW to the cutter | missing | reimagine: CLI/MCP and SVG/PDF interchange; never tie the core to proprietary software | pending |
+| Plugins for external design tools | SS (Silhouette Connect) | Send straight from Illustrator/CorelDRAW to the cutter | have (reimagined): `stencilcraft-cli cut` and the MCP server take SVG, PDF, DXF and AI/EPS from any design tool and send them to the cutter; no plug-in inside proprietary apps, by design | reimagine: CLI/MCP and SVG/PDF interchange; never tie the core to proprietary software | pending |
 | Cloud-only save | DS | Projects saved to the vendor cloud | out of scope | won't do: account system; we save open, local files | docs only (sign-in required) |
 
 Sources: [Silhouette, *File Types and Features*](https://silhouetteamerica.freshdesk.com/support/solutions/articles/35000282776-file-types-and-features), [Cricut, *Image uploads: unsupported items*](https://help.cricut.com/hc/en-us/articles/360009553213-Image-uploads-unsupported-items).
@@ -395,16 +395,16 @@ Owner goal: support every format the source apps support.
 | AI (Illustrator) | SS Business | open | partial: vector paths only | replicate via its PDF-compatible content |
 | EPS | SS Business | open | partial: vector paths only | replicate (PostScript subset) |
 | CDR (CorelDRAW) | SS Business | open | missing | replicate only if its structure can be learned clean-room |
-| PNG | SS Basic+ | open (observed 5.0.539; autotrace on import) | partial: placed raster import; desktop display/print incomplete | replicate (also placed raster for printing) |
+| PNG | SS Basic+ | open (observed 5.0.539; autotrace on import) | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate (also placed raster for printing) |
 | PNG | SS Business | export | have: CLI/MCP rendered image export | replicate |
-| PNG | DS | upload | partial: placed raster import; desktop display/print incomplete | replicate |
-| JPEG | SS Basic+ | open (observed 5.0.539) | partial: placed raster import; desktop display/print incomplete | replicate |
+| PNG | DS | upload | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
+| JPEG | SS Basic+ | open (observed 5.0.539) | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
 | JPEG | SS Business | export | have: CLI/MCP rendered image export | replicate |
-| JPEG | DS | upload | partial: placed raster import; desktop display/print incomplete | replicate |
-| BMP | SS Basic+, DS | open / upload | partial: placed raster import; desktop display/print incomplete | replicate |
-| GIF | SS Basic+, DS | open / upload | partial: placed raster import; desktop display/print incomplete | replicate |
-| TIFF | SS Basic+ | open (observed 5.0.539) | partial: placed raster import; desktop display/print incomplete | replicate |
-| TIFF | DS | not accepted for upload (help centre) | partial: placed raster import; desktop display/print incomplete | replicate (for SS parity) |
+| JPEG | DS | upload | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
+| BMP | SS Basic+, DS | open / upload | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
+| GIF | SS Basic+, DS | open / upload | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
+| TIFF | SS Basic+ | open (observed 5.0.539) | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate |
+| TIFF | DS | not accepted for upload (help centre) | partial: placed raster import, shown on the canvas, traced, exported in PNG/JPEG; not yet in printed PDF or Print & Cut sheets (craft-libs #3594, #3655) | replicate (for SS parity) |
 | HEIC | DS | upload (listed in one help article) | missing | replicate |
 | WebP | DS | not documented in the help articles we found | partial: placed raster import; desktop display/print incomplete | verify, then replicate if supported |
 | Embroidery: PES, DST, EXP, JEF, XXX | SS Designer Plus | open | missing | replicate (outline only) |

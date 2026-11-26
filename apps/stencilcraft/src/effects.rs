@@ -40,6 +40,7 @@ pub enum EffectKind {
     AdvancedReplicate,
     LeatherPunch,
     ReleaseEffects,
+    Nesting,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -67,6 +68,7 @@ pub enum EffectMenu {
     AdvancedReplicate,
     LeatherPunch,
     ReleaseEffects,
+    Nesting,
 }
 
 impl EffectMenu {
@@ -98,6 +100,7 @@ impl EffectMenu {
             Self::AdvancedReplicate => (EffectKind::AdvancedReplicate, Vec::new()),
             Self::LeatherPunch => (EffectKind::LeatherPunch, Vec::new()),
             Self::ReleaseEffects => (EffectKind::ReleaseEffects, Vec::new()),
+            Self::Nesting => (EffectKind::Nesting, Vec::new()),
         }
     }
 }
@@ -298,6 +301,22 @@ const EFFECTS: &[EffectDef] = &[
         fields: &[
             num("diameter_mm", "Punch size", 0.5, 50.0, "mm"),
             num("spacing_mm", "Spacing", 0.5, 1000.0, "mm"),
+        ],
+    },
+    EffectDef {
+        kind: EffectKind::Nesting,
+        title: "Nesting",
+        command: "shapes.nest",
+        target: Target::Shapes,
+        fields: &[
+            num("spacing_mm", "Spacing", 0.0, 100.0, "mm"),
+            num(
+                "rotation_step_deg",
+                "Rotation step (0 = upright)",
+                0.0,
+                180.0,
+                "°",
+            ),
         ],
     },
     EffectDef {
@@ -543,6 +562,7 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
         }
         EffectKind::LeatherPunch => Ok(json!({"diameter_mm": 3.0, "spacing_mm": 3.5})),
         EffectKind::ReleaseEffects => Ok(json!({})),
+        EffectKind::Nesting => Ok(json!({"spacing_mm": 2.0, "rotation_step_deg": 90.0})),
     };
     match value {
         Ok(Value::Object(map)) => map,

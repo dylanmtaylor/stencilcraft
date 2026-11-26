@@ -466,6 +466,17 @@ pub enum Command {
     /// without a fill are left as they are.
     #[serde(rename = "shapes.detach-lines")]
     ShapesDetachLines { ids: Vec<u64>, width_mm: f64 },
+    /// Nesting (Silhouette's Nesting panel): pack the selected shapes onto the page as
+    /// tightly as they go, `spacing_mm` apart, turning them in `rotation_step_deg` steps (0 keeps
+    /// them upright). One undo step; an error when they do not fit on the page.
+    #[serde(rename = "shapes.nest")]
+    ShapesNest {
+        ids: Vec<u64>,
+        #[serde(default)]
+        spacing_mm: f64,
+        #[serde(default)]
+        rotation_step_deg: f64,
+    },
     /// Cut the shapes along the straight line `from` → `to` (Silhouette's Knife). `solid`
     /// separates closed shapes into closed pieces with `gap_mm` between them; `outline` splits
     /// every shape's lines into open pieces where the line crosses (and removes `gap_mm` of line
@@ -931,6 +942,7 @@ impl Engine {
                 | Command::ShapesMakeCompound { .. }
                 | Command::ShapesReleaseCompound { .. }
                 | Command::ShapesDetachLines { .. }
+                | Command::ShapesNest { .. }
                 | Command::ShapesKnife { .. }
                 | Command::ShapesErase { .. }
                 | Command::ShapesBridge { .. }
@@ -1945,6 +1957,30 @@ impl Engine {
             } => self.erase(&ids, &points, size_mm, brush, mode),
             Command::ShapesReleaseCompound { ids } => self.release_compound(&ids),
             Command::ShapesDetachLines { ids, width_mm } => self.detach_lines(&ids, width_mm),
+            Command::ShapesNest {
+                ids,
+                spacing_mm,
+                rotation_step_deg,
+            } => {
+                const NAME: &str = "shapes.nest";
+                let ids = unique_ids(&ids, NAME)?;
+                let page =
+                    kurbo::Rect::new(0.0, 0.0, self.doc.board.width_mm, self.doc.board.height_mm);
+                let moves = stencilcraft_layout::nest_on_page(
+                    &self.doc,
+                    &ids,
+                    page,
+                    spacing_mm,
+                    rotation_step_deg,
+                )
+                .map_err(|e| EngineError::Invalid(format!("{NAME}: {e}")))?;
+                let mut moved = Vec::new();
+                for (shape_ids, map) in moves {
+                    self.vector_transform(&shape_ids, map, NAME)?;
+                    moved.extend(shape_ids);
+                }
+                Ok(Effect::ShapesEdited { ids: moved })
+            }
             Command::ShapesSetLocked { ids, locked } => {
                 self.set_flags(&ids, "shapes.set-locked", |shape| shape.locked = locked)
             }
@@ -3573,6 +3609,7 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesMakeCompound { ids }
         | Command::ShapesReleaseCompound { ids }
         | Command::ShapesDetachLines { ids, .. }
+        | Command::ShapesNest { ids, .. }
         | Command::ShapesKnife { ids, .. }
         | Command::ShapesErase { ids, .. }
         | Command::ShapesSetHidden { ids, .. }
@@ -3916,6 +3953,43 @@ mod tests {
             .map(|(_, s)| s.production.clone())
             .unwrap();
         assert_eq!(imported.fill_color, None);
+    }
+
+    #[test]
+    fn nesting_packs_the_selection_onto_the_page_in_one_step() {
+        let mut engine = Engine::default();
+        for x in [0.0, 500.0, 1000.0] {
+            engine
+                .run(Command::ShapeAddRect {
+                    x,
+                    y: 400.0,
+                    width: 30.0,
+                    height: 30.0,
+                })
+                .unwrap();
+        }
+        let ids: Vec<u64> = engine.doc.shapes().map(|(_, s)| s.id).collect();
+        engine
+            .run(Command::ShapesNest {
+                ids: ids.clone(),
+                spacing_mm: 2.0,
+                rotation_step_deg: 0.0,
+            })
+            .unwrap();
+        let (w, h) = (engine.doc.board.width_mm, engine.doc.board.height_mm);
+        for id in &ids {
+            let b = kurbo::Shape::bounding_box(&engine.doc.get_shape(*id).unwrap().path);
+            assert!(
+                b.x0 >= -1e-6 && b.y0 >= -1e-6 && b.x1 <= w + 1e-6 && b.y1 <= h + 1e-6,
+                "{b:?}"
+            );
+        }
+        assert!(engine.undo());
+        let b = kurbo::Shape::bounding_box(&engine.doc.get_shape(ids[2]).unwrap().path);
+        assert!(
+            (b.x0 - 1000.0).abs() < 1e-6,
+            "one undo puts them back: {b:?}"
+        );
     }
 
     #[test]

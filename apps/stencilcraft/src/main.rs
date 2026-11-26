@@ -5767,6 +5767,11 @@ impl StencilApp {
             weld: self.send.weld,
             track_enhancing: self.send.track_enhancing,
             packet_bytes: self.prefs.packet_bytes,
+            clip_inset_mm: Some(if self.prefs.cut_to_page_edge {
+                0.0
+            } else {
+                stencilcraft_ui_egui::CUT_BORDER_INSET_MM
+            }),
         }
     }
 

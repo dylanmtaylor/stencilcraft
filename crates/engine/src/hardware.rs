@@ -64,6 +64,10 @@ pub enum HardwareCommand {
         /// Bytes per write to the machine (Silhouette's packet size); omitted is Auto, 1000.
         #[serde(default)]
         packet_bytes: Option<usize>,
+        /// Cut only inside the cut border, this far inside the page (mm), as Silhouette
+        /// does: lines are clipped there and the parts outside are not cut. Omitted cuts all.
+        #[serde(default)]
+        clip_inset_mm: Option<f64>,
     },
 }
 
@@ -125,6 +129,7 @@ fn execute(
         weld,
         track_enhancing,
         packet_bytes,
+        clip_inset_mm,
     } = command
     else {
         return devices();
@@ -142,6 +147,23 @@ fn execute(
     let caps = machine::DeviceRegistry::builtin()
         .by_id(model)
         .ok_or_else(|| machine::MachineError::Config(format!("Unknown cutter {model}")))?;
+    let clip = match clip_inset_mm {
+        None => None,
+        Some(inset) if inset.is_finite() && *inset >= 0.0 => {
+            let (w, h) = (doc.board.width_mm, doc.board.height_mm);
+            if !(w.is_finite() && h.is_finite()) || inset * 2.0 >= w.min(h) {
+                return Err(machine::MachineError::Config(
+                    "The cut border leaves no room on the page".into(),
+                ));
+            }
+            Some([*inset, *inset, w - inset, h - inset])
+        }
+        Some(_) => {
+            return Err(machine::MachineError::Config(
+                "The cut border inset must be a positive number".into(),
+            ));
+        }
+    };
     let mut paths = Vec::new();
     for layer in doc.layers.iter().filter(|l| l.visible) {
         for shape in layer.shapes.iter().filter(|s| !s.hidden) {
@@ -158,7 +180,10 @@ fn execute(
                 {
                     points.push(first);
                 }
-                paths.push(points);
+                match clip {
+                    Some(rect) => paths.extend(clip_polyline(&points, line.closed, rect)),
+                    None => paths.push(points),
+                }
             }
         }
     }
@@ -244,6 +269,70 @@ fn devices() -> Result<serde_json::Value, machine::MachineError> {
         "USB support is disabled in this build".into(),
     ))
 }
+/// The parts of `points` inside `rect` (x0, y0, x1, y1), as open runs; a closed line wholly
+/// inside comes back unchanged, and one cut across its start is joined back into one run.
+pub fn clip_polyline(points: &[(f64, f64)], closed: bool, rect: [f64; 4]) -> Vec<Vec<(f64, f64)>> {
+    let [x0, y0, x1, y1] = rect;
+    let inside = |p: &(f64, f64)| p.0 >= x0 && p.0 <= x1 && p.1 >= y0 && p.1 <= y1;
+    if points.iter().all(inside) {
+        return vec![points.to_vec()];
+    }
+    let mut runs: Vec<Vec<(f64, f64)>> = Vec::new();
+    let mut open = false;
+    for pair in points.windows(2) {
+        let (Some(&a), Some(&b)) = (pair.first(), pair.get(1)) else {
+            continue;
+        };
+        // Liang–Barsky: the part of a→b inside the rectangle, as parameters t0..t1.
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let (mut t0, mut t1) = (0.0f64, 1.0f64);
+        let mut keep = true;
+        for (p, q) in [
+            (-dx, a.0 - x0),
+            (dx, x1 - a.0),
+            (-dy, a.1 - y0),
+            (dy, y1 - a.1),
+        ] {
+            if p == 0.0 {
+                if q < 0.0 {
+                    keep = false;
+                }
+            } else {
+                let r = q / p;
+                if p < 0.0 {
+                    t0 = t0.max(r);
+                } else {
+                    t1 = t1.min(r);
+                }
+            }
+        }
+        if !keep || t0 > t1 {
+            open = false;
+            continue;
+        }
+        let at = |t: f64| (a.0 + t * dx, a.1 + t * dy);
+        let (s, e) = (at(t0), at(t1));
+        match runs.last_mut() {
+            Some(run) if open && t0 == 0.0 => run.push(e),
+            _ => runs.push(vec![s, e]),
+        }
+        // The run goes on only when this piece reaches the segment's end.
+        open = t1 == 1.0;
+    }
+    if closed && runs.len() > 1 {
+        let joins = matches!((runs.first().and_then(|r| r.first()), points.first()), (Some(s), Some(p)) if s == p)
+            && matches!((runs.last().and_then(|r| r.last()), points.last()), (Some(e), Some(p)) if e == p);
+        if joins {
+            let first = runs.remove(0);
+            if let Some(last) = runs.last_mut() {
+                last.extend(first.into_iter().skip(1));
+            }
+        }
+    }
+    runs.retain(|r| r.len() >= 2);
+    runs
+}
+
 /// A device status as the Send tab shows it.
 pub fn status_label(status: &machine::DeviceStatus) -> String {
     match status {
@@ -364,6 +453,39 @@ fn send_bluetooth(
 mod tests {
 
     #[test]
+    fn lines_are_clipped_to_the_cut_border() {
+        let rect = [0.0, 0.0, 10.0, 10.0];
+        // A square crossing the left edge: what is inside stays, as one open run.
+        let square = vec![
+            (-5.0, 2.0),
+            (5.0, 2.0),
+            (5.0, 8.0),
+            (-5.0, 8.0),
+            (-5.0, 2.0),
+        ];
+        let runs = clip_polyline(&square, true, rect);
+        assert_eq!(
+            runs,
+            vec![vec![(0.0, 2.0), (5.0, 2.0), (5.0, 8.0), (0.0, 8.0)]]
+        );
+        // Starting inside, the run cut across the start joins back up.
+        let inside_start = vec![(5.0, 2.0), (5.0, 8.0), (-5.0, 8.0), (-5.0, 2.0), (5.0, 2.0)];
+        assert_eq!(
+            clip_polyline(&inside_start, true, rect),
+            vec![vec![(0.0, 2.0), (5.0, 2.0), (5.0, 8.0), (0.0, 8.0)]]
+        );
+        // Wholly outside: nothing; wholly inside: unchanged.
+        assert!(clip_polyline(&[(20.0, 20.0), (30.0, 30.0)], false, rect).is_empty());
+        let inner = vec![(1.0, 1.0), (2.0, 2.0)];
+        assert_eq!(clip_polyline(&inner, false, rect), vec![inner.clone()]);
+        // A line through the page in and out leaves only the middle.
+        assert_eq!(
+            clip_polyline(&[(-5.0, 5.0), (15.0, 5.0)], false, rect),
+            vec![vec![(0.0, 5.0), (10.0, 5.0)]]
+        );
+    }
+
+    #[test]
     fn statuses_read_as_words_and_the_command_round_trips() {
         assert_eq!(status_label(&machine::DeviceStatus::Ready), "ready");
         assert_eq!(status_label(&machine::DeviceStatus::Moving), "busy");
@@ -406,6 +528,7 @@ mod tests {
             weld: false,
             track_enhancing: false,
             packet_bytes: None,
+            clip_inset_mm: None,
         };
         assert!(run(&stencilcraft_doc::Document::default(), &command).is_err());
     }
@@ -438,6 +561,7 @@ mod tests {
             weld: false,
             track_enhancing: false,
             packet_bytes: None,
+            clip_inset_mm: None,
         };
         assert!(run(&engine.doc, &command).is_ok());
         if let HardwareCommand::Cut { force, .. } = &mut command {
@@ -506,6 +630,7 @@ mod tests {
             weld: false,
             track_enhancing: false,
             packet_bytes: None,
+            clip_inset_mm: None,
         };
         assert!(run(&engine.doc, &command).is_err());
         engine.run(crate::Command::DocumentSetBoard {
@@ -552,6 +677,7 @@ mod tests {
             weld: false,
             track_enhancing: false,
             packet_bytes: None,
+            clip_inset_mm: None,
         };
         let first = execute(&engine.doc, &command)?;
         if let HardwareCommand::Cut { passes, .. } = &mut command {

@@ -63,6 +63,7 @@ mod erase_colour;
 mod file_menu;
 mod framework;
 mod freehand;
+mod glyph_source;
 mod graphic_styles;
 mod home;
 
@@ -1321,6 +1322,8 @@ pub struct StencilApp {
     pub text_family: String,
     pub text_size: f64,
     pub text_fonts: Vec<stencilcraft_engine::text::FontFamily>,
+    /// The Glyphs panel's category, zoom and recent glyphs.
+    pub glyphs_settings: craft_font_manager::glyphs::GlyphsPanelSettings,
     /// The rest of the Text Style panel's settings.
     pub text_style: text_tool::TextStyle,
     /// Text being typed on the canvas.
@@ -1644,6 +1647,7 @@ impl StencilApp {
             text_family: String::new(),
             text_size: text_tool::DEFAULT_TEXT_SIZE_PT,
             text_fonts: Vec::new(),
+            glyphs_settings: craft_font_manager::glyphs::GlyphsPanelSettings::default(),
             text_style: text_tool::TextStyle::default(),
             text_session: None,
             pending_panel: None,

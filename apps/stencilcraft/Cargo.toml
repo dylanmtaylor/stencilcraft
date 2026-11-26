@@ -19,6 +19,7 @@ craft-theme = { workspace = true }
 craft-ui = { workspace = true, features = ["app"] }
 craft-behavior = { workspace = true }
 craft-host = { workspace = true }
+craft-font-manager = { workspace = true, features = ["ui"] }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true, features = ["ui"] }
 eframe = { workspace = true }
@@ -40,6 +41,8 @@ stencilcraft-svg = { workspace = true }
 stencilcraft-tiling = { workspace = true }
 stencilcraft-ui-egui = { workspace = true }
 craft-raster-codecs = { workspace = true }
+kurbo = { workspace = true }
+tiny-skia = { workspace = true }
 
 [dev-dependencies]
 # The menu-label test reads labels with the pin's own mnemonic reader, which takes a Folder.

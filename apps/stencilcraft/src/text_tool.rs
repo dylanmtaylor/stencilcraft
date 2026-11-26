@@ -6,7 +6,6 @@
 //! sets the font, size, alignment, line and character spacing and kerning of the text being
 //! typed or the selected text, and of new text.
 
-use craft_theme::ControlSize;
 use craft_ui::choice::{Checkbox, Segmented};
 use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft_ui::pickers::Select;
@@ -936,34 +935,40 @@ impl StencilApp {
         }
     }
 
-    /// The Glyphs panel: characters that are hard to type, a click inserts one.
+    /// The Glyphs panel (the framework's): every character of the text font, by category, with
+    /// the recently used ones. A double click or Enter inserts one into the text being typed
+    /// or selected.
     pub fn glyphs_panel(&mut self, ui: &mut egui::Ui) {
-        let mut picked = None;
-        let _ = Panel::new("Glyphs")
-            .id_salt("stencilcraft-glyphs-panel")
-            .show(ui, |ui, _| {
-                for (title, glyphs) in GLYPH_SETS {
-                    ui.label(*title);
-                    ui.horizontal_wrapped(|ui| {
-                        for glyph in glyphs.chars() {
-                            let s = glyph.to_string();
-                            if craft_ui::buttons::Button::new(s.clone())
-                                .size(ControlSize::Sm)
-                                .show(ui)
-                                .clicked()
-                            {
-                                picked = Some(s);
-                            }
-                        }
-                    });
-                }
-                hint(
-                    ui,
-                    "A click inserts the character into the text being typed or selected.",
-                );
-            });
-        if let Some(glyph) = picked {
-            self.insert_glyph(&glyph);
+        self.ensure_fonts();
+        let families: Vec<String> = self.text_fonts.iter().map(|f| f.family.clone()).collect();
+        let styles: Vec<String> = self
+            .text_fonts
+            .iter()
+            .find(|f| f.family == self.text_family)
+            .map(|f| f.styles.clone())
+            .unwrap_or_default();
+        if self.text_style.font_style.is_empty() {
+            self.text_style.font_style = styles
+                .iter()
+                .find(|s| s.eq_ignore_ascii_case("regular"))
+                .or_else(|| styles.first())
+                .cloned()
+                .unwrap_or_else(|| "Regular".to_string());
+        }
+        let can_insert = self.text_session.is_some() || self.selected_text_ids().next().is_some();
+        let out = craft_font_manager::glyphs::GlyphsPanel::new(
+            "Glyphs",
+            &crate::glyph_source::AppGlyphs,
+            Bind::bound(&mut self.text_family),
+            Bind::bound(&mut self.text_style.font_style),
+            Bind::bound(&mut self.glyphs_settings),
+        )
+        .families(&families)
+        .styles(&styles)
+        .can_insert(can_insert)
+        .show(ui);
+        if let Some(craft_font_manager::glyphs::GlyphCell::Char(c)) = out.activated {
+            self.insert_glyph(&c.to_string());
         }
     }
 
@@ -988,17 +993,6 @@ impl StencilApp {
         }
     }
 }
-
-/// The Glyphs panel's characters, by group.
-const GLYPH_SETS: &[(&str, &str)] = &[
-    ("Punctuation", "¡¿«»‹›‘’‚“”„–—…•·§¶†‡"),
-    ("Symbols", "©®™°±×÷µ¢£¥€¤ªº¹²³¼½¾"),
-    (
-        "Accented letters",
-        "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝßàáâãäåæçèéêëìíîïñòóôõöøùúûüýÿ",
-    ),
-    ("Shapes and arrows", "←↑→↓↔★☆♥♦♣♠✓✗♪♫☀☂☺"),
-];
 
 /// The Flow section: straight, curved (diameter; negative dips) or on a path (start,
 /// offset, flip).

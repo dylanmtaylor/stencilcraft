@@ -1148,6 +1148,70 @@ pub fn fonts(query: &str) -> Vec<FontFamily> {
     out
 }
 
+/// The most characters [`glyph_chars`] lists for one face.
+pub const MAX_GLYPH_CHARS: usize = 65_536;
+
+/// One glyph for the Glyphs panel: its outline in ems, y down, the baseline at 0 and the pen
+/// starting at 0, and its advance in ems.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlyphPreview {
+    pub outline: BezPath,
+    pub advance: f64,
+    /// Single-stroke lines to draw with a pen (the single-line family), not filled contours.
+    pub stroked: bool,
+}
+
+/// The characters `family` (in `style`) maps, in code point order, without control
+/// characters: the Glyphs panel's cells. A family that isn't installed lists the face text
+/// would fall back to.
+pub fn glyph_chars(family: &str, style: &str) -> Vec<char> {
+    if family.trim().eq_ignore_ascii_case(SINGLE_LINE_FAMILY) {
+        return single_line::chars();
+    }
+    let Some(face) = FontDb::global().face(family, style) else {
+        return Vec::new();
+    };
+    face.chars()
+        .into_iter()
+        .map(|(c, _)| c)
+        .filter(|c| !c.is_control())
+        .take(MAX_GLYPH_CHARS)
+        .collect()
+}
+
+/// The glyph of `c` in `family` (in `style`), or `None` when the face doesn't map it.
+pub fn glyph_preview(family: &str, style: &str, c: char) -> Option<GlyphPreview> {
+    if family.trim().eq_ignore_ascii_case(SINGLE_LINE_FAMILY) {
+        if !single_line::chars().contains(&c) {
+            return None;
+        }
+        let (advance, strokes) = single_line::glyph(c);
+        let unit = 1.0 / single_line::UNITS_PER_EM;
+        return Some(GlyphPreview {
+            // The grid is y up.
+            outline: Affine::scale_non_uniform(unit, -unit) * strokes,
+            advance: advance * unit,
+            stroked: true,
+        });
+    }
+    let db = FontDb::global();
+    let face = db.face(family, style)?;
+    if !face.covers(c) {
+        return None;
+    }
+    let upem = face.units_per_em();
+    if !(upem.is_finite() && upem > 0.0) {
+        return None;
+    }
+    let gid = face.glyph_for(c);
+    let outline = Affine::scale(1.0 / upem) * (*db.outline(&face, gid)).clone();
+    Some(GlyphPreview {
+        outline,
+        advance: face.advance(gid) / upem,
+        stroked: false,
+    })
+}
+
 /// Reads a font file (at most 64 MiB) into `db`; returns the families it holds.
 fn load_font_file(db: &FontDb, path: &str) -> Result<Vec<String>, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;

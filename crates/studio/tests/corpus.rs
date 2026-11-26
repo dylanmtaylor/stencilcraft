@@ -89,9 +89,9 @@ fn v2_rectangle_decodes_in_page_millimetres() {
     assert_eq!(got.doc.shape_count(), 1);
     assert!((got.doc.board.width_mm - 304.8).abs() < 1e-3);
     let (x0, y0, x1, y1) = bounds(&file);
-    // y-up: file y 58.21..169.35 from the top of a 304.8 mm page.
-    assert!((x0 - 62.38).abs() < 1e-3 && (y0 - (304.8 - 169.35)).abs() < 1e-3);
-    assert!((x1 - 201.3).abs() < 1e-3 && (y1 - (304.8 - 58.21)).abs() < 1e-3);
+    // y down, as the file stores it: 58.21..169.35 mm from the top of the page.
+    assert!((x0 - 62.38).abs() < 1e-3 && (y0 - 58.21).abs() < 1e-3);
+    assert!((x1 - 201.3).abs() < 1e-3 && (y1 - 169.35).abs() < 1e-3);
 }
 
 #[test]
@@ -327,9 +327,9 @@ const VERIFIED: &[Verified] = &[
     ("text-A-arial-72pt", (10.0, 7.0), 1, None),
 ];
 
-/// The flip, on an asymmetric sample: 1 in from the left and 1 in from the TOP.
+/// On an asymmetric sample: 1 in from the left and 1 in from the TOP, y down.
 #[test]
-fn rect_1in_at_1_1_is_one_inch_from_the_page_top_in_y_up() {
+fn rect_1in_at_1_1_is_one_inch_from_the_page_top() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpora/silhouette");
     let Ok(bytes) = std::fs::read(format!("{dir}/rect-1in-at-1-1.studio3")) else {
         return;
@@ -337,8 +337,8 @@ fn rect_1in_at_1_1_is_one_inch_from_the_page_top_in_y_up() {
     let doc = import(&bytes, "rect").unwrap().doc;
     let r = doc.layers[0].bounds().unwrap();
     assert!((r.x0 - 25.4).abs() < 0.05, "{r:?}");
-    assert!((r.y1 - (304.8 - 25.4)).abs() < 0.05, "top edge {r:?}");
-    assert!((r.y0 - (304.8 - 50.8)).abs() < 0.05, "bottom edge {r:?}");
+    assert!((r.y0 - 25.4).abs() < 0.05, "top edge {r:?}");
+    assert!((r.y1 - 50.8).abs() < 0.05, "bottom edge {r:?}");
 }
 
 #[test]
@@ -376,8 +376,8 @@ fn real_samples_decode_when_present() {
             let (Some([x, y, w, h]), Some(r)) = (bounds, got.doc.layers[0].bounds()) else {
                 continue;
             };
-            // Documents are y-up: Silhouette's Y (from the page top) is page height - y1.
-            let top = got.doc.board.height_mm - r.y1;
+            // Documents are y down, like Silhouette's page: its Y is the top edge.
+            let top = r.y0;
             let got_in = [r.x0, top, r.width(), r.height()].map(|v| v / 25.4);
             for (g, want) in got_in.iter().zip([x, y, w, h]) {
                 assert!((g - want).abs() < 0.002, "{name}: {got_in:?}");

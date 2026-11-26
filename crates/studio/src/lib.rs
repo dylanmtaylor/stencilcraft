@@ -59,7 +59,6 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
             },
         }
     })?;
-    let height = parsed.page_mm.map_or(210.0, |(_, h)| h);
     let mut doc = Document {
         layers: Vec::new(),
         ..Document::default()
@@ -68,7 +67,9 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
         doc.board.width_mm = w;
         doc.board.height_mm = h;
     }
-    let to_doc = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, height]);
+    // Silhouette's page and StencilCraft's document are both millimetres from the top-left,
+    // y down, so outlines come across as they are.
+    let to_doc = Affine::IDENTITY;
     for shape in parsed.shapes {
         let layer = layer_for(&mut doc, shape.line_color);
         let path: BezPath = to_doc * shape.path;

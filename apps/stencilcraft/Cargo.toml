@@ -37,6 +37,7 @@ stencilcraft-generate = { workspace = true }
 stencilcraft-geom = { workspace = true }
 stencilcraft-kerf = { workspace = true }
 stencilcraft-machine = { workspace = true }
+stencilcraft-studio = { workspace = true }
 stencilcraft-mcp = { workspace = true }
 stencilcraft-raster = { workspace = true }
 stencilcraft-svg = { workspace = true }

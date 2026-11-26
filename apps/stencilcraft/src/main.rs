@@ -130,6 +130,10 @@ pub struct UserPrefs {
     pub recent_fonts: Vec<String>,
     /// Spelling: the words the person added to the dictionary.
     pub spelling_words: Vec<String>,
+    /// Preferences › Import › DXF Open: Fit to Page (Silhouette's default) or As-is.
+    pub dxf_fit_to_page: bool,
+    /// Preferences › Import › Join lines into polylines (endpoints within 0.05 mm).
+    pub import_join_lines: bool,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
     /// Page Setup › Smart Snap only within media: off the page only the grid and guides snap.
@@ -171,6 +175,8 @@ impl Default for UserPrefs {
             mat_id: None,
             recent_fonts: Vec::new(),
             spelling_words: Vec::new(),
+            dxf_fit_to_page: true,
+            import_join_lines: true,
             select_after_drawing: false,
             snap_within_media: false,
             graphic_styles: Vec::new(),
@@ -3411,11 +3417,27 @@ impl StencilApp {
         }
     }
 
+    /// The import options Preferences › Import set for the file at `path`: DXF fits the
+    /// page or comes in as is, lines join into polylines or stay apart.
+    pub fn import_options_for(&self, path: &std::path::Path) -> stencilcraft_import::ImportOptions {
+        let dxf = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+        let board = &self.engine.doc.board;
+        stencilcraft_import::ImportOptions {
+            fit_to_page: dxf && self.prefs.dxf_fit_to_page,
+            page_mm: (board.width_mm, board.height_mm),
+            join: self.prefs.import_join_lines,
+            ..stencilcraft_import::ImportOptions::default()
+        }
+    }
+
     pub fn import_svg(&mut self, path: std::path::PathBuf) {
+        let options = self.import_options_for(&path);
         let name = path.to_string_lossy();
         let result =
-            stencilcraft_import::import_file(&name, &stencilcraft_import::ImportOptions::default())
-                .map_err(|error| error.to_string());
+            stencilcraft_import::import_file(&name, &options).map_err(|error| error.to_string());
         match result {
             Ok(document) => self.add_imported_shapes(document, &name),
             Err(error) => self.status = error,
@@ -8116,6 +8138,25 @@ mod tests {
             app.engine.doc, changed,
             "the changed document waits in its tab"
         );
+    }
+
+    #[test]
+    fn import_preferences_choose_fit_and_joining() {
+        let mut app = StencilApp::new(None);
+        let dxf = std::path::Path::new("/designs/part.DXF");
+        let svg = std::path::Path::new("/designs/part.svg");
+        let o = app.import_options_for(dxf);
+        assert!(o.fit_to_page && o.join, "Silhouette's defaults");
+        let board = &app.engine.doc.board;
+        assert_eq!(o.page_mm, (board.width_mm, board.height_mm));
+        assert!(
+            !app.import_options_for(svg).fit_to_page,
+            "only DXF fits the page"
+        );
+        app.prefs.dxf_fit_to_page = false;
+        app.prefs.import_join_lines = false;
+        let o = app.import_options_for(dxf);
+        assert!(!o.fit_to_page && !o.join);
     }
 
     #[test]

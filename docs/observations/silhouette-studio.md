@@ -202,3 +202,12 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   outline as a closed ring (5.091 × 4.653 in, i.e. half the 20 pt = 0.278 in line width on each
   side), filled with the old line colour, line width 0, no line colour. The original keeps its
   fill and its size and no longer shows a line. Dragging the ring afterwards moves it alone.
+
+## Preferences › Import and General (2026-11-25, SS 5.0.556)
+
+- Import tab, "Import Options": GSD: Open (As-is), Convert white lines to black (off), Join
+  lines into polylines (on). DXF: Open (Fit to Page), Convert white lines to black (on), Join
+  lines into polylines (on). PNG: Autotrace (on). There is no import DPI or scale setting.
+- General tab: Language, Default Save Location (Hard Disk / Library), Unit of Measurement
+  (Auto (inches)), Show Dimensions (on), Show Print Preview (on), Print Resolution (300, 600
+  (chosen), 1200 dpi, or Custom DPI with a number, 300.00).

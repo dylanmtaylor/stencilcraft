@@ -1229,7 +1229,7 @@ fn panel_label(panel: WorkspacePanel) -> &'static str {
         WorkspacePanel::GraphicStyles => "Graphic Styles",
         WorkspacePanel::Actions => "Actions",
         WorkspacePanel::PixScan => "PixScan",
-        WorkspacePanel::EraseColour => "Erase Colour",
+        WorkspacePanel::EraseColour => "Erase",
         WorkspacePanel::PrintCut => "Print & Cut",
     }
 }
@@ -6101,7 +6101,7 @@ impl StencilApp {
             overlay_claimed |= self.text_canvas(ui, &response, &painter);
             overlay_claimed |= self.distort_canvas(ui, &response, &painter);
             overlay_claimed |= self.pixscan_canvas(ui, &response, &painter);
-            overlay_claimed |= self.erase_colour_canvas(ui, &response);
+            overlay_claimed |= self.erase_colour_canvas(ui, &response, &painter);
             self.paint_effect_preview(&painter);
 
             // Interactive BezierOverlay for node editing

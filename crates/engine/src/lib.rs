@@ -340,6 +340,14 @@ pub enum Command {
     ImageRemoveBackground { id: u64, tolerance: f64 },
     /// Upload cleanup's Select: the pixels like the one at document point (`x_mm`, `y_mm`)
     /// become transparent (`tolerance` 0–100 %), the connected region only when `contiguous`.
+    /// Upload cleanup's Erase brush: the pixels within `radius_mm` of the stroke through
+    /// `points_mm` (document millimetres) become transparent, one undo step a stroke.
+    #[serde(rename = "image.erase-brush")]
+    ImageEraseBrush {
+        id: u64,
+        points_mm: Vec<[f64; 2]>,
+        radius_mm: f64,
+    },
     #[serde(rename = "image.erase-colour")]
     ImageEraseColour {
         id: u64,
@@ -870,6 +878,7 @@ impl Engine {
                 | Command::ImageTraceColours { .. }
                 | Command::ImageRemoveBackground { .. }
                 | Command::ImageEraseColour { .. }
+                | Command::ImageEraseBrush { .. }
                 | Command::ImageAdjust { .. }
                 | Command::ImageRectify { .. }
                 | Command::PathBreak { .. }
@@ -1652,6 +1661,37 @@ impl Engine {
                     .and_then(|pixels| stencilcraft_raster::remove_background(&pixels, tolerance))
                     .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
                     .map_err(invalid("image.remove-background"))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = pixels;
+                }
+                Ok(Effect::ImageChanged { id })
+            }
+            Command::ImageEraseBrush {
+                id,
+                points_mm,
+                radius_mm,
+            } => {
+                const NAME: &str = "image.erase-brush";
+                let image = self.doc.get_image(id).ok_or_else(|| no_image(NAME, id))?;
+                if !(image.width_mm > 0.0 && image.height_mm > 0.0) {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the image has no size"
+                    )));
+                }
+                let (sx, sy) = (
+                    f64::from(image.width_px) / image.width_mm,
+                    f64::from(image.height_px) / image.height_mm,
+                );
+                let points: Vec<[f64; 2]> = points_mm
+                    .iter()
+                    .map(|p| [(p[0] - image.x_mm) * sx, (p[1] - image.y_mm) * sy])
+                    .collect();
+                let pixels = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| {
+                        stencilcraft_raster::erase_brush(&pixels, &points, radius_mm * sx.max(sy))
+                    })
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid(NAME))?;
                 if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
                     *slot = pixels;
                 }
@@ -5062,6 +5102,41 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn erase_brush_clears_along_a_stroke_in_one_step() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let pixels = Pixels::from_pixel(40, 20, Pixel([10, 10, 10, 255]));
+        // 254 dpi: 10 px a millimetre.
+        let placed = stencilcraft_raster::place(&pixels, "dark", 254.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        engine
+            .run(Command::ImageEraseBrush {
+                id,
+                points_mm: vec![[0.5, 1.0], [3.5, 1.0]],
+                radius_mm: 0.3,
+            })
+            .unwrap();
+        let after = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(after.get_pixel(20, 10).0[3], 0, "under the stroke");
+        assert_eq!(after.get_pixel(20, 2).0[3], 255, "beside it");
+        assert!(engine.undo());
+        let back = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(back.get_pixel(20, 10).0[3], 255, "one undo step");
+        assert!(
+            engine
+                .run(Command::ImageEraseBrush {
+                    id,
+                    points_mm: vec![],
+                    radius_mm: 1.0
+                })
+                .is_err()
+        );
     }
 
     #[test]

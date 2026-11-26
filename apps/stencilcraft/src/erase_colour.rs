@@ -2,8 +2,8 @@
 //! on a placed image makes the pixels like the clicked one transparent (`image.erase-colour`,
 //! one undo step each), the connected region or every match. Done (or another tool) ends it.
 
-use craft_ui::choice::Checkbox;
-use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_engine::Command;
@@ -19,6 +19,12 @@ pub struct EraseColourState {
     pub tolerance: f64,
     /// Only the region connected to the click, else every matching pixel.
     pub contiguous: bool,
+    /// Erase with a brush (drag over the image) instead of by colour.
+    pub brush: bool,
+    /// The brush's diameter, millimetres.
+    pub brush_mm: f64,
+    /// The stroke being dragged: the image and its points (millimetres).
+    pub stroke: Option<(u64, Vec<stencilcraft_geom::Point>)>,
 }
 
 impl Default for EraseColourState {
@@ -27,6 +33,9 @@ impl Default for EraseColourState {
             picking: false,
             tolerance: 12.0,
             contiguous: true,
+            brush: false,
+            brush_mm: 3.0,
+            stroke: None,
         }
     }
 }
@@ -44,14 +53,34 @@ impl StencilApp {
         });
     }
 
-    /// While picking: a crosshair, and a click on an image erases its colour there. Returns
-    /// true while picking (it owns the clicks).
-    pub fn erase_colour_canvas(&mut self, ui: &egui::Ui, response: &egui::Response) -> bool {
+    /// Erase the stroke `points` (millimetres) from `image` with the brush.
+    pub fn brush_erase_image(&mut self, image: u64, points: &[stencilcraft_geom::Point]) {
+        let radius_mm = self.erase_colour.brush_mm / 2.0;
+        self.run_command(Command::ImageEraseBrush {
+            id: image,
+            points_mm: points.iter().map(|p| [p.x, p.y]).collect(),
+            radius_mm,
+        });
+    }
+
+    /// While picking: a crosshair; a click on an image erases its colour there, or with the
+    /// brush a drag (or a click) over it erases the stroke. Returns true while picking (it owns
+    /// the pointer).
+    pub fn erase_colour_canvas(
+        &mut self,
+        ui: &egui::Ui,
+        response: &egui::Response,
+        painter: &egui::Painter,
+    ) -> bool {
         if !self.erase_colour.picking {
             return false;
         }
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        }
+        if self.erase_colour.brush {
+            self.brush_canvas(ui, response, painter);
+            return true;
         }
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
@@ -67,6 +96,55 @@ impl StencilApp {
         true
     }
 
+    fn brush_canvas(&mut self, ui: &egui::Ui, response: &egui::Response, painter: &egui::Painter) {
+        let view = self.view;
+        let world = |pos: egui::Pos2| view.screen_to_world(pos.to_vec2());
+        if response.drag_started()
+            && let Some(press) = ui.input(|input| input.pointer.press_origin())
+            && let Some(image) =
+                stencilcraft_ui_egui::hit_test_image(&self.engine.doc, &view, press)
+        {
+            self.erase_colour.stroke = Some((image, vec![world(press)]));
+        }
+        if response.dragged()
+            && let Some(pos) = response.interact_pointer_pos()
+            && let Some((_, points)) = self.erase_colour.stroke.as_mut()
+            && points.len() < stencilcraft_raster::MAX_BRUSH_POINTS
+        {
+            let p = world(pos);
+            // A new point every quarter of the brush.
+            let step = (self.erase_colour.brush_mm / 4.0).max(0.05);
+            if points.last().is_none_or(|last| (p - *last).hypot() >= step) {
+                points.push(p);
+            }
+        }
+        if response.drag_stopped()
+            && let Some((image, points)) = self.erase_colour.stroke.take()
+        {
+            self.brush_erase_image(image, &points);
+        } else if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            match stencilcraft_ui_egui::hit_test_image(&self.engine.doc, &view, pos) {
+                Some(image) => self.brush_erase_image(image, &[world(pos)]),
+                None => self.status = "brush over a placed image to erase it".to_string(),
+            }
+        }
+        // The stroke so far, and the brush under the pointer.
+        let radius = (self.erase_colour.brush_mm / 2.0 * f64::from(view.zoom)) as f32;
+        let colour = stencilcraft_ui_egui::Palette::for_theme(self.theme).selection;
+        if let Some((_, points)) = &self.erase_colour.stroke {
+            let screen: Vec<egui::Pos2> = points.iter().map(|p| view.world_to_screen(*p)).collect();
+            painter.add(egui::Shape::line(
+                screen,
+                egui::Stroke::new(radius * 2.0, colour.gamma_multiply(0.35)),
+            ));
+        }
+        if let Some(at) = response.hover_pos() {
+            painter.circle_stroke(at, radius, egui::Stroke::new(1.0, colour));
+        }
+    }
+
     pub fn erase_colour_panel(&mut self, ui: &mut egui::Ui) {
         let numbers = self.locale_numbers.clone();
         let mut state = self.erase_colour.clone();
@@ -75,27 +153,53 @@ impl StencilApp {
         let _ = Panel::new("Erase Colour")
             .id_salt("stencilcraft-erase-colour-panel")
             .show(ui, |ui, _| {
-                labelled(ui, "Tolerance", |ui| {
-                    number(
-                        ui,
-                        "erase-tolerance",
-                        "Erase tolerance",
-                        &mut state.tolerance,
-                        0.0..=100.0,
-                        "{n} %",
-                        &numbers,
-                    );
-                });
-                let _ = Checkbox::new(Bind::bound(&mut state.contiguous))
-                    .label("Contiguous")
+                let modes = [Entry::new(false, "Colour"), Entry::new(true, "Brush")];
+                let _ = Segmented::new("Erase by", Bind::bound(&mut state.brush), &modes)
+                    .id_salt("erase-mode")
                     .show(ui);
+                if state.brush {
+                    labelled(ui, "Brush size", |ui| {
+                        number(
+                            ui,
+                            "erase-brush-size",
+                            "Brush size",
+                            &mut state.brush_mm,
+                            0.1..=100.0,
+                            "{n} mm",
+                            &numbers,
+                        );
+                    });
+                } else {
+                    labelled(ui, "Tolerance", |ui| {
+                        number(
+                            ui,
+                            "erase-tolerance",
+                            "Erase tolerance",
+                            &mut state.tolerance,
+                            0.0..=100.0,
+                            "{n} %",
+                            &numbers,
+                        );
+                    });
+                    let _ = Checkbox::new(Bind::bound(&mut state.contiguous))
+                        .label("Contiguous")
+                        .show(ui);
+                }
                 ui.horizontal(|ui| {
-                    start = button(ui, "Pick Colour", has_image && !state.picking);
+                    let label = if state.brush {
+                        "Start Erasing"
+                    } else {
+                        "Pick Colour"
+                    };
+                    start = button(ui, label, has_image && !state.picking);
                     done = button(ui, "Done", state.picking);
                 });
                 hint(
                     ui,
-                    if state.picking {
+                    if state.picking && state.brush {
+                        "Drag over an image to erase under the brush; each stroke is one undo \
+                         step."
+                    } else if state.picking {
                         "Click a colour on an image to make it transparent; each click is one \
                          undo step."
                     } else {
@@ -111,7 +215,7 @@ impl StencilApp {
         if done {
             state.picking = false;
         }
-        if state.tolerance.is_finite() {
+        if state.tolerance.is_finite() && state.brush_mm.is_finite() {
             self.erase_colour = state;
         }
     }
@@ -140,5 +244,19 @@ mod tests {
             .expect("pixels");
         assert_eq!(after.get_pixel(18, 5).0[3], 0, "the white half is gone");
         assert_eq!(after.get_pixel(2, 5).0[3], 255, "the blue half stays");
+        // The brush: a stroke across the blue half's top clears under it only.
+        app.erase_colour.brush_mm = 0.5;
+        app.brush_erase_image(
+            id,
+            &[
+                stencilcraft_geom::Point::new(0.2, 0.3),
+                stencilcraft_geom::Point::new(2.3, 0.3),
+            ],
+        );
+        let brushed =
+            stencilcraft_raster::image_pixels(app.engine.doc.get_image(id).expect("image"))
+                .expect("pixels");
+        assert_eq!(brushed.get_pixel(4, 1).0[3], 0, "under the stroke");
+        assert_eq!(brushed.get_pixel(4, 8).0[3], 255, "below it");
     }
 }

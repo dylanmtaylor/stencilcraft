@@ -758,7 +758,7 @@ fn effect(app: &StencilApp) -> Vec<MenuEntry<A>> {
         SEP,
         item("Trace Image…", A::ShowPanel(P::Trace)).into(),
         eff("Remove Background…", M::RemoveBackground),
-        item("Erase Colour…", A::ShowPanel(P::EraseColour)).into(),
+        item("Erase…", A::ShowPanel(P::EraseColour)).into(),
         eff("Image Effects…", M::ImageEffects),
         SEP,
         eff("Sketch Fill…", M::SketchFill),

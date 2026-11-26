@@ -10,8 +10,8 @@ Feature: Inspector
     Then the inspector shows the header "Shape #1 - Path"
     And the inspector shows the operation "cut"
 
-  @gap @UI-07
+  @UI-07
   Scenario: selecting an operation shows it in the inspector
     Given a nested fixture with groups "outer" and "inner"
-    When I click the first operation row
+    When I select operation 1
     Then the inspector shows the operation "cut"

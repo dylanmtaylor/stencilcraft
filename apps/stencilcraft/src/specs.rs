@@ -19,8 +19,8 @@ use craft_ui::behavior::Selection;
 use egui_kittest::kittest::Queryable as _;
 
 use crate::ui_e2e::{
-    App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_workspace, click, click_menu,
-    expand_all, has, has_row_containing, raw_click_label, raw_click_row_containing,
+    App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_profiles, boot_workspace, click,
+    click_menu, expand_all, has, has_row_containing, raw_click_label, raw_click_row_containing,
 };
 use crate::*;
 
@@ -44,6 +44,7 @@ enum Surface {
     Layers,
     Inspector,
     Workspace,
+    Profiles,
     Menu,
 }
 
@@ -66,6 +67,7 @@ impl World {
                 Surface::Layers => boot(),
                 Surface::Inspector => boot_inspector(),
                 Surface::Workspace => boot_workspace(),
+                Surface::Profiles => boot_profiles(),
                 Surface::Menu => boot_menu(),
             });
         }
@@ -268,6 +270,21 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         w.run();
         return Ok(());
     }
+    if let Some(name) = between(text, "a second operation \"", "\" over all shapes") {
+        let members: Vec<u64> = w.state().engine.doc.shapes.iter().map(|s| s.id).collect();
+        let cut = operations::OperationPreset::Cut;
+        w.state_mut()
+            .run_command(Command::Document(DocumentCommand::OperationCreate {
+                name: name.to_string(),
+                kind: cut.kind(),
+                settings: Default::default(),
+                color: None,
+                icon: Some(cut.icon_name().to_string()),
+                members,
+            }));
+        w.run();
+        return Ok(());
+    }
     if text.starts_with("a document with ") && text.contains("shape") {
         let n = nums(text).first().copied().unwrap_or(0);
         for i in 0..n {
@@ -334,11 +351,75 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
     if text == "the workspace is open" {
         return w.surface(Surface::Workspace);
     }
+    if text == "the profiles panel is open" {
+        return w.surface(Surface::Profiles);
+    }
     if text == "the menu bar is open" {
         return w.surface(Surface::Menu);
     }
 
     // --- When --------------------------------------------------------------
+    if let Some(rest) = text.strip_prefix("I expand operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        click(w.h(), &format!("Expand {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I remove member #") {
+        let (shape, op) = rest
+            .split_once(" from operation ")
+            .ok_or_else(|| format!("expected `from operation N` in {rest:?}"))?;
+        let shape = nums(shape).first().copied().ok_or("shape id missing")?;
+        let n = nums(op)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        click(w.h(), &format!("Remove #{shape} from {name}"));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I open the colour of operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        click(w.h(), &format!("Colour {name}"));
+        return Ok(());
+    }
+    if let Some(hex) = between(text, "I set the colour to \"", "\"") {
+        w.h().get_by_label("Hex").set_text_value_accesskit(hex);
+        w.run();
+        return Ok(());
+    }
+    if text == "I close the colour picker" {
+        click(w.h(), "Close");
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I focus operation ") {
+        let n = nums(rest)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let (_, name) = op_at(w, n)?;
+        raw_click_row_containing(w.h(), &name);
+        return Ok(());
+    }
+    if text == "I press Ctrl+[" {
+        w.h()
+            .key_press_modifiers(egui::Modifiers::CTRL, egui::Key::OpenBracket);
+        w.run();
+        return Ok(());
+    }
+    if text == "I press Ctrl+]" {
+        w.h()
+            .key_press_modifiers(egui::Modifiers::CTRL, egui::Key::CloseBracket);
+        w.run();
+        return Ok(());
+    }
     if let Some(label) = between(text, "I hammer the geometry row \"", "\"") {
         click(w.h(), &format!("New operation from {label}"));
         return Ok(());
@@ -356,7 +437,7 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             .last()
             .map(|op| op.name.clone())
             .ok_or("there is no operation to remove membership from")?;
-        click(w.h(), &format!("Operations of #{id}"));
+        click(w.h(), &format!("Operation {name} on #{id}"));
         click_menu(w.h(), &format!("Remove #{id} from {name}"));
         return Ok(());
     }
@@ -366,8 +447,7 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             .copied()
             .ok_or("operation number missing")? as usize;
         let (_, name) = op_at(w, n)?;
-        open_op_menu(w, &name);
-        click_menu(w.h(), &format!("Settings {name}"));
+        click(w.h(), &format!("Operation settings {name}"));
         return Ok(());
     }
     if let Some(rest) = text.strip_prefix("I set the power to ") {
@@ -467,7 +547,7 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
                 .map(|op| op.name.clone())
                 .collect();
             for name in names {
-                click(w.h(), &format!("Operations of #{id}"));
+                click(w.h(), &format!("Operation {name} on #{id}"));
                 click_menu(w.h(), &format!("{verb} {name} from the geometry view"));
             }
             return Ok(());
@@ -479,6 +559,18 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
     }
     if let Some(label) = between(text, "I click the operation row \"", "\"") {
         raw_click_label(w.h(), label);
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I select operation ") {
+        let n: usize = rest
+            .parse()
+            .map_err(|_| format!("not a number: {rest:?}"))?;
+        let index = n.checked_sub(1).ok_or("operation numbers start at 1")?;
+        if index >= w.state().engine.doc.operations.len() {
+            return Err(format!("there is no operation {n}"));
+        }
+        w.state_mut().op_selection = Selection::only(OpKey::Op(index));
+        w.run();
         return Ok(());
     }
     if text == "I click the first operation row" {
@@ -616,6 +708,28 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
                 fail(format!(
                     "expected operation {idx} kind {kind:?}, got {:?}",
                     op.kind_name()
+                ))
+            };
+        }
+        if let Some((left, right)) = rest.split_once(" has colour ") {
+            let idx = nums(left)
+                .first()
+                .copied()
+                .ok_or("operation number missing")? as usize;
+            let want = unquote(right);
+            let op = w
+                .state()
+                .engine
+                .doc
+                .operations
+                .get(idx.saturating_sub(1))
+                .ok_or_else(|| format!("there is no operation {idx}"))?;
+            return if op.color.as_deref() == Some(want) {
+                Ok(())
+            } else {
+                fail(format!(
+                    "expected operation {idx} colour {want:?}, got {:?}",
+                    op.color
                 ))
             };
         }

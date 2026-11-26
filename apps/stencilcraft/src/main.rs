@@ -14,7 +14,7 @@ use craft_draw::ui::pen::{
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
 use craft_theme::{ControlSize, TypeRole};
-use craft_ui::behavior::{RowInfo, Selection};
+use craft_ui::behavior::{Axis, DropPosition, Move, Reorder, RowInfo, Selection};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
@@ -568,6 +568,7 @@ pub enum WorkspacePanel {
     Inspector,
     Geometry,
     Operations,
+    Profiles,
     Transform,
     Replicate,
     Offset,
@@ -587,6 +588,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Inspector => self.app.inspector_panel(ui),
             WorkspacePanel::Geometry => self.app.geometry_panel(ui),
             WorkspacePanel::Operations => self.app.operations_panel(ui),
+            WorkspacePanel::Profiles => self.app.profiles_panel(ui),
             WorkspacePanel::Transform => self.app.transform_panel(ui),
             WorkspacePanel::Replicate => self.app.replicate_panel(ui),
             WorkspacePanel::Offset => self.app.offset_panel(ui),
@@ -602,6 +604,7 @@ impl DockContent<WorkspacePanel> for WorkspaceContent<'_> {
             WorkspacePanel::Inspector => "Properties",
             WorkspacePanel::Geometry => "Geometry",
             WorkspacePanel::Operations => "Operations",
+            WorkspacePanel::Profiles => "Profiles",
             WorkspacePanel::Transform => "Transform",
             WorkspacePanel::Replicate => "Replicate",
             WorkspacePanel::Offset => "Offset",
@@ -647,6 +650,7 @@ pub enum GeoKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OpKey {
     Op(usize),
+    Member { op: u64, shape: u64 },
 }
 
 /// Pre-built display data for one tree row; the panel never reads the doc mid-pass.
@@ -656,6 +660,10 @@ struct RowVisual {
     icon: Option<Icon>,
     eye: Option<bool>,
     swatch: Option<egui::Color32>,
+    /// Operation pills shown at the trailing edge of a geometry row.
+    pills: Vec<(String, egui::Color32)>,
+    /// Operations beyond the pills, reachable through the overflow popup.
+    extra_ops: usize,
     dimmed: bool,
 }
 
@@ -733,6 +741,7 @@ fn push_shape_row(
     visuals: &mut Vec<(GeoKey, RowVisual)>,
     id: u64,
     depth: usize,
+    theme: stencilcraft_ui_egui::ColorTheme,
 ) {
     use stencilcraft_ui_egui::layers;
     if layers::shape_filtered_out(doc, id, hidden_ops) {
@@ -746,6 +755,21 @@ fn push_shape_row(
         .map(|op| format!("#{}", op.id))
         .collect::<Vec<_>>()
         .join(" ");
+    let mut pills = Vec::new();
+    let mut extra_ops = 0;
+    for index in &tags {
+        let Some(op) = doc.operations.get(*index) else {
+            continue;
+        };
+        if pills.len() < 3 {
+            pills.push((
+                op.name.clone(),
+                stencilcraft_ui_egui::operation_swatch_color(op, theme),
+            ));
+        } else {
+            extra_ops += 1;
+        }
+    }
     row_infos.push(RowInfo::leaf(key).at_depth(depth));
     visuals.push((
         key,
@@ -755,6 +779,8 @@ fn push_shape_row(
             icon: Some(Icon::Spline),
             eye: None,
             swatch: None,
+            pills,
+            extra_ops,
             dimmed: tags.is_empty(),
         },
     ));
@@ -877,6 +903,8 @@ pub struct StencilApp {
     /// View-only filter: operation ids whose shapes are hidden in the geometry
     /// panel. Never persisted into the document (D-09).
     pub hidden_ops: std::collections::BTreeSet<u64>,
+    /// Operation ids whose member rows are expanded (OP-01).
+    pub open_ops: std::collections::BTreeSet<u64>,
     /// A bulk action waiting for its confirm gate (D-07).
     pub pending_bulk: Option<PendingBulk>,
     /// The bulk confirm dialog's state.
@@ -891,16 +919,26 @@ pub struct StencilApp {
     pub color_popup: Option<(u64, egui::Response)>,
     /// Working colour while the colour popup is open; committed on close when dirty.
     pub color_popup_value: egui::Color32,
+    /// The hex text shown in the colour popup.
+    pub color_popup_hex: String,
+    /// One-frame open command for the colour popup.
+    pub color_popup_open: bool,
     /// Whether the working colour changed since the popup opened.
     pub color_popup_dirty: bool,
     /// The open operation-actions menu: the operation id and its anchor (UI-04/05).
     pub op_menu: Option<(u64, egui::Response)>,
     /// One-frame open command for the operation menu.
     pub op_menu_open: bool,
-    /// The operation whose settings dialog is open, with a working copy (UI-05).
-    pub op_settings: Option<(u64, stencilcraft_doc::OperationSettings)>,
-    /// The operation settings dialog's state.
-    pub op_settings_dialog: DialogState<stencilcraft_doc::OperationSettings>,
+    /// The operation settings popover: the operation id and its anchor (UI-05).
+    pub op_settings: Option<(u64, egui::Response)>,
+    /// One-frame open command for the settings popover.
+    pub op_settings_open: bool,
+    /// The new-operation menu anchored to the plus button.
+    pub bulk_menu: Option<egui::Response>,
+    /// One-frame open command for the new-operation menu.
+    pub bulk_menu_open: bool,
+    /// Inspector "Add to operation" dialog (OP-07).
+    pub assign_dialog: bool,
     pub text_dialog: bool,
     /// File › Quit was chosen; the next frame closes the window.
     pub quit_requested: bool,
@@ -1030,6 +1068,7 @@ pub fn default_workspace() -> Layout<WorkspacePanel> {
                     vec![
                         Group::new(vec![WorkspacePanel::Inspector, WorkspacePanel::Geometry], 1),
                         Group::new(vec![WorkspacePanel::Operations], 0),
+                        Group::new(vec![WorkspacePanel::Profiles], 0),
                         // Silhouette's right-hand panel strip.
                         Group::new(
                             vec![
@@ -1112,6 +1151,7 @@ impl StencilApp {
             geo_selection: Selection::default(),
             op_selection: Selection::default(),
             hidden_ops: Default::default(),
+            open_ops: Default::default(),
             pending_bulk: None,
             bulk_dialog: DialogState::new(),
             tag_popup: None,
@@ -1119,11 +1159,16 @@ impl StencilApp {
             pending_hammer: None,
             color_popup: None,
             color_popup_value: egui::Color32::WHITE,
+            color_popup_hex: String::new(),
+            color_popup_open: false,
             color_popup_dirty: false,
             op_menu: None,
             op_menu_open: false,
             op_settings: None,
-            op_settings_dialog: DialogState::new(),
+            op_settings_open: false,
+            bulk_menu: None,
+            bulk_menu_open: false,
+            assign_dialog: false,
             text_dialog: false,
             quit_requested: false,
             text_dialog_state: DialogState::new(),
@@ -2980,6 +3025,8 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            pills: Vec::new(),
+                            extra_ops: 0,
                             dimmed: false,
                         },
                     ));
@@ -3006,17 +3053,35 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            pills: Vec::new(),
+                            extra_ops: 0,
                             dimmed: false,
                         },
                     ));
                     hammer_targets.push((GeoKey::Group(id), members));
                 }
                 GeoRow::Shape { id, depth } => {
-                    push_shape_row(doc, &hidden_ops, &mut row_infos, &mut visuals, id, depth);
+                    push_shape_row(
+                        doc,
+                        &hidden_ops,
+                        &mut row_infos,
+                        &mut visuals,
+                        id,
+                        depth,
+                        self.theme,
+                    );
                     hammer_targets.push((GeoKey::Shape(id), vec![id]));
                 }
                 GeoRow::UnassignedShape { id } => {
-                    push_shape_row(doc, &hidden_ops, &mut row_infos, &mut visuals, id, 1);
+                    push_shape_row(
+                        doc,
+                        &hidden_ops,
+                        &mut row_infos,
+                        &mut visuals,
+                        id,
+                        1,
+                        self.theme,
+                    );
                     hammer_targets.push((GeoKey::Shape(id), vec![id]));
                 }
                 GeoRow::UnassignedGroup => {
@@ -3032,6 +3097,8 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            pills: Vec::new(),
+                            extra_ops: 0,
                             dimmed: false,
                         },
                     ));
@@ -3045,6 +3112,12 @@ impl StencilApp {
             .footer_label("Geometry actions")
             .footer(|ui| {
                 PanelFooter::show(ui, |ui| {
+                    if ui
+                        .add(IconButton::new(Icon::Plus, "Add shape").size(ControlSize::Sm))
+                        .clicked()
+                    {
+                        self.assign_dialog = true;
+                    }
                     if ui
                         .add(
                             IconButton::new(Icon::Plus, "Group selection")
@@ -3083,6 +3156,60 @@ impl StencilApp {
                             if let Some(icon) = v.icon {
                                 row = row.icon(icon);
                             }
+                            // Operation pills (LY-01): coloured, named by operation.
+                            if let GeoKey::Shape(shape) = key {
+                                for (name, fill) in v.pills.iter().cloned() {
+                                    let hit = &tag_click;
+                                    row = row.trailing_item(46.0, move |ui| {
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(44.0, 14.0),
+                                            egui::Sense::click(),
+                                        );
+                                        let label = format!("Operation {name} on #{shape}");
+                                        resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::accesskit::Role::Label,
+                                                true,
+                                                &label,
+                                            )
+                                        });
+                                        ui.painter().rect_filled(rect, 7.0, fill);
+                                        let ink =
+                                            if fill.r() as u32 + fill.g() as u32 + fill.b() as u32
+                                                > 382
+                                            {
+                                                egui::Color32::BLACK
+                                            } else {
+                                                egui::Color32::WHITE
+                                            };
+                                        ui.painter().text(
+                                            rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            &name,
+                                            egui::FontId::proportional(9.0),
+                                            ink,
+                                        );
+                                        if resp.clicked() {
+                                            *hit.borrow_mut() = Some((shape, resp.clone()));
+                                        }
+                                    });
+                                }
+                                if v.extra_ops > 0 {
+                                    let hit = &tag_click;
+                                    row = row.trailing_item(20.0, move |ui| {
+                                        let btn = ui.add(
+                                            IconButton::new(
+                                                Icon::More,
+                                                format!("More operations for #{shape}"),
+                                            )
+                                            .size(ControlSize::Sm),
+                                        );
+                                        if btn.clicked() {
+                                            *hit.borrow_mut() = Some((shape, btn));
+                                        }
+                                    });
+                                }
+                            }
                             // Hammer on a geometry node: create an operation scoped to it.
                             if let Some(members) = hammer_targets
                                 .iter()
@@ -3102,24 +3229,6 @@ impl StencilApp {
                                     );
                                     if btn.clicked() {
                                         *hit.borrow_mut() = Some((members.clone(), btn));
-                                    }
-                                });
-                            }
-                            // Tag "…" overflow on a shape row.
-                            if matches!(key, GeoKey::Shape(_)) {
-                                let hit = &tag_click;
-                                row = row.trailing_item(16.0, move |ui| {
-                                    let btn = ui.add(
-                                        IconButton::new(
-                                            Icon::Settings,
-                                            format!("Operations of {}", v.label),
-                                        )
-                                        .size(ControlSize::Sm),
-                                    );
-                                    if btn.clicked()
-                                        && let GeoKey::Shape(id) = key
-                                    {
-                                        *hit.borrow_mut() = Some((id, btn));
                                     }
                                 });
                             }
@@ -3233,8 +3342,10 @@ impl StencilApp {
         let mut events: Vec<ListEvent<OpKey>> = Vec::new();
         let swatch_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
             std::cell::RefCell::new(None);
-        let hammer_click: std::cell::RefCell<Option<(usize, egui::Response)>> =
+        let settings_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
             std::cell::RefCell::new(None);
+        let trash_click: std::cell::RefCell<Option<u64>> = std::cell::RefCell::new(None);
+        let member_remove: std::cell::RefCell<Option<(u64, u64)>> = std::cell::RefCell::new(None);
         let menu_click: std::cell::RefCell<Option<(u64, egui::Response)>> =
             std::cell::RefCell::new(None);
         let mut bulk: Option<BulkKind> = None;
@@ -3245,7 +3356,13 @@ impl StencilApp {
         let mut visuals: Vec<(OpKey, RowVisual)> = Vec::with_capacity(op_count);
         for (index, op) in doc.operations.iter().enumerate() {
             let key = OpKey::Op(index);
-            row_infos.push(RowInfo::leaf(key));
+            let open = self.open_ops.contains(&op.id);
+            row_infos.push(RowInfo::group(key, open));
+            if open {
+                for &shape in &op.members {
+                    row_infos.push(RowInfo::leaf(OpKey::Member { op: op.id, shape }).at_depth(1));
+                }
+            }
             let mut detail = op.kind_name().to_string();
             if let Some(n) = layers::pass_number(doc, index) {
                 detail = format!("Pass {n} · {detail}");
@@ -3264,6 +3381,8 @@ impl StencilApp {
                     icon: Some(operation_icon(op)),
                     eye: Some(op.visible),
                     swatch: Some(stencilcraft_ui_egui::operation_swatch_color(op, self.theme)),
+                    pills: Vec::new(),
+                    extra_ops: 0,
                     dimmed: !op.visible,
                 },
             ));
@@ -3271,22 +3390,30 @@ impl StencilApp {
         let mut selection = std::mem::take(&mut self.op_selection);
         let selected_keys: Vec<OpKey> = selection.items.clone();
 
+        let bulk_menu_click: std::cell::RefCell<Option<egui::Response>> =
+            std::cell::RefCell::new(None);
         Panel::new("stencilcraft-operations-panel")
             .footer_label("Operation actions")
             .footer(|ui| {
                 PanelFooter::show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for kind in [
-                            BulkKind::ByColour,
-                            BulkKind::AllSelected,
-                            BulkKind::EachSelected,
-                        ] {
-                            if ui
-                                .add(Button::new(kind.label()).size(ControlSize::Sm))
-                                .clicked()
-                            {
-                                bulk = Some(kind);
+                    ui.horizontal(|ui| {
+                        let plus = ui.add(
+                            IconButton::new(Icon::Plus, "New operation from all selected")
+                                .size(ControlSize::Sm),
+                        );
+                        if plus.clicked() {
+                            if ui.input(|i| i.modifiers.shift) {
+                                *bulk_menu_click.borrow_mut() = Some(plus);
+                            } else {
+                                bulk = Some(BulkKind::AllSelected);
                             }
+                        }
+                        let chevron = ui.add(
+                            IconButton::new(Icon::ChevronDown, "More new operation actions")
+                                .size(ControlSize::Sm),
+                        );
+                        if chevron.clicked() {
+                            *bulk_menu_click.borrow_mut() = Some(chevron);
                         }
                     });
                 });
@@ -3297,94 +3424,130 @@ impl StencilApp {
                     .show(ui, |_| {});
                 let out = List::new("operations-list", "Operations", row_infos.as_slice())
                     .tree(true)
+                    .can_drag(|key| matches!(key, OpKey::Op(_)))
+                    .reorder(Reorder::new(Axis::Vertical).accepts(|m: &Move<OpKey>, _| {
+                        matches!(m.target, OpKey::Op(_))
+                            && m.items.iter().all(|k| matches!(k, OpKey::Op(_)))
+                    }))
                     .selection(&mut selection)
-                    .show(ui, |_, &key| {
-                        let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
-                        let mut row =
-                            ListRow::new(key, visual.map(|v| v.label.clone()).unwrap_or_default());
-                        if let Some(v) = visual {
-                            if !v.detail.is_empty() {
-                                row = row.detail(v.detail.clone());
-                            }
-                            if let Some(icon) = v.icon {
-                                row = row.icon(icon);
-                            }
-                            if let Some(on) = v.eye {
-                                row = row.toggle(ToggleColumn::eye(
-                                    format!("Visibility {}", v.label),
-                                    on,
-                                ));
-                            }
-                            // View-only filter toggle (second column): hides the operation's
-                            // shapes in the geometry panel without touching the document.
-                            if let OpKey::Op(index) = key
-                                && let Some(op) = doc.operations.get(index)
-                            {
-                                let filtered = self.hidden_ops.contains(&op.id);
-                                row = row.toggle(ToggleColumn::new(
-                                    format!("Filter {}", v.label),
-                                    Icon::Eye,
-                                    Icon::EyeOff,
-                                    !filtered,
-                                ));
-                            }
-                            // Colour swatch: opens the colour picker for this operation.
-                            if let (Some(col), OpKey::Op(index)) = (v.swatch, key)
-                                && let Some(op) = doc.operations.get(index)
-                            {
-                                let hit = &swatch_click;
-                                row = row.trailing_item(16.0, move |ui| {
-                                    let (rect, resp) = ui.allocate_exact_size(
-                                        egui::vec2(12.0, 12.0),
-                                        egui::Sense::click(),
-                                    );
-                                    ui.painter().rect_filled(rect, 2.0, col);
-                                    if resp.clicked() {
-                                        *hit.borrow_mut() = Some((op.id, resp.clone()));
-                                    }
-                                });
-                            }
-                            // Hammer on an operation row: a new pass over the same members.
-                            {
-                                let OpKey::Op(index) = key;
-                                let hit = &hammer_click;
-                                let label = v.label.clone();
-                                row = row.trailing_item(20.0, move |ui| {
+                    .show(ui, |_, &key| match key {
+                        OpKey::Member { op, shape } => {
+                            let name = doc
+                                .operations
+                                .iter()
+                                .find(|o| o.id == op)
+                                .map(|o| o.name.clone())
+                                .unwrap_or_default();
+                            let hit = &member_remove;
+                            ListRow::new(key, format!("Member #{shape} of {name}"))
+                                .trailing_item(20.0, move |ui| {
                                     let btn = ui.add(
                                         IconButton::new(
-                                            Icon::Settings,
-                                            format!("New operation from {label}"),
+                                            Icon::Trash,
+                                            format!("Remove #{shape} from {name}"),
                                         )
                                         .size(ControlSize::Sm),
                                     );
                                     if btn.clicked() {
-                                        *hit.borrow_mut() = Some((index, btn));
+                                        *hit.borrow_mut() = Some((op, shape));
                                     }
-                                });
-                            }
-                            // Per-operation actions: settings, kind, lock, reorder, delete.
-                            if let OpKey::Op(index) = key
-                                && let Some(op) = doc.operations.get(index)
-                            {
-                                let hit = &menu_click;
-                                let id = op.id;
-                                let label = v.label.clone();
-                                row = row.trailing_item(20.0, move |ui| {
-                                    let btn = ui.add(
-                                        IconButton::new(
-                                            Icon::More,
-                                            format!("Operation menu {label}"),
-                                        )
-                                        .size(ControlSize::Sm),
-                                    );
-                                    if btn.clicked() {
-                                        *hit.borrow_mut() = Some((id, btn));
-                                    }
-                                });
-                            }
-                            row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
+                                })
+                                .selected(selected_keys.contains(&key))
                         }
-                        row
+                        OpKey::Op(_) => {
+                            let visual = visuals.iter().find(|(k, _)| *k == key).map(|(_, v)| v);
+                            let mut row = ListRow::new(
+                                key,
+                                visual.map(|v| v.label.clone()).unwrap_or_default(),
+                            );
+                            if let Some(v) = visual {
+                                if !v.detail.is_empty() {
+                                    row = row.detail(v.detail.clone());
+                                }
+                                if let Some(icon) = v.icon {
+                                    row = row.icon(icon);
+                                }
+                                if let Some(on) = v.eye {
+                                    row = row.toggle(ToggleColumn::eye(
+                                        format!("Visibility {}", v.label),
+                                        on,
+                                    ));
+                                }
+                                // Colour swatch: opens the colour picker for this operation.
+                                if let (Some(col), OpKey::Op(index)) = (v.swatch, key)
+                                    && let Some(op) = doc.operations.get(index)
+                                {
+                                    let hit = &swatch_click;
+                                    let label = format!("Colour {}", op.name);
+                                    row = row.trailing_item(16.0, move |ui| {
+                                        let (rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(12.0, 12.0),
+                                            egui::Sense::click(),
+                                        );
+                                        resp.widget_info(|| {
+                                            egui::WidgetInfo::labeled(
+                                                egui::accesskit::Role::Button,
+                                                true,
+                                                &label,
+                                            )
+                                        });
+                                        ui.painter().rect_filled(rect, 2.0, col);
+                                        if resp.clicked() {
+                                            *hit.borrow_mut() = Some((op.id, resp.clone()));
+                                        }
+                                    });
+                                }
+                                if let OpKey::Op(index) = key
+                                    && let Some(op) = doc.operations.get(index)
+                                {
+                                    let hit = &settings_click;
+                                    let id = op.id;
+                                    let label = v.label.clone();
+                                    row = row.trailing_item(20.0, move |ui| {
+                                        let btn = ui.add(
+                                            IconButton::new(
+                                                Icon::Settings,
+                                                format!("Operation settings {label}"),
+                                            )
+                                            .size(ControlSize::Sm),
+                                        );
+                                        if btn.clicked() {
+                                            *hit.borrow_mut() = Some((id, btn));
+                                        }
+                                    });
+                                    let hit = &trash_click;
+                                    let label = v.label.clone();
+                                    row = row.trailing_item(20.0, move |ui| {
+                                        let btn = ui.add(
+                                            IconButton::new(
+                                                Icon::Trash,
+                                                format!("Delete operation {label}"),
+                                            )
+                                            .size(ControlSize::Sm),
+                                        );
+                                        if btn.clicked() {
+                                            *hit.borrow_mut() = Some(id);
+                                        }
+                                    });
+                                    let hit = &menu_click;
+                                    let label = v.label.clone();
+                                    row = row.trailing_item(20.0, move |ui| {
+                                        let btn = ui.add(
+                                            IconButton::new(
+                                                Icon::More,
+                                                format!("Operation menu {label}"),
+                                            )
+                                            .size(ControlSize::Sm),
+                                        );
+                                        if btn.clicked() {
+                                            *hit.borrow_mut() = Some((id, btn));
+                                        }
+                                    });
+                                }
+                                row = row.selected(selected_keys.contains(&key)).dimmed(v.dimmed);
+                            }
+                            row
+                        }
                     });
                 events.extend(out.events);
             });
@@ -3392,26 +3555,55 @@ impl StencilApp {
         self.op_selection = selection;
 
         for ev in events {
-            if let ListEvent::Row(RowEvent::Toggle(
-                EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
-            )) = ev
-            {
-                let OpKey::Op(index) = value.row;
-                if let Some(op) = self.engine.doc.operations.get(index) {
-                    if value.column == 0 {
+            match ev {
+                ListEvent::Open(change) => {
+                    if let OpKey::Op(index) = change.row
+                        && let Some(op) = self.engine.doc.operations.get(index)
+                    {
+                        if change.open {
+                            self.open_ops.insert(op.id);
+                        } else {
+                            self.open_ops.remove(&op.id);
+                        }
+                    }
+                }
+                ListEvent::Row(RowEvent::Toggle(
+                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+                )) => {
+                    if let OpKey::Op(index) = value.row
+                        && let Some(op) = self.engine.doc.operations.get(index)
+                        && value.column == 0
+                    {
                         self.run_command(Command::Document(DocumentCommand::OperationSetVisible {
                             id: op.id,
                             visible: value.on,
                         }));
-                    } else if value.column == 1 {
-                        // View-only filter: never persisted into the document.
-                        if value.on {
-                            self.hidden_ops.remove(&op.id);
-                        } else {
-                            self.hidden_ops.insert(op.id);
+                    }
+                }
+                ListEvent::Reorder(
+                    EditEvent::Commit { value, .. } | EditEvent::Set { value, .. },
+                ) => {
+                    if let (Some(OpKey::Op(from)), OpKey::Op(target)) =
+                        (value.items.first().copied(), value.target)
+                    {
+                        let mut to = target
+                            + usize::from(matches!(
+                                value.position,
+                                DropPosition::After | DropPosition::Into
+                            ));
+                        if from < to {
+                            to -= 1;
+                        }
+                        if from != to {
+                            self.run_command(Command::Document(DocumentCommand::OperationMove {
+                                from,
+                                to,
+                            }));
+                            self.op_selection = Selection::default();
                         }
                     }
                 }
+                _ => {}
             }
         }
         if let Some((id, anchor)) = swatch_click.into_inner() {
@@ -3423,29 +3615,69 @@ impl StencilApp {
                 .find(|op| op.id == id)
                 .map(|op| stencilcraft_ui_egui::operation_swatch_color(op, self.theme))
                 .unwrap_or(egui::Color32::WHITE);
+            self.color_popup_hex = stencilcraft_doc::canvas::format_hex_color([
+                self.color_popup_value.r(),
+                self.color_popup_value.g(),
+                self.color_popup_value.b(),
+            ]);
             self.color_popup_dirty = false;
+            self.color_popup_open = true;
             self.color_popup = Some((id, anchor));
         }
-        if let Some((index, _anchor)) = hammer_click.into_inner()
-            && let Some(op) = self.engine.doc.operations.get(index).cloned()
-        {
-            let n = self.engine.doc.operations.len() + 1;
-            self.run_command(Command::Document(DocumentCommand::OperationCreate {
-                name: format!("{} {n}", operation_label(&op)),
-                kind: op.kind,
-                settings: op.settings.clone(),
-                color: None,
-                icon: op.icon.clone(),
-                members: op.members.clone(),
+        if let Some((id, anchor)) = settings_click.into_inner() {
+            self.op_settings = Some((id, anchor));
+            self.op_settings_open = true;
+        }
+        if let Some(id) = trash_click.into_inner() {
+            self.run_command(Command::Document(DocumentCommand::OperationDelete { id }));
+        }
+        if let Some((op, shape)) = member_remove.into_inner() {
+            self.run_command(Command::Document(DocumentCommand::OperationRemoveMembers {
+                id: op,
+                ids: vec![shape],
             }));
         }
         if let Some((id, anchor)) = menu_click.into_inner() {
             self.op_menu = Some((id, anchor));
             self.op_menu_open = true;
         }
+        if let Some(anchor) = bulk_menu_click.into_inner() {
+            self.bulk_menu = Some(anchor);
+            self.bulk_menu_open = true;
+        }
         if let Some(kind) = bulk {
             self.request_bulk(kind);
         }
+        if let Some(OpKey::Op(index)) = self.op_selection.lead {
+            let up = ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::OpenBracket));
+            let down =
+                ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::CloseBracket));
+            let to = if up {
+                index.checked_sub(1)
+            } else if down {
+                (index + 1 < self.engine.doc.operations.len()).then_some(index + 1)
+            } else {
+                None
+            };
+            if let Some(to) = to {
+                self.run_command(Command::Document(DocumentCommand::OperationMove {
+                    from: index,
+                    to,
+                }));
+                self.op_selection = Selection::default();
+            }
+        }
+    }
+
+    /// Operation profiles panel (OP-03): an explicit stub until profiles have a
+    /// data model. It is a dock panel so it can grow without crowding Operations.
+    pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
+        Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
+            let _ = SectionHeader::new("profiles-header", "Profiles")
+                .collapsible(false)
+                .show(ui, |_| {});
+            ui.add(Text::new("No operation profiles yet").content(Content::Muted));
+        });
     }
 
     /// Bulk "new operation" actions: confirm first when the affected shape
@@ -3619,38 +3851,86 @@ impl StencilApp {
 
     /// The colour-picker popup for an operation row (UI-05); the picked colour
     /// is canonicalised and dispatched as OperationSetColor when it closes.
+    ///
+    /// It must not use `Popup::menu`: that closes on any click inside, so the
+    /// picker and the hex field could never be used.
     fn operation_color_popup(&mut self, _ui: &mut egui::Ui) {
         let Some((id, anchor)) = self.color_popup.clone() else {
             return;
         };
+        let name = self
+            .engine
+            .doc
+            .operations
+            .iter()
+            .find(|op| op.id == id)
+            .map(|op| op.name.clone())
+            .unwrap_or_else(|| "operation".to_string());
+        let open_cmd = self
+            .color_popup_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.color_popup_open = false;
+
+        let mut value = self.color_popup_value;
+        let mut hex = std::mem::take(&mut self.color_popup_hex);
+        let mut dirty = self.color_popup_dirty;
         let mut clear = false;
-        let shown = egui::Popup::menu(&anchor).show(|ui| {
-            let name = self
-                .engine
-                .doc
-                .operations
-                .iter()
-                .find(|op| op.id == id)
-                .map(|op| op.name.clone())
-                .unwrap_or_else(|| "operation".to_string());
-            ui.label(format!("Colour of {name}"));
-            let resp = ui.color_edit_button_srgba(&mut self.color_popup_value);
-            if resp.changed() {
-                self.color_popup_dirty = true;
-            }
-            if ui.button("Clear colour").clicked() {
-                clear = true;
-            }
-        });
+        let mut close = false;
+        let shown = egui::Popup::from_response(&anchor)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .open_memory(open_cmd)
+            .show(|ui| {
+                ui.label(format!("Colour of {name}"));
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 18.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rect, 3.0, value);
+                let mut r = value.r();
+                let mut g = value.g();
+                let mut b = value.b();
+                let changed = ui
+                    .add(egui::Slider::new(&mut r, 0..=255).text("R"))
+                    .changed()
+                    | ui.add(egui::Slider::new(&mut g, 0..=255).text("G"))
+                        .changed()
+                    | ui.add(egui::Slider::new(&mut b, 0..=255).text("B"))
+                        .changed();
+                if changed {
+                    value = egui::Color32::from_rgb(r, g, b);
+                    dirty = true;
+                    hex = stencilcraft_doc::canvas::format_hex_color([r, g, b]);
+                }
+                ui.horizontal(|ui| {
+                    let label = ui.label("Hex");
+                    let resp = ui
+                        .add(egui::TextEdit::singleline(&mut hex).desired_width(76.0))
+                        .labelled_by(label.id);
+                    if resp.changed()
+                        && let Some([r, g, b]) = stencilcraft_doc::canvas::parse_hex_color(&hex)
+                    {
+                        value = egui::Color32::from_rgb(r, g, b);
+                        dirty = true;
+                    }
+                });
+                if ui.button("Clear colour").clicked() {
+                    clear = true;
+                }
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+        self.color_popup_value = value;
+        self.color_popup_hex = hex;
+        self.color_popup_dirty = dirty;
+
         if clear {
             self.run_command(Command::Document(DocumentCommand::OperationSetColor {
                 id,
                 color: None,
             }));
             self.color_popup = None;
-        } else if shown.is_some() {
-            self.color_popup = Some((id, anchor));
-        } else {
+        } else if close || shown.is_none() {
             if self.color_popup_dirty {
                 let c = self.color_popup_value;
                 let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
@@ -3660,6 +3940,8 @@ impl StencilApp {
                 }));
             }
             self.color_popup = None;
+        } else {
+            self.color_popup = Some((id, anchor));
         }
     }
 
@@ -3672,7 +3954,9 @@ impl StencilApp {
         self.tag_overflow_popup(ui);
         self.operation_color_popup(ui);
         self.operation_menu_popup(ui);
-        self.operation_settings_dialog(ui);
+        self.operation_settings_popup(ui);
+        self.bulk_menu_popup(ui);
+        self.assign_operation_dialog(ui);
     }
 
     /// The per-operation actions menu: settings, kind, lock, reorder, delete.
@@ -3735,8 +4019,8 @@ impl StencilApp {
         if let Some(action) = shown.chosen {
             match action {
                 Act::Settings => {
-                    self.op_settings = Some((id, op.settings.clone()));
-                    self.op_settings_dialog = DialogState::new();
+                    self.op_settings = Some((id, anchor));
+                    self.op_settings_open = true;
                 }
                 Act::Kind(kind) => {
                     self.run_command(Command::Document(DocumentCommand::OperationSetKind {
@@ -3774,52 +4058,166 @@ impl StencilApp {
         }
     }
 
-    /// The operation settings dialog (UI-05): power, speed, passes, focus, kerf.
-    fn operation_settings_dialog(&mut self, ui: &mut egui::Ui) {
-        let Some((id, mut draft)) = self.op_settings.clone() else {
+    /// The operation settings popover (UI-05): kind, lock, view filter and the
+    /// numeric settings. Kind, lock and the filter apply immediately; the numeric
+    /// settings commit when the popover closes.
+    fn operation_settings_popup(&mut self, _ui: &mut egui::Ui) {
+        let Some((id, anchor)) = self.op_settings.clone() else {
             return;
         };
-        let name = self
+        let Some(op) = self
             .engine
             .doc
             .operations
             .iter()
             .find(|op| op.id == id)
-            .map(|op| op.name.clone())
-            .unwrap_or_else(|| "operation".to_string());
-        let shown = Dialog::new("operation-settings", format!("Settings — {name}"))
-            .footer(Footer::standard().ok("Apply").cancel("Cancel"))
-            .show(
-                ui.ctx(),
-                &mut self.op_settings_dialog,
-                &mut draft,
-                |ui, s| {
-                    let row = |ui: &mut egui::Ui, label: &str, value: &mut f64| {
-                        let word = ui.label(label);
-                        ui.add(egui::DragValue::new(value).speed(0.5))
-                            .labelled_by(word.id);
-                    };
-                    ui.horizontal(|ui| row(ui, "Power", &mut s.power));
-                    ui.horizontal(|ui| row(ui, "Speed", &mut s.speed_mm_per_min));
-                    ui.horizontal(|ui| {
-                        let word = ui.label("Passes");
-                        ui.add(egui::DragValue::new(&mut s.passes).range(1..=100))
-                            .labelled_by(word.id);
-                    });
-                    ui.horizontal(|ui| row(ui, "Focus", &mut s.focus_mm));
-                    ui.horizontal(|ui| row(ui, "Kerf", &mut s.kerf_mm));
-                },
-            );
-        if shown.outcome == Some(Outcome::Ok) {
+            .cloned()
+        else {
+            self.op_settings = None;
+            return;
+        };
+        let open_cmd = self
+            .op_settings_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.op_settings_open = false;
+
+        let name = op.name.clone();
+        let mut kind = op.kind;
+        let mut locked = op.locked;
+        let mut visible_in_view = !self.hidden_ops.contains(&id);
+        let mut settings = op.settings.clone();
+        let mut close = false;
+        let shown = egui::Popup::from_response(&anchor)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .open_memory(open_cmd)
+            .show(|ui| {
+                let mut select = Select::new("operation-settings-kind", "Kind", &mut kind);
+                for preset in operations::OperationPreset::ALL {
+                    select = select.option(preset.kind(), preset.label());
+                }
+                let _ = select.show(ui);
+                let _ = Checkbox::bool(format!("Lock {name}"), &mut locked).show(ui);
+                let _ = Checkbox::bool(
+                    format!("Show {name} in geometry view"),
+                    &mut visible_in_view,
+                )
+                .show(ui);
+                let row = |ui: &mut egui::Ui, label: &str, value: &mut f64| {
+                    let word = ui.label(label);
+                    ui.add(egui::DragValue::new(value).speed(0.5))
+                        .labelled_by(word.id);
+                };
+                ui.horizontal(|ui| row(ui, "Power", &mut settings.power));
+                ui.horizontal(|ui| row(ui, "Speed", &mut settings.speed_mm_per_min));
+                ui.horizontal(|ui| {
+                    let word = ui.label("Passes");
+                    ui.add(egui::DragValue::new(&mut settings.passes).range(1..=100))
+                        .labelled_by(word.id);
+                });
+                ui.horizontal(|ui| row(ui, "Focus", &mut settings.focus_mm));
+                ui.horizontal(|ui| row(ui, "Kerf", &mut settings.kerf_mm));
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+
+        if kind != op.kind {
+            self.run_command(Command::Document(DocumentCommand::OperationSetKind {
+                id,
+                kind,
+            }));
+        }
+        if locked != op.locked {
+            self.run_command(Command::Document(DocumentCommand::OperationSetLocked {
+                id,
+                locked,
+            }));
+        }
+        if visible_in_view != !self.hidden_ops.contains(&id) {
+            if visible_in_view {
+                self.hidden_ops.remove(&id);
+            } else {
+                self.hidden_ops.insert(id);
+            }
+        }
+        if settings != op.settings {
             self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
                 id,
-                settings: draft,
+                settings,
             }));
-            self.op_settings = None;
-        } else if shown.closed {
-            self.op_settings = None;
+        }
+        if shown.is_some() && !close {
+            self.op_settings = Some((id, anchor));
         } else {
-            self.op_settings = Some((id, draft));
+            self.op_settings = None;
+        }
+    }
+
+    /// The new-operation menu anchored to the plus chevron (OP-04).
+    fn bulk_menu_popup(&mut self, ui: &mut egui::Ui) {
+        let Some(anchor) = self.bulk_menu.clone() else {
+            return;
+        };
+        let open_cmd = self
+            .bulk_menu_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.bulk_menu_open = false;
+        let entries: Vec<MenuEntry<BulkKind>> = [
+            BulkKind::EachSelected,
+            BulkKind::AllSelected,
+            BulkKind::ByColour,
+        ]
+        .into_iter()
+        .map(|kind| MenuItem::new(kind.label(), kind).into())
+        .collect();
+        let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
+        if let Some(kind) = shown.chosen {
+            self.request_bulk(kind);
+            self.bulk_menu = None;
+        } else if shown.open {
+            self.bulk_menu = Some(anchor);
+        } else {
+            self.bulk_menu = None;
+        }
+    }
+
+    /// Inspector's "Add to operation" dialog (OP-07).
+    fn assign_operation_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.assign_dialog {
+            return;
+        }
+        let ops: Vec<(u64, String, bool)> = self
+            .engine
+            .doc
+            .operations
+            .iter()
+            .map(|op| (op.id, op.name.clone(), op.locked))
+            .collect();
+        let mut chosen = None;
+        let mut close = false;
+        egui::Window::new("Choose an operation")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label("Choose an operation");
+                for (id, name, locked) in &ops {
+                    if !*locked && ui.add(Button::new(format!("Add to {name}"))).clicked() {
+                        chosen = Some(*id);
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+            });
+        if let Some(id) = chosen {
+            self.run_command(Command::Document(DocumentCommand::OperationAddMembers {
+                id,
+                ids: self.selected_shapes.clone(),
+            }));
+            close = true;
+        }
+        if close {
+            self.assign_dialog = false;
         }
     }
 
@@ -3863,18 +4261,28 @@ impl StencilApp {
     }
 
     pub fn inspector(&mut self, ui: &mut egui::Ui) {
+        if !self.selected_shapes.is_empty() && ui.add(Button::new("Add to operation")).clicked() {
+            self.assign_dialog = true;
+        }
+
         // UI-07: the effective operation of the current selection, read-only —
         // the first operation in pass order containing the first selected shape,
         // or "Unassigned" when it has none.
         let doc = &self.engine.doc;
-        let effective: Option<(Option<stencilcraft_doc::Operation>, String)> = self
-            .selected_shapes
-            .first()
-            .copied()
-            .map(|id| match doc.operation_of_shape(id) {
-                Some(op) => (Some(op.clone()), op.name.clone()),
-                None => (None, "Unassigned".to_string()),
-            });
+        let effective: Option<(Option<stencilcraft_doc::Operation>, String)> =
+            if let Some(OpKey::Op(index)) = self.op_selection.lead {
+                doc.operations
+                    .get(index)
+                    .map(|op| (Some(op.clone()), op.name.clone()))
+            } else {
+                self.selected_shapes
+                    .first()
+                    .copied()
+                    .map(|id| match doc.operation_of_shape(id) {
+                        Some(op) => (Some(op.clone()), op.name.clone()),
+                        None => (None, "Unassigned".to_string()),
+                    })
+            };
         if let Some((op, source)) = effective {
             let op_text = op.as_ref().map(operation_label).unwrap_or("—".to_string());
             let _ = SectionHeader::new("inspector-operation", "Operation").show(ui, |ui| {
@@ -7428,11 +7836,38 @@ mod ui_e2e {
                 |ui, app: &mut StencilApp| {
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui(egui::vec2(360.0, ui.available_height()), |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| app.layers_panel(ui));
+                            ui.allocate_ui(egui::vec2(360.0, 360.0), |ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| app.geometry_panel(ui));
+                            });
+                            egui::ScrollArea::vertical().show(ui, |ui| app.operations_panel(ui));
                         });
                         ui.separator();
                         egui::ScrollArea::vertical().show(ui, |ui| app.inspector_panel(ui));
                     });
+                    app.operation_overlays(ui);
+                },
+                app,
+            );
+        h.run();
+        h
+    }
+
+    /// Boot the app with the Profiles panel mounted as the only surface.
+    pub(crate) fn boot_profiles() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([680.0, 800.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    egui::ScrollArea::vertical().show(ui, |ui| app.profiles_panel(ui));
                 },
                 app,
             );
@@ -7465,6 +7900,7 @@ mod ui_e2e {
 
     pub(crate) fn click(h: &mut App, label: &str) {
         h.get_by_label(label).click();
+        h.run();
         h.run();
     }
 
@@ -7679,7 +8115,8 @@ mod ui_e2e {
         h.run();
         let before = h.state().engine.doc.operations.len();
 
-        click(&mut h, "New operation: each selected");
+        click(&mut h, "More new operation actions");
+        click_menu(&mut h, "New operation: each selected");
 
         // 3 shapes > threshold 2: the confirm gate is up, nothing created yet.
         assert!(
@@ -7713,7 +8150,7 @@ mod ui_e2e {
         h.run();
         let before = h.state().engine.doc.operations.len();
 
-        click(&mut h, "New operation: all selected");
+        click(&mut h, "New operation from all selected");
 
         assert!(
             !has(&h, "operations?"),
@@ -7749,7 +8186,7 @@ mod ui_e2e {
         // Filter the auto cut operation out of the geometry view through the tag
         // overflow menu: #2's only operation is filtered, so its row hides; #1
         // still runs in the hammered pass and stays.
-        click(&mut h, "Operations of #1");
+        click(&mut h, &format!("Operation {cut_name} on #1"));
         click_menu(&mut h, &format!("Hide {cut_name} from the geometry view"));
 
         // "#2, #1" is shape #2's row label (label + its only tag chip); row #1's
@@ -7767,7 +8204,7 @@ mod ui_e2e {
         assert!(h.state().engine.doc.operations[0].visible);
         assert_eq!(h.state().engine.doc.operations[0].members.len(), 2);
 
-        click(&mut h, "Operations of #1");
+        click(&mut h, &format!("Operation {cut_name} on #1"));
         click_menu(&mut h, &format!("Show {cut_name} from the geometry view"));
         assert!(
             has_row_containing(&h, "#2, #1"),
@@ -7801,7 +8238,7 @@ mod ui_e2e {
         click(&mut h, "New operation from outer");
         let op = h.state().engine.doc.operations.last().expect("op").clone();
 
-        click(&mut h, "Operations of #1");
+        click(&mut h, &format!("Operation {} on #1", op.name));
         click_menu(&mut h, &format!("Remove #1 from {}", op.name));
 
         let doc = &h.state().engine.doc;

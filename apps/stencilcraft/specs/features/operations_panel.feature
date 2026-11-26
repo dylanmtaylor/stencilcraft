@@ -44,9 +44,9 @@ Feature: Operations panel
   Scenario: expanding an operation lists its member shapes
     Given a nested fixture with groups "outer" and "inner"
     When I expand operation 1
-    Then the operations panel shows "Member #1 of cut"
-    And the operations panel shows "Member #2 of cut"
-    And the operations panel shows "Member #3 of cut"
+    Then the operations panel shows "#1"
+    And the operations panel shows "#2"
+    And the operations panel shows "#3"
 
   @UI-04
   Scenario: removing a member from the expanded operation row
@@ -59,7 +59,7 @@ Feature: Operations panel
   Scenario: double-clicking a member row selects that member
     Given a nested fixture with groups "outer" and "inner"
     When I expand operation 1
-    And I double-click the member row "Member #2 of cut"
+    And I double-click the member row "#2"
     Then the selected shapes are 2
 
   @UI-05

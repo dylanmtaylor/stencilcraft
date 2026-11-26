@@ -3400,7 +3400,8 @@ impl StencilApp {
                                 .map(|o| o.name.clone())
                                 .unwrap_or_default();
                             let hit = &member_remove;
-                            ListRow::new(key, format!("Member #{shape} of {name}"))
+                            ListRow::new(key, format!("#{shape}"))
+                                .icon(Icon::Spline)
                                 .trailing_item(20.0, move |ui| {
                                     let btn = ui.add(
                                         IconButton::new(
@@ -3662,14 +3663,48 @@ impl StencilApp {
     /// operation shows its profile while its kind and settings still match it;
     /// editing the settings unlinks it ("Profile none" in the Operations row).
     pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
+        let mut link: Option<(stencilcraft_doc::OperationKind, &'static str)> = None;
         Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
             let _ = SectionHeader::new("profiles-header", "Profiles")
                 .collapsible(false)
                 .show(ui, |_| {});
-            for (_, name) in BASE_PROFILES {
-                ui.label(format!("Profile {name}"));
+            for (kind, name) in BASE_PROFILES {
+                // Profiles are provisional: their defaults are the base kind with
+                // default settings. Clicking one links the selected operations.
+                let resp = ui.button(format!("Profile {name}")).on_hover_text(format!(
+                    "Link the selected operations to the {name} defaults"
+                ));
+                if resp.clicked() {
+                    link = Some((kind, name));
+                }
             }
         });
+        if let Some((kind, name)) = link {
+            let ids: Vec<u64> = self
+                .op_selection
+                .items
+                .iter()
+                .filter_map(|key| match key {
+                    OpKey::Op(index) => self.engine.doc.operations.get(*index).map(|op| op.id),
+                    _ => None,
+                })
+                .collect();
+            if ids.is_empty() {
+                self.status = format!("select an operation to link to Profile {name}");
+            } else {
+                for id in &ids {
+                    self.run_command(Command::Document(DocumentCommand::OperationSetKind {
+                        id: *id,
+                        kind,
+                    }));
+                    self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
+                        id: *id,
+                        settings: stencilcraft_doc::OperationSettings::default(),
+                    }));
+                }
+                self.status = format!("linked {} operation(s) to Profile {name}", ids.len());
+            }
+        }
     }
 
     /// Bulk "new operation" actions: confirm first when the affected shape
@@ -3896,7 +3931,7 @@ impl StencilApp {
                 });
                 ui.separator();
                 egui::Grid::new("operation-palette")
-                    .spacing([4.0, 4.0])
+                    .spacing([2.0, 2.0])
                     .show(ui, |ui| {
                         for (index, code) in OPERATION_PALETTE.iter().enumerate() {
                             let n = index + 1;
@@ -3904,7 +3939,7 @@ impl StencilApp {
                                 .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
                                 .unwrap_or(egui::Color32::BLACK);
                             let (rect, resp) = ui
-                                .allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
+                                .allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::click());
                             let label = format!("Palette colour {n}");
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
@@ -5571,6 +5606,7 @@ impl StencilApp {
             self.canvas_panning = false;
         }
 
+        let selection_before = self.selected_shapes.clone();
         if self.canvas_panning {
             if pointer_delta != egui::Vec2::ZERO {
                 self.view.pan_mm -= pointer_delta / self.view.zoom;
@@ -5729,6 +5765,11 @@ impl StencilApp {
                 self.drag_origin = None;
                 self.snap_lines.clear();
             }
+        }
+        // The canvas owns the selection it changed; drop the Geometry tree's
+        // stale row highlight so it does not re-apply it on the next frame.
+        if self.selected_shapes != selection_before {
+            self.geo_selection = Selection::default();
         }
         if self.prefs.smart_guides && !self.snap_lines.is_empty() {
             let color = craft_ui::canvas::Guides::style(&tokens).smart;
@@ -7861,6 +7902,52 @@ mod tests {
         let _ = app.engine.undo();
         assert_eq!(app.engine.doc.shape_count(), initial_count);
     }
+
+    #[test]
+    fn hand_click_on_empty_canvas_clears_the_geometry_highlight() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        craft_ui::theme::install(&ctx, &craft_ui::theme::Base::suite_default());
+        let mut app = StencilApp::new(None);
+        app.prefs.show_rulers = false;
+        app.run_command(Command::ShapeAddRect {
+            x: 5.0,
+            y: 5.0,
+            width: 10.0,
+            height: 10.0,
+        });
+        app.active_tool = ActiveTool::Hand;
+        app.set_selection([1]);
+        app.geo_selection = Selection::only(GeoKey::Shape(1));
+
+        // The first pass fits the view and paints the document.
+        let _ = frame(&ctx, &mut app, vec![], StencilApp::canvas_body);
+        let empty = (0..32)
+            .flat_map(|ix| {
+                (0..24).map(move |iy| egui::pos2(ix as f32 * 30.0 + 15.0, iy as f32 * 32.0 + 16.0))
+            })
+            .rev()
+            .find(|pos| {
+                stencilcraft_ui_egui::hit_test_shape(&app.engine.doc, &app.view, *pos, 8.0)
+                    .is_none()
+            })
+            .expect("an empty canvas point");
+        click(&ctx, &mut app, StencilApp::canvas_body, empty);
+
+        assert!(
+            app.selected_shapes.is_empty(),
+            "a Hand click on empty canvas deselects"
+        );
+        assert!(
+            app.geo_selection.items.is_empty(),
+            "the stale geometry highlight is dropped"
+        );
+        let _ = frame(&ctx, &mut app, vec![], StencilApp::geometry_panel);
+        assert!(
+            app.selected_shapes.is_empty(),
+            "the geometry panel does not resurrect the shape"
+        );
+    }
 }
 
 // Gherkin specs: `.feature` files under `specs/features/` are parsed and driven
@@ -7994,6 +8081,38 @@ mod ui_e2e {
             .build_ui_state(
                 |ui, app: &mut StencilApp| {
                     egui::ScrollArea::vertical().show(ui, |ui| app.profiles_panel(ui));
+                },
+                app,
+            );
+        h.run();
+        h
+    }
+
+    /// Boot with Operations and Profiles stacked: select an operation, then link
+    /// it to a profile's defaults from the Profiles panel.
+    pub(crate) fn boot_ops_profiles() -> App {
+        let app = StencilApp::new(None);
+        let mut h = Harness::builder()
+            .with_size([680.0, 900.0])
+            .with_step_dt(0.05)
+            .with_max_steps(40)
+            .with_context_setup(|ctx| {
+                craft_ui::theme::install(
+                    ctx,
+                    &stencilcraft_ui_egui::theme_base(stencilcraft_ui_egui::ColorTheme::Light),
+                );
+            })
+            .build_ui_state(
+                |ui, app: &mut StencilApp| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), 600.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| app.operations_panel(ui),
+                        );
+                        app.profiles_panel(ui);
+                        app.operation_overlays(ui);
+                    });
                 },
                 app,
             );
@@ -8269,11 +8388,7 @@ mod ui_e2e {
         let op_id = h.state().engine.doc.operations[0].id;
         h.state_mut().open_ops.insert(op_id);
         h.run();
-        let name = h.state().engine.doc.operations[0].name.clone();
-        let pos = h
-            .get_by_label(&format!("Member #2 of {name}"))
-            .rect()
-            .center();
+        let pos = h.get_by_label("#2").rect().center();
         for _ in 0..2 {
             h.event(egui::Event::PointerMoved(pos));
             for pressed in [true, false] {

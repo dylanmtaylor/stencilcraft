@@ -383,3 +383,29 @@ Silhouette, replacing Silhouette's bytes one record at a time.
     stored 10 mm (f32 bits 0x411FFFEB, 9.99998).
   - The mat colour is 159/255, 161/255 and 163/255.
   - The mat fields are still the 12x12 mat's; a 12x24 mat save is next.
+- **Also confirmed byte for byte (2026-11-26), regenerated from their fields:**
+  - **602 (view):** pan, zoom, a sub-record, then u32 2.
+  - **676 (document):** the default material, given as name, label, key, description, two
+    u32 10 values, "adjustable" and step 0.1; then the document name "default", the tab
+    title, f32 3.175, guide settings, "edge", the machine id (`cameo5`) twice and "auto"
+    twice.
+  - **964 (objects):** −1 when there are none.
+  - **973:** a setting "off" with a self-sized margins struct (u32 length counting itself,
+    u8, four f32).
+  - **1013 (cut layers):** u32 4, u8 0, the count minus one (as path contour counts are
+    stored), then ten layers `layer_@<key>:` with keys cnon, ccut, cced, cper, cped, ccu2,
+    cce2, cpf2, cpe2 and weed. Each is a self-sized 298-byte body:
+    - the key and a 31-character pattern string (`2` × 30, `A`);
+    - flags: in use (every layer but cnon), edge (cced, cped, cce2, cpe2), second tool
+      (ccu2, cce2, cpf2, cpe2);
+    - two tool blocks: `no_tool`, u32 100, a 32-hex id, the pattern, `auto`, `no_action`;
+    - the raw key `studio4.3extension1_dghyujnbvf` between the two blocks.
+  - **4172 (`@all` group):** a count, a sized header and six entries.
+  - **5153:** small integer and flag fields.
+- That is 4,281 of the empty document's 5,812 root bytes.
+- **Left:**
+  - 4275, the "Default Layer" object (873 bytes). It shares the shape-object layout, so it
+    is best decoded together with shape records changed one property at a time.
+  - The trailer after 5153.
+  - Whether Silhouette needs the 32-hex id and the extension key exactly, to test by
+    opening a generated file.

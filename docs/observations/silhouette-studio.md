@@ -424,3 +424,15 @@ Silhouette, replacing Silhouette's bytes one record at a time.
   - **Opened in Silhouette:** a file with a generated header (magic, section length, the
     0x3E8 constant, two u64 300 000 000 values) and the generated root opens. With the page
     set to 100 × 150 mm it shows as Custom, 3.937 × 5.906 in.
+- **Line style in an object record, confirmed (2026-11-26).** Five rectangles were saved, each
+  with one Line Style panel setting changed. All five style records regenerate byte for byte
+  from these fields:
+  - u8 0, u8 1, a 2×2 matrix (f32 1, 0, 0, 1), u32 0;
+  - the line width in millimetres as an f32 (2 pt is stored as 0.7056);
+  - the cut-style record: key `cut`, label `Cut`, index `0`, then the line colour as RGBA f32;
+  - u8 0, then the corner (join) name: `rounded`, or `corner` for the sharp corner;
+  - the position flag: 1 for the line centred on the outline, 0 for behind the shape;
+  - the end-cap name: `rounded`, or `flat`.
+
+  The three enclosing record lengths follow from what they hold. A fill adds a flag and an
+  RGBA colour after the cap name (fillA → fillC).

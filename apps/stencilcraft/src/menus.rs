@@ -570,7 +570,7 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 pathfinder("Outline", BooleanOperation::Outline),
                 pathfinder("Minus Back", BooleanOperation::MinusBack),
                 SEP,
-                todo("Detach Lines"),
+                edit("Detach Lines", E::DetachLines, any),
                 SEP,
                 item("Modify Panel…", A::ShowPanel(P::Modify)).into(),
             ],
@@ -1215,6 +1215,7 @@ mod tests {
             "Ungroup to Letters",
             "Next Object Above",
             "Next Object Below",
+            "Detach Lines",
         ] {
             let found: Vec<_> = items.iter().filter(|(l, ..)| l == wired).collect();
             assert!(!found.is_empty(), "missing {wired}");
@@ -1223,12 +1224,5 @@ mod tests {
                 "{wired} is still a placeholder"
             );
         }
-        // Items still waiting for an engine command stay planned.
-        assert!(
-            items.iter().any(|(l, enabled, command)| l == "Detach Lines"
-                && !enabled
-                && *command == A::NotYet),
-            "Detach Lines should stay planned"
-        );
     }
 }

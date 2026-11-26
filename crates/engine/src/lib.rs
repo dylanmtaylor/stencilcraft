@@ -453,6 +453,12 @@ pub enum Command {
     /// contour keeps the id).
     #[serde(rename = "shapes.release-compound")]
     ShapesReleaseCompound { ids: Vec<u64> },
+    /// Object › Modify › Detach Lines (Silhouette): a filled shape's line becomes its own shape
+    /// right above it, the stroke `width_mm` wide outlined into a closed contour and filled
+    /// with the old line colour; the original keeps its fill and loses its line colour. Shapes
+    /// without a fill are left as they are.
+    #[serde(rename = "shapes.detach-lines")]
+    ShapesDetachLines { ids: Vec<u64>, width_mm: f64 },
     /// Cut the shapes along the straight line `from` → `to` (Silhouette's Knife). `solid`
     /// separates closed shapes into closed pieces with `gap_mm` between them; `outline` splits
     /// every shape's lines into open pieces where the line crosses (and removes `gap_mm` of line
@@ -906,6 +912,7 @@ impl Engine {
                 | Command::PathOutlineStroke { .. }
                 | Command::ShapesMakeCompound { .. }
                 | Command::ShapesReleaseCompound { .. }
+                | Command::ShapesDetachLines { .. }
                 | Command::ShapesKnife { .. }
                 | Command::ShapesErase { .. }
                 | Command::ShapesBridge { .. }
@@ -1890,6 +1897,7 @@ impl Engine {
                 mode,
             } => self.erase(&ids, &points, size_mm, brush, mode),
             Command::ShapesReleaseCompound { ids } => self.release_compound(&ids),
+            Command::ShapesDetachLines { ids, width_mm } => self.detach_lines(&ids, width_mm),
             Command::ShapesSetLocked { ids, locked } => {
                 self.set_flags(&ids, "shapes.set-locked", |shape| shape.locked = locked)
             }
@@ -2283,6 +2291,65 @@ impl Engine {
             )));
         }
         Ok(Effect::ShapesAdded { ids: released })
+    }
+
+    fn detach_lines(&mut self, ids: &[u64], width_mm: f64) -> Result<Effect, EngineError> {
+        const NAME: &str = "shapes.detach-lines";
+        // Range checks reject NaN and infinities too.
+        if !(f64::MIN_POSITIVE..=1000.0).contains(&width_mm) {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: width_mm must be finite, positive and at most 1000"
+            )));
+        }
+        let ids = unique_ids(ids, NAME)?;
+        // Check every shape before changing any, so a bad id changes nothing.
+        let mut work = Vec::new();
+        for id in ids {
+            let shape = self
+                .doc
+                .get_shape(id)
+                .ok_or_else(|| EngineError::Invalid(format!("{NAME}: no shape has id {id}")))?;
+            if shape.production.fill_color.is_none() {
+                continue;
+            }
+            let ring = path_edit::outline_stroke(
+                &AnchorPath::from_bezpath(&shape.path),
+                width_mm,
+                StrokeJoin::Round,
+                StrokeCap::Round,
+                4.0,
+            );
+            if ring.is_empty() {
+                continue;
+            }
+            let ring = ring.to_bezpath();
+            work.push((
+                id,
+                shape.path.clone(),
+                ring,
+                shape.production.line_color.clone(),
+            ));
+        }
+        if work.is_empty() {
+            return Err(EngineError::Invalid(format!(
+                "{NAME}: no selected shape has a fill to detach its line from"
+            )));
+        }
+        let mut detached = Vec::new();
+        for (id, path, ring, line) in work {
+            let pieces = self.replace_shape_with(id, vec![path, ring])?;
+            if let Some(shape) = self.doc.get_shape_mut(id) {
+                shape.production.line_color = None;
+            }
+            if let Some(&ring_id) = pieces.get(1)
+                && let Some(shape) = self.doc.get_shape_mut(ring_id)
+            {
+                shape.production.fill_color = line;
+                shape.production.line_color = None;
+            }
+            detached.extend(pieces);
+        }
+        Ok(Effect::ShapesAdded { ids: detached })
     }
 
     /// Replaces shape `id` in place with `paths`: the first keeps the id, the rest get new ids
@@ -3458,6 +3525,7 @@ fn edit_targets(command: &Command) -> Vec<u64> {
         | Command::ShapesToPath { ids }
         | Command::ShapesMakeCompound { ids }
         | Command::ShapesReleaseCompound { ids }
+        | Command::ShapesDetachLines { ids, .. }
         | Command::ShapesKnife { ids, .. }
         | Command::ShapesErase { ids, .. }
         | Command::ShapesSetHidden { ids, .. }
@@ -3686,6 +3754,78 @@ fn rect_path(x: f64, y: f64, w: f64, h: f64) -> BezPath {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detach_lines_splits_a_filled_shape_into_fill_and_line() {
+        let mut engine = Engine::default();
+        for x in [0.0, 50.0] {
+            engine
+                .run(Command::ShapeAddRect {
+                    x,
+                    y: 0.0,
+                    width: 20.0,
+                    height: 10.0,
+                })
+                .unwrap();
+        }
+        // Shape 1 is filled with a blue line; shape 2 has no fill.
+        if let Some(s) = engine.doc.get_shape_mut(1) {
+            s.production.fill_color = Some("#ffff00".into());
+            s.production.line_color = Some("#0000ff".into());
+        }
+        let err = engine
+            .run(Command::ShapesDetachLines {
+                ids: vec![2],
+                width_mm: 2.0,
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("no selected shape has a fill"));
+        for width_mm in [0.0, f64::NAN, 1e9] {
+            assert!(
+                engine
+                    .run(Command::ShapesDetachLines {
+                        ids: vec![1],
+                        width_mm
+                    })
+                    .is_err()
+            );
+        }
+        assert!(
+            engine
+                .run(Command::ShapesDetachLines {
+                    ids: vec![1, 99],
+                    width_mm: 2.0
+                })
+                .is_err(),
+            "a missing id changes nothing"
+        );
+        assert_eq!(engine.doc.shape_count(), 2);
+        let effect = engine
+            .run(Command::ShapesDetachLines {
+                ids: vec![1, 2],
+                width_mm: 2.0,
+            })
+            .unwrap();
+        let Effect::ShapesAdded { ids } = effect else {
+            panic!("{effect:?}")
+        };
+        assert_eq!(ids.len(), 2, "the unfilled shape is left alone");
+        assert_eq!(engine.doc.shape_count(), 3);
+        let fill = engine.doc.get_shape(1).unwrap();
+        assert_eq!(fill.production.fill_color.as_deref(), Some("#ffff00"));
+        assert_eq!(fill.production.line_color, None);
+        let line = engine.doc.get_shape(ids[1]).unwrap();
+        assert_eq!(line.production.fill_color.as_deref(), Some("#0000ff"));
+        assert_eq!(line.production.line_color, None);
+        // The ring reaches half the width outside the rectangle.
+        let b = kurbo::Shape::bounding_box(&line.path);
+        assert!(
+            (b.width() - 22.0).abs() < 1e-6 && (b.height() - 12.0).abs() < 1e-6,
+            "{b:?}"
+        );
+        assert!(engine.undo());
+        assert_eq!(engine.doc.shape_count(), 2);
+    }
 
     #[test]
     fn add_remove_roundtrip() {

@@ -969,6 +969,11 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "Release compound paths / detach: one shape per contour. Args: ids.",
     ),
     (
+        "shapes_detach_lines",
+        "shapes.detach-lines",
+        "Detach Lines: a filled shape's line becomes its own shape (the stroke outlined, filled with the line colour). Args: ids, width_mm.",
+    ),
+    (
         "shape_pathfinder",
         "shape.pathfinder",
         "Pathfinder on shapes in document order. Args: ids, operation (union, difference, subtract-all, intersect, xor, divide, trim, merge, crop, outline, minus-back).",

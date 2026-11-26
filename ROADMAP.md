@@ -381,3 +381,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
   compact (12 px, 2 px gaps); profile rows link the selected operations back to
   their provisional defaults; a Hand-tool click on empty canvas clears the
   selection and the Geometry row highlight instead of leaving it stuck.
+
+- 2026-11-26 — assign geometry to an operation in place: the Operations footer
+  button `Add selected to current operation` and the chevron's `All selected to
+  current operation` call `OperationAddMembers` for the shape selection, and
+  Geometry shape rows can be dragged onto an operation row (ListDrag payload).
+  Member rows reserve the swatch/settings slots so their trash aligns with the
+  operation rows' trash.

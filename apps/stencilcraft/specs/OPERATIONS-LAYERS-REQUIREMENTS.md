@@ -124,7 +124,19 @@ dialog titled `Choose an operation` listing the unlocked operations; choosing
 one calls `OperationAddMembers`. This is how an existing (including empty)
 operation receives objects.
 
-Acceptance: selecting shapes, choosing an operation, adds exactly those ids.
+Faster paths mirror that command:
+
+- With geometry selected and an operation (or one of its member rows) selected,
+  the Operations footer's `Add selected to current operation` button adds the
+  whole geometry selection to that operation.
+- The Operations chevron menu offers `All selected to current operation` for
+  the same action.
+- Dragging one or more Geometry shape rows onto an operation row adds the
+  dragged shapes. Group rows do not drag.
+- A locked operation refuses with a status message.
+
+Acceptance: each path adds exactly the selected ids to the current operation;
+the member-row trash lines up with the operation rows' trash column.
 
 ### LY-01 — Operation pills on geometry rows
 

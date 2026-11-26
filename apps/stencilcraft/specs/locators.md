@@ -25,6 +25,7 @@ confirm with CodeGraph before relying on them.
 | "confirmación de operación masiva" | dialog `Create {n} operations?`, `Button` `Continue` | `main.rs` `bulk_confirm_dialog` |
 | "crear una operación por forma / para todas / por apariencia" | `Button` `New operation from all selected`; menu `More new operation actions` → `New operation: each selected` / `all selected` / `by appearance` | `main.rs` `bulk_menu_popup` |
 | "ventana por apariencia" | window `New operation by appearance` with `Stroke`, `Fill`, `Both`; value buttons `{mode} {value}` | `main.rs` appearance dialog |
+| "añadir la geometría seleccionada a la operación actual" | footer button `Add selected to current operation`; menu item `All selected to current operation`; drag a Geometry row onto an operation row | `main.rs` `operations_panel`, `geometry_panel` |
 | "perfiles" | panel `Profiles` with buttons `Profile Cut`, `Profile Score`, `Profile Engrave`; clicking one links the selected operations to its defaults. No `Profile Guide`, no `New profile` | `main.rs` `profiles_panel` |
 | "inspector" | `Header` `Shape #1 - Path` / `Document` | `main.rs` `inspector_panel` |
 | "operación efectiva de la selección" | section `Operation`, values exposed as accesskit `value` (`Cut`, source name) | `main.rs` inspector |

@@ -134,6 +134,9 @@ impl StencilApp {
                 let _ = Checkbox::new(Bind::bound(&mut prefs.import_join_lines))
                     .label("Join lines into polylines")
                     .show(ui);
+                let _ = Checkbox::new(Bind::bound(&mut prefs.png_autotrace))
+                    .label("PNG: Autotrace (cut round transparency)")
+                    .show(ui);
                 ui.separator();
                 ui.label("Tools");
                 let _ = Checkbox::new(Bind::bound(&mut prefs.select_after_drawing))

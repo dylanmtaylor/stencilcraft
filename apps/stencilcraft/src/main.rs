@@ -134,6 +134,9 @@ pub struct UserPrefs {
     pub dxf_fit_to_page: bool,
     /// Preferences › Import › Join lines into polylines (endpoints within 0.05 mm).
     pub import_join_lines: bool,
+    /// Preferences › Import › PNG Autotrace: a PNG with transparency comes in with a cut
+    /// line round its opaque area.
+    pub png_autotrace: bool,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
     /// Page Setup › Smart Snap only within media: off the page only the grid and guides snap.
@@ -177,6 +180,7 @@ impl Default for UserPrefs {
             spelling_words: Vec::new(),
             dxf_fit_to_page: true,
             import_join_lines: true,
+            png_autotrace: true,
             select_after_drawing: false,
             snap_within_media: false,
             graphic_styles: Vec::new(),
@@ -3451,15 +3455,48 @@ impl StencilApp {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "image".to_string());
+        let png = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("png"));
         let placed = std::fs::read(&path)
             .map_err(|e| e.to_string())
             .and_then(|bytes| stencilcraft_raster::decode(&bytes).map_err(|e| e.to_string()))
             .and_then(|pixels| {
-                stencilcraft_raster::place(&pixels, &name, 300.0).map_err(|e| e.to_string())
+                let clear = stencilcraft_raster::has_transparency(&pixels);
+                stencilcraft_raster::place(&pixels, &name, 300.0)
+                    .map(|image| (image, clear))
+                    .map_err(|e| e.to_string())
             });
         match placed {
-            Ok(image) => self.place_image(image),
+            Ok((image, clear)) => {
+                self.place_image(image);
+                if png && clear && self.prefs.png_autotrace {
+                    self.autotrace_latest_image();
+                }
+            }
             Err(error) => self.status = format!("{}: {error}", path.display()),
+        }
+    }
+
+    /// PNG Autotrace: a cut line round the opaque area of the image placed last.
+    pub fn autotrace_latest_image(&mut self) {
+        let Some(id) = self.engine.doc.images.iter().map(|i| i.id).max() else {
+            return;
+        };
+        let options = stencilcraft_raster::TraceOptions {
+            alpha: true,
+            ..stencilcraft_raster::TraceOptions::default()
+        };
+        match self.engine.run(Command::ImageTrace {
+            id,
+            options,
+            style: CutStyle::Cut,
+            area: None,
+            compound: false,
+        }) {
+            Ok(_) => self.status = "placed and traced round its transparency".to_string(),
+            Err(e) => self.status = format!("autotrace: {e}"),
         }
     }
 
@@ -8157,6 +8194,47 @@ mod tests {
         app.prefs.import_join_lines = false;
         let o = app.import_options_for(dxf);
         assert!(!o.fit_to_page && !o.join);
+    }
+
+    #[test]
+    fn png_autotrace_cuts_round_transparency_only() {
+        let dir = std::env::temp_dir().join(format!("sc-autotrace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut clear = stencilcraft_raster::RgbaImage::from_pixel(
+            40,
+            40,
+            craft_raster_codecs::common::Pixel([0, 0, 0, 0]),
+        );
+        for y in 10..30 {
+            for x in 10..30 {
+                clear.put_pixel(x, y, craft_raster_codecs::common::Pixel([250, 250, 0, 255]));
+            }
+        }
+        let opaque = stencilcraft_raster::RgbaImage::from_pixel(
+            40,
+            40,
+            craft_raster_codecs::common::Pixel([0, 0, 0, 255]),
+        );
+        let (clear_path, opaque_path) = (dir.join("clear.png"), dir.join("opaque.png"));
+        for (img, path) in [(&clear, &clear_path), (&opaque, &opaque_path)] {
+            let bytes = craft_raster_codecs::common::encode_for_path(
+                path.to_string_lossy().into_owned(),
+                img,
+            )
+            .unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let shapes = |app: &StencilApp| app.engine.doc.shapes().count();
+        let mut app = StencilApp::new(None);
+        app.import_image(opaque_path.clone());
+        assert_eq!(app.engine.doc.images.len(), 1);
+        assert_eq!(shapes(&app), 0, "an opaque PNG is only placed");
+        app.import_image(clear_path.clone());
+        assert_eq!(shapes(&app), 1, "a cut line round the opaque square");
+        app.prefs.png_autotrace = false;
+        app.import_image(clear_path);
+        assert_eq!(shapes(&app), 1, "off: only placed");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

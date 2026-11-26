@@ -211,3 +211,13 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
 - General tab: Language, Default Save Location (Hard Disk / Library), Unit of Measurement
   (Auto (inches)), Show Dimensions (on), Show Print Preview (on), Print Resolution (300, 600
   (chosen), 1200 dpi, or Custom DPI with a number, 300.00).
+
+## PNG Autotrace on open (2026-11-26, SS 5.0.556)
+
+- With Preferences › Import › PNG Autotrace on (the default), File › Open of an opaque PNG
+  (coloured shapes on a white background) places the image in a new tab at the page's top
+  left with no cut lines: the Send view shows no lines.
+- The same picture with the white made transparent comes in with a red cut line round every
+  opaque shape (circle, rectangle, triangle, bar), hugging the edge of the opaque pixels.
+  Autotrace traces the outline of a PNG's opaque area; it does nothing on a PNG without
+  transparency.

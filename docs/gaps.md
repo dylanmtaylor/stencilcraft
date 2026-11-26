@@ -275,7 +275,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     minimum and maximum lengths, card mats (2×2, 1×2, Joy), Print Then Cut usable area
     and page size, and roller margins. Also missing: per-machine default load type and
     page size, and remembering the material between mats.
-47. **Upload cleanup**: missing Select (same-colour areas), Erase/Restore brushes,
+47. **Upload cleanup**: Effect › Erase Colour clears a colour (connected or everywhere)
+    from a placed image. Missing: Erase/Restore brushes,
     despeckle, smooth, reduce colours, preview as a single layer, and saving an upload as a
     printable image rather than an outline. User pattern uploads are also missing.
 48. **Monogram and text conveniences**: engine/MCP provide a monogram command, ungroup

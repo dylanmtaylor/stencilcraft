@@ -338,6 +338,17 @@ pub enum Command {
     },
     #[serde(rename = "image.remove-background")]
     ImageRemoveBackground { id: u64, tolerance: f64 },
+    /// Upload cleanup's Select: the pixels like the one at document point (`x_mm`, `y_mm`)
+    /// become transparent (`tolerance` 0–100 %), the connected region only when `contiguous`.
+    #[serde(rename = "image.erase-colour")]
+    ImageEraseColour {
+        id: u64,
+        x_mm: f64,
+        y_mm: f64,
+        tolerance: f64,
+        #[serde(default = "default_true")]
+        contiguous: bool,
+    },
     /// Break a shape's path at one node: a closed contour opens there, an open one splits in
     /// two (both pieces stay in the shape; `shapes.release-compound` separates them).
     #[serde(rename = "path.break")]
@@ -557,6 +568,10 @@ pub enum Command {
 }
 
 /// VectorCraft Pathfinder operations supported for StencilCraft's filled cut paths.
+fn default_true() -> bool {
+    true
+}
+
 fn cut_style() -> CutStyle {
     CutStyle::Cut
 }
@@ -854,6 +869,7 @@ impl Engine {
                 | Command::ImageTrace { .. }
                 | Command::ImageTraceColours { .. }
                 | Command::ImageRemoveBackground { .. }
+                | Command::ImageEraseColour { .. }
                 | Command::ImageAdjust { .. }
                 | Command::ImageRectify { .. }
                 | Command::PathBreak { .. }
@@ -1636,6 +1652,47 @@ impl Engine {
                     .and_then(|pixels| stencilcraft_raster::remove_background(&pixels, tolerance))
                     .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
                     .map_err(invalid("image.remove-background"))?;
+                if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
+                    *slot = pixels;
+                }
+                Ok(Effect::ImageChanged { id })
+            }
+            Command::ImageEraseColour {
+                id,
+                x_mm,
+                y_mm,
+                tolerance,
+                contiguous,
+            } => {
+                const NAME: &str = "image.erase-colour";
+                let image = self.doc.get_image(id).ok_or_else(|| no_image(NAME, id))?;
+                if !(x_mm.is_finite() && y_mm.is_finite())
+                    || !(image.width_mm > 0.0 && image.height_mm > 0.0)
+                {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the point and the image must be finite"
+                    )));
+                }
+                // The pixel under the point; one off the image changes nothing.
+                let u = (x_mm - image.x_mm) / image.width_mm * f64::from(image.width_px);
+                let v = (y_mm - image.y_mm) / image.height_mm * f64::from(image.height_px);
+                if !(u >= 0.0
+                    && v >= 0.0
+                    && u < f64::from(image.width_px)
+                    && v < f64::from(image.height_px))
+                {
+                    return Err(EngineError::Invalid(format!(
+                        "{NAME}: the point is not on the image"
+                    )));
+                }
+                // Inside the image's pixel size, so the casts are exact.
+                let (px, py) = (u.floor() as u32, v.floor() as u32);
+                let pixels = stencilcraft_raster::image_pixels(image)
+                    .and_then(|pixels| {
+                        stencilcraft_raster::erase_colour(&pixels, px, py, tolerance, contiguous)
+                    })
+                    .and_then(|pixels| stencilcraft_raster::with_pixels(image, &pixels))
+                    .map_err(invalid(NAME))?;
                 if let Some(slot) = self.doc.images.iter_mut().find(|image| image.id == id) {
                     *slot = pixels;
                 }
@@ -5005,6 +5062,41 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    #[test]
+    fn erase_colour_clears_the_picked_region_in_one_step() {
+        use craft_raster_codecs::common::{Pixel, Pixels};
+        let pixels = Pixels::from_fn(20, 10, |x, _| {
+            if x < 10 {
+                Pixel([200, 10, 10, 255])
+            } else {
+                Pixel([255, 255, 255, 255])
+            }
+        });
+        // 100 dpi: 20 px is 5.08 mm.
+        let placed = stencilcraft_raster::place(&pixels, "two", 100.0).unwrap();
+        let mut engine = Engine::default();
+        let Effect::ImageAdded { id } = engine.run(Command::ImagePlace { image: placed }).unwrap()
+        else {
+            panic!("image");
+        };
+        let erase = |x_mm: f64| Command::ImageEraseColour {
+            id,
+            x_mm,
+            y_mm: 1.0,
+            tolerance: 10.0,
+            contiguous: true,
+        };
+        engine.run(erase(1.0)).unwrap();
+        let after = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(after.get_pixel(3, 5).0[3], 0, "the red half is cleared");
+        assert_eq!(after.get_pixel(15, 5).0[3], 255, "the white half stays");
+        assert!(engine.undo());
+        let back = stencilcraft_raster::image_pixels(engine.doc.get_image(id).unwrap()).unwrap();
+        assert_eq!(back.get_pixel(3, 5).0[3], 255, "one undo step");
+        assert!(engine.run(erase(50.0)).is_err(), "off the image");
+        assert!(engine.run(erase(f64::NAN)).is_err());
     }
 
     #[test]

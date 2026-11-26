@@ -289,6 +289,78 @@ pub fn adjust(pixels: &RgbaImage, a: &Adjust) -> Result<RgbaImage, RasterError> 
     Ok(out)
 }
 
+/// Upload cleanup's Select: the pixels like the one at (`x`, `y`) made transparent. Like means
+/// every channel within `tolerance` percent (0–100) of the picked colour; `contiguous` takes
+/// only the region connected to the pick (four-way), else every such pixel in the image. An
+/// already transparent pick, or one outside the image, changes nothing.
+pub fn erase_colour(
+    pixels: &RgbaImage,
+    x: u32,
+    y: u32,
+    tolerance: f64,
+    contiguous: bool,
+) -> Result<RgbaImage, RasterError> {
+    if !(tolerance.is_finite() && (0.0..=100.0).contains(&tolerance)) {
+        return Err(bad(format!("tolerance {tolerance} is outside 0–100")));
+    }
+    let mut out = pixels.clone();
+    let Some(pick) = pixels.get_pixel_checked(x, y).map(|p| p.0) else {
+        return Ok(out);
+    };
+    if pick[3] < 128 {
+        return Ok(out);
+    }
+    // Within 0..=255 after the clamp, so the cast is exact.
+    let limit = (tolerance / 100.0 * 255.0).round().clamp(0.0, 255.0) as i32;
+    let like = |p: [u8; 4]| {
+        p[3] >= 128 && (0..3).all(|c| (i32::from(p[c]) - i32::from(pick[c])).abs() <= limit)
+    };
+    let clear = common::Pixel([0, 0, 0, 0]);
+    let (w, h) = (pixels.width(), pixels.height());
+    if !contiguous {
+        for p in out.pixels_mut() {
+            if like(p.0) {
+                *p = clear;
+            }
+        }
+        return Ok(out);
+    }
+    let index = |x: u32, y: u32| (y as usize) * (w as usize) + x as usize;
+    let mut seen = vec![false; (w as usize) * (h as usize)];
+    let mut stack = vec![(x, y)];
+    while let Some((cx, cy)) = stack.pop() {
+        let Some(slot) = seen.get_mut(index(cx, cy)) else {
+            continue;
+        };
+        if *slot {
+            continue;
+        }
+        *slot = true;
+        let Some(p) = pixels.get_pixel_checked(cx, cy).map(|p| p.0) else {
+            continue;
+        };
+        if !like(p) {
+            continue;
+        }
+        if let Some(px) = out.get_pixel_mut_checked(cx, cy) {
+            *px = clear;
+        }
+        if cx > 0 {
+            stack.push((cx - 1, cy));
+        }
+        if cy > 0 {
+            stack.push((cx, cy - 1));
+        }
+        if cx + 1 < w {
+            stack.push((cx + 1, cy));
+        }
+        if cy + 1 < h {
+            stack.push((cx, cy + 1));
+        }
+    }
+    Ok(out)
+}
+
 /// Make the background transparent: flood-fill (4-connected) from every border pixel
 /// whose colour is within `tolerance` percent (0–100, per channel) of the border's most
 /// common colour. Already transparent pixels count as background.
@@ -384,6 +456,35 @@ mod tests {
                 decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
             assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
+    }
+
+    #[test]
+    fn erase_colour_clears_the_picked_region_or_every_match() {
+        // Two red squares apart on white: the left one at x 0..4, the right at 8..12.
+        let image = RgbaImage::from_fn(12, 4, |x, _| {
+            if !(4..8).contains(&x) {
+                Pixel([200, 10, 10, 255])
+            } else {
+                Pixel([255, 255, 255, 255])
+            }
+        });
+        let region = erase_colour(&image, 1, 1, 10.0, true).unwrap();
+        assert_eq!(
+            region.get_pixel(2, 2).0[3],
+            0,
+            "the picked square is cleared"
+        );
+        assert_eq!(region.get_pixel(10, 2).0[3], 255, "the other square stays");
+        assert_eq!(region.get_pixel(5, 2).0[3], 255, "white stays");
+        let every = erase_colour(&image, 1, 1, 10.0, false).unwrap();
+        assert_eq!(every.get_pixel(10, 2).0[3], 0, "every match is cleared");
+        assert_eq!(every.get_pixel(5, 2).0[3], 255);
+        assert_eq!(
+            erase_colour(&image, 99, 1, 10.0, true).unwrap(),
+            image,
+            "outside: no change"
+        );
+        assert!(erase_colour(&image, 1, 1, f64::NAN, true).is_err());
     }
 
     #[test]

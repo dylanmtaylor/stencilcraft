@@ -74,7 +74,8 @@ impl StencilApp {
         }
         self.stores.last_snapshot = Some(std::time::Instant::now());
         if let Some(recovery) = &self.stores.recovery
-            && let Err(e) = recovery.snapshot(&self.stores.session_id, &self.engine.doc)
+            && let Err(e) =
+                recovery.snapshot(&self.recovery_key(self.tabs.active), &self.engine.doc)
         {
             self.status = format!("autosave: {e}");
         }
@@ -83,13 +84,16 @@ impl StencilApp {
     /// The document was saved: its recovery snapshot is no longer needed.
     pub fn discard_own_snapshot(&mut self) {
         if let Some(recovery) = &self.stores.recovery {
-            let _ = recovery.discard(&self.stores.session_id);
+            let _ = recovery.discard(&self.recovery_key(self.tabs.active));
         }
     }
 
     /// Open `doc` as the current document. A recovered or library design is unsaved until
     /// saved to a file.
     fn load_design(&mut self, doc: stencilcraft_doc::Document, what: &str) {
+        if !self.tab_for_new_document() {
+            return;
+        }
         self.engine = stencilcraft_engine::Engine::new(doc);
         self.saved_document = stencilcraft_doc::Document::default();
         self.set_selection([]);

@@ -258,3 +258,15 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   Overcut (on), Include Cut Data (on); Enable Performance Improvement data collection (off);
   Silhouette Device Connections: Do not auto-release connections (chosen) | Auto-release when
   connections are not in use; OpenGL Configure (WGL_SWAP_COPY / EXCHANGE / UNDEFINED / None).
+
+## Panels › Pop up (2026-11-26, SS 5.0.556)
+
+- The panel: Pop up On | Off (Off chosen), and Pop up Options greyed while off: Base Width
+  (33.3 %), Strut Width (0.079 in), Dash Pitch (0.000 in). On's tooltip: "Select shapes and
+  click here to convert them to a Pop up."
+- On with a 2.625 in square selected converts the square itself: the options become Base
+  Width 10.0 %, Strut Width 0.079 in, Dash Pitch 0.039 in, and the selection grows to
+  2.673 × 3.039 in. A strip is added above the square, joined to it by a blue dashed fold line
+  along the square's top edge, with another dashed fold along the strip's top; the red cut
+  line runs round square and strip; short dashed folds appear at the square's bottom
+  corners. How Base Width and Strut Width map to these sizes needs more samples.

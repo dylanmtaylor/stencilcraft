@@ -139,7 +139,6 @@ impl StencilApp {
         ];
         let _ = craft_ui::choice::Segmented::new("Send mode", Bind::bound(&mut mode), &entries)
             .id_salt("send-mode")
-            .size(craft_theme::ControlSize::Sm)
             .show(ui);
         self.send.mode = mode;
         if mode == SendMode::Standard {

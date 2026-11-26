@@ -741,17 +741,15 @@ impl StencilApp {
                         &numbers,
                     );
                 });
-                // A picker, not a segmented strip: the pin elides a strip's segments in the
-                // panel's width ("Ce…"), where a picker shows the whole word.
-                crate::panels::captioned(ui, "Justification", |ui| {
-                    let _ = Select::new(
-                        "Justification",
-                        Bind::bound(&mut style.align),
-                        &align_entries,
-                    )
-                    .id_salt("text-align")
-                    .show(ui);
-                });
+                // At the default size: the pin's small segmented strip elides its own words
+                // ("Ce…").
+                let _ = Segmented::new(
+                    "Justification",
+                    Bind::bound(&mut style.align),
+                    &align_entries,
+                )
+                .id_salt("text-align")
+                .show(ui);
                 let _ = Section::new("Spacing")
                     .id_salt("text-spacing")
                     .show(ui, |ui, _| {
@@ -780,15 +778,13 @@ impl StencilApp {
                         let _ = Checkbox::new(Bind::bound(&mut style.kerning))
                             .label("Kerning")
                             .show(ui);
-                        crate::panels::captioned(ui, "Direction", |ui| {
-                            let _ = Select::new(
-                                "Direction",
-                                Bind::bound(&mut style.vertical),
-                                &direction_entries,
-                            )
-                            .id_salt("text-direction")
-                            .show(ui);
-                        });
+                        let _ = Segmented::new(
+                            "Direction",
+                            Bind::bound(&mut style.vertical),
+                            &direction_entries,
+                        )
+                        .id_salt("text-direction")
+                        .show(ui);
                     });
                 if let Some(flow) = flow.as_mut() {
                     let _ = Section::new("Flow").id_salt("text-flow").show(ui, |ui, _| {
@@ -1024,7 +1020,6 @@ fn flow_controls(
     }
     let _ = Segmented::new("Flow", Bind::bound(&mut kind), &entries)
         .id_salt("text-flow-kind")
-        .size(ControlSize::Sm)
         .show(ui);
     if kind != was {
         *flow = match kind {

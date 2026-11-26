@@ -673,7 +673,6 @@ impl StencilApp {
                                     &display_entries,
                                 )
                                 .id_salt("trace-display")
-                                .size(ControlSize::Sm)
                                 .show(ui);
                                 labelled(ui, "Quality", |ui| {
                                     let _ = Segmented::new(
@@ -682,7 +681,6 @@ impl StencilApp {
                                         &quality_entries,
                                     )
                                     .id_salt("trace-quality")
-                                    .size(ControlSize::Sm)
                                     .show(ui);
                                 });
                             });

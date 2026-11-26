@@ -289,8 +289,13 @@ pub fn export_tile_preview(
 
 /// Silhouette's Print & Cut page: the page itself (printed at 100 %) with registration marks
 /// on it (`marks`: `[x, y, width, height]` rectangles in page millimetres) and the design's
-/// fills and line colours.
-pub fn export_print_sheet(doc: &Document, marks: &[[f64; 4]]) -> Result<String, SvgError> {
+/// fills and line colours. A cut or engrave line with no colour of its own prints only with
+/// `print_cut_lines` (Silhouette's Print Cut Lines), as a thin line; otherwise it is left out.
+pub fn export_print_sheet(
+    doc: &Document,
+    marks: &[[f64; 4]],
+    print_cut_lines: bool,
+) -> Result<String, SvgError> {
     doc.validate().map_err(|e| SvgError::Model(e.to_string()))?;
     let (page_w, page_h) = (doc.board.width_mm, doc.board.height_mm);
     if !(page_w.is_finite() && page_h.is_finite() && page_w > 0.0 && page_h > 0.0) {
@@ -309,9 +314,17 @@ pub fn export_print_sheet(doc: &Document, marks: &[[f64; 4]]) -> Result<String, 
             height: m[3],
         })
         .collect();
-    let mut elements = vec![SvgElement::Title(
-        "StencilCraft Print & Cut page (print at 100 %)".into(),
-    )];
+    // Paths are filled black by default in SVG: an uncoloured cut line must not print as a
+    // solid shape. Inline colours (fills, line colours) win over these rules.
+    let lines = if print_cut_lines {
+        ".stencilcraft-cut, .stencilcraft-engrave { fill: none; stroke: #000000; stroke-width: 0.25; }"
+    } else {
+        ".stencilcraft-cut, .stencilcraft-engrave { fill: none; stroke: none; }"
+    };
+    let mut elements = vec![
+        SvgElement::Title("StencilCraft Print & Cut page (print at 100 %)".into()),
+        SvgElement::Style(lines.into()),
+    ];
     elements.extend(document_elements(doc, false, true, true));
     elements.push(SvgElement::Group {
         attributes: vec![
@@ -572,12 +585,21 @@ mod print_tests {
         let mut doc = Document::default();
         doc.board.width_mm = 215.9;
         doc.board.height_mm = 279.4;
-        let sheet =
-            export_print_sheet(&doc, &[[15.0, 15.0, 10.0, 10.0], [f64::NAN, 0.0, 1.0, 1.0]])
-                .expect("sheet");
+        let sheet = export_print_sheet(
+            &doc,
+            &[[15.0, 15.0, 10.0, 10.0], [f64::NAN, 0.0, 1.0, 1.0]],
+            false,
+        )
+        .expect("sheet");
         assert!(sheet.contains("registration-marks"));
         assert!(sheet.contains("215.900mm"), "the page itself: {sheet}");
         assert_eq!(sheet.matches("<rect").count(), 1, "bad marks are skipped");
+        // Uncoloured cut lines print as nothing (not SVG's default black fill), or as thin
+        // lines when asked.
+        assert!(sheet.contains("fill: none; stroke: none"), "{sheet}");
+        let lines = export_print_sheet(&doc, &[], true).expect("sheet");
+        assert!(lines.contains("stroke: #000000"), "{lines}");
+        assert!(!lines.contains("stroke: none"));
     }
 
     #[test]

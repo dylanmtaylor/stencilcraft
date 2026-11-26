@@ -43,6 +43,9 @@ pub fn root_env(theme: ColorTheme) -> craft_ui::runtime::env::RootEnv {
 /// Theme tokens: every colour the frontend draws comes from here.
 pub struct Tokens;
 
+/// Registration mark layouts (Silhouette's three marks, or four corners).
+pub use stencilcraft_layout::MarkStyle;
+
 /// Silhouette's default registration marks: 0.787 in long, 0.020 in thick, 0.625 in in from
 /// the page edge.
 pub const DEFAULT_MARK_GEOMETRY: [f64; 3] = [0.787 * 25.4, 0.020 * 25.4, 0.625 * 25.4];
@@ -51,16 +54,31 @@ pub const DEFAULT_MARK_GEOMETRY: [f64; 3] = [0.787 * 25.4, 0.020 * 25.4, 0.625 *
 /// `geometry` (length, thickness, inset): Silhouette's square at the top left and brackets at
 /// the top right and bottom left.
 pub fn mark_rects(width: f64, height: f64, geometry: [f64; 3]) -> Vec<[f64; 4]> {
+    styled_mark_rects(
+        width,
+        height,
+        geometry,
+        stencilcraft_layout::MarkStyle::Silhouette,
+    )
+}
+
+/// [`mark_rects`] in `style`: Silhouette's three marks, or a bracket at every corner.
+pub fn styled_mark_rects(
+    width: f64,
+    height: f64,
+    geometry: [f64; 3],
+    style: stencilcraft_layout::MarkStyle,
+) -> Vec<[f64; 4]> {
     let [length, thickness, inset] = geometry;
     let page = stencilcraft_layout::PageOptions {
         width_mm: width,
         height_mm: height,
-        marks: Some(stencilcraft_layout::MarkStyle::Silhouette),
+        marks: Some(style),
         mark_length_mm: length,
         mark_thickness_mm: thickness,
         mark_inset_mm: inset,
     };
-    stencilcraft_layout::registration_marks(&page, stencilcraft_layout::MarkStyle::Silhouette)
+    stencilcraft_layout::registration_marks(&page, style)
 }
 
 /// The unit lengths are shown in (Preferences › Units). The document is always millimetres;
@@ -168,6 +186,8 @@ pub struct CanvasOptions {
     pub print_cut_marks: bool,
     /// Registration mark length, thickness and inset from the page edge, millimetres.
     pub mark_geometry: [f64; 3],
+    /// Four corner brackets instead of Silhouette's three marks.
+    pub four_marks: bool,
     pub show_selection_bounds: bool,
     pub theme: ColorTheme,
     /// View › Outline View: every line a hairline, whatever its weight.
@@ -187,6 +207,7 @@ impl Default for CanvasOptions {
             show_grid: true,
             print_cut_marks: false,
             mark_geometry: DEFAULT_MARK_GEOMETRY,
+            four_marks: false,
             show_selection_bounds: true,
             theme: ColorTheme::Dark,
             outline_view: false,
@@ -756,7 +777,14 @@ pub fn paint_document(
     }
 
     if options.print_cut_marks {
-        paint_registration_marks(painter, view, doc, palette, options.mark_geometry);
+        paint_registration_marks(
+            painter,
+            view,
+            doc,
+            palette,
+            options.mark_geometry,
+            options.four_marks,
+        );
     }
 
     if options.cut_border
@@ -973,12 +1001,19 @@ fn paint_registration_marks(
     doc: &stencilcraft_doc::Document,
     palette: Palette,
     geometry: [f64; 3],
+    four: bool,
 ) {
     let mark_color = match palette.board {
         c if c.r() > 140 => egui::Color32::from_gray(24),
         _ => egui::Color32::from_gray(230),
     };
-    for [x, y, w, h] in mark_rects(doc.board.width_mm, doc.board.height_mm, geometry) {
+    let style = if four {
+        stencilcraft_layout::MarkStyle::FourCorner
+    } else {
+        stencilcraft_layout::MarkStyle::Silhouette
+    };
+    for [x, y, w, h] in styled_mark_rects(doc.board.width_mm, doc.board.height_mm, geometry, style)
+    {
         if ![x, y, w, h].iter().all(|v| v.is_finite()) {
             continue;
         }

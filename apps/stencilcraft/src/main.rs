@@ -22,13 +22,12 @@ use craft_ui::contract::{
     CollectionEvent, ColumnSpec, Entry, Props as _, Show as _, ShowCollection as _,
     ShowContainer as _, ToggleColumn,
 };
-use craft_ui::dialog::Dialog;
 use craft_ui::display::{Divider, Shade, Text};
 use craft_ui::list::{List, ListRow, RowInk, ToggleCell};
 use craft_ui::patterns::panels::Inspector;
 use craft_ui::pickers::{ReferencePoint, Select};
 use craft_ui::primitives::IconSpec;
-use craft_ui::sections::{DialogRole, FooterAction, FooterBar, FooterButton, Panel, Section};
+use craft_ui::sections::{FooterAction, FooterBar, Panel, Section};
 use craft_ui::text::{NumberField, TextField};
 use craft_ui::value_drag::{Slider, SliderScale};
 use panels::LocaleNumbers;
@@ -58,6 +57,7 @@ mod click_draw;
 mod colour_panels;
 mod control;
 mod distort_tool;
+mod doc_tabs;
 mod effects;
 mod erase_colour;
 mod file_menu;
@@ -1321,7 +1321,8 @@ pub struct StencilApp {
     /// File › New's dialog.
     pub new_doc: new_doc::NewDocState,
     saved_document: stencilcraft_doc::Document,
-    pending_new_document: Option<new_doc::Choice>,
+    /// The open documents (tabs); the live one is the fields above.
+    pub tabs: doc_tabs::DocTabs,
     /// Name of an unsaved document (New Document's Name), shown in the title bar.
     pub doc_title: String,
     /// Font family and size for new text and the Text Style panel.
@@ -1650,7 +1651,7 @@ impl StencilApp {
             quit_requested: false,
             new_doc: new_doc::NewDocState::default(),
             saved_document,
-            pending_new_document: None,
+            tabs: doc_tabs::DocTabs::default(),
             doc_title: "Untitled".to_string(),
             text_family: String::new(),
             text_size: text_tool::DEFAULT_TEXT_SIZE_PT,
@@ -1968,9 +1969,19 @@ impl StencilApp {
         true
     }
 
+    /// Open the file at `path`: its tab when it is open already, else the live tab when it is
+    /// blank, else a new tab.
     pub fn open_document(&mut self, path: &str) {
+        if let Some(id) = self.tab_with_path(path) {
+            self.switch_tab(id);
+            self.status = format!("{path} is open");
+            return;
+        }
         match stencilcraft_doc::load_from(path) {
             Ok(doc) => {
+                if !self.tab_for_new_document() {
+                    return;
+                }
                 self.engine = stencilcraft_engine::Engine::new(doc);
                 self.saved_document = self.engine.doc.clone();
                 self.set_selection([]);
@@ -3506,6 +3517,15 @@ impl StencilApp {
     pub fn open_new_document(&mut self, tab: usize) {
         let kerf = self.engine.doc.kerf.width_mm;
         self.new_doc.open(tab, kerf, self.mat, self.send.model);
+        // An Untitled name counts up past the open documents' names.
+        let name = self.new_doc.choice.name.trim();
+        if name.is_empty()
+            || name
+                .strip_prefix("Untitled-")
+                .is_some_and(|n| n.parse::<u32>().is_ok())
+        {
+            self.new_doc.choice.name = self.next_untitled();
+        }
         self.new_doc.saved.clone_from(&self.prefs.saved_new);
     }
 
@@ -3528,40 +3548,11 @@ impl StencilApp {
         if let Some(choice) = created {
             self.request_new_document(choice);
         }
-        if self.pending_new_document.is_some() {
-            let mut open = true;
-            let shown = Dialog::new("Discard unsaved changes?")
-                .id_salt("discard-before-new")
-                .opened(Bind::bound(&mut open))
-                .buttons([
-                    FooterButton::new("Discard changes", DialogRole::Accept),
-                    FooterButton::new("Cancel", DialogRole::Cancel),
-                ])
-                .show(parent, |ui, _| {
-                    let _ = Text::new(
-                        "Creating a new document will discard changes. Cancel to save your work first.",
-                    )
-                    .shade(Shade::Muted)
-                    .show(ui);
-                });
-            if shown.output.picked == Some(0) {
-                self.confirm_new_document();
-            } else if !open || shown.output.closed.is_some() {
-                self.pending_new_document = None;
-            }
-        }
     }
 
+    /// Create from New Document: in the live tab when it is blank, else in a new tab.
     fn request_new_document(&mut self, choice: new_doc::Choice) {
-        if self.engine.doc != self.saved_document {
-            self.pending_new_document = Some(choice);
-        } else {
-            self.create_document(&choice);
-        }
-    }
-
-    fn confirm_new_document(&mut self) {
-        if let Some(choice) = self.pending_new_document.take() {
+        if self.tab_for_new_document() {
             self.create_document(&choice);
         }
     }
@@ -4192,7 +4183,7 @@ impl StencilApp {
                 }
             }
             TopMenuAction::CurveText => self.curve_text(),
-            TopMenuAction::CloseDoc => self.request_new_document(new_doc::Choice::default()),
+            TopMenuAction::CloseDoc => self.request_close_tab(self.tabs.active),
             TopMenuAction::ToggleAttach => self.toggle_attach(),
             TopMenuAction::Flatten => self.flatten_selection(),
             TopMenuAction::ClipMake => self.make_clipping_mask(),
@@ -5982,6 +5973,7 @@ impl StencilApp {
             self.home_body(ui);
             return;
         }
+        self.tab_strip(ui);
         use craft_behavior::geometry::quad::{BoxAllow, BoxPart, BoxRules, BoxState, ScaleRule};
         use craft_draw::ui::pen::PenEvent;
         use craft_ui::canvas::{Canvas, CanvasScrollbars, RulerText, Rulers, ToolHost, tool_pass};
@@ -8000,13 +7992,14 @@ mod tests {
         let centre = |app: &StencilApp| app.view.screen_to_world(screen.center().to_vec2());
         let start = centre(&app);
         let start_zoom = app.view.zoom;
-        // The anchor is the canvas centre (inside the rulers), a few px from the screen
-        // centre, so the world point there may move by those px at the new zoom only.
+        // The anchor is the canvas centre (inside the rulers, below the document tabs), some
+        // px from the screen centre, so the world point there may move by those px at the new
+        // zoom only.
         for factor in [1.2_f32; 5].into_iter().chain([1.0 / 1.2; 5]) {
             app.pending_zoom = Some(app.view.zoom * factor);
             frame(&mut app);
             let at = centre(&app);
-            let slack = 30.0 / f64::from(app.view.zoom);
+            let slack = 60.0 / f64::from(app.view.zoom);
             assert!(
                 (at.x - start.x).abs() < slack && (at.y - start.y).abs() < slack,
                 "view centre drifted: {start:?} -> {at:?} at zoom {}",
@@ -8105,23 +8098,24 @@ mod tests {
     }
 
     #[test]
-    fn new_document_waits_for_confirmation_when_document_changed() {
+    fn new_document_opens_a_tab_when_the_document_changed() {
         let mut app = StencilApp::new(None);
         app.run_command(Command::KerfSet { width_mm: 0.4 });
         let changed = app.engine.doc.clone();
+        let first = app.tabs.active;
         let choice = new_doc::Choice {
             width_mm: 300.0,
             ..Default::default()
         };
-        app.request_new_document(choice.clone());
-        assert_eq!(app.engine.doc, changed);
-        assert!(app.pending_new_document.is_some());
-        app.pending_new_document = None; // Cancel preserves the original document.
-        assert_eq!(app.engine.doc, changed);
         app.request_new_document(choice);
-        app.confirm_new_document();
+        assert_eq!(app.tabs.entries.len(), 2);
         assert_eq!(app.engine.doc.board.width_mm, 300.0);
         assert_eq!(app.engine.doc, app.saved_document);
+        app.switch_tab(first);
+        assert_eq!(
+            app.engine.doc, changed,
+            "the changed document waits in its tab"
+        );
     }
 
     #[test]

@@ -282,3 +282,11 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   the page (1.5 mm) to the page's own edge.
 - Pop up's Strut Width raised to 0.5 in on a converted rectangle changed neither its bounding
   box nor any line visible at that zoom.
+
+## Panel Mode (2026-11-26, SS 5.0.556)
+
+- Preferences › Defaults › Panel Mode offers Flexible Panel Mode (the default), Single Panel
+  Mode and Multiple Panel Mode.
+- Single: opening Panels › Modify after Panels › Transform leaves only Modify open.
+- Multiple: the same two open stacked in one column, Modify above Transform, each with its own
+  header and close box.

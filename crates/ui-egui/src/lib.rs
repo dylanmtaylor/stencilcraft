@@ -688,6 +688,9 @@ fn shape_visual(
 ///
 /// Headless-testable: the only egui requirement is a `Painter`, which tests can
 /// obtain via `egui::Context::begin_pass`-style setup or a scratch painter.
+/// The ink of a guide layer's lines.
+pub const GUIDE_LAYER_INK: egui::Color32 = egui::Color32::from_rgb(140, 146, 158);
+
 pub fn paint_document(
     painter: &egui::Painter,
     clip: egui::Rect,
@@ -821,6 +824,13 @@ pub fn paint_document(
             if options.outline_view {
                 width = 1.0;
             }
+            // A guide layer (shown, never cut) draws in thin grey dashes, so a sizing
+            // background never reads as a cut line.
+            let guide = layer.template && !selection.selected_shapes.contains(&shape.id);
+            if guide {
+                color = GUIDE_LAYER_INK;
+                width = 1.0;
+            }
             if selection.selected_shapes.contains(&shape.id) {
                 color = palette.selection;
                 width = width.max(if options.outline_view { 1.5 } else { 2.5 });
@@ -848,7 +858,11 @@ pub fn paint_document(
                 {
                     screen.push(view.world_to_screen(*first));
                 }
-                painter.add(egui::Shape::line(screen, (width, color)));
+                if guide {
+                    painter.extend(egui::Shape::dashed_line(&screen, (width, color), 6.0, 4.0));
+                } else {
+                    painter.add(egui::Shape::line(screen, (width, color)));
+                }
             }
         }
     }
@@ -2466,6 +2480,46 @@ mod tests {
             panic!("a point gets a square marker: {:?}", shapes[1]);
         };
         assert_eq!(marker.rect.center(), egui::pos2(20.0, 20.0));
+    }
+
+    #[test]
+    fn guide_layers_draw_in_grey_dashes() {
+        let mut doc = stencilcraft_doc::Document::default();
+        let mut path = kurbo::BezPath::new();
+        path.move_to((10.0, 10.0));
+        path.line_to((60.0, 10.0));
+        doc.push_shape(0, path, stencilcraft_doc::CutStyle::Cut)
+            .unwrap();
+        let view = View::default();
+        let clip =
+            egui::Rect::from_min_size(egui::pos2(-500.0, -500.0), egui::vec2(2000.0, 2000.0));
+        let paint = |doc: &stencilcraft_doc::Document| {
+            painted(|p| {
+                paint_document(
+                    p,
+                    clip,
+                    doc,
+                    &view,
+                    CanvasLayers {
+                        backdrop: None,
+                        image_textures: &std::collections::HashMap::new(),
+                    },
+                    CanvasOptions::default(),
+                    &SelectionState::default(),
+                )
+            })
+        };
+        let grey = |shapes: &[egui::Shape]| {
+            shapes.iter().filter(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == GUIDE_LAYER_INK)).count()
+        };
+        assert_eq!(grey(&paint(&doc)), 0, "a cut layer is not grey");
+        if let Some(layer) = doc.layers.first_mut() {
+            layer.template = true;
+        }
+        assert!(
+            grey(&paint(&doc)) > 1,
+            "a guide layer's line is grey dashes"
+        );
     }
 
     #[test]

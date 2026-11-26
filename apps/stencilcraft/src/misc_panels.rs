@@ -170,6 +170,9 @@ impl StencilApp {
                 }
                 hint(ui, "Line");
                 swatch_row(ui, "pref-line", &mut prefs.default_line, true);
+                let _ = Checkbox::new(Bind::bound(&mut prefs.cut_to_page_edge))
+                    .label("Cut to edge of page")
+                    .show(ui);
                 ui.separator();
                 ui.label("Print");
                 let _ = Checkbox::new(Bind::bound(&mut prefs.show_print_preview))

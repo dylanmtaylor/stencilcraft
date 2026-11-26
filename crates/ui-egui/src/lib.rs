@@ -194,6 +194,8 @@ pub struct CanvasOptions {
     pub outline_view: bool,
     /// View › Show Cut Border: the area the machine can cut, just inside the page.
     pub cut_border: bool,
+    /// Preferences › Cut to Edge of Page: the cut border is the page's own edge.
+    pub cut_to_page_edge: bool,
     /// View › Show Print Border: the area a printer can print, for Print & Cut.
     pub print_border: bool,
     /// View › Show Dimensions: the selection's width and height beside it.
@@ -235,6 +237,7 @@ impl Default for CanvasOptions {
             show_dimensions: true,
             page_colour: None,
             page_transparency: 0.0,
+            cut_to_page_edge: false,
         }
     }
 }
@@ -242,6 +245,16 @@ impl Default for CanvasOptions {
 /// How far inside the page Silhouette Studio draws its cut border (measured in SS 5.0.556:
 /// 1.4–1.5 mm on a 12 × 12 in CAMEO page).
 pub const CUT_BORDER_INSET_MM: f64 = 1.5;
+
+/// How far inside the page the cut border runs: Silhouette's 1.5 mm, or none with Cut to Edge of
+/// Page (as SS 5.0.556 draws it, 2026-11-26).
+pub fn cut_border_inset(options: &CanvasOptions) -> f64 {
+    if options.cut_to_page_edge {
+        0.0
+    } else {
+        CUT_BORDER_INSET_MM
+    }
+}
 
 /// The print border's inset: a typical printer's unprintable margin, a quarter inch.
 pub const PRINT_BORDER_INSET_MM: f64 = 6.35;
@@ -809,7 +822,7 @@ pub fn paint_document(
     }
 
     if options.cut_border
-        && let Some(points) = board_inset_screen(doc, view, CUT_BORDER_INSET_MM)
+        && let Some(points) = board_inset_screen(doc, view, cut_border_inset(&options))
     {
         painter.add(egui::Shape::line(
             points,
@@ -2089,6 +2102,14 @@ mod tests {
         assert_eq!(light.accent, Tokens::ACCENT_LIGHT);
         assert_eq!(dark.selection, Tokens::SELECTION);
         assert_eq!(light.selection, Tokens::SELECTION);
+    }
+
+    #[test]
+    fn cut_to_page_edge_moves_the_border_to_the_edge() {
+        let mut options = CanvasOptions::default();
+        assert_eq!(cut_border_inset(&options), CUT_BORDER_INSET_MM);
+        options.cut_to_page_edge = true;
+        assert_eq!(cut_border_inset(&options), 0.0);
     }
 
     #[test]

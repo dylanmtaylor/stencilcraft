@@ -275,3 +275,10 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   the bounding box unchanged and lengthened the dashed fold segments along the bottom edge
   (one at each end). The converted shape shows red handles at the middle of its left and
   right sides, likely for dragging the fold.
+
+## Cut to Edge of Page, Pop up's Strut Width (2026-11-26, SS 5.0.556)
+
+- Preferences › Defaults › Cut to Edge of Page on: the red cut border moves from just inside
+  the page (1.5 mm) to the page's own edge.
+- Pop up's Strut Width raised to 0.5 in on a converted rectangle changed neither its bounding
+  box nor any line visible at that zoom.

@@ -144,6 +144,38 @@ impl StencilApp {
                         )
                         .id_salt("page-orientation")
                         .show(ui);
+                        ui.label("Page colour");
+                        ui.horizontal_wrapped(|ui| {
+                            use craft_ui::choice::Swatch;
+                            for (i, colour) in crate::colour_panels::PALETTE.iter().enumerate() {
+                                let Some(c) = stencilcraft_ui_egui::parse_hex_colour(colour) else {
+                                    continue;
+                                };
+                                let picked = prefs.page_colour.as_deref() == Some(*colour)
+                                    || (prefs.page_colour.is_none() && *colour == "#ffffff");
+                                if Swatch::new(*colour, craft_theme::Srgba::from(c))
+                                    .id_salt(format!("page-colour-{i}"))
+                                    .size(craft_theme::ControlSize::Sm)
+                                    .selected(picked)
+                                    .show(ui)
+                                    .clicked
+                                {
+                                    prefs.page_colour =
+                                        (*colour != "#ffffff").then(|| (*colour).to_string());
+                                }
+                            }
+                        });
+                        labelled(ui, "Transparency", |ui| {
+                            number(
+                                ui,
+                                "page-transparency",
+                                "Page transparency",
+                                &mut prefs.page_transparency,
+                                0.0..=100.0,
+                                "{n} %",
+                                &numbers,
+                            );
+                        });
                         labelled(ui, "Rotate View", |ui| {
                             let _ = Segmented::new(
                                 "Rotate view",

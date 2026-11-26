@@ -198,6 +198,25 @@ pub struct CanvasOptions {
     pub print_border: bool,
     /// View › Show Dimensions: the selection's width and height beside it.
     pub show_dimensions: bool,
+    /// Page Setup's page colour (`#rrggbb`); the paper white when `None`.
+    pub page_colour: Option<[u8; 3]>,
+    /// Page Setup's page transparency, 0 (opaque) to 100 % (the mat shows through).
+    pub page_transparency: f64,
+}
+
+/// The page's fill: Page Setup's colour (else `board`) with its transparency.
+pub fn page_fill(board: egui::Color32, options: &CanvasOptions) -> egui::Color32 {
+    let [r, g, b] = options
+        .page_colour
+        .unwrap_or([board.r(), board.g(), board.b()]);
+    let t = if options.page_transparency.is_finite() {
+        options.page_transparency.clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    // In 0..=255 after the clamp, so the cast is exact.
+    let alpha = (255.0 * (1.0 - t / 100.0)).round() as u8;
+    egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
 }
 
 impl Default for CanvasOptions {
@@ -214,6 +233,8 @@ impl Default for CanvasOptions {
             cut_border: true,
             print_border: false,
             show_dimensions: true,
+            page_colour: None,
+            page_transparency: 0.0,
         }
     }
 }
@@ -734,7 +755,7 @@ pub fn paint_document(
         paint_mat(painter, view, backdrop, palette);
     }
     let page = view.board_rect_screen(doc);
-    painter.rect_filled(page, 0.0, palette.board);
+    painter.rect_filled(page, 0.0, page_fill(palette.board, &options));
     painter.rect_stroke(
         page,
         0.0,
@@ -2068,6 +2089,19 @@ mod tests {
         assert_eq!(light.accent, Tokens::ACCENT_LIGHT);
         assert_eq!(dark.selection, Tokens::SELECTION);
         assert_eq!(light.selection, Tokens::SELECTION);
+    }
+
+    #[test]
+    fn page_fill_takes_the_colour_and_transparency() {
+        let white = egui::Color32::WHITE;
+        let mut options = CanvasOptions::default();
+        assert_eq!(page_fill(white, &options), white);
+        options.page_colour = Some([255, 0, 0]);
+        options.page_transparency = 50.0;
+        let fill = page_fill(white, &options);
+        assert_eq!(fill.a(), 128);
+        options.page_transparency = f64::NAN;
+        assert_eq!(page_fill(white, &options).a(), 255, "a bad value is opaque");
     }
 
     #[test]

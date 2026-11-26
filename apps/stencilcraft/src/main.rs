@@ -134,6 +134,10 @@ pub struct UserPrefs {
     /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
     /// larger than the mat's usable area.
     pub constrain_media: bool,
+    /// Page Setup › page colour (`#rrggbb`); paper white when `None`. View only.
+    pub page_colour: Option<String>,
+    /// Page Setup › Transparency, 0 (opaque) to 100 %. View only.
+    pub page_transparency: f64,
     /// Preferences › Import › DXF Open: Fit to Page (Silhouette's default) or As-is.
     pub dxf_fit_to_page: bool,
     /// Preferences › Import › Join lines into polylines (endpoints within 0.05 mm).
@@ -183,6 +187,8 @@ impl Default for UserPrefs {
             recent_fonts: Vec::new(),
             spelling_words: Vec::new(),
             constrain_media: true,
+            page_colour: None,
+            page_transparency: 0.0,
             dxf_fit_to_page: true,
             import_join_lines: true,
             png_autotrace: true,
@@ -6283,6 +6289,13 @@ impl StencilApp {
                     print_cut_marks: self.prefs.print_cut_marks,
                     mark_geometry: self.prefs.marks.geometry(),
                     four_marks: self.prefs.marks.four_marks,
+                    page_colour: self
+                        .prefs
+                        .page_colour
+                        .as_deref()
+                        .and_then(stencilcraft_ui_egui::parse_hex_colour)
+                        .map(|c| [c.r(), c.g(), c.b()]),
+                    page_transparency: self.prefs.page_transparency,
                     show_selection_bounds: true,
                     theme: self.theme,
                     outline_view: self.prefs.outline_view,

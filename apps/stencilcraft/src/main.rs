@@ -1607,6 +1607,10 @@ pub struct SendTab {
     pub overcut_mm: f64,
     pub weld: bool,
     pub track_enhancing: bool,
+    /// Designs waiting to be cut one after another (Silhouette Business's job queue).
+    pub queue: Vec<send_modes::QueuedJob>,
+    /// How many times Add to Queue adds the current design.
+    pub queue_repeat: u8,
 }
 
 impl Default for SendTab {
@@ -1643,6 +1647,8 @@ impl Default for SendTab {
             overcut_mm: 0.0,
             weld: false,
             track_enhancing: false,
+            queue: Vec::new(),
+            queue_repeat: 1,
         }
     }
 }
@@ -5658,7 +5664,7 @@ impl StencilApp {
     }
 
     /// Run cut jobs one after another in the background (a by-colour send has one per row).
-    fn start_hardware_jobs(
+    pub fn start_hardware_jobs(
         &mut self,
         jobs: Vec<(
             stencilcraft_doc::Document,
@@ -6158,6 +6164,7 @@ impl StencilApp {
             }
         }
         self.send_advanced_ui(ui);
+        self.send_queue_ui(ui);
         self.custom_materials_ui(ui);
     }
 

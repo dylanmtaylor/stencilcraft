@@ -126,6 +126,17 @@ pub fn row_document(doc: &Document, mode: SendMode, key: &str) -> Document {
     out
 }
 
+/// The most jobs the queue holds.
+pub const MAX_QUEUE: usize = 100;
+
+/// A design waiting in the job queue: its send jobs as they were when it was added.
+#[derive(Clone, Debug)]
+pub struct QueuedJob {
+    pub name: String,
+    pub jobs: Vec<(Document, stencilcraft_engine::HardwareCommand)>,
+    pub repeat: u8,
+}
+
 impl StencilApp {
     /// The Send mode chooser and, outside Standard, the rows with their settings.
     pub fn send_mode_ui(&mut self, ui: &mut egui::Ui) {
@@ -207,6 +218,93 @@ impl StencilApp {
             });
             ui.checkbox(&mut self.send.weld, "Weld overlapping shapes when cutting");
             ui.checkbox(&mut self.send.track_enhancing, "Track enhancing");
+        });
+    }
+
+    /// Add the design as it is now to the queue, `times` copies in a row.
+    pub fn queue_current(&mut self, times: u8) {
+        let room = MAX_QUEUE.saturating_sub(self.send.queue.len());
+        if room == 0 {
+            self.status = format!("the queue holds at most {MAX_QUEUE} jobs");
+            return;
+        }
+        let name =
+            crate::doc_tabs::tab_name(self.open_path.as_deref(), &self.engine.doc.meta.title);
+        self.send.queue.push(QueuedJob {
+            name: if name.is_empty() {
+                "Untitled".to_string()
+            } else {
+                name
+            },
+            jobs: self.send_jobs(true),
+            repeat: times.clamp(1, 99),
+        });
+        self.status = format!("{} in the queue", self.send.queue.len());
+    }
+
+    /// Every queued job in order, each repeated as asked.
+    pub fn queue_jobs(&self) -> Vec<(Document, stencilcraft_engine::HardwareCommand)> {
+        self.send
+            .queue
+            .iter()
+            .flat_map(|q| (0..q.repeat).flat_map(move |_| q.jobs.iter().cloned()))
+            .collect()
+    }
+
+    /// The Send tab's job queue: add the open design, see and remove queued ones, send all.
+    pub fn send_queue_ui(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label("Job queue");
+        let numbers = self.locale_numbers.clone();
+        ui.horizontal(|ui| {
+            ui.label("Copies");
+            let mut times = f64::from(self.send.queue_repeat);
+            crate::panels::number(
+                ui,
+                "send-queue-repeat",
+                "Copies",
+                &mut times,
+                1.0..=99.0,
+                "{n}",
+                &numbers,
+            );
+            self.send.queue_repeat = times.round().clamp(1.0, 99.0) as u8;
+            if ui.button("Add to Queue").clicked() {
+                self.queue_current(self.send.queue_repeat);
+            }
+        });
+        let mut remove = None;
+        for (i, job) in self.send.queue.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}. {} × {}", i + 1, job.name, job.repeat));
+                if ui.small_button("Remove").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove.filter(|&i| i < self.send.queue.len()) {
+            self.send.queue.remove(i);
+        }
+        let ready = !self.send.queue.is_empty() && !self.send.busy;
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(ready, egui::Button::new("Send Queue"))
+                .clicked()
+            {
+                if self.cutter_chosen() {
+                    let jobs = self.queue_jobs();
+                    self.send.queue.clear();
+                    self.start_hardware_jobs(jobs, ui.ctx().clone());
+                } else {
+                    self.status = "choose a cutter in the Send tab first".to_string();
+                }
+            }
+            if ui
+                .add_enabled(ready, egui::Button::new("Clear Queue"))
+                .clicked()
+            {
+                self.send.queue.clear();
+            }
         });
     }
 
@@ -496,6 +594,26 @@ impl StencilApp {
 
 #[cfg(test)]
 mod send_assign_tests {
+
+    #[test]
+    fn the_job_queue_keeps_designs_in_order_with_their_copies() {
+        let mut app = StencilApp::new(None);
+        app.queue_current(2);
+        app.engine.doc.meta.title = "Second".into();
+        app.queue_current(0);
+        assert_eq!(app.send.queue.len(), 2);
+        assert_eq!(app.send.queue[1].repeat, 1, "at least one copy");
+        assert_eq!(app.send.queue[1].name, "Second");
+        assert_eq!(app.queue_jobs().len(), 3);
+        app.send.queue = vec![app.send.queue[0].clone(); MAX_QUEUE];
+        app.queue_current(1);
+        assert_eq!(
+            app.send.queue.len(),
+            MAX_QUEUE,
+            "a full queue takes no more"
+        );
+    }
+
     use super::*;
 
     #[test]

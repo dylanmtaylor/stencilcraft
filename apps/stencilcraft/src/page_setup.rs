@@ -62,6 +62,12 @@ impl StencilApp {
         let mut landscape = width > height;
         let mut turns = self.view.quarter_turns % 4;
         let mut mat = self.mat;
+        let mat_before = self.mat;
+        let mut model = self.send.model;
+        let model_entries: Vec<Entry<stencilcraft_machine::Model>> = crate::MODEL_CHOICES
+            .iter()
+            .map(|(m, label)| Entry::new(*m, *label))
+            .collect();
         let mut prefs = self.prefs.clone();
         let snap = self.engine.doc.snap.clone();
         let (mut snap_grid, mut smart, mut tolerance) =
@@ -90,11 +96,19 @@ impl StencilApp {
                 let _ = Section::new("Page")
                     .id_salt("page-setup-page")
                     .show(ui, |ui, _| {
+                        labelled(ui, "Machine", |ui| {
+                            let _ = Select::new("Machine", Bind::bound(&mut model), &model_entries)
+                                .id_salt("page-machine")
+                                .show(ui);
+                        });
                         labelled(ui, "Cutting Mat", |ui| {
                             let _ = Select::new("Cutting mat", Bind::bound(&mut mat), &mat_entries)
                                 .id_salt("page-mat")
                                 .show(ui);
                         });
+                        let _ = Checkbox::new(Bind::bound(&mut prefs.constrain_media))
+                            .label("Constrain Media to Cutting Mat")
+                            .show(ui);
                         labelled(ui, "Media Size", |ui| {
                             let _ =
                                 Select::new("Media size", Bind::bound(&mut preset), &media_entries)
@@ -195,16 +209,31 @@ impl StencilApp {
             });
 
         self.mat = mat;
+        self.send.model = model;
+        let constrain = prefs.constrain_media;
+        let mut target = None;
         if preset != before_preset {
             if let Some((pw, ph)) = preset.size_mm() {
                 // Keep the page's current orientation.
-                let (pw, ph) = if landscape { (ph, pw) } else { (pw, ph) };
-                self.set_board(pw, ph);
+                target = Some(if landscape { (ph, pw) } else { (pw, ph) });
             }
         } else if (w - width).abs() > 1e-9 || (h - height).abs() > 1e-9 {
-            self.set_board(w, h);
+            target = Some((w, h));
         } else if landscape != (width > height) && (width - height).abs() > 1e-9 {
-            self.set_board(height, width);
+            target = Some((height, width));
+        } else if constrain && (!self.prefs.constrain_media || mat != mat_before) {
+            // The constraint or the mat changed: fit the page as it is.
+            target = Some((width, height));
+        }
+        if let Some((pw, ph)) = target {
+            let (pw, ph) = if constrain {
+                constrain_to_mat(pw, ph, mat)
+            } else {
+                (pw, ph)
+            };
+            if (pw - width).abs() > 1e-9 || (ph - height).abs() > 1e-9 {
+                self.set_board(pw, ph);
+            }
         }
         if turns != self.view.quarter_turns % 4 {
             self.pending_view_command = Some(CanvasViewCommand::Rotate(turns));
@@ -251,9 +280,36 @@ impl StencilApp {
     }
 }
 
+/// The page `width` × `height` (mm) brought within `mat`'s usable area; any size without a
+/// mat.
+pub fn constrain_to_mat(width: f64, height: f64, mat: stencilcraft_machine::Mat) -> (f64, f64) {
+    let (down, right) = mat.extent_mm();
+    if down <= 0.0 || right <= 0.0 {
+        return (width, height);
+    }
+    (width.min(right), height.min(down))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_is_constrained_to_the_mat() {
+        use stencilcraft_machine::Mat;
+        let (w, h) = constrain_to_mat(400.0, 500.0, Mat::Cameo12x12);
+        assert!((w - 304.8).abs() < 1e-9 && (h - 304.8).abs() < 1e-9);
+        let (w, h) = constrain_to_mat(400.0, 500.0, Mat::Cameo12x24);
+        assert!(
+            (w - 304.8).abs() < 1e-9 && (h - 500.0).abs() < 1e-9,
+            "24 in down"
+        );
+        assert_eq!(constrain_to_mat(400.0, 500.0, Mat::None), (400.0, 500.0));
+        assert_eq!(
+            constrain_to_mat(100.0, 150.0, Mat::Cameo12x12),
+            (100.0, 150.0)
+        );
+    }
 
     #[test]
     fn presets_match_either_orientation() {

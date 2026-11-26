@@ -36,6 +36,10 @@ pub enum EffectKind {
     ReduceColours,
     Despeckle,
     Smooth,
+    ObjectOnPath,
+    AdvancedReplicate,
+    LeatherPunch,
+    ReleaseEffects,
 }
 
 /// An Effect or Panels menu item that opens the Effects panel on an effect, maybe preset.
@@ -59,6 +63,10 @@ pub enum EffectMenu {
     ReduceColours,
     Despeckle,
     Smooth,
+    ObjectOnPath,
+    AdvancedReplicate,
+    LeatherPunch,
+    ReleaseEffects,
 }
 
 impl EffectMenu {
@@ -86,6 +94,10 @@ impl EffectMenu {
             Self::ReduceColours => (EffectKind::ReduceColours, Vec::new()),
             Self::Despeckle => (EffectKind::Despeckle, Vec::new()),
             Self::Smooth => (EffectKind::Smooth, Vec::new()),
+            Self::ObjectOnPath => (EffectKind::ObjectOnPath, Vec::new()),
+            Self::AdvancedReplicate => (EffectKind::AdvancedReplicate, Vec::new()),
+            Self::LeatherPunch => (EffectKind::LeatherPunch, Vec::new()),
+            Self::ReleaseEffects => (EffectKind::ReleaseEffects, Vec::new()),
         }
     }
 }
@@ -101,6 +113,9 @@ enum Target {
     Image,
     /// Nothing: the effect makes new shapes on the page.
     Page,
+    /// Two or more shapes: the largest is the path (`path_id`), the others are copied along
+    /// it (`ids`).
+    OnPath,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -216,6 +231,14 @@ const BRIDGE_DIRECTIONS: &[(&str, &str)] = &[
     ("horizontal", "Left and right"),
     ("both", "All four sides"),
 ];
+const REPLICATE_DIRECTIONS: &[(&str, &str)] = &[
+    ("on-top", "On top"),
+    ("left", "Left"),
+    ("right", "Right"),
+    ("above", "Above"),
+    ("below", "Below"),
+    ("angle", "At an angle"),
+];
 const WEED_DIRECTIONS: &[(&str, &str)] = &[
     ("vertical", "Vertical"),
     ("horizontal", "Horizontal"),
@@ -231,6 +254,59 @@ struct EffectDef {
 }
 
 const EFFECTS: &[EffectDef] = &[
+    EffectDef {
+        kind: EffectKind::ObjectOnPath,
+        title: "Object on Path",
+        command: "generate.object-on-path",
+        target: Target::OnPath,
+        fields: &[
+            Field {
+                key: "perpendicular",
+                label: "Perpendicular",
+                kind: Kind::Bool,
+            },
+            num("start_angle_deg", "Start angle", -360.0, 360.0, "°"),
+            num("increment_angle_deg", "Increment angle", -360.0, 360.0, "°"),
+            num("start_position_mm", "Start position", 0.0, 100_000.0, "mm"),
+            num(
+                "section_length_mm",
+                "Section length (0 = all)",
+                0.0,
+                100_000.0,
+                "mm",
+            ),
+            int("count", "Number of repeats", 1.0, 10_000.0),
+        ],
+    },
+    EffectDef {
+        kind: EffectKind::AdvancedReplicate,
+        title: "Advanced Replicate",
+        command: "generate.replicate",
+        target: Target::Shapes,
+        fields: &[
+            int("count", "Number of copies", 1.0, 1000.0),
+            choice("direction", "Position each copy", REPLICATE_DIRECTIONS),
+            num("angle_deg", "Angle", -360.0, 360.0, "°"),
+            num("gap_mm", "Gap", 0.0, 10_000.0, "mm"),
+        ],
+    },
+    EffectDef {
+        kind: EffectKind::LeatherPunch,
+        title: "Leather Punch",
+        command: "generate.punch",
+        target: Target::Shapes,
+        fields: &[
+            num("diameter_mm", "Punch size", 0.5, 50.0, "mm"),
+            num("spacing_mm", "Spacing", 0.5, 1000.0, "mm"),
+        ],
+    },
+    EffectDef {
+        kind: EffectKind::ReleaseEffects,
+        title: "Release Effects",
+        command: "generate.release",
+        target: Target::Shapes,
+        fields: &[],
+    },
     EffectDef {
         kind: EffectKind::Lattice,
         title: "Lattice",
@@ -457,6 +533,16 @@ fn defaults(kind: EffectKind) -> Map<String, Value> {
             Ok(json!({"hole": "square", "hole_mm": 5.0, "wall_mm": 1.5, "border_mm": 3.0}))
         }
         EffectKind::ImageEffects => serde_json::to_value(stencilcraft_raster::Adjust::default()),
+        EffectKind::ObjectOnPath => {
+            serde_json::to_value(stencilcraft_generate::along::AlongParams::default())
+        }
+        // Silhouette's Advanced Replicate opens at one copy to the right; its Leather Punch
+        // at a 3 mm (0.118 in) punch every 3.5 mm (0.138 in).
+        EffectKind::AdvancedReplicate => {
+            Ok(json!({"count": 1, "direction": "right", "angle_deg": 0.0, "gap_mm": 0.0}))
+        }
+        EffectKind::LeatherPunch => Ok(json!({"diameter_mm": 3.0, "spacing_mm": 3.5})),
+        EffectKind::ReleaseEffects => Ok(json!({})),
     };
     match value {
         Ok(Value::Object(map)) => map,
@@ -525,6 +611,33 @@ pub struct EffectPreview {
 }
 
 impl StencilApp {
+    /// Object on Path's two parts of the selection: the shape with the largest bounds is the
+    /// path, the others are the objects copied along it.
+    fn object_and_path(&self) -> Result<(u64, Vec<u64>), String> {
+        if self.selected_shapes.len() < 2 {
+            return Err("Select the objects and the path to place them on.".into());
+        }
+        let area = |id: &u64| {
+            self.engine.doc.get_shape(*id).map_or(0.0, |s| {
+                let b = stencilcraft_geom::Shape::bounding_box(&s.path);
+                b.width() * b.height()
+            })
+        };
+        let path = self
+            .selected_shapes
+            .iter()
+            .copied()
+            .max_by(|a, b| area(a).total_cmp(&area(b)))
+            .ok_or("Select the objects and the path to place them on.")?;
+        let ids = self
+            .selected_shapes
+            .iter()
+            .copied()
+            .filter(|id| *id != path)
+            .collect();
+        Ok((path, ids))
+    }
+
     /// The command for `kind` with `params` on the current selection, as JSON.
     fn effect_command(
         &self,
@@ -549,6 +662,11 @@ impl StencilApp {
             Target::Image => {
                 let id = self.selected_image.ok_or("Select a placed image.")?;
                 params.insert("id".into(), json!(id));
+            }
+            Target::OnPath => {
+                let (path_id, ids) = self.object_and_path()?;
+                params.insert("path_id".into(), json!(path_id));
+                params.insert("ids".into(), json!(ids));
             }
             Target::Page => {
                 if d.kind == EffectKind::PopupCard {
@@ -782,10 +900,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn object_on_path_copies_the_small_shapes_along_the_largest() {
+        let mut app = StencilApp::new(None);
+        for (x, y, w, h) in [(0.0, 0.0, 100.0, 60.0), (10.0, 10.0, 4.0, 4.0)] {
+            app.run_command(Command::ShapeAddRect {
+                x,
+                y,
+                width: w,
+                height: h,
+            });
+        }
+        let ids: Vec<u64> = app.engine.doc.shapes().map(|(_, s)| s.id).collect();
+        app.set_selection(ids.clone());
+        let (path, objects) = app.object_and_path().expect("two shapes");
+        assert_eq!(path, ids[0], "the larger rectangle is the path");
+        assert_eq!(objects, vec![ids[1]]);
+        let mut params = defaults(EffectKind::ObjectOnPath);
+        params.insert("count".into(), json!(8));
+        app.effects.params.insert(EffectKind::ObjectOnPath, params);
+        app.apply_effect(EffectKind::ObjectOnPath);
+        assert!(
+            app.engine.doc.shapes().count() >= 2 + 8 - 1,
+            "copies along the path"
+        );
+        app.set_selection([ids[0]]);
+        assert!(app.object_and_path().is_err(), "one shape is not enough");
+    }
+
+    #[test]
     fn every_effect_default_builds_a_valid_command() {
         for d in EFFECTS {
             let mut params = defaults(d.kind);
-            assert!(!params.is_empty(), "{}", d.title);
+            assert!(!params.is_empty() || d.fields.is_empty(), "{}", d.title);
             for field in d.fields {
                 assert!(
                     get(&params, field.key).is_some(),
@@ -800,6 +946,10 @@ mod tests {
                 }
                 Target::Shape | Target::Image => {
                     params.insert("id".into(), json!(1));
+                }
+                Target::OnPath => {
+                    params.insert("ids".into(), json!([1]));
+                    params.insert("path_id".into(), json!(2));
                 }
                 Target::Page => {}
             }

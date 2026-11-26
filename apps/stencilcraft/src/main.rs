@@ -131,6 +131,9 @@ pub struct UserPrefs {
     pub recent_fonts: Vec<String>,
     /// Spelling: the words the person added to the dictionary.
     pub spelling_words: Vec<String>,
+    /// Page Setup › Constrain Media to Cutting Mat (Silhouette's default: on): the page is no
+    /// larger than the mat's usable area.
+    pub constrain_media: bool,
     /// Preferences › Import › DXF Open: Fit to Page (Silhouette's default) or As-is.
     pub dxf_fit_to_page: bool,
     /// Preferences › Import › Join lines into polylines (endpoints within 0.05 mm).
@@ -179,6 +182,7 @@ impl Default for UserPrefs {
             mat_id: None,
             recent_fonts: Vec::new(),
             spelling_words: Vec::new(),
+            constrain_media: true,
             dxf_fit_to_page: true,
             import_join_lines: true,
             png_autotrace: true,

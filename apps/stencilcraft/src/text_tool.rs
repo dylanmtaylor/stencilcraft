@@ -221,7 +221,7 @@ impl StencilApp {
         }
     }
 
-    fn new_text_spec(&self, text: String, at: Point) -> TextSpec {
+    pub(crate) fn new_text_spec(&self, text: String, at: Point) -> TextSpec {
         TextSpec {
             text,
             font: self.text_font(),
@@ -240,7 +240,7 @@ impl StencilApp {
         }
     }
 
-    fn text_spec_of(&self, id: u64) -> Option<TextSpec> {
+    pub(crate) fn text_spec_of(&self, id: u64) -> Option<TextSpec> {
         self.engine
             .doc
             .get_shape(id)

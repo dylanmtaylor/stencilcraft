@@ -235,15 +235,6 @@ fn todo(label: &str) -> MenuEntry<A> {
         .into()
 }
 
-/// A planned item with its future shortcut shown.
-fn todo_key(label: &str, modifiers: Modifiers, key: Key) -> MenuEntry<A> {
-    item(label, A::NotYet)
-        .shortcut(kbd(modifiers, key))
-        .enabled(false)
-        .tooltip(NOT_YET)
-        .into()
-}
-
 /// An editing action enabled only when `enabled`.
 fn edit(label: &str, action: E, enabled: bool) -> MenuEntry<A> {
     when(label, A::Edit(action), enabled)
@@ -727,7 +718,9 @@ fn type_menu(app: &StencilApp) -> Vec<MenuEntry<A>> {
         when("Ungroup to Letters", A::TextUngroupLetters, text),
         SEP,
         item("Find Font…", A::ShowPanel(P::TextStyle)).into(),
-        todo_key("Spelling…", NONE, Key::F7),
+        item("Spelling…", A::CheckSpelling)
+            .shortcut(kbd(NONE, Key::F7))
+            .into(),
     ]
 }
 
@@ -974,7 +967,7 @@ fn panels(app: &StencilApp) -> Vec<MenuEntry<A>> {
         item("Trace", A::ShowPanel(P::Trace)).into(),
         eff("Image Effects", M::ImageEffects),
         item("Text Style", A::ShowPanel(P::TextStyle)).into(),
-        todo("Spelling"),
+        item("Spelling", A::CheckSpelling).into(),
         item("Transform", A::ShowPanel(P::Transform)).into(),
         item("Replicate", A::ShowPanel(P::Replicate)).into(),
         item("Modify", A::ShowPanel(P::Modify)).into(),
@@ -1231,13 +1224,11 @@ mod tests {
             );
         }
         // Items still waiting for an engine command stay planned.
-        for planned in ["Detach Lines", "Spelling…"] {
-            assert!(
-                items
-                    .iter()
-                    .any(|(l, enabled, command)| l == planned && !enabled && *command == A::NotYet),
-                "{planned} should stay planned"
-            );
-        }
+        assert!(
+            items.iter().any(|(l, enabled, command)| l == "Detach Lines"
+                && !enabled
+                && *command == A::NotYet),
+            "Detach Lines should stay planned"
+        );
     }
 }

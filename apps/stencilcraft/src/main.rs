@@ -66,6 +66,7 @@ mod freehand;
 mod glyph_source;
 mod graphic_styles;
 mod home;
+mod spelling;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
@@ -127,6 +128,8 @@ pub struct UserPrefs {
     pub mat_id: Option<String>,
     /// Text Style › Recently used font families, newest first.
     pub recent_fonts: Vec<String>,
+    /// Spelling: the words the person added to the dictionary.
+    pub spelling_words: Vec<String>,
     /// Return to the Select tool after drawing a shape (else the tool stays, as by default).
     pub select_after_drawing: bool,
     /// Page Setup › Smart Snap only within media: off the page only the grid and guides snap.
@@ -167,6 +170,7 @@ impl Default for UserPrefs {
             media_id: None,
             mat_id: None,
             recent_fonts: Vec::new(),
+            spelling_words: Vec::new(),
             select_after_drawing: false,
             snap_within_media: false,
             graphic_styles: Vec::new(),
@@ -843,6 +847,8 @@ pub enum TopMenuAction {
     HelpManual,
     HelpCheatsheet,
     HelpAbout,
+    /// Type › Spelling…: the Check Spelling dialog.
+    CheckSpelling,
 }
 
 fn apply_edit<T: Clone>(
@@ -1358,6 +1364,8 @@ pub struct StencilApp {
     pub erase_colour: erase_colour::EraseColourState,
     /// Home: the start screen in place of the design.
     pub home: home::HomeState,
+    /// Type › Spelling…, while open.
+    pub spelling: Option<craft_text::ui::spelling::CheckSpellingDialog>,
     pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
@@ -1665,6 +1673,7 @@ impl StencilApp {
             pixscan: pixscan::PixScanState::default(),
             erase_colour: erase_colour::EraseColourState::default(),
             home: home::HomeState::default(),
+            spelling: None,
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -3035,6 +3044,7 @@ impl StencilApp {
         // Typing on the canvas takes every plain key; Cmd shortcuts other than undo still work.
         self.handle_text_session_keys(ctx);
         if self.handle_distort_keys(ctx)
+            || self.handle_spelling_key(ctx)
             || self.handle_click_draft_keys(ctx)
             || self.handle_clipboard_events(ctx)
         {
@@ -4202,6 +4212,7 @@ impl StencilApp {
                 self.save_prefs();
             }
             TopMenuAction::ResetWorkspace => self.reset_workspace(),
+            TopMenuAction::CheckSpelling => self.open_spelling(),
             TopMenuAction::SetTheme(theme) => {
                 self.theme = theme;
                 self.save_prefs();
@@ -7565,6 +7576,7 @@ impl eframe::App for StencilApp {
         }
         content.app.retain_valid_selection();
         content.app.new_document_dialog(ui);
+        content.app.spelling_dialog(ui);
         ui.ctx().request_repaint();
     }
 }

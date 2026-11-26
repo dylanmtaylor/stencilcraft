@@ -1587,6 +1587,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-text"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=90e14375a4a461fb42eba802846250b2473366f7#90e14375a4a461fb42eba802846250b2473366f7"
+dependencies = [
+ "craft-behavior",
+ "craft-host",
+ "craft-keymap",
+ "craft-theme",
+ "craft-ui",
+ "egui",
+ "miniz_oxide 0.8.9",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "craft-theme"
 version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=90e14375a4a461fb42eba802846250b2473366f7#90e14375a4a461fb42eba802846250b2473366f7"
@@ -6019,6 +6035,7 @@ dependencies = [
  "craft-keymap",
  "craft-raster-codecs",
  "craft-settings",
+ "craft-text",
  "craft-theme",
  "craft-ui",
  "craft-window",

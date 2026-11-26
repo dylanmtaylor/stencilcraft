@@ -20,6 +20,8 @@ craft-ui = { workspace = true, features = ["app"] }
 craft-behavior = { workspace = true }
 craft-host = { workspace = true }
 craft-font-manager = { workspace = true, features = ["ui"] }
+# Type › Spelling…: the Check Spelling dialog and the bundled English word list.
+craft-text = { workspace = true, default-features = false, features = ["ui"] }
 craft-keymap = { workspace = true }
 craft-window = { workspace = true, features = ["ui"] }
 eframe = { workspace = true }

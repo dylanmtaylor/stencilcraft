@@ -409,3 +409,18 @@ Silhouette, replacing Silhouette's bytes one record at a time.
   - The trailer after 5153.
   - Whether Silhouette needs the 32-hex id and the extension key exactly, to test by
     opening a generated file.
+- **Whole root generated (2026-11-26).** The empty document's root record now regenerates byte
+  for byte, 4,935 of its 5,813 bytes from decoded fields; only the "Default Layer" object
+  (record 4275) is still taken from the sample.
+  - **The end of the root record:** two empty records, then a `score` and a `template` group.
+    Each group is self-sized and holds two presets: name, index, a fixed 32-hex preset id,
+    two RGBA colours (red 0.963, 0, 0 and blue 0.04, 0.424, 1) and an
+    `offsetter.<group>.layer_name.<n>` key, then f32 0.3, three counts, 1 and 0. After the
+    groups come small records holding f32 1.27, 1.5 and 20.
+  - **The ids:** the four preset ids are the same in every file saved here. One document id
+    in record 4275 changes from save to save.
+  - **Only the root record is needed.** The 2.5 KB after it in section 0 (copies of the page,
+    more material entries) can be dropped, and Silhouette still opens the file with its shapes.
+  - **Opened in Silhouette:** a file with a generated header (magic, section length, the
+    0x3E8 constant, two u64 300 000 000 values) and the generated root opens. With the page
+    set to 100 × 150 mm it shows as Custom, 3.937 × 5.906 in.

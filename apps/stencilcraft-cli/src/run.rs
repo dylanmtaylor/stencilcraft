@@ -391,7 +391,8 @@ mod tests {
             ok.commands,
             vec![stencilcraft_engine::Command::ShapesRotateCopies {
                 ids: vec![1],
-                count: 6
+                count: 6,
+                half_turn: false,
             }]
         );
         let plain = RunRequest::parse(&args(&["--in", "a", "--export", "b"])).unwrap();

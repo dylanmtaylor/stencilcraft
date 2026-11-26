@@ -222,6 +222,40 @@ fn arrow_nudge(ctx: &egui::Context) -> Option<(f64, f64)> {
     })
 }
 
+/// Silhouette's Object › Replicate shortcuts other than Ctrl+Arrow (SS 5.0.556): Shift+Alt+Arrow
+/// mirrors, Ctrl+Shift+F1/F2/F3/F5 rotates 1/2/3/5 copies, Ctrl+Shift/Alt+Right/Down makes a
+/// row/column of three/four, Ctrl+Shift+F fills the page.
+fn replicate_shortcut(input: &mut egui::InputState) -> Option<panels::EditAction> {
+    use panels::{EditAction as E, ScreenSide as S};
+    use stencilcraft_engine::DistributionAxis as D;
+    let shift_alt = egui::Modifiers::SHIFT | egui::Modifiers::ALT;
+    let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+    let cmd_alt = egui::Modifiers::COMMAND | egui::Modifiers::ALT;
+    let table = [
+        (shift_alt, egui::Key::ArrowLeft, E::Mirror(S::Left)),
+        (shift_alt, egui::Key::ArrowRight, E::Mirror(S::Right)),
+        (shift_alt, egui::Key::ArrowUp, E::Mirror(S::Above)),
+        (shift_alt, egui::Key::ArrowDown, E::Mirror(S::Below)),
+        (cmd_shift, egui::Key::F1, E::RotatePreset(1)),
+        (cmd_shift, egui::Key::F2, E::RotatePreset(2)),
+        (cmd_shift, egui::Key::F3, E::RotatePreset(3)),
+        (cmd_shift, egui::Key::F5, E::RotatePreset(5)),
+        (
+            cmd_shift,
+            egui::Key::ArrowRight,
+            E::ArrayOf(D::Horizontal, 3),
+        ),
+        (cmd_alt, egui::Key::ArrowRight, E::ArrayOf(D::Horizontal, 4)),
+        (cmd_shift, egui::Key::ArrowDown, E::ArrayOf(D::Vertical, 3)),
+        (cmd_alt, egui::Key::ArrowDown, E::ArrayOf(D::Vertical, 4)),
+        (cmd_shift, egui::Key::F, E::FillPage),
+    ];
+    table
+        .into_iter()
+        .find(|(mods, key, _)| consume_exact(input, *mods, *key))
+        .map(|(_, _, action)| action)
+}
+
 /// Takes this pass's Escape: from egui's input while one of the app's own widgets has focus,
 /// else the window's Cancel, which the runtime routes Escape to.
 pub(crate) fn take_escape(ctx: &egui::Context) -> bool {
@@ -3314,6 +3348,8 @@ impl StencilApp {
         }) {
             // Silhouette: Ctrl+Arrow duplicates the selection to that side.
             self.handle_edit_action(panels::EditAction::Duplicate(side));
+        } else if let Some(action) = ctx.input_mut(replicate_shortcut) {
+            self.handle_edit_action(action);
         } else if ctx
             .input_mut(|input| consume_exact(input, egui::Modifiers::COMMAND, egui::Key::D))
         {
@@ -8496,6 +8532,34 @@ mod tests {
             assert_eq!(app.engine.doc.shape_count(), 0);
             assert!(app.selected_shapes.is_empty());
         }
+    }
+
+    #[test]
+    fn replicate_shortcuts_make_silhouettes_presets() {
+        let mut app = StencilApp::new(None);
+        app.run_command(Command::ShapeAddRect {
+            x: 10.0,
+            y: 10.0,
+            width: 20.0,
+            height: 4.0,
+        });
+        app.select_latest_shape();
+        let cmd_shift = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        press_key(&mut app, egui::Key::ArrowRight, cmd_shift);
+        assert_eq!(app.engine.doc.shapes().count(), 3, "Row of Three");
+        let bounds =
+            stencilcraft_ui_egui::selected_world_bounds(&app.engine.doc, &app.selected_shapes)
+                .expect("bounds");
+        assert!((bounds.width() - 60.0).abs() < 1e-6, "touching: {bounds:?}");
+        app.select_latest_shape();
+        press_key(&mut app, egui::Key::F3, cmd_shift);
+        assert_eq!(app.engine.doc.shapes().count(), 6, "Rotate Three Copies");
+        press_key(
+            &mut app,
+            egui::Key::ArrowLeft,
+            egui::Modifiers::SHIFT | egui::Modifiers::ALT,
+        );
+        assert!(app.engine.doc.shapes().count() > 6, "Mirror Left");
     }
 
     fn press_key(app: &mut StencilApp, key: egui::Key, modifiers: egui::Modifiers) {

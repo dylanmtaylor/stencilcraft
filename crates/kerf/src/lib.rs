@@ -7,7 +7,10 @@
 //! intersecting) contours and is exact for convex ones; a join that would need a
 //! miter longer than the limit is bevelled instead of spiked. Corners can also be
 //! joined round or bevelled ([`JoinStyle`]), and [`offset_path`] takes a signed
-//! distance, so a negative one is an internal offset. Counters are
+//! distance, so a negative one is an internal offset. A contour that shrinks goes through
+//! VectorCraft's path offsetter, so a feature thinner than twice the distance closes up
+//! (and a pinched neck splits the contour) instead of turning inside out; kerf compensation
+//! still cuts a hole narrower than the kerf on its drawn line. Counters are
 //! detected by point containment against the shape's other contours, not full
 //! winding algebra yet.
 
@@ -230,7 +233,7 @@ pub fn apply_with(doc: &Document, options: &OffsetOptions) -> Result<Document, K
             if shape.style != CutStyle::Cut {
                 continue;
             }
-            shape.path = offset_shape_path(&shape.path, delta, options)?;
+            shape.path = offset_shape_path(&shape.path, delta, options, Collapsed::KeepDrawn)?;
         }
     }
     Ok(out)
@@ -251,7 +254,17 @@ pub fn offset_path(
             "offset distance {distance} mm is not finite"
         )));
     }
-    offset_shape_path(path, distance, options)
+    offset_shape_path(path, distance, options, Collapsed::Remove)
+}
+
+/// What becomes of a contour that closes up entirely when it shrinks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Collapsed {
+    /// An internal offset: the feature is gone.
+    Remove,
+    /// Kerf compensation: a hole narrower than the kerf is still cut, on its drawn line
+    /// (the beam makes it a little larger than drawn), rather than lost.
+    KeepDrawn,
 }
 
 /// Offsets every closed subpath of one path by `delta`, deciding the side via
@@ -260,6 +273,7 @@ fn offset_shape_path(
     path: &kurbo::BezPath,
     delta: f64,
     options: &OffsetOptions,
+    collapsed: Collapsed,
 ) -> Result<kurbo::BezPath, KerfError> {
     // A closed contour drawn back to its start before closing (as rectangles are) repeats
     // its first point; that zero-length edge would put an offset vertex on the original
@@ -283,6 +297,7 @@ fn offset_shape_path(
         })
         .collect();
     let mut moved: Vec<Polyline> = Vec::with_capacity(lines.len());
+    let mut closed_up = false;
     for (i, pl) in lines.iter().enumerate() {
         if !pl.closed || pl.points.len() < 3 {
             moved.push(pl.clone());
@@ -300,10 +315,23 @@ fn offset_shape_path(
             })
             .count();
         let signed = if depth % 2 == 1 { -delta } else { delta };
-        moved.push(Polyline {
-            points: offset_closed_polygon_with(&pl.points, signed, options),
-            closed: true,
-        });
+        if signed < 0.0 {
+            // Shrinking can close up a feature thinner than twice the distance: the vertex
+            // offset would turn it inside out, so a shrink goes through the path offsetter,
+            // which removes what closes and splits a contour where a neck pinches shut.
+            let pieces = shrink_contour(&pl.points, signed, options);
+            if pieces.is_empty() && collapsed == Collapsed::KeepDrawn {
+                moved.push(pl.clone());
+            } else {
+                closed_up |= pieces.is_empty();
+                moved.extend(pieces);
+            }
+        } else {
+            moved.push(Polyline {
+                points: offset_closed_polygon_with(&pl.points, signed, options),
+                closed: true,
+            });
+        }
     }
     // Rebuild as a polyline path: cut machines follow straight steps anyway, so
     // the flattened outline is the honest representation post-compensation.
@@ -321,11 +349,58 @@ fn offset_shape_path(
         }
     }
     if out.elements().is_empty() && !path.elements().is_empty() {
-        return Err(KerfError::Model(
-            "kerf: path had no plottable contours".to_string(),
-        ));
+        return Err(KerfError::Model(if closed_up {
+            format!(
+                "nothing is left: the shape is thinner than twice the {} mm offset",
+                delta.abs()
+            )
+        } else {
+            "the path has no plottable contours".to_string()
+        }));
     }
     Ok(out)
+}
+
+/// The closed contour `points` moved inward by `-delta` (`delta < 0`): every piece left,
+/// none when the contour closes up entirely.
+fn shrink_contour(points: &[Point], delta: f64, options: &OffsetOptions) -> Vec<Polyline> {
+    let mut ring = kurbo::BezPath::new();
+    for (n, p) in points.iter().enumerate() {
+        if n == 0 {
+            ring.move_to(*p);
+        } else {
+            ring.line_to(*p);
+        }
+    }
+    ring.close_path();
+    // The offsetter takes the ring as a solid whichever way it winds: a negative distance
+    // shrinks it.
+    let join = match options.join {
+        JoinStyle::Miter => vectorcraft_pathops::Join::Miter,
+        JoinStyle::Round => vectorcraft_pathops::Join::Round,
+        JoinStyle::Bevel => vectorcraft_pathops::Join::Bevel,
+    };
+    let path = vectorcraft_geom::PathData::from_bezpath(&ring);
+    let out =
+        vectorcraft_pathops::offset_path(&path, delta, join, options.miter_limit).to_bezpath();
+    Polyline::from_path(&out)
+        .into_iter()
+        .map(|mut pl| {
+            // Like the input: no repeated points, no closing point equal to the start.
+            pl.points.dedup_by(|a, b| a.distance(*b) <= 1e-9);
+            while pl.points.len() > 1
+                && pl
+                    .points
+                    .first()
+                    .zip(pl.points.last())
+                    .is_some_and(|(a, b)| a.distance(*b) <= 1e-9)
+            {
+                pl.points.pop();
+            }
+            pl
+        })
+        .filter(|pl| pl.closed && pl.points.len() >= 3 && signed_area(&pl.points).abs() > 1e-12)
+        .collect()
 }
 
 /// Are all the vertices of `pl` inside `ring` (a closed contour)?
@@ -394,6 +469,121 @@ mod closing_segment_tests {
 
 #[cfg(test)]
 mod tests {
+
+    fn closed(points: &[(f64, f64)]) -> kurbo::BezPath {
+        let mut p = kurbo::BezPath::new();
+        for (n, &(x, y)) in points.iter().enumerate() {
+            if n == 0 {
+                p.move_to((x, y));
+            } else {
+                p.line_to((x, y));
+            }
+        }
+        p.close_path();
+        p
+    }
+
+    fn contour_areas(path: &kurbo::BezPath) -> Vec<f64> {
+        Polyline::from_path(path)
+            .into_iter()
+            .filter(|pl| pl.closed)
+            .map(|pl| signed_area(&pl.points).abs())
+            .collect()
+    }
+
+    #[test]
+    fn a_thin_feature_vanishes_instead_of_inverting() {
+        // A 10 × 1 strip shrunk by 0.8 has nothing left.
+        let strip = closed(&[(0.0, 0.0), (10.0, 0.0), (10.0, 1.0), (0.0, 1.0)]);
+        let out = offset_path(&strip, -0.8, &OffsetOptions::default()).unwrap_or_default();
+        let areas = contour_areas(&out);
+        assert!(
+            areas.iter().all(|a| *a < 1e-6),
+            "inverted leftovers: {areas:?}"
+        );
+        // Wound the other way, the same.
+        let clockwise = closed(&[(0.0, 0.0), (0.0, 1.0), (10.0, 1.0), (10.0, 0.0)]);
+        let out = offset_path(&clockwise, -0.8, &OffsetOptions::default()).unwrap_or_default();
+        assert!(contour_areas(&out).iter().all(|a| *a < 1e-6));
+        let shrunk = offset_path(&clockwise, -0.25, &OffsetOptions::default()).unwrap();
+        let areas = contour_areas(&shrunk);
+        assert!(
+            areas.len() == 1 && (areas[0] - 9.5 * 0.5).abs() < 1e-6,
+            "{areas:?}"
+        );
+    }
+
+    #[test]
+    fn a_pinched_shape_splits_where_its_neck_closes() {
+        // Two 10 × 10 squares joined by a 1 mm neck; shrinking by 1 closes the neck and
+        // leaves two 8 × 8 squares.
+        let dumbbell = closed(&[
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 4.5),
+            (20.0, 4.5),
+            (20.0, 0.0),
+            (30.0, 0.0),
+            (30.0, 10.0),
+            (20.0, 10.0),
+            (20.0, 5.5),
+            (10.0, 5.5),
+            (10.0, 10.0),
+            (0.0, 10.0),
+        ]);
+        let out = offset_path(&dumbbell, -1.0, &OffsetOptions::default()).unwrap();
+        let mut areas = contour_areas(&out);
+        areas.retain(|a| *a > 1e-6);
+        assert_eq!(areas.len(), 2, "{areas:?}");
+        assert!(areas.iter().all(|a| (a - 64.0).abs() < 0.5), "{areas:?}");
+    }
+
+    #[test]
+    fn an_offset_that_closes_everything_says_why() {
+        let strip = closed(&[(0.0, 0.0), (10.0, 0.0), (10.0, 1.0), (0.0, 1.0)]);
+        let err = offset_path(&strip, -0.8, &OffsetOptions::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("thinner than twice the 0.8 mm offset"),
+            "{err}"
+        );
+        assert!(!err.to_string().contains("kerf: kerf:"), "{err}");
+    }
+
+    #[test]
+    fn kerf_compensation_keeps_a_hole_narrower_than_the_kerf() {
+        // A 20 × 20 plate with a 0.3 mm slot; a 0.5 mm kerf would close the slot.
+        let mut plate = closed(&[(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]);
+        let slot = closed(&[(5.0, 10.0), (5.0, 10.3), (15.0, 10.3), (15.0, 10.0)]);
+        plate.extend(slot.elements().iter().copied());
+        let out = offset_shape_path(
+            &plate,
+            0.25,
+            &OffsetOptions::default(),
+            Collapsed::KeepDrawn,
+        )
+        .unwrap();
+        let areas = contour_areas(&out);
+        assert_eq!(areas.len(), 2, "the slot is still cut: {areas:?}");
+        assert!(
+            areas.iter().any(|a| (a - 3.0).abs() < 1e-6),
+            "on its drawn line: {areas:?}"
+        );
+        // As an internal design offset the same slot closes.
+        let gone =
+            offset_shape_path(&plate, 0.25, &OffsetOptions::default(), Collapsed::Remove).unwrap();
+        assert_eq!(contour_areas(&gone).len(), 1);
+    }
+
+    #[test]
+    fn a_plain_inward_offset_is_unchanged() {
+        let square = closed(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let out = offset_path(&square, -1.0, &OffsetOptions::default()).unwrap();
+        let areas = contour_areas(&out);
+        assert_eq!(areas.len(), 1);
+        assert!((areas[0] - 64.0).abs() < 1e-6, "{areas:?}");
+    }
+
     use super::*;
     use stencilcraft_doc::{Board, KerfSettings, Layer};
     use stencilcraft_geom::bounds_of_points;

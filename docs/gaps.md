@@ -40,8 +40,10 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
    hairline kerf matches perimeter × kerf/2 within 5%, and mitered vertices land at the
    geometric miter distance. Round and bevel joins and a corner (miter) limit are
    selectable (`--kerf-join`, `--kerf-limit`, `shapes.offset`); round-join area is tested
-   to grow with distance and stay within the miter area on convex shapes. A large internal
-   offset can still invert a thin feature instead of removing it.
+   to grow with distance and stay within the miter area on convex shapes. Shrinking contours
+   go through VectorCraft's path offsetter: a feature thinner than twice the distance closes
+   up and a pinched neck splits the contour, instead of inverting; kerf compensation keeps
+   a hole narrower than the kerf on its drawn line so it is still cut.
 3. **Tiling**: geometry is clipped to each sheet (closed contours that cross the edge come
    back as open runs, so no cut is added along the material edge) and sheets with nothing
    on them are not exported. Sheets can be stamped with corner registration brackets and

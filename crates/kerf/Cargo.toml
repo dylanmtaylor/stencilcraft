@@ -12,6 +12,9 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 stencilcraft-doc = { workspace = true }
 stencilcraft-geom = { workspace = true }
+# Shrinking contours: the path offsetter removes features that close up.
+vectorcraft-geom = { workspace = true }
+vectorcraft-pathops = { workspace = true }
 
 [lints]
 workspace = true

@@ -50,7 +50,8 @@ This file is the contract for the next UI waves. Specs live beside it under
 ### OP-01 — Collapsible operation rows with members
 
 An operation row is a tree group. Expanding it lists its member shapes as child
-rows. Clicking a member row selects that shape. Each member row has a trash
+rows labelled `#{shape}` with the same `Spline` icon as the Geometry rows.
+Clicking a member row selects that shape. Each member row has a trash
 button `Remove #{shape} from {name}` that calls `operation.remove-members`.
 
 Acceptance: expanding an operation shows one row per existing member; removing
@@ -67,9 +68,13 @@ Acceptance: setting `#ff0000` stores that colour; the swatch shows it.
 
 ### OP-03 — Operation profiles stub
 
-A `Profiles` dock panel, listed under Panels, with the empty state
-"No operation profiles yet". No profile data model and no working "New
-profile" action in this wave.
+A `Profiles` dock panel, listed under Panels, listing the base Cut, Score and
+Engrave profiles (no Guide). Profile values are provisional: a profile's
+defaults are its kind with default settings. Clicking a profile row applies
+those defaults to every selected operation, linking it back after an edit; a
+new operation links to Cut, and editing its numeric settings unlinks it
+(`Profile none`). No profile data model and no "New profile" action in this
+wave.
 
 ### OP-04 — Row actions and `+`
 

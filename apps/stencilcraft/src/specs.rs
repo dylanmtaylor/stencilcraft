@@ -20,8 +20,9 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use stencilcraft_engine::ProductionCommand;
 
 use crate::ui_e2e::{
-    App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_profiles, boot_workspace, click,
-    click_menu, expand_all, has, has_row_containing, raw_click_label, raw_click_row_containing,
+    App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_ops_profiles, boot_profiles,
+    boot_workspace, click, click_menu, expand_all, has, has_row_containing, raw_click_label,
+    raw_click_row_containing,
 };
 use crate::*;
 
@@ -46,6 +47,7 @@ enum Surface {
     Inspector,
     Workspace,
     Profiles,
+    OpsProfiles,
     Menu,
 }
 
@@ -69,6 +71,7 @@ impl World {
                 Surface::Inspector => boot_inspector(),
                 Surface::Workspace => boot_workspace(),
                 Surface::Profiles => boot_profiles(),
+                Surface::OpsProfiles => boot_ops_profiles(),
                 Surface::Menu => boot_menu(),
             });
         }
@@ -408,6 +411,9 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
     }
     if text == "the profiles panel is open" {
         return w.surface(Surface::Profiles);
+    }
+    if text == "the operations and profiles panels are open" {
+        return w.surface(Surface::OpsProfiles);
     }
     if text == "the menu bar is open" {
         return w.surface(Surface::Menu);

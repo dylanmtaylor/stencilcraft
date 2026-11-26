@@ -17,7 +17,7 @@ confirm with CodeGraph before relying on them.
 | "fila de operación" | `TreeItem` `{name}, Pass {n} · {kind} · … · Profile {label|none}` | `main.rs` `operations_panel` |
 | "visibilidad de una operación" | toggle `Button` `Visibility {label}` (column 0) | `main.rs` `operations_panel` |
 | "bloquear una operación" | toggle `Button` `Lock {name}` (column 1) → `OperationSetLocked` | `main.rs` `operations_panel`, `craft_ui::list::ToggleColumn::lock` |
-| "fila miembro" | `TreeItem` `Member #{shape} of {name}`; double-click selects the shape | `main.rs` `operations_panel` |
+| "fila miembro" | `TreeItem` `#{shape}` with the `Spline` icon (as in Geometry); double-click selects the shape | `main.rs` `operations_panel` |
 | "quitar un miembro" | `Button` `Remove #{shape} from {name}` (member row trailing) | `main.rs` `operations_panel` |
 | "color de una operación" | `Button` `Colour {name}`; popup palette `Palette colour 1`…`40`, `Hex`, `Clear colour`, `Close` | `main.rs` `operation_color_popup`, `OPERATION_PALETTE` |
 | "ajustes de una operación" | `Button` `Operation settings {name}`; popover `Kind`, `Power`, `Speed`, `Passes`, `Focus`, `Kerf` | `main.rs` `operation_settings_popup` |
@@ -25,7 +25,7 @@ confirm with CodeGraph before relying on them.
 | "confirmación de operación masiva" | dialog `Create {n} operations?`, `Button` `Continue` | `main.rs` `bulk_confirm_dialog` |
 | "crear una operación por forma / para todas / por apariencia" | `Button` `New operation from all selected`; menu `More new operation actions` → `New operation: each selected` / `all selected` / `by appearance` | `main.rs` `bulk_menu_popup` |
 | "ventana por apariencia" | window `New operation by appearance` with `Stroke`, `Fill`, `Both`; value buttons `{mode} {value}` | `main.rs` appearance dialog |
-| "perfiles" | panel `Profiles` with rows `Profile Cut`, `Profile Score`, `Profile Engrave`; no `Profile Guide`, no `New profile` | `main.rs` `profiles_panel` |
+| "perfiles" | panel `Profiles` with buttons `Profile Cut`, `Profile Score`, `Profile Engrave`; clicking one links the selected operations to its defaults. No `Profile Guide`, no `New profile` | `main.rs` `profiles_panel` |
 | "inspector" | `Header` `Shape #1 - Path` / `Document` | `main.rs` `inspector_panel` |
 | "operación efectiva de la selección" | section `Operation`, values exposed as accesskit `value` (`Cut`, source name) | `main.rs` inspector |
 | "capa heredada" | `Button` `Add Layer`, section `Layers` | `main.rs` inspector |

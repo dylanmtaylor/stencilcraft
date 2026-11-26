@@ -375,3 +375,9 @@ Completed items should be marked here only when behavior is usable end-to-end.
   operations/geometry Gherkin contract is green (35 scenarios). `cargo xtask ci`
   stops on two pre-existing `stencilcraft-import` failures that also fail on the
   base commit (unrelated to this change).
+
+- 2026-11-26 — operations UI follow-ups: member rows read `#{shape}` with the
+  Spline icon instead of "Member #N of {name}"; the colour palette swatches are
+  compact (12 px, 2 px gaps); profile rows link the selected operations back to
+  their provisional defaults; a Hand-tool click on empty canvas clears the
+  selection and the Geometry row highlight instead of leaving it stuck.

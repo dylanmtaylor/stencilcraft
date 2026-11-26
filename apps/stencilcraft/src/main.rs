@@ -64,6 +64,7 @@ mod file_menu;
 mod framework;
 mod freehand;
 mod graphic_styles;
+mod home;
 
 /// The menu bar (Silhouette Studio order plus Illustrator-grade items; docs/menu-map.md).
 mod menus;
@@ -695,6 +696,8 @@ pub enum TopMenuAction {
     NewFromTemplate,
     OpenDoc,
     OpenRecent(usize),
+    /// The title bar's Home: the start screen, or back to the design.
+    ToggleHome,
     SaveDoc,
     SaveAsDoc,
     ImportSvg,
@@ -1342,6 +1345,8 @@ pub struct StencilApp {
     pub pixscan: pixscan::PixScanState,
     /// Effect › Erase Colour: clicks on an image erase a colour.
     pub erase_colour: erase_colour::EraseColourState,
+    /// Home: the start screen in place of the design.
+    pub home: home::HomeState,
     pub selection_name_draft: String,
     /// The mat before Load Type › Without Mat / Roll, for On Mat.
     pub mat_before_unload: Option<stencilcraft_machine::Mat>,
@@ -1647,6 +1652,7 @@ impl StencilApp {
             distort: None,
             pixscan: pixscan::PixScanState::default(),
             erase_colour: erase_colour::EraseColourState::default(),
+            home: home::HomeState::default(),
             selection_name_draft: String::new(),
             mat_before_unload: None,
             pending_style: None,
@@ -3671,6 +3677,7 @@ impl StencilApp {
                     self.open_document(&path.to_string_lossy());
                 }
             }
+            TopMenuAction::ToggleHome => self.home.shown = !self.home.shown,
             TopMenuAction::OpenRecent(idx) => {
                 if let Some(path) = self.recent_files.get(idx).cloned() {
                     self.open_document(&path);
@@ -4234,11 +4241,11 @@ impl StencilApp {
                         Title::new(title_text),
                         |ui, _| {
                             if IconButton::new(IconId::new("home"))
-                                .label("Home / Fit View")
+                                .label("Home")
                                 .show(ui)
                                 .clicked()
                             {
-                                chosen_action = Some(TopMenuAction::FitView);
+                                chosen_action = Some(TopMenuAction::ToggleHome);
                             }
                             chosen_action = chosen_action.or(menus::show_bar(ui, &menus));
                         },
@@ -5939,6 +5946,10 @@ impl StencilApp {
     }
 
     pub fn canvas_body(&mut self, ui: &mut egui::Ui) {
+        if self.home.shown {
+            self.home_body(ui);
+            return;
+        }
         use craft_behavior::geometry::quad::{BoxAllow, BoxPart, BoxRules, BoxState, ScaleRule};
         use craft_draw::ui::pen::PenEvent;
         use craft_ui::canvas::{Canvas, CanvasScrollbars, RulerText, Rulers, ToolHost, tool_pass};

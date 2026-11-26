@@ -142,6 +142,15 @@ pub fn import(bytes: &[u8], name: &str) -> Result<Imported, StudioError> {
 /// visible shape as one Silhouette shape with its contours and curves, its line colour, line
 /// width and fill. Placed images, text styling and cut settings are not written.
 pub fn export(doc: &Document) -> Result<Vec<u8>, StudioError> {
+    export_as(doc, false)
+}
+
+/// The document as a legacy `.studio` (Studio V2) file; otherwise like [`export`].
+pub fn export_v2(doc: &Document) -> Result<Vec<u8>, StudioError> {
+    export_as(doc, true)
+}
+
+fn export_as(doc: &Document, v2: bool) -> Result<Vec<u8>, StudioError> {
     let to_page = Affine::IDENTITY;
     let hex = |c: Option<&str>| {
         let d = c?.trim().trim_start_matches('#');
@@ -172,10 +181,15 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, StudioError> {
             }
         }
     }
-    craft_silhouette_studio::write(&craft_silhouette_studio::WriteDocument {
+    let document = craft_silhouette_studio::WriteDocument {
         page_mm: (doc.board.width_mm, doc.board.height_mm),
         shapes,
-    })
+    };
+    if v2 {
+        craft_silhouette_studio::write_v2(&document)
+    } else {
+        craft_silhouette_studio::write(&document)
+    }
     .map_err(|e| StudioError::Malformed {
         name: "export".to_owned(),
         what: e.to_string(),
@@ -331,6 +345,27 @@ mod tests {
         let dir = std::env::var("STUDIO_SAMPLES").ok()?;
         let bytes = std::fs::read(std::path::Path::new(&dir).join(name)).ok()?;
         import(&bytes, name).ok()
+    }
+
+    #[test]
+    fn v2_exports_open_again() {
+        let mut doc = Document::default();
+        let mut tri = BezPath::new();
+        tri.move_to((10.0, 10.0));
+        tri.line_to((40.0, 10.0));
+        tri.line_to((25.0, 30.0));
+        tri.close_path();
+        doc.push_shape(0, tri, CutStyle::Cut).unwrap();
+        let back = import(&export_v2(&doc).unwrap(), "tri.studio").unwrap();
+        assert_eq!(back.version, Version::V2);
+        assert_eq!(
+            back.doc
+                .layers
+                .iter()
+                .map(|l| l.shapes.len())
+                .sum::<usize>(),
+            1
+        );
     }
 
     #[test]

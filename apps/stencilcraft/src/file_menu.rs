@@ -34,6 +34,8 @@ pub enum ExportKind {
     Jpeg,
     /// A Silhouette Studio document (`.studio3`) Silhouette opens.
     Studio3,
+    /// A legacy Silhouette Studio V2 document (`.studio`).
+    Studio,
 }
 
 impl ExportKind {
@@ -43,6 +45,7 @@ impl ExportKind {
             Self::Png => "png",
             Self::Jpeg => "jpg",
             Self::Studio3 => "studio3",
+            Self::Studio => "studio",
         }
     }
 
@@ -52,6 +55,7 @@ impl ExportKind {
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
             Self::Studio3 => "Silhouette Studio",
+            Self::Studio => "Silhouette Studio V2",
         }
     }
 }
@@ -90,8 +94,14 @@ impl StencilApp {
 
     /// The document as `kind`'s bytes.
     pub fn export_bytes(&self, kind: ExportKind) -> Result<Vec<u8>, String> {
-        if kind == ExportKind::Studio3 {
-            return stencilcraft_studio::export(&self.engine.doc).map_err(|e| e.to_string());
+        match kind {
+            ExportKind::Studio3 => {
+                return stencilcraft_studio::export(&self.engine.doc).map_err(|e| e.to_string());
+            }
+            ExportKind::Studio => {
+                return stencilcraft_studio::export_v2(&self.engine.doc).map_err(|e| e.to_string());
+            }
+            _ => {}
         }
         stencilcraft_import::write_document(&self.engine.doc, kind.extension(), EXPORT_DPI)
             .map_err(|e| e.to_string())

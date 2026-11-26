@@ -352,6 +352,11 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     A::Export(crate::file_menu::ExportKind::Studio3),
                 )
                 .into(),
+                item(
+                    "Silhouette Studio V2 (.studio)…",
+                    A::Export(crate::file_menu::ExportKind::Studio),
+                )
+                .into(),
             ],
         ),
         SEP,

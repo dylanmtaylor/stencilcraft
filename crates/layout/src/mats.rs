@@ -555,6 +555,70 @@ fn auto_mirror(key: &MatKey) -> bool {
     })
 }
 
+/// Nesting on the design page (Silhouette's Nesting panel): the visible pieces made of the
+/// shapes `ids` (an attach group moves as one) packed into `page` with `spacing_mm` between
+/// them, turned in `rotation_step_deg` steps (0 keeps them upright). Returns each piece's
+/// shapes and the document → document map that moves it; an error when they do not fit on
+/// one page. The page is y down, like the document, so no flip.
+pub fn nest_on_page(
+    doc: &Document,
+    ids: &[u64],
+    page: Rect,
+    spacing_mm: f64,
+    rotation_step_deg: f64,
+) -> Result<Vec<(Vec<u64>, Affine)>> {
+    check_range(spacing_mm, 0.0, 100.0, "spacing_mm")?;
+    if rotation_step_deg != 0.0 {
+        check_range(
+            rotation_step_deg,
+            1.0,
+            180.0,
+            "rotation_step_deg (0 for none)",
+        )?;
+    }
+    if !(page.width() > 0.0
+        && page.height() > 0.0
+        && page.width().is_finite()
+        && page.height().is_finite())
+    {
+        return invalid("the page has no area".to_string());
+    }
+    let pieces: Vec<Piece> = collect_pieces(doc)
+        .into_iter()
+        .filter(|p| p.shape_ids.iter().any(|id| ids.contains(id)))
+        .collect();
+    if pieces.is_empty() {
+        return invalid("no visible shapes to nest".to_string());
+    }
+    if pieces.len() > MAX_PIECES {
+        return invalid(format!("more than {MAX_PIECES} pieces to nest"));
+    }
+    let packer = Packer {
+        area: page,
+        spacing: spacing_mm,
+        nest: true,
+        angles: angles(rotation_step_deg, true),
+    };
+    let all: Vec<usize> = (0..pieces.len()).collect();
+    let bins = packer.pack(&pieces, &all)?;
+    let [bin] = bins.as_slice() else {
+        return invalid("the shapes do not all fit on the page; make the page larger".to_string());
+    };
+    let mut out = Vec::with_capacity(bin.placed.len());
+    for placed in &bin.placed {
+        let Some(piece) = pieces.get(placed.piece) else {
+            continue;
+        };
+        let (rot, rb) = piece.rotated(placed.deg);
+        let (px, py) = (page.x0 + placed.x, page.y0 + placed.y);
+        out.push((
+            piece.shape_ids.clone(),
+            Affine::translate((px - rb.x0, py - rb.y0)) * rot,
+        ));
+    }
+    Ok(out)
+}
+
 /// Lays the document's pieces onto mats.
 pub fn layout_mats(doc: &Document, options: &MatOptions) -> Result<MatLayout> {
     let profile = validate(options)?;
@@ -786,6 +850,34 @@ mod tests {
         let b = stencilcraft_geom::bounds_of_shape(&mapped).unwrap();
         assert!((b.x0 - p.bounds[0]).abs() < 1e-6 && (b.y1 - p.bounds[3]).abs() < 1e-6);
         assert_eq!(p.bounds, [0.0, 0.0, 40.0, 20.0]);
+    }
+
+    #[test]
+    fn nesting_on_the_page_packs_the_selection_inside_it() {
+        // Three 40 × 40 squares spread far apart, and one left out of the selection.
+        let doc = doc_with(&[
+            (0.0, 500.0, 40.0, 40.0),
+            (300.0, 500.0, 40.0, 40.0),
+            (600.0, 500.0, 40.0, 40.0),
+            (900.0, 500.0, 40.0, 40.0),
+        ]);
+        let all: Vec<u64> = doc.shapes().map(|(_, s)| s.id).collect();
+        let ids = all[..3].to_vec();
+        let page = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let moves = nest_on_page(&doc, &ids, page, 2.0, 0.0).unwrap();
+        assert_eq!(moves.len(), 3, "only the selection");
+        for (shape_ids, map) in &moves {
+            let path = &doc.get_shape(shape_ids[0]).unwrap().path;
+            let b = stencilcraft_geom::bounds_of_shape(&(*map * path.clone())).unwrap();
+            assert!(
+                b.x0 >= -1e-6 && b.y0 >= -1e-6 && b.x1 <= 100.0 + 1e-6 && b.y1 <= 100.0 + 1e-6,
+                "{b:?}"
+            );
+        }
+        // Too many for the page is an error, not an overflow.
+        let tiny = Rect::new(0.0, 0.0, 50.0, 50.0);
+        assert!(nest_on_page(&doc, &ids, tiny, 2.0, 0.0).is_err());
+        assert!(nest_on_page(&doc, &ids, page, f64::NAN, 0.0).is_err());
     }
 
     #[test]

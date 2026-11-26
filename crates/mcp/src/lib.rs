@@ -969,6 +969,11 @@ const ENGINE_TOOLS: &[(&str, &str, &str)] = &[
         "Release compound paths / detach: one shape per contour. Args: ids.",
     ),
     (
+        "shapes_nest",
+        "shapes.nest",
+        "Nesting: pack the shapes onto the page as tightly as they go. Args: ids, spacing_mm, rotation_step_deg (0 = upright).",
+    ),
+    (
         "shapes_detach_lines",
         "shapes.detach-lines",
         "Detach Lines: a filled shape's line becomes its own shape (the stroke outlined, filled with the line colour). Args: ids, width_mm.",

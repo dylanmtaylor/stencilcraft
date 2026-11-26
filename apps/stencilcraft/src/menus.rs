@@ -646,6 +646,7 @@ fn object(app: &StencilApp) -> Vec<MenuEntry<A>> {
                     crate::effects::EffectMenu::AdvancedReplicate,
                 ),
                 eff("Object on Path…", crate::effects::EffectMenu::ObjectOnPath),
+                eff("Nesting…", crate::effects::EffectMenu::Nesting),
                 item("Replicate Options…", A::ShowPanel(P::Replicate)).into(),
             ],
         ),

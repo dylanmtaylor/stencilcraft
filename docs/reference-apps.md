@@ -222,7 +222,7 @@ Sources: [Cricut, *How to upload images*](https://help.cricut.com/hc/en-us/artic
 | Object on Path | SS | Repeat an object along another shape's outline | have: Object › Replicate › Object on Path… (the largest selected shape is the path; Perpendicular, start/increment angle, start position, section length, repeats; `generate.object-on-path`) | replicate | Replicate panel tab 3 (2026-11-25, SS 5.0.556) |
 | Fill page | SS | Repeat a shape until the media is full | have: desktop Replicate panel and `shapes.replicate-fill` | replicate (pairs with nesting) | 2026-11-02, SS 5.0.539: Fill Page in the Replicate panel |
 | Mirror copy | SS | A mirrored duplicate | have: desktop Replicate panel and `shapes.mirror-copy` | replicate | 2026-11-02, SS 5.0.539: mirrored copy below, above, left or right |
-| Nesting (auto pack shapes to save material) | SS (Business) | Pack shapes tightly onto the media | partial: production mat planner supports nesting; desktop workflow and hardware validation remain open | replicate | 2026-11-02, SS 5.0.539: the Replicate panel may have a Nesting tab; not confirmed usable in Basic |
+| Nesting (auto pack shapes to save material) | SS (Business) | Pack shapes tightly onto the media | have: Object › Replicate › Nesting… (Effects panel, live preview): packs the selected shapes onto the page, spacing and rotation step (`shapes.nest`; attach groups move as one); the production mat planner nests across mats | replicate | 2026-11-02, SS 5.0.539: the Replicate panel may have a Nesting tab; not confirmed usable in Basic |
 
 ## Alignment
 

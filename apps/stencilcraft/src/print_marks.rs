@@ -1,8 +1,8 @@
 //! Silhouette's Print & Cut panel: registration marks on the page (length, thickness, inset),
 //! bleed, a check that the design stays clear of the marks, and printing the page at 100 %.
 
-use craft_ui::choice::Checkbox;
-use craft_ui::contract::{Bind, Props as _, Show as _, ShowContainer as _};
+use craft_ui::choice::{Checkbox, Segmented};
+use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft_ui::sections::Panel;
 use eframe::egui;
 use stencilcraft_doc::Document;
@@ -24,6 +24,10 @@ pub struct MarkSettings {
     /// Print past each filled shape's edge so a slightly-off cut shows no white edge.
     pub bleed: bool,
     pub bleed_mm: f64,
+    /// Silhouette's Type 2 marks: a bracket at each of the four corners.
+    pub four_marks: bool,
+    /// Print Cut Lines: the cut outlines print as thin lines too.
+    pub print_cut_lines: bool,
 }
 
 impl Default for MarkSettings {
@@ -35,11 +39,22 @@ impl Default for MarkSettings {
             inset_mm,
             bleed: false,
             bleed_mm: 0.05 * 25.4,
+            four_marks: false,
+            print_cut_lines: false,
         }
     }
 }
 
 impl MarkSettings {
+    /// The mark layout: Silhouette's three marks (Type 1) or four corners (Type 2).
+    pub fn style(&self) -> stencilcraft_ui_egui::MarkStyle {
+        if self.four_marks {
+            stencilcraft_ui_egui::MarkStyle::FourCorner
+        } else {
+            stencilcraft_ui_egui::MarkStyle::Silhouette
+        }
+    }
+
     pub fn geometry(&self) -> [f64; 3] {
         [self.length_mm, self.thickness_mm, self.inset_mm]
     }
@@ -94,12 +109,14 @@ impl StencilApp {
         } else {
             self.engine.doc.clone()
         };
-        let rects = stencilcraft_ui_egui::mark_rects(
+        let rects = stencilcraft_ui_egui::styled_mark_rects(
             doc.board.width_mm,
             doc.board.height_mm,
             marks.geometry(),
+            marks.style(),
         );
-        stencilcraft_svg::export_print_sheet(&doc, &rects).map_err(|e| e.to_string())
+        stencilcraft_svg::export_print_sheet(&doc, &rects, marks.print_cut_lines)
+            .map_err(|e| e.to_string())
     }
 
     /// Shapes that reach into the marks (outside the safe area).
@@ -131,6 +148,10 @@ impl StencilApp {
                     .label("Show Registration Marks")
                     .show(ui);
                 ui.add_enabled_ui(on, |ui| {
+                let styles = [Entry::new(false, "Type 1 (three marks)"), Entry::new(true, "Type 2 (four)")];
+                let _ = Segmented::new("Mark style", Bind::bound(&mut marks.four_marks), &styles)
+                    .id_salt("marks-style")
+                    .show(ui);
                 for (label, id, value, range) in [
                     ("Length", "marks-length", &mut marks.length_mm, 2.0..=100.0),
                     (
@@ -157,6 +178,9 @@ impl StencilApp {
                         &numbers,
                     );
                 });
+                let _ = Checkbox::new(Bind::bound(&mut marks.print_cut_lines))
+                    .label("Print Cut Lines")
+                    .show(ui);
                 if over > 0 {
                     hint(
                         ui,
@@ -258,5 +282,14 @@ mod tests {
             5,
             "square and two brackets: {svg}"
         );
+        // Type 2 marks put a bracket at every corner; Print Cut Lines draws the outlines.
+        app.prefs.marks.four_marks = true;
+        app.prefs.marks.print_cut_lines = true;
+        let four = app.print_sheet_svg().expect("sheet");
+        assert!(
+            four.matches("<rect").count() > 5,
+            "more marks than Type 1: {four}"
+        );
+        assert!(four.contains("stroke: #000000"));
     }
 }

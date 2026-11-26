@@ -6139,6 +6139,7 @@ impl StencilApp {
                     show_grid: self.prefs.show_grid,
                     print_cut_marks: self.prefs.print_cut_marks,
                     mark_geometry: self.prefs.marks.geometry(),
+                    four_marks: self.prefs.marks.four_marks,
                     show_selection_bounds: true,
                     theme: self.theme,
                     outline_view: self.prefs.outline_view,

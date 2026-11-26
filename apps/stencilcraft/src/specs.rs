@@ -16,7 +16,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use craft_ui::behavior::Selection;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use stencilcraft_engine::ProductionCommand;
 
 use crate::ui_e2e::{
     App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_profiles, boot_workspace, click,
@@ -285,6 +286,60 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         w.run();
         return Ok(());
     }
+    if let Some(rest) = text.strip_prefix("an operation \"") {
+        if let Some((name, tail)) = rest.split_once("\" over shapes ") {
+            let members = nums(tail);
+            if members.is_empty() {
+                return fail(format!("expected at least one shape id in {tail:?}"));
+            }
+            let cut = operations::OperationPreset::Cut;
+            w.state_mut()
+                .run_command(Command::Document(DocumentCommand::OperationCreate {
+                    name: name.to_string(),
+                    kind: cut.kind(),
+                    settings: Default::default(),
+                    color: None,
+                    icon: Some(cut.icon_name().to_string()),
+                    members,
+                }));
+            w.run();
+            return Ok(());
+        }
+    }
+    if let Some(rest) = text.strip_prefix("shape ") {
+        if let Some((left, right)) = rest.split_once(" has stroke \"") {
+            let id = nums(left).first().copied().ok_or("shape id missing")?;
+            let hex = right.strip_suffix('"').ok_or("stroke colour missing")?;
+            w.state_mut()
+                .run_command(Command::Production(ProductionCommand::SetProduction {
+                    ids: vec![id],
+                    operation: None,
+                    line_color: Some(hex.to_string()),
+                    fill_color: None,
+                    material: None,
+                    send: None,
+                    clear: Vec::new(),
+                }));
+            w.run();
+            return Ok(());
+        }
+        if let Some((left, right)) = rest.split_once(" has fill \"") {
+            let id = nums(left).first().copied().ok_or("shape id missing")?;
+            let hex = right.strip_suffix('"').ok_or("fill colour missing")?;
+            w.state_mut()
+                .run_command(Command::Production(ProductionCommand::SetProduction {
+                    ids: vec![id],
+                    operation: None,
+                    line_color: None,
+                    fill_color: Some(hex.to_string()),
+                    material: None,
+                    send: None,
+                    clear: Vec::new(),
+                }));
+            w.run();
+            return Ok(());
+        }
+    }
     if text.starts_with("a document with ") && text.contains("shape") {
         let n = nums(text).first().copied().unwrap_or(0);
         for i in 0..n {
@@ -420,10 +475,6 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         w.run();
         return Ok(());
     }
-    if let Some(label) = between(text, "I hammer the geometry row \"", "\"") {
-        click(w.h(), &format!("New operation from {label}"));
-        return Ok(());
-    }
     if let Some(id) = text
         .strip_prefix("I remove shape #")
         .and_then(|r| r.strip_suffix(" from the last operation"))
@@ -483,20 +534,10 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             .first()
             .copied()
             .ok_or("operation number missing")? as usize;
-        let (id, name) = op_at(w, n)?;
-        let locked = w
-            .state()
-            .engine
-            .doc
-            .operations
-            .iter()
-            .find(|op| op.id == id)
-            .is_some_and(|op| op.locked);
-        open_op_menu(w, &name);
-        click_menu(
-            w.h(),
-            &format!("{} {name}", if locked { "Unlock" } else { "Lock" }),
-        );
+        let (_, name) = op_at(w, n)?;
+        // The visible lock toggle in the operations list; toggle cells need a
+        // real pointer press/release, not an accesskit click.
+        raw_click_label(w.h(), &format!("Lock {name}"));
         return Ok(());
     }
     if let Some(rest) = text.strip_prefix("I move operation ") {
@@ -519,39 +560,6 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         open_op_menu(w, &name);
         click_menu(w.h(), &format!("Delete {name}"));
         return Ok(());
-    }
-    if let Some(id) = text
-        .strip_prefix("I open the tag overflow for shape #")
-        .and_then(|r| r.strip_suffix(""))
-    {
-        let id = nums(id).first().copied().ok_or("shape id missing")?;
-        click(w.h(), &format!("Operations of #{id}"));
-        return Ok(());
-    }
-    for (prefix, verb) in [
-        ("I hide every operation of shape #", "Hide"),
-        ("I show every operation of shape #", "Show"),
-    ] {
-        if let Some(id) = text
-            .strip_prefix(prefix)
-            .and_then(|r| r.strip_suffix(" from the geometry view"))
-        {
-            let id = nums(id).first().copied().ok_or("shape id missing")?;
-            let names: Vec<String> = w
-                .state()
-                .engine
-                .doc
-                .operations
-                .iter()
-                .filter(|op| op.members.contains(&id))
-                .map(|op| op.name.clone())
-                .collect();
-            for name in names {
-                click(w.h(), &format!("Operation {name} on #{id}"));
-                click_menu(w.h(), &format!("{verb} {name} from the geometry view"));
-            }
-            return Ok(());
-        }
     }
     if let Some(label) = between(text, "I click the geometry row \"", "\"") {
         raw_click_label(w.h(), label);
@@ -583,6 +591,32 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             .map(|op| op.name.clone())
             .ok_or("there is no operation row")?;
         raw_click_row_containing(w.h(), &label);
+        return Ok(());
+    }
+    if let Some(label) = between(text, "I double-click the member row \"", "\"") {
+        // A list row's Activate fires on the second press/release pair in one
+        // frame batch; a plain accesskit click never reaches it.
+        let pos = w.h().get_by_label(label).rect().center();
+        for _ in 0..2 {
+            w.h().event(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                w.h().event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            w.h().run();
+        }
+        return Ok(());
+    }
+    if let Some(n) = text.strip_prefix("I click the palette colour ") {
+        raw_click_label(w.h(), &format!("Palette colour {}", n.trim()));
+        return Ok(());
+    }
+    if let Some(label) = between(text, "I choose the appearance value \"", "\"") {
+        click(w.h(), label);
         return Ok(());
     }
     if let Some(rest) = text.strip_prefix("I click the \"") {
@@ -877,6 +911,17 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             Ok(())
         } else {
             fail(format!("expected selected shapes {want:?}, got {got:?}"))
+        };
+    }
+    if let Some(label) = between(text, "the menu item \"", "\" is on screen") {
+        let found = w
+            .h()
+            .query_all_by_label(label)
+            .any(|n| n.accesskit_node().role() == egui::accesskit::Role::MenuItem);
+        return if found {
+            Ok(())
+        } else {
+            fail(format!("the menu item {label:?} is not on screen"))
         };
     }
     if let Some(label) = text.strip_suffix(" is on screen") {

@@ -269,4 +269,9 @@ Driven through the UI; cross-checked against the in-app User's Manual (Help › 
   2.673 × 3.039 in. A strip is added above the square, joined to it by a blue dashed fold line
   along the square's top edge, with another dashed fold along the strip's top; the red cut
   line runs round square and strip; short dashed folds appear at the square's bottom
-  corners. How Base Width and Strut Width map to these sizes needs more samples.
+  corners.
+- A second sample, 5.250 × 1.750 in, became 5.306 × 2.170 in: the strip above adds about
+  0.42 in whatever the shape's size (0.414 in on the square). Raising Base Width to 50 % left
+  the bounding box unchanged and lengthened the dashed fold segments along the bottom edge
+  (one at each end). The converted shape shows red handles at the middle of its left and
+  right sides, likely for dragging the fold.

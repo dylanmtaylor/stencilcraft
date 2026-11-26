@@ -506,14 +506,6 @@ pub(crate) fn labelled(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egu
     });
 }
 
-/// `label` over the control `add` shows (for a control as wide as the panel).
-pub(crate) fn captioned(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
-    ui.vertical(|ui| {
-        let _ = Text::new(label.to_owned()).role(TypeRole::Label).show(ui);
-        add(ui);
-    });
-}
-
 pub(crate) fn button(ui: &mut egui::Ui, label: &str, enabled: bool) -> bool {
     Button::new(label.to_owned())
         .size(ControlSize::Sm)
@@ -984,7 +976,6 @@ impl StencilApp {
                     &kind_entries,
                 )
                 .id_salt("offset-kind")
-                .size(ControlSize::Sm)
                 .show(ui);
                 labelled(ui, "Distance", |ui| {
                     number(
@@ -1000,7 +991,6 @@ impl StencilApp {
                 labelled(ui, "Corner", |ui| {
                     let _ = Segmented::new("Corner", Bind::bound(&mut draft.join), &join_entries)
                         .id_salt("offset-join")
-                        .size(ControlSize::Sm)
                         .show(ui);
                 });
                 if draft.join == JoinStyle::Miter {

@@ -5796,6 +5796,7 @@ dependencies = [
  "craft-behavior",
  "craft-draw",
  "craft-host",
+ "craft-i18n",
  "craft-jsonrpc",
  "craft-keymap",
  "craft-raster-codecs",

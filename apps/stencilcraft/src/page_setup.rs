@@ -3,7 +3,6 @@
 //! and snapping (Show Print/Cut Border, Show Grid, Snap to Grid, Smart Snapping, tolerance,
 //! grid spacing and divisions). Page changes are document commands, so each is one undo step.
 
-use craft_theme::ControlSize;
 use craft_ui::choice::{Checkbox, Segmented};
 use craft_ui::contract::{Bind, Entry, Props as _, Show as _, ShowContainer as _};
 use craft_ui::pickers::Select;
@@ -130,7 +129,6 @@ impl StencilApp {
                             &orientation_entries,
                         )
                         .id_salt("page-orientation")
-                        .size(ControlSize::Sm)
                         .show(ui);
                         labelled(ui, "Rotate View", |ui| {
                             let _ = Segmented::new(
@@ -139,7 +137,6 @@ impl StencilApp {
                                 &turn_entries,
                             )
                             .id_salt("page-rotate-view")
-                            .size(ControlSize::Sm)
                             .show(ui);
                         });
                     });

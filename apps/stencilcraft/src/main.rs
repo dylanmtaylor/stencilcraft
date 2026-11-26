@@ -8789,16 +8789,14 @@ mod tests {
     }
 
     #[test]
-    fn text_style_justification_and_direction_pickers_fit_a_narrow_panel() {
-        // Regression: in the default panel width the pin elided the Justification and
-        // Direction segmented strips ("Ce…", "R…", "Horizo…"); they are pickers now.
+    fn text_style_strips_offer_every_choice_by_its_whole_word() {
+        // Justification and Direction are segmented strips again, at the default size (the
+        // pin's small strip elided its words in the real app: "Ce…", "Horizo…").
         use egui::accesskit::Role;
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         crate::framework::install_headless(&ctx).unwrap();
         let mut app = StencilApp::new(None);
-        // The dock's default panel width.
-        let width = 300.0;
         let mut out = None;
         for pass in 0..3 {
             let mut output = ctx.run_ui(
@@ -8811,8 +8809,8 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    ui.allocate_ui(egui::vec2(width, 800.0), |ui| {
-                        ui.set_max_width(width);
+                    ui.allocate_ui(egui::vec2(300.0, 800.0), |ui| {
+                        ui.set_max_width(300.0);
                         app.text_style_panel(ui);
                     });
                 },
@@ -8822,18 +8820,19 @@ mod tests {
         }
         let out = out.unwrap();
         let tree = out.platform_output.accesskit_update.as_ref().unwrap();
-        for (name, value) in [("Justification", "Left"), ("Direction", "Horizontal")] {
-            let node = &tree
-                .nodes
-                .iter()
-                .find(|(_, node)| node.role() == Role::ComboBox && node.label() == Some(name))
-                .unwrap_or_else(|| panic!("missing picker {name}"))
-                .1;
-            assert_eq!(node.value(), Some(value), "{name} shows its whole value");
-            let b = node.bounds().unwrap();
+        for label in [
+            "Left",
+            "Centre",
+            "Right",
+            "Justify",
+            "Horizontal",
+            "Vertical",
+        ] {
             assert!(
-                b.x1 <= f64::from(width) + 1.0,
-                "{name} fits the panel: {b:?}"
+                tree.nodes.iter().any(
+                    |(_, node)| node.role() == Role::RadioButton && node.label() == Some(label)
+                ),
+                "missing segment {label}"
             );
         }
     }

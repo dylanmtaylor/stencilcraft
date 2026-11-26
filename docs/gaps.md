@@ -276,7 +276,8 @@ clean-room posture for studying Silhouette Studio and Cricut Design Space.
     and page size, and roller margins. Also missing: per-machine default load type and
     page size, and remembering the material between mats.
 47. **Upload cleanup**: Effect › Erase Colour clears a colour (connected or everywhere)
-    from a placed image. Missing: Erase/Restore brushes,
+    from a placed image, and its Brush mode erases under a stroke. Missing: a Restore brush (the
+    document keeps no original pixels),
     despeckle, smooth, reduce colours, preview as a single layer, and saving an upload as a
     printable image rather than an outline. User pattern uploads are also missing.
 48. **Monogram and text conveniences**: engine/MCP provide a monogram command, ungroup

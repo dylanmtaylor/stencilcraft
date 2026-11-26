@@ -289,6 +289,68 @@ pub fn adjust(pixels: &RgbaImage, a: &Adjust) -> Result<RgbaImage, RasterError> 
     Ok(out)
 }
 
+/// Most stroke points an erase brush stroke takes.
+pub const MAX_BRUSH_POINTS: usize = 10_000;
+
+/// Upload cleanup's Erase brush: every pixel whose centre is within `radius` pixels of the
+/// stroke through `points` (pixel coordinates; one point is a dab) made transparent.
+pub fn erase_brush(
+    pixels: &RgbaImage,
+    points: &[[f64; 2]],
+    radius: f64,
+) -> Result<RgbaImage, RasterError> {
+    if !(radius.is_finite() && radius > 0.0 && radius <= 10_000.0) {
+        return Err(bad(format!("brush radius {radius} is outside (0, 10000]")));
+    }
+    if points.is_empty() || points.len() > MAX_BRUSH_POINTS {
+        return Err(bad(format!("a stroke has 1 to {MAX_BRUSH_POINTS} points")));
+    }
+    if !points.iter().flatten().all(|v| v.is_finite()) {
+        return Err(bad("stroke points must be finite".to_string()));
+    }
+    let mut out = pixels.clone();
+    let (w, h) = (f64::from(pixels.width()), f64::from(pixels.height()));
+    let segments: Vec<([f64; 2], [f64; 2])> = match points {
+        [only] => vec![(*only, *only)],
+        _ => points
+            .windows(2)
+            .filter_map(|s| Some((*s.first()?, *s.get(1)?)))
+            .collect(),
+    };
+    let r2 = radius * radius;
+    let clear = common::Pixel([0, 0, 0, 0]);
+    for (a, b) in segments {
+        // The segment's box grown by the radius, clamped to the image.
+        let x0 = (a[0].min(b[0]) - radius).floor().max(0.0);
+        let x1 = (a[0].max(b[0]) + radius).ceil().min(w);
+        let y0 = (a[1].min(b[1]) - radius).floor().max(0.0);
+        let y1 = (a[1].max(b[1]) + radius).ceil().min(h);
+        if !(x0 < x1 && y0 < y1) {
+            continue;
+        }
+        let (d0, d1) = (b[0] - a[0], b[1] - a[1]);
+        let len2 = d0 * d0 + d1 * d1;
+        // Inside the image's pixel range after the clamps, so the casts are exact.
+        for y in (y0 as u32)..(y1 as u32) {
+            for x in (x0 as u32)..(x1 as u32) {
+                let (cx, cy) = (f64::from(x) + 0.5, f64::from(y) + 0.5);
+                let t = if len2 > 0.0 {
+                    (((cx - a[0]) * d0 + (cy - a[1]) * d1) / len2).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let (px, py) = (a[0] + t * d0 - cx, a[1] + t * d1 - cy);
+                if px * px + py * py <= r2
+                    && let Some(p) = out.get_pixel_mut_checked(x, y)
+                {
+                    *p = clear;
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Upload cleanup's Select: the pixels like the one at (`x`, `y`) made transparent. Like means
 /// every channel within `tolerance` percent (0–100) of the picked colour; `contiguous` takes
 /// only the region connected to the pick (four-way), else every such pixel in the image. An
@@ -456,6 +518,25 @@ mod tests {
                 decode(&encode(&image, extension)).unwrap_or_else(|e| panic!("{extension}: {e}"));
             assert_eq!(decoded.dimensions(), (8, 6), "{extension}");
         }
+    }
+
+    #[test]
+    fn erase_brush_clears_along_the_stroke_only() {
+        let image = RgbaImage::from_pixel(40, 20, Pixel([10, 10, 10, 255]));
+        let out = erase_brush(&image, &[[5.0, 10.0], [35.0, 10.0]], 3.0).unwrap();
+        assert_eq!(out.get_pixel(20, 10).0[3], 0, "on the stroke");
+        assert_eq!(out.get_pixel(20, 2).0[3], 255, "away from it");
+        let dab = erase_brush(&image, &[[10.0, 10.0]], 2.0).unwrap();
+        assert_eq!(dab.get_pixel(10, 10).0[3], 0, "a single point is a dab");
+        assert_eq!(dab.get_pixel(20, 10).0[3], 255);
+        // Off the image: nothing, and no panic.
+        assert_eq!(
+            erase_brush(&image, &[[-50.0, -50.0], [-40.0, -40.0]], 3.0).unwrap(),
+            image
+        );
+        assert!(erase_brush(&image, &[], 3.0).is_err());
+        assert!(erase_brush(&image, &[[f64::NAN, 1.0]], 3.0).is_err());
+        assert!(erase_brush(&image, &[[1.0, 1.0]], 0.0).is_err());
     }
 
     #[test]

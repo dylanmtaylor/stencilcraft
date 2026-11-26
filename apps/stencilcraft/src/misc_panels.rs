@@ -83,6 +83,7 @@ impl StencilApp {
     }
 
     pub fn preferences_panel(&mut self, ui: &mut egui::Ui) {
+        let mut restore = false;
         let mut prefs = self.prefs.clone();
         let mut theme = self.theme;
         let theme_entries = [
@@ -191,6 +192,11 @@ impl StencilApp {
                 )
                 .id_salt("pref-drag-select")
                 .show(ui);
+                ui.separator();
+                ui.label("Maintenance");
+                if button(ui, "Restore Factory Defaults…", true) {
+                    restore = true;
+                }
                 hint(
                     ui,
                     "Designs are always stored in millimetres; Units sets what you read and type. \
@@ -203,6 +209,39 @@ impl StencilApp {
         if prefs != self.prefs {
             self.prefs = prefs;
             self.save_prefs();
+        }
+        if restore {
+            self.confirm_restore_defaults = true;
+        }
+    }
+
+    /// The question before Restore Factory Defaults.
+    pub fn restore_defaults_dialog(&mut self, ui: &mut egui::Ui) {
+        use craft_ui::dialog::Dialog;
+        use craft_ui::sections::{DialogRole, FooterButton};
+        if !self.confirm_restore_defaults {
+            return;
+        }
+        let mut open = true;
+        let shown = Dialog::new("Restore factory defaults?")
+            .id_salt("restore-factory-defaults")
+            .opened(Bind::bound(&mut open))
+            .buttons([
+                FooterButton::new("Restore", DialogRole::Accept),
+                FooterButton::new("Cancel", DialogRole::Cancel),
+            ])
+            .show(ui, |ui, _| {
+                let _ = craft_ui::display::Text::new(
+                    "Every preference returns to its default and the panels are reset. Your \
+                     designs, recent files, presets, styles and actions are kept.",
+                )
+                .show(ui);
+            });
+        if shown.output.picked == Some(0) {
+            self.confirm_restore_defaults = false;
+            self.restore_factory_defaults();
+        } else if !open || shown.output.closed.is_some() {
+            self.confirm_restore_defaults = false;
         }
     }
 

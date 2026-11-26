@@ -366,3 +366,12 @@ Completed items should be marked here only when behavior is usable end-to-end.
   the preview renders.
 
 - 2026-11-15: advanced the shared format pin to consume craft-libs #1206 bounded DXF SPLINE paths. Existing full-entity and joined-line assertions remain unchanged; hosted validation pending.
+
+- 2026-11-26 — operations and profiles UI: the colour popup offers a 40-swatch
+  palette; the Profiles dock lists the Cut/Score/Engrave base profiles and each
+  operation shows the profile it still matches (editing its settings unlinks it
+  to "Profile none"); the `+` menu offers "New operation by appearance", a dialog
+  grouping the selection (or the whole document) by stroke, fill or both. The
+  operations/geometry Gherkin contract is green (35 scenarios). `cargo xtask ci`
+  stops on two pre-existing `stencilcraft-import` failures that also fail on the
+  base commit (unrelated to this change).

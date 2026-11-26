@@ -52,7 +52,7 @@ impl Default for DocTabs {
 }
 
 /// A tab's name: the file's name, else the document's title.
-fn tab_name(open_path: Option<&str>, title: &str) -> String {
+pub(crate) fn tab_name(open_path: Option<&str>, title: &str) -> String {
     open_path
         .and_then(|p| std::path::Path::new(p).file_stem()?.to_str())
         .map_or_else(|| title.to_string(), str::to_string)

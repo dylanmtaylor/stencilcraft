@@ -5657,6 +5657,7 @@ mod tests {
                     spacing_mm: 5.0,
                     subdivisions: 2,
                     visible: None,
+                    isometric: None,
                 },
             ))
             .unwrap();

@@ -816,13 +816,35 @@ pub fn paint_document(
                 j += 1.0;
             }
         };
+        // Isometric: three families of lines (vertical, 30° and 150°) the same distance apart,
+        // which meet as equilateral triangles.
+        let iso = |pitch_mm: f64, colour: egui::Color32| {
+            if !(pitch_mm.is_finite() && pitch_mm > 0.0 && f64::from(view.zoom) * pitch_mm > 6.0) {
+                return;
+            }
+            for angle in [90.0_f64, 30.0, 150.0] {
+                for (a, b) in isometric_lines(w, h, pitch_mm, angle) {
+                    painter.line_segment(
+                        [view.world_to_screen(a), view.world_to_screen(b)],
+                        (1.0, colour),
+                    );
+                }
+            }
+        };
         // Subdivisions in the secondary colour once they are far enough apart, then the
         // spacing lines over them in the primary colour.
         let step = doc.grid.step_mm();
-        if step < spacing {
-            lines(step, colour(options.grid_secondary));
+        if doc.grid.isometric {
+            if step < spacing {
+                iso(step, colour(options.grid_secondary));
+            }
+            iso(spacing, colour(options.grid_primary));
+        } else {
+            if step < spacing {
+                lines(step, colour(options.grid_secondary));
+            }
+            lines(spacing, colour(options.grid_primary));
         }
-        lines(spacing, colour(options.grid_primary));
     }
 
     if options.print_cut_marks {
@@ -1529,6 +1551,60 @@ pub fn shade_gradient(
         let t = gradient_position(bounds, angle_deg, world) as f32;
         vertex.color = from.lerp_to_gamma(to, t);
     }
+}
+
+/// The lines at `angle_deg` from the x axis, `pitch_mm` apart (measured across them) and
+/// passing through the origin, clipped to the `w` × `h` board; at most 10 000.
+pub fn isometric_lines(
+    w: f64,
+    h: f64,
+    pitch_mm: f64,
+    angle_deg: f64,
+) -> Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)> {
+    let mut out = Vec::new();
+    if !(w.is_finite()
+        && h.is_finite()
+        && w > 0.0
+        && h > 0.0
+        && pitch_mm.is_finite()
+        && pitch_mm > 0.0)
+    {
+        return out;
+    }
+    let (s, c) = angle_deg.to_radians().sin_cos();
+    let (ux, uy) = (c, s); // along the line
+    let (nx, ny) = (-s, c); // across it
+    let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)];
+    let across = corners.map(|(x, y)| x * nx + y * ny);
+    let lo = across.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = across.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut k = (lo / pitch_mm).ceil();
+    while k * pitch_mm <= hi + 1e-9 && out.len() < 10_000 {
+        let d = k * pitch_mm;
+        let (px, py) = (nx * d, ny * d);
+        // Clip p + t·u to the board, slab by slab.
+        let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+        let mut keep = true;
+        for (p, u, max) in [(px, ux, w), (py, uy, h)] {
+            if u.abs() < 1e-12 {
+                if p < -1e-9 || p > max + 1e-9 {
+                    keep = false;
+                }
+            } else {
+                let (a, b) = ((0.0 - p) / u, (max - p) / u);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+        }
+        if keep && t1 > t0 {
+            out.push((
+                stencilcraft_geom::Point::new(px + ux * t0, py + uy * t0),
+                stencilcraft_geom::Point::new(px + ux * t1, py + uy * t1),
+            ));
+        }
+        k += 1.0;
+    }
+    out
 }
 
 pub fn even_odd_fill(
@@ -2717,6 +2793,32 @@ mod tests {
     }
 
     #[test]
+    fn isometric_lines_are_clipped_and_evenly_spaced() {
+        let vertical = isometric_lines(40.0, 30.0, 10.0, 90.0);
+        assert_eq!(vertical.len(), 5, "x = 0, 10, 20, 30, 40");
+        assert!(
+            vertical
+                .iter()
+                .all(|(a, b)| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 29.99)
+        );
+        let diag = isometric_lines(40.0, 30.0, 10.0, 30.0);
+        assert!(!diag.is_empty());
+        for (a, b) in &diag {
+            assert!(
+                ((b.y - a.y).atan2(b.x - a.x).to_degrees().rem_euclid(180.0) - 30.0).abs() < 1e-6
+            );
+            for p in [a, b] {
+                assert!(
+                    p.x > -1e-6 && p.x < 40.0 + 1e-6 && p.y > -1e-6 && p.y < 30.0 + 1e-6,
+                    "{p:?}"
+                );
+            }
+        }
+        assert!(isometric_lines(40.0, 30.0, f64::NAN, 30.0).is_empty());
+        assert!(isometric_lines(1e6, 1e6, 1e-3, 30.0).len() <= 10_000);
+    }
+
+    #[test]
     fn grid_lines_take_their_primary_and_secondary_colours() {
         let mut doc = stencilcraft_doc::Document::default();
         doc.board.width_mm = 40.0;
@@ -2743,6 +2845,7 @@ mod tests {
                 CanvasLayers {
                     backdrop: None,
                     image_textures: &std::collections::HashMap::new(),
+                    pattern_textures: &std::collections::HashMap::new(),
                 },
                 options,
                 &SelectionState::default(),

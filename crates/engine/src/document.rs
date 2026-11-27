@@ -138,6 +138,9 @@ pub enum DocumentCommand {
         subdivisions: u32,
         #[serde(default)]
         visible: Option<bool>,
+        /// Isometric (30°, 150° and vertical lines) instead of square; left out keeps it.
+        #[serde(default)]
+        isometric: Option<bool>,
     },
     /// Change which targets snapping uses; fields left out keep their value.
     #[serde(rename = "snap.set")]
@@ -884,12 +887,16 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             spacing_mm,
             subdivisions,
             visible,
+            isometric,
         } => {
             let grid = &mut engine.doc.grid;
             grid.spacing_mm = spacing_mm;
             grid.subdivisions = subdivisions;
             if let Some(v) = visible {
                 grid.visible = v;
+            }
+            if let Some(i) = isometric {
+                grid.isometric = i;
             }
             // `validate` (run after every edit) enforces the ranges.
             changed
@@ -2455,6 +2462,7 @@ mod tests {
                 spacing_mm: 25.4,
                 subdivisions: 4,
                 visible: Some(true),
+                isometric: None,
             },
         );
         assert!((e.doc.grid.step_mm() - 6.35).abs() < 1e-12);
@@ -2463,11 +2471,13 @@ mod tests {
                 spacing_mm: 0.0,
                 subdivisions: 4,
                 visible: None,
+                isometric: None,
             },
             DocumentCommand::GridSet {
                 spacing_mm: 10.0,
                 subdivisions: 1000,
                 visible: None,
+                isometric: None,
             },
             DocumentCommand::GuideAdd {
                 axis: GuideAxis::Vertical,

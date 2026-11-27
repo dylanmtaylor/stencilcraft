@@ -61,6 +61,59 @@ pub fn encode_png_base64(pixels: &RgbaImage) -> Result<String, RasterError> {
     common::encode_png_base64(pixels).map_err(|e| bad(e.to_string()))
 }
 
+/// The largest pattern tile side, in pixels.
+pub const MAX_PATTERN_SIDE_PX: u32 = 4096;
+
+/// A pattern fill's tile pixels (document data is untrusted too).
+pub fn pattern_pixels(pattern: &stencilcraft_doc::FillPattern) -> Result<RgbaImage, RasterError> {
+    let pixels = common::decode_png_base64(&pattern.png_base64, decode_limits())
+        .map_err(|e| bad(format!("pattern: bad pixel data: {e}")))?;
+    let (w, h) = pixels.dimensions();
+    if w == 0 || h == 0 || w > MAX_PATTERN_SIDE_PX || h > MAX_PATTERN_SIDE_PX {
+        return Err(bad(format!(
+            "pattern: a {w}×{h} tile is outside 1–{MAX_PATTERN_SIDE_PX} px"
+        )));
+    }
+    Ok(pixels)
+}
+
+/// A pattern fill from an image file's bytes, `tile_mm` wide; big pictures shrink to
+/// [`MAX_PATTERN_SIDE_PX`] on their longer side.
+pub fn pattern_from_bytes(
+    bytes: &[u8],
+    tile_mm: f64,
+) -> Result<stencilcraft_doc::FillPattern, RasterError> {
+    let mut pixels = decode(bytes)?;
+    let (w, h) = pixels.dimensions();
+    let longest = w.max(h);
+    if longest > MAX_PATTERN_SIDE_PX {
+        let scale = f64::from(MAX_PATTERN_SIDE_PX) / f64::from(longest);
+        let nw = ((f64::from(w) * scale).round() as u32).max(1);
+        let nh = ((f64::from(h) * scale).round() as u32).max(1);
+        let mut small = RgbaImage::new(nw, nh);
+        for (x, y, out) in small.enumerate_pixels_mut() {
+            let sx = (u64::from(x) * u64::from(w) / u64::from(nw))
+                .min(u64::from(w.saturating_sub(1))) as u32;
+            let sy = (u64::from(y) * u64::from(h) / u64::from(nh))
+                .min(u64::from(h.saturating_sub(1))) as u32;
+            if let Some(p) = pixels.get_pixel_checked(sx, sy) {
+                *out = *p;
+            }
+        }
+        pixels = small;
+    }
+    let pattern = stencilcraft_doc::FillPattern {
+        png_base64: encode_png_base64(&pixels)?.into(),
+        tile_mm: tile_mm.clamp(
+            *stencilcraft_doc::PATTERN_TILE_MM.start(),
+            *stencilcraft_doc::PATTERN_TILE_MM.end(),
+        ),
+        angle_deg: 0.0,
+    };
+    pattern.validate().map_err(|e| bad(e.to_string()))?;
+    Ok(pattern)
+}
+
 /// Decode a placed image's pixels (document data is untrusted too).
 pub fn image_pixels(image: &RasterImage) -> Result<RgbaImage, RasterError> {
     let pixels = common::decode_png_base64(&image.png_base64, decode_limits())
@@ -129,6 +182,7 @@ pub fn place(pixels: &RgbaImage, name: &str, dpi: f64) -> Result<RasterImage, Ra
         width_px: pixels.width(),
         height_px: pixels.height(),
         png_base64: encode_png_base64(pixels)?.into(),
+        original_png_base64: None,
     })
 }
 

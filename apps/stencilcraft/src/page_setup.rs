@@ -75,6 +75,7 @@ impl StencilApp {
         let grid = self.engine.doc.grid.clone();
         let mut spacing = grid.spacing_mm;
         let mut divisions = f64::from(grid.subdivisions.max(1));
+        let mut isometric = grid.isometric;
         let mat_entries: Vec<_> = MAT_CHOICES
             .iter()
             .map(|(choice, label)| Entry::new(*choice, *label))
@@ -226,6 +227,13 @@ impl StencilApp {
                                 &numbers,
                             );
                         });
+                        let _ = Segmented::new(
+                            "Grid type",
+                            Bind::bound(&mut isometric),
+                            &[Entry::new(false, "Square"), Entry::new(true, "Isometric")],
+                        )
+                        .id_salt("page-grid-type")
+                        .show(ui);
                         labelled(ui, "Divisions", |ui| {
                             number(
                                 ui,
@@ -313,6 +321,7 @@ impl StencilApp {
         };
         if (spacing.is_finite() && (spacing - grid.spacing_mm).abs() > 1e-9)
             || divisions_now != grid.subdivisions
+            || isometric != grid.isometric
         {
             self.run_command(Command::Document(DocumentCommand::GridSet {
                 spacing_mm: if spacing.is_finite() {
@@ -322,6 +331,7 @@ impl StencilApp {
                 },
                 subdivisions: divisions_now,
                 visible: None,
+                isometric: (isometric != grid.isometric).then_some(isometric),
             }));
         }
     }

@@ -311,8 +311,18 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("DXF…", A::ImportVector(crate::file_menu::ImportKind::Dxf)).into(),
                 item("PDF…", A::ImportVector(crate::file_menu::ImportKind::Pdf)).into(),
                 item(
+                    "PDF as Image…",
+                    A::ImportVector(crate::file_menu::ImportKind::PdfImage),
+                )
+                .into(),
+                item(
                     "AI / EPS…",
                     A::ImportVector(crate::file_menu::ImportKind::AiEps),
+                )
+                .into(),
+                item(
+                    "Embroidery…",
+                    A::ImportVector(crate::file_menu::ImportKind::Embroidery),
                 )
                 .into(),
             ],
@@ -337,6 +347,16 @@ fn file(app: &StencilApp) -> Vec<MenuEntry<A>> {
                 item("PDF…", A::Export(crate::file_menu::ExportKind::Pdf)).into(),
                 item("PNG…", A::Export(crate::file_menu::ExportKind::Png)).into(),
                 item("JPEG…", A::Export(crate::file_menu::ExportKind::Jpeg)).into(),
+                item(
+                    "Silhouette Studio (.studio3)…",
+                    A::Export(crate::file_menu::ExportKind::Studio3),
+                )
+                .into(),
+                item(
+                    "Silhouette Studio V2 (.studio)…",
+                    A::Export(crate::file_menu::ExportKind::Studio),
+                )
+                .into(),
             ],
         ),
         SEP,

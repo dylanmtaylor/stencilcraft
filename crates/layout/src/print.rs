@@ -234,6 +234,7 @@ pub fn sheets_to_pdf(sheets: &[PrintSheet]) -> Result<Vec<u8>> {
                 height_mm: sheet.height_mm,
                 view_box: [0.0, 0.0, sheet.width_mm, sheet.height_mm],
                 paths,
+                images: Vec::new(),
             }
         })
         .collect::<Vec<_>>();

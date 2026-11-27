@@ -17,6 +17,25 @@ pub fn export(doc: &Document) -> Result<Vec<u8>, PdfError> {
         height_mm: doc.board.height_mm,
         view_box: [0.0, 0.0, doc.board.width_mm, doc.board.height_mm],
         paths: Vec::new(),
+        // Placed pictures, under the lines; one whose pixels do not decode is left out.
+        images: doc
+            .images
+            .iter()
+            .take(craft_file_import::write::MAX_IMAGES)
+            .filter_map(|image| {
+                let pixels = stencilcraft_raster::image_pixels(image).ok()?;
+                Some(craft_file_import::write::OutputImage {
+                    x: image.x_mm,
+                    y: image.y_mm,
+                    width: image.width_mm,
+                    height: image.height_mm,
+                    width_px: pixels.width(),
+                    height_px: pixels.height(),
+                    rgba: pixels.into_raw(),
+                })
+            })
+            .filter(craft_file_import::write::OutputImage::is_valid)
+            .collect(),
     };
     for layer in doc.layers.iter().filter(|layer| layer.visible) {
         for shape in &layer.shapes {

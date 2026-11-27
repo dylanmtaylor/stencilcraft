@@ -39,6 +39,8 @@ pub enum ProductionField {
     FillColor,
     Material,
     Send,
+    FillPattern,
+    FillGradient,
 }
 
 /// Production commands, serialised with the same `command`/`params` envelope as [`crate::Command`].
@@ -103,6 +105,12 @@ pub enum ProductionCommand {
         material: Option<String>,
         #[serde(default)]
         send: Option<SendAssign>,
+        /// A picture tiled inside the shapes (Silhouette's pattern fill).
+        #[serde(default)]
+        fill_pattern: Option<Box<stencilcraft_doc::FillPattern>>,
+        /// A two-colour linear gradient inside the shapes (Silhouette's gradient fill).
+        #[serde(default)]
+        fill_gradient: Option<Box<stencilcraft_doc::FillGradient>>,
         #[serde(default)]
         clear: Vec<ProductionField>,
     },
@@ -368,9 +376,30 @@ pub(crate) fn execute(
             fill_color,
             material,
             send,
+            fill_pattern,
+            fill_gradient,
             clear,
         } => {
             let name = "shapes.set-production";
+            if let Some(pattern) = fill_pattern.as_deref() {
+                pattern
+                    .validate()
+                    .map_err(|e| EngineError::Invalid(format!("{name}: {e}")))?;
+            }
+            let fill_gradient = fill_gradient
+                .map(|mut g| {
+                    let canonical = |c: &str| {
+                        craft_svg::color::parse_color(c)
+                            .map(|c| c.to_css())
+                            .map_err(|e| EngineError::Invalid(format!("{name}: {e}")))
+                    };
+                    g.from = canonical(&g.from)?;
+                    g.to = canonical(&g.to)?;
+                    g.validate()
+                        .map_err(|e| EngineError::Invalid(format!("{name}: {e}")))?;
+                    Ok::<_, EngineError>(g)
+                })
+                .transpose()?;
             let ids = checked(doc, &ids, name, 1)?;
             let color = |c: Option<String>| -> Result<Option<String>, EngineError> {
                 c.map(|c| {
@@ -400,6 +429,8 @@ pub(crate) fn execute(
                         ProductionField::FillColor => p.fill_color = None,
                         ProductionField::Material => p.material = None,
                         ProductionField::Send => p.send = None,
+                        ProductionField::FillPattern => p.fill_pattern = None,
+                        ProductionField::FillGradient => p.fill_gradient = None,
                     }
                 }
                 p.operation = operation.or(p.operation);
@@ -407,6 +438,12 @@ pub(crate) fn execute(
                 p.fill_color = fill_color.clone().or(p.fill_color.take());
                 p.material = material.clone().or(p.material.take());
                 p.send = send.or(p.send);
+                if fill_pattern.is_some() {
+                    p.fill_pattern.clone_from(&fill_pattern);
+                }
+                if fill_gradient.is_some() {
+                    p.fill_gradient.clone_from(&fill_gradient);
+                }
             }
             Ok(Effect::ShapesEdited { ids })
         }

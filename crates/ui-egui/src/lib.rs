@@ -764,6 +764,7 @@ pub fn paint_document(
     let CanvasLayers {
         backdrop,
         image_textures,
+        pattern_textures,
     } = layers;
     let palette = Palette::for_theme(options.theme);
     // Canvas backing, then (optionally) the cutting mat, then the design
@@ -815,13 +816,35 @@ pub fn paint_document(
                 j += 1.0;
             }
         };
+        // Isometric: three families of lines (vertical, 30° and 150°) the same distance apart,
+        // which meet as equilateral triangles.
+        let iso = |pitch_mm: f64, colour: egui::Color32| {
+            if !(pitch_mm.is_finite() && pitch_mm > 0.0 && f64::from(view.zoom) * pitch_mm > 6.0) {
+                return;
+            }
+            for angle in [90.0_f64, 30.0, 150.0] {
+                for (a, b) in isometric_lines(w, h, pitch_mm, angle) {
+                    painter.line_segment(
+                        [view.world_to_screen(a), view.world_to_screen(b)],
+                        (1.0, colour),
+                    );
+                }
+            }
+        };
         // Subdivisions in the secondary colour once they are far enough apart, then the
         // spacing lines over them in the primary colour.
         let step = doc.grid.step_mm();
-        if step < spacing {
-            lines(step, colour(options.grid_secondary));
+        if doc.grid.isometric {
+            if step < spacing {
+                iso(step, colour(options.grid_secondary));
+            }
+            iso(spacing, colour(options.grid_primary));
+        } else {
+            if step < spacing {
+                lines(step, colour(options.grid_secondary));
+            }
+            lines(spacing, colour(options.grid_primary));
         }
-        lines(spacing, colour(options.grid_primary));
     }
 
     if options.print_cut_marks {
@@ -879,12 +902,22 @@ pub fn paint_document(
             {
                 color = line;
             }
-            if !options.outline_view
-                && let Some(fill) = shape
-                    .production
-                    .fill_color
-                    .as_deref()
-                    .and_then(parse_hex_colour)
+            let pattern = shape
+                .production
+                .fill_pattern
+                .as_deref()
+                .zip(pattern_textures.get(&shape.id).copied());
+            let solid = shape
+                .production
+                .fill_color
+                .as_deref()
+                .and_then(parse_hex_colour);
+            let gradient = shape
+                .production
+                .fill_gradient
+                .as_deref()
+                .and_then(|g| Some((g, parse_hex_colour(&g.from)?, parse_hex_colour(&g.to)?)));
+            if !options.outline_view && (pattern.is_some() || gradient.is_some() || solid.is_some())
             {
                 let polygons: Vec<Vec<egui::Pos2>> = stencilcraft_geom::path_to_polylines(
                     &shape.path,
@@ -895,7 +928,18 @@ pub fn paint_document(
                 .filter(|(i, pl)| pl.closed && !shape.production.hidden_contours.contains(i))
                 .map(|(_, pl)| pl.points.iter().map(|p| view.world_to_screen(*p)).collect())
                 .collect();
-                painter.add(egui::Shape::mesh(even_odd_fill(&polygons, clip, fill)));
+                if let Some((pattern, (texture, aspect))) = pattern {
+                    let mut mesh = even_odd_fill(&polygons, clip, egui::Color32::WHITE);
+                    map_pattern(&mut mesh, view, texture, pattern, aspect);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else if let Some((g, from, to)) = gradient {
+                    let mut mesh = even_odd_fill(&polygons, clip, egui::Color32::WHITE);
+                    let bounds = kurbo::Shape::bounding_box(&shape.path);
+                    shade_gradient(&mut mesh, view, bounds, g.angle_deg, from, to);
+                    painter.add(egui::Shape::mesh(mesh));
+                } else if let Some(fill) = solid {
+                    painter.add(egui::Shape::mesh(even_odd_fill(&polygons, clip, fill)));
+                }
             }
             if options.outline_view {
                 width = 1.0;
@@ -1453,6 +1497,116 @@ const MAX_FILL_ROWS: usize = 4096;
 
 /// Fill closed screen polygons by the even-odd rule, one pixel row at a time, clipped to
 /// `clip`: concave shapes and holes fill correctly, which egui's convex fill cannot do.
+/// Texture `mesh` (a fill in screen space) with a pattern tile repeated in page millimetres:
+/// one tile is `tile_mm` wide and `aspect` times that tall, turned by the pattern's angle.
+pub fn map_pattern(
+    mesh: &mut egui::Mesh,
+    view: &View,
+    texture: egui::TextureId,
+    pattern: &stencilcraft_doc::FillPattern,
+    aspect: f32,
+) {
+    let width = pattern.tile_mm.max(0.5);
+    let height = width * f64::from(aspect.max(0.01));
+    let (sin, cos) = (-pattern.angle_deg.to_radians()).sin_cos();
+    mesh.texture_id = texture;
+    for vertex in &mut mesh.vertices {
+        let world = view.screen_to_world(vertex.pos.to_vec2());
+        let (x, y) = (world.x * cos - world.y * sin, world.x * sin + world.y * cos);
+        vertex.uv = egui::pos2((x / width) as f32, (y / height) as f32);
+        vertex.color = egui::Color32::WHITE;
+    }
+}
+
+/// Where `point` falls along a gradient across `bounds` at `angle_deg` (0 left to right,
+/// 90 bottom to top on the y-down page), from 0 to 1.
+pub fn gradient_position(
+    bounds: kurbo::Rect,
+    angle_deg: f64,
+    point: stencilcraft_geom::Point,
+) -> f64 {
+    let (sin, cos) = angle_deg.to_radians().sin_cos();
+    let centre = bounds.center();
+    // Half the extent of the bounds along the direction.
+    let half = (bounds.width() * cos.abs() + bounds.height() * sin.abs()) / 2.0;
+    if !(half.is_finite() && half > 1e-9) {
+        return 0.0;
+    }
+    let along = (point.x - centre.x) * cos - (point.y - centre.y) * sin;
+    (along / (2.0 * half) + 0.5).clamp(0.0, 1.0)
+}
+
+/// Colour `mesh` (a fill in screen space) with a gradient from `from` to `to` across the
+/// shape's `bounds` in page millimetres.
+pub fn shade_gradient(
+    mesh: &mut egui::Mesh,
+    view: &View,
+    bounds: kurbo::Rect,
+    angle_deg: f64,
+    from: egui::Color32,
+    to: egui::Color32,
+) {
+    for vertex in &mut mesh.vertices {
+        let world = view.screen_to_world(vertex.pos.to_vec2());
+        let t = gradient_position(bounds, angle_deg, world) as f32;
+        vertex.color = from.lerp_to_gamma(to, t);
+    }
+}
+
+/// The lines at `angle_deg` from the x axis, `pitch_mm` apart (measured across them) and
+/// passing through the origin, clipped to the `w` × `h` board; at most 10 000.
+pub fn isometric_lines(
+    w: f64,
+    h: f64,
+    pitch_mm: f64,
+    angle_deg: f64,
+) -> Vec<(stencilcraft_geom::Point, stencilcraft_geom::Point)> {
+    let mut out = Vec::new();
+    if !(w.is_finite()
+        && h.is_finite()
+        && w > 0.0
+        && h > 0.0
+        && pitch_mm.is_finite()
+        && pitch_mm > 0.0)
+    {
+        return out;
+    }
+    let (s, c) = angle_deg.to_radians().sin_cos();
+    let (ux, uy) = (c, s); // along the line
+    let (nx, ny) = (-s, c); // across it
+    let corners = [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)];
+    let across = corners.map(|(x, y)| x * nx + y * ny);
+    let lo = across.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = across.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut k = (lo / pitch_mm).ceil();
+    while k * pitch_mm <= hi + 1e-9 && out.len() < 10_000 {
+        let d = k * pitch_mm;
+        let (px, py) = (nx * d, ny * d);
+        // Clip p + t·u to the board, slab by slab.
+        let (mut t0, mut t1) = (f64::NEG_INFINITY, f64::INFINITY);
+        let mut keep = true;
+        for (p, u, max) in [(px, ux, w), (py, uy, h)] {
+            if u.abs() < 1e-12 {
+                if p < -1e-9 || p > max + 1e-9 {
+                    keep = false;
+                }
+            } else {
+                let (a, b) = ((0.0 - p) / u, (max - p) / u);
+                t0 = t0.max(a.min(b));
+                t1 = t1.min(a.max(b));
+            }
+        }
+        if keep && t1 > t0 {
+            out.push((
+                stencilcraft_geom::Point::new(px + ux * t0, py + uy * t0),
+                stencilcraft_geom::Point::new(px + ux * t1, py + uy * t1),
+            ));
+        }
+        k += 1.0;
+    }
+    out
+}
+
 pub fn even_odd_fill(
     polygons: &[Vec<egui::Pos2>],
     clip: egui::Rect,
@@ -1506,6 +1660,8 @@ pub fn even_odd_fill(
 pub struct CanvasLayers<'a> {
     pub backdrop: Option<&'a MatBackdrop>,
     pub image_textures: &'a std::collections::HashMap<u64, egui::TextureId>,
+    /// Pattern fill tiles by shape id: a repeating texture and the tile's height ÷ width.
+    pub pattern_textures: &'a std::collections::HashMap<u64, (egui::TextureId, f32)>,
 }
 
 /// Selection state painted over the canvas.
@@ -1922,6 +2078,56 @@ fn distance_to_segment_squared(point: egui::Pos2, start: egui::Pos2, end: egui::
 #[cfg(test)]
 mod fill_tests {
     use super::*;
+
+    #[test]
+    fn a_gradient_runs_across_the_bounds_at_its_angle() {
+        let b = kurbo::Rect::new(0.0, 0.0, 20.0, 10.0);
+        let p = stencilcraft_geom::Point::new;
+        assert!((gradient_position(b, 0.0, p(0.0, 5.0))).abs() < 1e-9);
+        assert!((gradient_position(b, 0.0, p(20.0, 5.0)) - 1.0).abs() < 1e-9);
+        assert!((gradient_position(b, 0.0, p(10.0, 0.0)) - 0.5).abs() < 1e-9);
+        // The page is y-down: 90° ends at the top edge.
+        assert!((gradient_position(b, 90.0, p(3.0, 0.0)) - 1.0).abs() < 1e-9);
+        assert!(gradient_position(b, 90.0, p(3.0, 10.0)).abs() < 1e-9);
+        assert_eq!(gradient_position(kurbo::Rect::ZERO, 0.0, p(1.0, 1.0)), 0.0);
+    }
+
+    #[test]
+    fn a_pattern_repeats_in_page_millimetres() {
+        let view = View::default();
+        let mut mesh = egui::Mesh::default();
+        mesh.add_colored_rect(
+            egui::Rect::from_min_max(
+                view.world_to_screen(stencilcraft_geom::Point::new(0.0, 0.0)),
+                view.world_to_screen(stencilcraft_geom::Point::new(20.0, 10.0)),
+            ),
+            egui::Color32::RED,
+        );
+        let pattern = stencilcraft_doc::FillPattern {
+            png_base64: "x".into(),
+            tile_mm: 10.0,
+            angle_deg: 0.0,
+        };
+        map_pattern(&mut mesh, &view, egui::TextureId::User(7), &pattern, 0.5);
+        assert_eq!(mesh.texture_id, egui::TextureId::User(7));
+        let far = mesh
+            .vertices
+            .iter()
+            .map(|v| v.uv)
+            .fold(egui::pos2(f32::MIN, f32::MIN), |a, b| {
+                egui::pos2(a.x.max(b.x), a.y.max(b.y))
+            });
+        // 20 mm across is two 10 mm tiles; 10 mm down is two 5 mm tall tiles.
+        assert!(
+            (far.x - 2.0).abs() < 1e-3 && (far.y - 2.0).abs() < 1e-3,
+            "{far:?}"
+        );
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|v| v.color == egui::Color32::WHITE)
+        );
+    }
 
     #[test]
     fn even_odd_fill_leaves_holes_and_respects_clip() {
@@ -2587,6 +2793,32 @@ mod tests {
     }
 
     #[test]
+    fn isometric_lines_are_clipped_and_evenly_spaced() {
+        let vertical = isometric_lines(40.0, 30.0, 10.0, 90.0);
+        assert_eq!(vertical.len(), 5, "x = 0, 10, 20, 30, 40");
+        assert!(
+            vertical
+                .iter()
+                .all(|(a, b)| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() > 29.99)
+        );
+        let diag = isometric_lines(40.0, 30.0, 10.0, 30.0);
+        assert!(!diag.is_empty());
+        for (a, b) in &diag {
+            assert!(
+                ((b.y - a.y).atan2(b.x - a.x).to_degrees().rem_euclid(180.0) - 30.0).abs() < 1e-6
+            );
+            for p in [a, b] {
+                assert!(
+                    p.x > -1e-6 && p.x < 40.0 + 1e-6 && p.y > -1e-6 && p.y < 30.0 + 1e-6,
+                    "{p:?}"
+                );
+            }
+        }
+        assert!(isometric_lines(40.0, 30.0, f64::NAN, 30.0).is_empty());
+        assert!(isometric_lines(1e6, 1e6, 1e-3, 30.0).len() <= 10_000);
+    }
+
+    #[test]
     fn grid_lines_take_their_primary_and_secondary_colours() {
         let mut doc = stencilcraft_doc::Document::default();
         doc.board.width_mm = 40.0;
@@ -2613,6 +2845,7 @@ mod tests {
                 CanvasLayers {
                     backdrop: None,
                     image_textures: &std::collections::HashMap::new(),
+                    pattern_textures: &std::collections::HashMap::new(),
                 },
                 options,
                 &SelectionState::default(),
@@ -2652,6 +2885,7 @@ mod tests {
                     CanvasLayers {
                         backdrop: None,
                         image_textures: &std::collections::HashMap::new(),
+                        pattern_textures: &std::collections::HashMap::new(),
                     },
                     CanvasOptions::default(),
                     &SelectionState::default(),
@@ -2693,6 +2927,7 @@ mod tests {
                 CanvasLayers {
                     backdrop: None,
                     image_textures: &std::collections::HashMap::new(),
+                    pattern_textures: &std::collections::HashMap::new(),
                 },
                 CanvasOptions::default(),
                 &SelectionState::default(),

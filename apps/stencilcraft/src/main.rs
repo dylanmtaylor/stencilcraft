@@ -1529,6 +1529,9 @@ pub struct StencilApp {
     pub click_draft: Option<click_draw::ClickDraft>,
     /// Uploaded textures of placed images, keyed by image id with the pixel data they show.
     pub image_textures: std::collections::HashMap<u64, (usize, egui::TextureHandle)>,
+    /// Pattern fill tiles by shape id: the data they were made from, the repeating texture
+    /// and the tile's height ÷ width.
+    pub pattern_textures: std::collections::HashMap<u64, (usize, egui::TextureHandle, f32)>,
     /// A placed image picked on the canvas (images select on their own, as in Silhouette).
     pub selected_image: Option<u64>,
     /// An image being dragged: its id and the press point.
@@ -1848,6 +1851,7 @@ impl StencilApp {
             pen_undo_requested: false,
             click_draft: None,
             image_textures: std::collections::HashMap::new(),
+            pattern_textures: std::collections::HashMap::new(),
             selected_image: None,
             image_drag: None,
             trace_preview: None,
@@ -3757,6 +3761,42 @@ impl StencilApp {
             self.set_selection([]);
             self.status = "placed image (trace it from the Trace panel)".to_string();
         }
+    }
+
+    /// Upload or refresh the repeating tiles of pattern fills; drop those no shape uses.
+    fn sync_pattern_textures(&mut self, ctx: &egui::Context) {
+        let mut live = std::collections::BTreeSet::new();
+        for shape in self.engine.doc.layers.iter().flat_map(|l| &l.shapes) {
+            let Some(pattern) = shape.production.fill_pattern.as_deref() else {
+                continue;
+            };
+            live.insert(shape.id);
+            let key = std::sync::Arc::as_ptr(&pattern.png_base64).cast::<u8>() as usize;
+            if self
+                .pattern_textures
+                .get(&shape.id)
+                .is_some_and(|(cached, _, _)| *cached == key)
+            {
+                continue;
+            }
+            let Ok(pixels) = stencilcraft_raster::pattern_pixels(pattern) else {
+                continue;
+            };
+            let (w, h) = pixels.dimensions();
+            let (Ok(wu), Ok(hu)) = (usize::try_from(w), usize::try_from(h)) else {
+                continue;
+            };
+            let aspect = h as f32 / w.max(1) as f32;
+            let colour = egui::ColorImage::from_rgba_unmultiplied([wu, hu], &pixels.into_raw());
+            let options = egui::TextureOptions {
+                wrap_mode: egui::TextureWrapMode::Repeat,
+                ..egui::TextureOptions::LINEAR
+            };
+            let texture = ctx.load_texture(format!("pattern-{}", shape.id), colour, options);
+            self.pattern_textures
+                .insert(shape.id, (key, texture, aspect));
+        }
+        self.pattern_textures.retain(|id, _| live.contains(id));
     }
 
     /// Upload or refresh the textures of placed images; drop those of removed ones.
@@ -6432,6 +6472,7 @@ impl StencilApp {
                 self.status = format!("kerf preview: {error}");
             }
             self.sync_image_textures(ui.ctx());
+            self.sync_pattern_textures(ui.ctx());
             let paint_doc = if self.kerf_preview {
                 self.kerf_preview_cache
                     .as_ref()
@@ -6466,6 +6507,11 @@ impl StencilApp {
                 .iter()
                 .map(|(id, (_, texture))| (*id, texture.id()))
                 .collect();
+            let patterns: std::collections::HashMap<u64, (egui::TextureId, f32)> = self
+                .pattern_textures
+                .iter()
+                .map(|(id, (_, texture, aspect))| (*id, (texture.id(), *aspect)))
+                .collect();
             stencilcraft_ui_egui::paint_document(
                 &painter,
                 clip,
@@ -6474,6 +6520,7 @@ impl StencilApp {
                 stencilcraft_ui_egui::CanvasLayers {
                     backdrop: self.prefs.mat_preview.then_some(&backdrop),
                     image_textures: &textures,
+                    pattern_textures: &patterns,
                 },
                 stencilcraft_ui_egui::CanvasOptions {
                     kerf_preview: self.kerf_preview,
@@ -8581,6 +8628,30 @@ mod tests {
             (b.x0 - 53.467).abs() < 0.01 && (b.y0 - 51.191).abs() < 0.01,
             "y down: {b:?}"
         );
+    }
+
+    #[test]
+    fn silhouette_documents_open_as_new_unsaved_documents() {
+        let mut source = stencilcraft_doc::Document::default();
+        let mut square = kurbo::BezPath::new();
+        square.move_to((10.0, 10.0));
+        square.line_to((40.0, 10.0));
+        square.line_to((40.0, 30.0));
+        square.close_path();
+        source.push_shape(0, square, CutStyle::Cut).unwrap();
+        let dir = std::env::temp_dir().join(format!("sc-studio-open-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("triangle.studio3");
+        std::fs::write(&path, stencilcraft_studio::export(&source).unwrap()).unwrap();
+        let mut app = StencilApp::new(None);
+        app.open_document(&path.to_string_lossy());
+        assert_eq!(app.engine.doc.shape_count(), 1, "{}", app.status);
+        assert_eq!(
+            app.open_path, None,
+            "Save must not overwrite the Silhouette file"
+        );
+        assert!(app.status.contains("Silhouette Studio"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

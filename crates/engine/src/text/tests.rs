@@ -38,6 +38,8 @@ fn spec(text: &str, font: FontSpec) -> TextSpec {
         vertical: false,
         weld: false,
         flow: TextFlow::Straight,
+        wrap_width_mm: None,
+        underline: false,
         letters: Vec::new(),
         transform: IDENTITY_TRANSFORM,
     }

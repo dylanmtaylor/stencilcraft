@@ -54,23 +54,9 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
 
     for placed in &doc.images {
         let pixels = image_pixels(placed)?;
-        let Some(mut source) = Pixmap::new(pixels.width(), pixels.height()) else {
+        let Some(source) = premultiplied(&pixels) else {
             continue;
         };
-        // tiny-skia wants premultiplied RGBA.
-        for (dst, src) in source
-            .data_mut()
-            .as_chunks_mut::<4>()
-            .0
-            .iter_mut()
-            .zip(pixels.as_raw().as_chunks::<4>().0)
-        {
-            let a = u16::from(src[3]);
-            for c in 0..3 {
-                dst[c] = ((u16::from(src[c]) * a + 127) / 255) as u8;
-            }
-            dst[3] = src[3];
-        }
         let placement = page
             .pre_translate(placed.x_mm as f32, placed.y_mm as f32)
             .pre_scale(
@@ -104,6 +90,7 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
             let Some(path) = skia_path(&shape.path, scale) else {
                 continue;
             };
+            fill_shape(&mut pixmap, shape, &path, scale);
             pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
         }
     }
@@ -119,6 +106,110 @@ pub fn render(doc: &Document, dpi: f64) -> Result<RgbaImage, RasterError> {
         dst.copy_from_slice(src);
     }
     Ok(out)
+}
+
+/// Pixels as the premultiplied RGBA tiny-skia draws from.
+fn premultiplied(pixels: &RgbaImage) -> Option<Pixmap> {
+    let mut source = Pixmap::new(pixels.width(), pixels.height())?;
+    for (dst, src) in source
+        .data_mut()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(pixels.as_raw().as_chunks::<4>().0)
+    {
+        let a = u16::from(src[3]);
+        for c in 0..3 {
+            dst[c] = ((u16::from(src[c]) * a + 127) / 255) as u8;
+        }
+        dst[3] = src[3];
+    }
+    Some(source)
+}
+
+/// A shape's pattern fill, else its fill colour, inside `path` (page pixels, even-odd).
+fn fill_shape(
+    pixmap: &mut Pixmap,
+    shape: &stencilcraft_doc::Shape,
+    path: &tiny_skia::Path,
+    scale: f64,
+) {
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    let tile = shape
+        .production
+        .fill_pattern
+        .as_deref()
+        .and_then(|pattern| {
+            Some((
+                pattern,
+                premultiplied(&stencilcraft_raster::pattern_pixels(pattern).ok()?)?,
+            ))
+        });
+    if let Some((pattern, tile)) = &tile {
+        let per_px = (pattern.tile_mm * scale / f64::from(tile.width().max(1))) as f32;
+        let place = Transform::from_rotate(pattern.angle_deg as f32).pre_scale(per_px, per_px);
+        paint.shader = tiny_skia::Pattern::new(
+            tile.as_ref(),
+            tiny_skia::SpreadMode::Repeat,
+            tiny_skia::FilterQuality::Bilinear,
+            1.0,
+            place,
+        );
+    } else if let Some((g, [r0, g0, b0], [r1, g1, b1])) = shape
+        .production
+        .fill_gradient
+        .as_deref()
+        .and_then(|g| Some((g, hex_rgb(&g.from)?, hex_rgb(&g.to)?)))
+    {
+        // The gradient's ends across the shape's bounds, in page pixels.
+        let bounds = kurbo::Shape::bounding_box(&shape.path);
+        let (sin, cos) = g.angle_deg.to_radians().sin_cos();
+        let half = (bounds.width() * cos.abs() + bounds.height() * sin.abs()) / 2.0;
+        let c = bounds.center();
+        let end = |s: f64| {
+            tiny_skia::Point::from_xy(
+                ((c.x + s * half * cos) * scale) as f32,
+                ((c.y - s * half * sin) * scale) as f32,
+            )
+        };
+        let Some(shader) = tiny_skia::LinearGradient::new(
+            end(-1.0),
+            end(1.0),
+            vec![
+                tiny_skia::GradientStop::new(0.0, Color::from_rgba8(r0, g0, b0, 0xff)),
+                tiny_skia::GradientStop::new(1.0, Color::from_rgba8(r1, g1, b1, 0xff)),
+            ],
+            tiny_skia::SpreadMode::Pad,
+            Transform::identity(),
+        ) else {
+            return;
+        };
+        paint.shader = shader;
+    } else if let Some([r, g, b]) = shape.production.fill_color.as_deref().and_then(hex_rgb) {
+        paint.set_color_rgba8(r, g, b, 0xff);
+    } else {
+        return;
+    }
+    pixmap.fill_path(
+        path,
+        &paint,
+        tiny_skia::FillRule::EvenOdd,
+        Transform::identity(),
+        None,
+    );
+}
+
+/// `#rrggbb` as R, G, B.
+fn hex_rgb(hex: &str) -> Option<[u8; 3]> {
+    let digits = hex.trim().trim_start_matches('#');
+    if digits.len() != 6 || !digits.is_ascii() {
+        return None;
+    }
+    let channel = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
 /// The path in page pixels (scaled here so stroke width is in pixels).
@@ -172,6 +263,79 @@ pub fn render_document(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn fills_and_pattern_fills_render() {
+        let mut doc = Document::default();
+        doc.board.width_mm = 50.0;
+        doc.board.height_mm = 20.0;
+        let square = |x: f64| {
+            let mut p = stencilcraft_geom::BezPath::new();
+            p.move_to((x, 2.0));
+            p.line_to((x + 16.0, 2.0));
+            p.line_to((x + 16.0, 18.0));
+            p.line_to((x, 18.0));
+            p.close_path();
+            p
+        };
+        let solid = doc.push_shape(0, square(2.0), CutStyle::Cut).unwrap().id;
+        let tiled = doc.push_shape(0, square(30.0), CutStyle::Cut).unwrap().id;
+        doc.get_shape_mut(solid).unwrap().production.fill_color = Some("#00ff00".into());
+        let tile =
+            RgbaImage::from_pixel(2, 2, craft_raster_codecs::common::Pixel([0, 0, 255, 255]));
+        doc.get_shape_mut(tiled).unwrap().production.fill_pattern =
+            Some(Box::new(stencilcraft_doc::FillPattern {
+                png_base64: stencilcraft_raster::encode_png_base64(&tile)
+                    .unwrap()
+                    .into(),
+                tile_mm: 5.0,
+                angle_deg: 30.0,
+            }));
+        let out = render(&doc, 72.0).unwrap();
+        let at = |x_mm: f64, y_mm: f64| {
+            let px = out.get_pixel((x_mm / 25.4 * 72.0) as u32, (y_mm / 25.4 * 72.0) as u32);
+            [px.0[0], px.0[1], px.0[2]]
+        };
+        assert_eq!(at(10.0, 10.0), [0, 255, 0], "solid fill");
+        assert_eq!(at(38.0, 10.0), [0, 0, 255], "pattern fill");
+        assert_eq!(at(25.0, 10.0), [255, 255, 255], "between them");
+        doc.get_shape_mut(solid).unwrap().production.fill_gradient =
+            Some(Box::new(stencilcraft_doc::FillGradient {
+                from: "#ff0000".into(),
+                to: "#0000ff".into(),
+                angle_deg: 0.0,
+            }));
+        let out = render(&doc, 72.0).unwrap();
+        let px = |x_mm: f64| {
+            out.get_pixel((x_mm / 25.4 * 72.0) as u32, (10.0 / 25.4 * 72.0) as u32)
+                .0
+        };
+        let (left, right) = (px(3.0), px(17.0));
+        assert!(left[0] > 200 && left[2] < 60, "red end {left:?}");
+        assert!(right[2] > 200 && right[0] < 60, "blue end {right:?}");
+        // At 90° the gradient starts at the bottom of the page-down shape and ends at its top.
+        if let Some(g) = doc
+            .get_shape_mut(solid)
+            .unwrap()
+            .production
+            .fill_gradient
+            .as_mut()
+        {
+            g.angle_deg = 90.0;
+        }
+        let out = render(&doc, 72.0).unwrap();
+        let py = |y_mm: f64| {
+            out.get_pixel((10.0 / 25.4 * 72.0) as u32, (y_mm / 25.4 * 72.0) as u32)
+                .0
+        };
+        let (top, bottom) = (py(3.0), py(17.0));
+        assert!(top[2] > 200 && top[0] < 60, "blue at the top {top:?}");
+        assert!(
+            bottom[0] > 200 && bottom[2] < 60,
+            "red at the bottom {bottom:?}"
+        );
+    }
+
     use super::*;
 
     #[test]

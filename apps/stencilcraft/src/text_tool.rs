@@ -255,6 +255,8 @@ impl StencilApp {
             vertical: self.text_style.vertical,
             weld: false,
             flow: stencilcraft_doc::TextFlow::Straight,
+            wrap_width_mm: None,
+            underline: false,
             letters: Vec::new(),
             transform: stencilcraft_doc::IDENTITY_TRANSFORM,
         }

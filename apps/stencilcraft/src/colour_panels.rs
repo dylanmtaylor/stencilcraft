@@ -44,6 +44,9 @@ pub fn normalise_hex(text: &str) -> Option<String> {
         .then(|| format!("#{}", text.to_ascii_lowercase()))
 }
 
+/// A new pattern's tile width.
+pub const DEFAULT_PATTERN_TILE_MM: f64 = 25.0;
+
 impl StencilApp {
     /// Set (or clear with `None`) the fill or line colour of the selection: one undo step.
     pub fn set_selection_colour(&mut self, target: ColourTarget, colour: Option<String>) {
@@ -60,6 +63,8 @@ impl StencilApp {
                 fill_color: (target == ColourTarget::Fill).then_some(hex),
                 material: None,
                 send: None,
+                fill_pattern: None,
+                fill_gradient: None,
                 clear: Vec::new(),
             },
             None => ProductionCommand::SetProduction {
@@ -69,6 +74,8 @@ impl StencilApp {
                 fill_color: None,
                 material: None,
                 send: None,
+                fill_pattern: None,
+                fill_gradient: None,
                 clear: vec![target.field()],
             },
         };
@@ -163,6 +170,10 @@ impl StencilApp {
                         "Select shapes to colour."
                     },
                 );
+                if target == ColourTarget::Fill {
+                    self.fill_gradient_ui(ui);
+                    self.fill_pattern_ui(ui);
+                }
             });
         self.colour_hex_draft = hex;
         if let Some(colour) = picked {
@@ -195,6 +206,208 @@ impl StencilApp {
 
     pub fn fill_colour_panel(&mut self, ui: &mut egui::Ui) {
         self.colour_panel(ui, ColourTarget::Fill);
+    }
+
+    /// Set (or clear with `None`) the selection's pattern fill: one undo step.
+    pub fn set_selection_pattern(&mut self, pattern: Option<stencilcraft_doc::FillPattern>) {
+        if self.selected_shapes.is_empty() {
+            self.status = "select shapes first".to_string();
+            return;
+        }
+        let clear = if pattern.is_none() {
+            vec![stencilcraft_engine::ProductionField::FillPattern]
+        } else {
+            Vec::new()
+        };
+        self.run_command(Command::Production(ProductionCommand::SetProduction {
+            ids: self.selected_shapes.clone(),
+            operation: None,
+            line_color: None,
+            fill_color: None,
+            material: None,
+            send: None,
+            fill_pattern: pattern.map(Box::new),
+            fill_gradient: None,
+            clear,
+        }));
+    }
+
+    /// Set (or clear with `None`) the selection's gradient fill: one undo step.
+    pub fn set_selection_gradient(&mut self, gradient: Option<stencilcraft_doc::FillGradient>) {
+        if self.selected_shapes.is_empty() {
+            self.status = "select shapes first".to_string();
+            return;
+        }
+        let clear = if gradient.is_none() {
+            vec![stencilcraft_engine::ProductionField::FillGradient]
+        } else {
+            Vec::new()
+        };
+        self.run_command(Command::Production(ProductionCommand::SetProduction {
+            ids: self.selected_shapes.clone(),
+            operation: None,
+            line_color: None,
+            fill_color: None,
+            material: None,
+            send: None,
+            fill_pattern: None,
+            fill_gradient: gradient.map(Box::new),
+            clear,
+        }));
+    }
+
+    /// The first selected shape's gradient fill.
+    pub fn selection_gradient(&self) -> Option<stencilcraft_doc::FillGradient> {
+        self.selected_shapes.iter().find_map(|id| {
+            self.engine
+                .doc
+                .get_shape(*id)?
+                .production
+                .fill_gradient
+                .as_deref()
+                .cloned()
+        })
+    }
+
+    /// Fill Color › Gradient: two colours blended across the selected shapes at an angle.
+    fn fill_gradient_ui(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label("Fill Gradient");
+        let any = !self.selected_shapes.is_empty();
+        let current = self.selection_gradient();
+        // The draft being typed lives in egui's memory until it is applied; a new selection
+        // with a gradient shows that one.
+        let draft_id = egui::Id::unique("fill-gradient-draft");
+        let fallback = current.clone().unwrap_or(stencilcraft_doc::FillGradient {
+            from: "#ffffff".into(),
+            to: "#000000".into(),
+            angle_deg: 0.0,
+        });
+        let (mut g, shown_for) = ui
+            .ctx()
+            .data_mut(|d| d.get_temp::<(stencilcraft_doc::FillGradient, Vec<u64>)>(draft_id))
+            .filter(|(_, ids)| *ids == self.selected_shapes)
+            .unwrap_or((fallback, self.selected_shapes.clone()));
+        let numbers = self.locale_numbers.clone();
+        ui.horizontal(|ui| {
+            ui.label("From");
+            ui.add(egui::TextEdit::singleline(&mut g.from).desired_width(70.0));
+            ui.label("To");
+            ui.add(egui::TextEdit::singleline(&mut g.to).desired_width(70.0));
+        });
+        crate::panels::number(
+            ui,
+            "fill-gradient-angle",
+            "Gradient angle",
+            &mut g.angle_deg,
+            -360.0..=360.0,
+            "{n}°",
+            &numbers,
+        );
+        ui.horizontal(|ui| {
+            let apply = current.is_none() || current.as_ref() != Some(&g);
+            if button(ui, "Apply Gradient", any && apply) {
+                match (normalise_hex(&g.from), normalise_hex(&g.to)) {
+                    (Some(from), Some(to)) => {
+                        self.set_selection_gradient(Some(stencilcraft_doc::FillGradient {
+                            from,
+                            to,
+                            ..g.clone()
+                        }))
+                    }
+                    _ => self.status = "gradient colours must be #rrggbb".to_string(),
+                }
+            }
+            if button(ui, "Remove Gradient", current.is_some()) {
+                self.set_selection_gradient(None);
+            }
+        });
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(draft_id, (g, shown_for)));
+    }
+
+    /// The first selected shape's pattern fill.
+    pub fn selection_pattern(&self) -> Option<stencilcraft_doc::FillPattern> {
+        self.selected_shapes.iter().find_map(|id| {
+            self.engine
+                .doc
+                .get_shape(*id)?
+                .production
+                .fill_pattern
+                .as_deref()
+                .cloned()
+        })
+    }
+
+    /// Fill Color › Pattern: a picture tiled inside the selected shapes (Silhouette's Fill
+    /// Pattern), its tile width and angle.
+    fn fill_pattern_ui(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label("Fill Pattern");
+        let any = !self.selected_shapes.is_empty();
+        let current = self.selection_pattern();
+        let numbers = self.locale_numbers.clone();
+        if let Some(mut pattern) = current.clone() {
+            let mut angle = pattern.angle_deg;
+            crate::panels::number(
+                ui,
+                "fill-pattern-tile",
+                "Pattern size",
+                &mut pattern.tile_mm,
+                0.5..=2000.0,
+                "{n} mm",
+                &numbers,
+            );
+            crate::panels::number(
+                ui,
+                "fill-pattern-angle",
+                "Pattern angle",
+                &mut angle,
+                -360.0..=360.0,
+                "{n}°",
+                &numbers,
+            );
+            pattern.angle_deg = angle;
+            if Some(&pattern) != current.as_ref() {
+                self.set_selection_pattern(Some(pattern));
+            }
+        }
+        ui.horizontal(|ui| {
+            if button(ui, "Load Pattern…", any) {
+                self.pick_fill_pattern();
+            }
+            if button(ui, "Remove Pattern", current.is_some()) {
+                self.set_selection_pattern(None);
+            }
+        });
+    }
+
+    /// Choose a picture and use it as the selection's pattern fill, 25 mm a tile.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn pick_fill_pattern(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter(
+                "Image",
+                &["png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff"],
+            )
+            .pick_file()
+        else {
+            return;
+        };
+        match std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| {
+                stencilcraft_raster::pattern_from_bytes(&bytes, DEFAULT_PATTERN_TILE_MM)
+                    .map_err(|e| e.to_string())
+            }) {
+            Ok(pattern) => self.set_selection_pattern(Some(pattern)),
+            Err(error) => self.status = format!("{}: {error}", path.display()),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn pick_fill_pattern(&mut self) {
+        self.status = "pattern fills need the desktop app".to_string();
     }
 
     pub fn line_style_panel(&mut self, ui: &mut egui::Ui) {
@@ -292,6 +505,61 @@ impl StencilApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pattern_fill_is_set_resized_and_removed() {
+        let mut app = StencilApp::new(None);
+        let mut square = kurbo::BezPath::new();
+        square.move_to((0.0, 0.0));
+        square.line_to((20.0, 0.0));
+        square.line_to((20.0, 20.0));
+        square.close_path();
+        let id = app
+            .engine
+            .doc
+            .push_shape(0, square, stencilcraft_doc::CutStyle::Cut)
+            .unwrap()
+            .id;
+        app.selected_shapes = vec![id];
+        let tile = stencilcraft_raster::RgbaImage::from_pixel(2, 2, image_pixel());
+        let png = stencilcraft_raster::encode_png_base64(&tile).unwrap();
+        let pattern = stencilcraft_doc::FillPattern {
+            png_base64: png.into(),
+            tile_mm: 25.0,
+            angle_deg: 0.0,
+        };
+        app.set_selection_pattern(Some(pattern.clone()));
+        assert_eq!(app.selection_pattern(), Some(pattern.clone()));
+        app.set_selection_pattern(Some(stencilcraft_doc::FillPattern {
+            tile_mm: 0.0,
+            ..pattern.clone()
+        }));
+        assert_eq!(
+            app.selection_pattern(),
+            Some(pattern),
+            "a bad tile size is refused"
+        );
+        app.set_selection_pattern(None);
+        assert_eq!(app.selection_pattern(), None);
+        let gradient = stencilcraft_doc::FillGradient {
+            from: "#FF0000".into(),
+            to: "#00f".into(),
+            angle_deg: 45.0,
+        };
+        app.set_selection_gradient(Some(gradient));
+        let set = app.selection_gradient().expect("a gradient");
+        assert_eq!(
+            (set.from.as_str(), set.to.as_str()),
+            ("#ff0000", "#0000ff"),
+            "colours canonical"
+        );
+        app.set_selection_gradient(None);
+        assert_eq!(app.selection_gradient(), None);
+    }
+
+    fn image_pixel() -> craft_raster_codecs::common::Pixel<u8> {
+        craft_raster_codecs::common::Pixel([10, 200, 30, 255])
+    }
 
     #[test]
     fn colours_set_clear_and_select() {

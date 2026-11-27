@@ -131,7 +131,7 @@ fn open_paths_stay_open_and_compound_contours_stay_one_shape() {
 /// then the cut-action record (`01 L`, name "cut").
 fn style(rgb: [u8; 3]) -> Vec<u8> {
     let mut out = vec![1];
-    for c in [rgb[2], rgb[1], rgb[0], 255] {
+    for c in [rgb[0], rgb[1], rgb[2], 255] {
         out.extend_from_slice(&(f32::from(c) / 255.0).to_le_bytes());
     }
     out.extend_from_slice(&[0; 8]);

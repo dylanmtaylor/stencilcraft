@@ -8,14 +8,19 @@ use crate::StencilApp;
 pub enum ImportKind {
     Dxf,
     Pdf,
+    /// The first page of a PDF placed as a picture (Silhouette's Import PDF as Image).
+    PdfImage,
     AiEps,
+    /// Machine-embroidery stitch files, each thread colour a layer of stitch runs.
+    Embroidery,
 }
 
 impl ImportKind {
     fn filter(self) -> (&'static str, &'static [&'static str]) {
         match self {
             Self::Dxf => ("DXF", &["dxf"]),
-            Self::Pdf => ("PDF", &["pdf"]),
+            Self::Pdf | Self::PdfImage => ("PDF", &["pdf"]),
+            Self::Embroidery => ("Embroidery", &["pes", "dst", "exp", "jef"]),
             Self::AiEps => ("Illustrator or EPS", &["ai", "eps", "ps"]),
         }
     }
@@ -27,6 +32,10 @@ pub enum ExportKind {
     Pdf,
     Png,
     Jpeg,
+    /// A Silhouette Studio document (`.studio3`) Silhouette opens.
+    Studio3,
+    /// A legacy Silhouette Studio V2 document (`.studio`).
+    Studio,
 }
 
 impl ExportKind {
@@ -35,6 +44,8 @@ impl ExportKind {
             Self::Pdf => "pdf",
             Self::Png => "png",
             Self::Jpeg => "jpg",
+            Self::Studio3 => "studio3",
+            Self::Studio => "studio",
         }
     }
 
@@ -43,6 +54,8 @@ impl ExportKind {
             Self::Pdf => "PDF",
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
+            Self::Studio3 => "Silhouette Studio",
+            Self::Studio => "Silhouette Studio V2",
         }
     }
 }
@@ -57,12 +70,39 @@ impl StencilApp {
             .add_filter(name, extensions)
             .pick_file()
         {
-            self.import_svg(path);
+            if kind == ImportKind::PdfImage {
+                self.import_pdf_as_image(&path);
+            } else {
+                self.import_svg(path);
+            }
+        }
+    }
+
+    /// Place the first page of the PDF at `path` as a picture, at 300 dpi.
+    pub fn import_pdf_as_image(&mut self, path: &std::path::Path) {
+        let name = path.to_string_lossy();
+        match std::fs::read(path)
+            .map_err(|e| format!("{name}: {e}"))
+            .and_then(|bytes| {
+                stencilcraft_import::import_pdf_as_image(&bytes, &name, 300.0)
+                    .map_err(|e| e.to_string())
+            }) {
+            Ok(image) => self.place_image(image),
+            Err(error) => self.status = error,
         }
     }
 
     /// The document as `kind`'s bytes.
     pub fn export_bytes(&self, kind: ExportKind) -> Result<Vec<u8>, String> {
+        match kind {
+            ExportKind::Studio3 => {
+                return stencilcraft_studio::export(&self.engine.doc).map_err(|e| e.to_string());
+            }
+            ExportKind::Studio => {
+                return stencilcraft_studio::export_v2(&self.engine.doc).map_err(|e| e.to_string());
+            }
+            _ => {}
+        }
         stencilcraft_import::write_document(&self.engine.doc, kind.extension(), EXPORT_DPI)
             .map_err(|e| e.to_string())
     }

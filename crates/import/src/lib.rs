@@ -62,6 +62,21 @@ fn bad(name: &str, message: impl std::fmt::Display) -> ImportError {
 }
 
 /// Read a file (bounded) and import it.
+/// Silhouette's Import PDF as Image: the first page drawn as a picture (everything on it,
+/// fills, text and pictures too) and placed at `dpi`, at the page's top left.
+pub fn import_pdf_as_image(
+    bytes: &[u8],
+    name: &str,
+    dpi: f64,
+) -> Result<stencilcraft_doc::RasterImage, ImportError> {
+    let page = craft_file_import::render_pdf_page(bytes, 0, dpi, Default::default())
+        .map_err(|e| bad(name, e))?;
+    let pixels = craft_raster_codecs::common::Pixels::from_raw(page.width, page.height, page.rgba)
+        .ok_or_else(|| bad(name, "the rendered page has the wrong number of pixels"))?;
+    let label = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    stencilcraft_raster::place(&pixels, label, dpi).map_err(|e| bad(name, e))
+}
+
 pub fn import_file(path: &str, options: &ImportOptions) -> Result<Document, ImportError> {
     let size = std::fs::metadata(path).map_err(|e| bad(path, e))?.len();
     if size > craft_file_import::MAX_INPUT_BYTES as u64 {
@@ -443,6 +458,64 @@ pub fn art_bounds(doc: &Document) -> Option<kurbo::Rect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pdf_page_places_as_a_picture_and_stitch_files_import() {
+        let mut square = BezPath::new();
+        square.move_to((10.0, 10.0));
+        square.line_to((30.0, 10.0));
+        square.line_to((30.0, 30.0));
+        square.close_path();
+        let pdf = craft_file_import::write::write_pdf_pages(&[craft_file_import::write::PdfPage {
+            width_mm: 50.0,
+            height_mm: 40.0,
+            view_box: [0.0, 0.0, 50.0, 40.0],
+            paths: vec![craft_file_import::write::PdfPath {
+                path: square,
+                color_rgb: [255, 0, 0],
+                stroke_width_mm: Some(0.5),
+            }],
+            images: Vec::new(),
+        }])
+        .unwrap();
+        let image = import_pdf_as_image(&pdf, "page.pdf", 300.0).unwrap();
+        assert!((image.width_mm - 50.0).abs() < 0.2, "{}", image.width_mm);
+        assert!((image.height_mm - 40.0).abs() < 0.2, "{}", image.height_mm);
+        assert!(import_pdf_as_image(b"not a pdf", "bad.pdf", 300.0).is_err());
+        // An EXP stitch file: two stitches, a colour change, two more.
+        let exp = [100u8, 0, 0, 100, 0x80, 0x01, 0, 0, 50, 0, 50, 0];
+        let doc = import_bytes(&exp, "rose.exp", &ImportOptions::default()).unwrap();
+        let shapes: usize = doc.layers.iter().map(|l| l.shapes.len()).sum();
+        assert_eq!(shapes, 2, "one stitch run per thread");
+    }
+
+    #[test]
+    fn exports_carry_fills_and_placed_pictures() {
+        let mut doc = Document::default();
+        let mut square = BezPath::new();
+        square.move_to((10.0, 10.0));
+        square.line_to((30.0, 10.0));
+        square.line_to((30.0, 30.0));
+        square.close_path();
+        let id = doc
+            .push_shape(0, square, stencilcraft_doc::CutStyle::Cut)
+            .unwrap()
+            .id;
+        doc.get_shape_mut(id).unwrap().production.fill_color = Some("#123456".into());
+        let svg = String::from_utf8(write_document(&doc, "svg", 300.0).unwrap()).unwrap();
+        assert!(svg.contains("#123456"), "{svg}");
+        let plain = write_document(&doc, "pdf", 300.0).unwrap();
+        let pixels = craft_raster_codecs::common::Pixels::from_pixel(
+            4,
+            4,
+            craft_raster_codecs::common::Pixel([200, 0, 0, 255]),
+        );
+        doc.images
+            .push(stencilcraft_raster::place(&pixels, "red", 72.0).unwrap());
+        let with = write_document(&doc, "pdf", 300.0).unwrap();
+        assert!(String::from_utf8_lossy(&with).contains("/Subtype/Image"));
+        assert!(!String::from_utf8_lossy(&plain).contains("/Subtype/Image"));
+    }
 
     fn line(a: (f64, f64), b: (f64, f64)) -> BezPath {
         let mut p = BezPath::new();

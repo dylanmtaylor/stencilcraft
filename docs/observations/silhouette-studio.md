@@ -460,3 +460,13 @@ Silhouette, replacing Silhouette's bytes one record at a time.
   now comes from fields. A document generated with no sample bytes at all (our own ids, a
   150 mm page, the layers and a 100 × 60 mm rectangle with a 1 pt line) opens in Silhouette
   with exactly that page and rectangle. Next: the Rust `write()` in craft-libs.
+
+### GSP line steps, more samples (2026-11-26)
+
+- Lines of the same length at nine different positions all encode the same way (`54 30 d4`),
+  except where the line's true length rounds differently (`5c 21 d4` for 1019 against
+  1018 units). So a step does not depend on the page position, only on the exact step.
+- As one 24-bit little-endian value minus 0x900000, a step grows about 4378 per unit of dx
+  (1.0689 × 4096) and by a smaller, irregular amount per unit of dy. Within the low 12 bits,
+  bits 4–11 rise by exactly 1 for every 278 units of dx while the low nibble stays put, which
+  points to a packing of more than two fields. Not decoded yet.

@@ -17,6 +17,7 @@ Feature: Operation profiles
     And an operation "Cut 2" over shapes 1, 2, 3
     When I select operation 2
     And I click "Profile Score"
+    And I click "Link anyway"
     Then operation 2 has kind "score"
     And the operations panel shows "Profile Score"
 
@@ -27,10 +28,11 @@ Feature: Operation profiles
     And an operation "Cut 2" over shapes 1, 2, 3
     When I select operation 2
     And I click "Profile Score"
+    And I click "Link anyway"
     Then the operations panel shows "Profile Score"
-    When I click "Unlink Profile Score"
+    When I click the link glyph "Unlink Profile Score"
     Then the operations panel shows "Profile none"
-    When I click "Link Profile Score"
+    When I click "Profile Score"
     Then the operations panel shows "Profile Score"
 
   @OP-03
@@ -51,3 +53,35 @@ Feature: Operation profiles
     And I click "Close"
     And I click "Extract profiles"
     Then "Profile Cut 2" is on screen
+
+  @OP-03
+  Scenario: a profile row shows how many operations are linked to it
+    Given the operations and profiles panels are open
+    And a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1, 2, 3
+    When I select operation 1
+    And I click "Profile Score"
+    And I click "Link anyway"
+    And I select operation 2
+    And I click "Profile Score"
+    And I click "Link anyway"
+    Then "2 linked to Profile Score" is on screen
+
+  @OP-03
+  Scenario: a profile row separates its description from the name button
+    Given the profiles panel is open
+    Then the profile row for "Score" shows a description
+
+  @OP-03
+  Scenario: applying a profile with different settings asks first
+    Given the operations and profiles panels are open
+    And a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1, 2, 3
+    When I open the settings for operation 2
+    And I set the power to 40
+    And I click "Close"
+    And I select operation 2
+    And I click "Profile Score"
+    Then "1 operation differs. Link anyway?" is on screen
+    When I click "Link anyway"
+    Then operation 2 has kind "score"

@@ -28,7 +28,7 @@ use craft_ui::docking::{
 use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
-use craft_ui::list::{List, ListEvent, ListRow, RowEvent, ToggleColumn};
+use craft_ui::list::{List, ListEvent, ListRow, RowEvent, ThumbSize, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::menu::{Menu, MenuBar, MenuEntry, MenuItem};
 use craft_ui::patterns::{
@@ -100,17 +100,30 @@ pub struct UserPrefs {
 /// preferences so it works in every document (OP-03).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
+    /// Stable identity for the library (dedupe, import and future links).
+    #[serde(default)]
+    pub id: u64,
     pub name: String,
     pub kind: stencilcraft_doc::OperationKind,
     pub settings: stencilcraft_doc::OperationSettings,
+    /// `#rrggbb`; linked operations show it as their swatch colour.
+    #[serde(default)]
+    pub color: String,
 }
 
 impl Profile {
-    fn new(name: impl Into<String>, kind: stencilcraft_doc::OperationKind) -> Self {
+    fn new(
+        id: u64,
+        name: impl Into<String>,
+        kind: stencilcraft_doc::OperationKind,
+        color: impl Into<String>,
+    ) -> Self {
         Self {
+            id,
             name: name.into(),
             kind,
             settings: stencilcraft_doc::OperationSettings::default(),
+            color: color.into(),
         }
     }
 
@@ -161,10 +174,13 @@ fn extract_profiles(profiles: &mut Vec<Profile>, ops: &[stencilcraft_doc::Operat
                 n += 1;
             }
         }
+        let id = profiles.iter().map(|p| p.id).max().unwrap_or(0) + 1;
         profiles.push(Profile {
+            id,
             name,
             kind: op.kind,
             settings: op.settings.clone(),
+            color: op.color.clone().unwrap_or_else(|| "#9aa0a6".to_string()),
         });
         added += 1;
     }
@@ -210,7 +226,7 @@ impl Default for UserPrefs {
             bulk_confirm_threshold: 10,
             profiles: BASE_PROFILES
                 .iter()
-                .map(|(kind, name)| Profile::new(*name, *kind))
+                .map(|(id, kind, name, color)| Profile::new(*id, *name, *kind, *color))
                 .collect(),
         }
     }
@@ -751,12 +767,21 @@ struct RowVisual {
     icon: Option<Icon>,
     eye: Option<bool>,
     swatch: Option<egui::Color32>,
+    /// The profile this operation is linked to, if any; the row draws the link
+    /// glyph before the swatch and breaks the link on click.
+    linked: Option<String>,
     /// Operation pills shown at the trailing edge of a geometry row:
     /// `(operation id, name, fill)`.
     pills: Vec<(u64, String, egui::Color32)>,
     /// Operations beyond the pills, reachable through the overflow popup.
     extra_ops: usize,
     dimmed: bool,
+}
+
+struct MemberDrop {
+    target: u64,
+    members: Vec<(u64, u64)>,
+    copy: bool,
 }
 
 /// Display label for an operation: the built-in preset catalogue's label where
@@ -862,6 +887,7 @@ fn push_shape_row(
             icon: Some(Icon::Spline),
             eye: None,
             swatch: None,
+            linked: None,
             pills,
             extra_ops,
             dimmed: false,
@@ -924,10 +950,20 @@ impl BulkKind {
 /// The built-in operation profiles (OP-03): a base kind and the settings a
 /// freshly created operation of that kind carries. `Guide` is canvas-only and
 /// has no profile.
-pub(crate) const BASE_PROFILES: [(stencilcraft_doc::OperationKind, &str); 3] = [
-    (stencilcraft_doc::OperationKind::Cut, "Cut"),
-    (stencilcraft_doc::OperationKind::Score, "Score"),
-    (stencilcraft_doc::OperationKind::Engrave, "Engrave"),
+pub(crate) const BASE_PROFILES: [(u64, stencilcraft_doc::OperationKind, &str, &str); 3] = [
+    (1, stencilcraft_doc::OperationKind::Cut, "Cut", "#e5484d"),
+    (
+        2,
+        stencilcraft_doc::OperationKind::Score,
+        "Score",
+        "#f5a524",
+    ),
+    (
+        3,
+        stencilcraft_doc::OperationKind::Engrave,
+        "Engrave",
+        "#30a46c",
+    ),
 ];
 
 /// The profile an operation is linked to, if any: same kind and settings and
@@ -937,13 +973,57 @@ fn operation_profile<'a>(
     profiles: &'a [Profile],
     detached: &std::collections::BTreeSet<u64>,
 ) -> Option<&'a str> {
+    linked_profile(op, profiles, detached).map(|p| p.name.as_str())
+}
+
+/// The profile an operation is linked to, for its swatch colour.
+fn linked_profile<'a>(
+    op: &stencilcraft_doc::Operation,
+    profiles: &'a [Profile],
+    detached: &std::collections::BTreeSet<u64>,
+) -> Option<&'a Profile> {
     if detached.contains(&op.id) {
         return None;
     }
     profiles
         .iter()
         .find(|p| p.kind == op.kind && p.settings == op.settings)
-        .map(|p| p.name.as_str())
+}
+
+/// How many operations in the document are linked to `profile` right now.
+fn linked_count(
+    profile: &Profile,
+    ops: &[stencilcraft_doc::Operation],
+    detached: &std::collections::BTreeSet<u64>,
+) -> usize {
+    ops.iter()
+        .filter(|op| {
+            !detached.contains(&op.id) && op.kind == profile.kind && op.settings == profile.settings
+        })
+        .count()
+}
+
+/// Whether applying `profile` would change this operation's kind or settings.
+fn profile_differs(op: &stencilcraft_doc::Operation, profile: &Profile) -> bool {
+    op.kind != profile.kind || op.settings != profile.settings
+}
+
+/// `#rrggbb` → egui colour; unparseable text falls back to the muted ink.
+fn profile_color(profile: &Profile) -> egui::Color32 {
+    profile
+        .color
+        .trim_start_matches('#')
+        .parse::<u32>()
+        .ok()
+        .filter(|_| profile.color.len() == 7)
+        .map(|v| {
+            egui::Color32::from_rgb(
+                ((v >> 16) & 0xff) as u8,
+                ((v >> 8) & 0xff) as u8,
+                (v & 0xff) as u8,
+            )
+        })
+        .unwrap_or(egui::Color32::from_rgb(0x9a, 0xa0, 0xa6))
 }
 
 /// The name and colour of the Cut operation an appearance value creates;
@@ -1021,6 +1101,10 @@ pub struct StencilApp {
     pub pending_bulk: Option<PendingBulk>,
     /// The bulk confirm dialog's state.
     pub bulk_dialog: DialogState,
+    /// A profile application waiting for its differing-settings confirm (OP-03).
+    pub pending_profile_link: Option<usize>,
+    /// The differing-settings dialog's state.
+    pub profile_link_dialog: DialogState,
     /// The open tag popup: the shape row, which control opened it, and the anchor.
     pub tag_popup: Option<(u64, TagTarget, egui::Response)>,
     /// One-frame open command for the tag popup.
@@ -1270,6 +1354,8 @@ impl StencilApp {
             open_ops: Default::default(),
             pending_bulk: None,
             bulk_dialog: DialogState::new(),
+            pending_profile_link: None,
+            profile_link_dialog: DialogState::new(),
             tag_popup: None,
             tag_popup_open: false,
             color_popup: None,
@@ -3138,6 +3224,7 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            linked: None,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3166,6 +3253,7 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            linked: None,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3191,6 +3279,7 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
+                            linked: None,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3481,8 +3570,11 @@ impl StencilApp {
         let current_op = self.current_operation_id();
         let add_to_current = std::cell::Cell::new(false);
         let drop_add: std::cell::RefCell<Option<(u64, Vec<u64>)>> = std::cell::RefCell::new(None);
+        let member_drop: std::cell::RefCell<Option<MemberDrop>> = std::cell::RefCell::new(None);
 
         let doc = &self.engine.doc;
+        let ink = ui.visuals().text_color();
+        let icon_set = craft_ui::icons::active(ui.ctx());
         let op_count = doc.operations.len();
         let mut row_infos: Vec<RowInfo<OpKey>> = Vec::with_capacity(op_count);
         let mut visuals: Vec<(OpKey, RowVisual)> = Vec::with_capacity(op_count);
@@ -3499,6 +3591,7 @@ impl StencilApp {
             if let Some(n) = layers::pass_number(doc, index) {
                 detail = format!("Pass {n} · {detail}");
             }
+            let link = linked_profile(op, &self.prefs.profiles, &self.detached_ops);
             detail = format!(
                 "{detail} · {} members · {}% @ {} mm/min · Profile {}",
                 op.members.len(),
@@ -3506,6 +3599,12 @@ impl StencilApp {
                 op.settings.speed_mm_per_min,
                 operation_profile(op, &self.prefs.profiles, &self.detached_ops).unwrap_or("none")
             );
+            let swatch = match link {
+                Some(profile) => profile_color(profile),
+                None => {
+                    stencilcraft_ui_egui::operation_swatch_color(op, self.theme).gamma_multiply(0.5)
+                }
+            };
             visuals.push((
                 key,
                 RowVisual {
@@ -3513,7 +3612,8 @@ impl StencilApp {
                     detail,
                     icon: Some(operation_icon(op)),
                     eye: Some(op.visible),
-                    swatch: Some(stencilcraft_ui_egui::operation_swatch_color(op, self.theme)),
+                    swatch: Some(swatch),
+                    linked: link.map(|p| p.name.clone()),
                     pills: Vec::new(),
                     extra_ops: 0,
                     dimmed: !op.visible,
@@ -3565,7 +3665,7 @@ impl StencilApp {
                     .show(ui, |_| {});
                 let out = List::new("operations-list", "Operations", row_infos.as_slice())
                     .tree(true)
-                    .can_drag(|key| matches!(key, OpKey::Op(_)))
+                    .can_drag(|key| matches!(key, OpKey::Op(_) | OpKey::Member { .. }))
                     .reorder(Reorder::new(Axis::Vertical).accepts(|m: &Move<OpKey>, _| {
                         matches!(m.target, OpKey::Op(_))
                             && m.items.iter().all(|k| matches!(k, OpKey::Op(_)))
@@ -3580,12 +3680,12 @@ impl StencilApp {
                                 .map(|o| o.name.clone())
                                 .unwrap_or_default();
                             let hit = &member_remove;
-                            ListRow::new(key, format!("#{shape}"))
+                            ListRow::new(key, format!("#{shape} · {name}"))
                                 .icon(Icon::Spline)
                                 // Reserve the swatch (16) and settings (20)
                                 // slots so this trash lines up with the
                                 // operation rows' trash.
-                                .trailing_item(16.0, |_| {})
+                                .trailing_item(12.0, |_| {})
                                 .trailing_item(20.0, |_| {})
                                 .trailing_item(20.0, move |ui| {
                                     let btn = ui.add(
@@ -3611,7 +3711,24 @@ impl StencilApp {
                                 if !v.detail.is_empty() {
                                     row = row.detail(v.detail.clone());
                                 }
-                                if let Some(icon) = v.icon {
+                                // Photoshop's layer+mask layout: the kind icon,
+                                // then the link glyph, then the profile swatch.
+                                if let (Some(col), OpKey::Op(_)) = (v.swatch, key) {
+                                    let icon = v.icon.unwrap_or(Icon::Spline);
+                                    row = row
+                                        .thumb(ThumbSize::Small, move |painter, rect| {
+                                            craft_ui::icons::paint_on(
+                                                painter, rect, icon, icon_set, 12.0, 1.4, ink,
+                                            );
+                                        })
+                                        .extra_thumb(move |painter, rect| {
+                                            painter.rect_filled(rect.shrink(2.0), 2.0, col);
+                                        });
+                                    if let Some(profile) = v.linked.clone() {
+                                        row = row
+                                            .thumb_link(true, format!("Unlink Profile {profile}"));
+                                    }
+                                } else if let Some(icon) = v.icon {
                                     row = row.icon(icon);
                                 }
                                 if let Some(on) = v.eye {
@@ -3636,9 +3753,9 @@ impl StencilApp {
                                 {
                                     let hit = &swatch_click;
                                     let label = format!("Colour {}", op.name);
-                                    row = row.trailing_item(16.0, move |ui| {
+                                    row = row.trailing_item(12.0, move |ui| {
                                         let (rect, resp) = ui.allocate_exact_size(
-                                            egui::vec2(12.0, 12.0),
+                                            egui::vec2(10.0, 10.0),
                                             egui::Sense::click(),
                                         );
                                         resp.widget_info(|| {
@@ -3708,6 +3825,11 @@ impl StencilApp {
                     });
                 let rows = out.rows.clone();
                 events.extend(out.events);
+                if egui::DragAndDrop::payload::<ListDrag<OpKey>>(ui.ctx()).is_some()
+                    && ui.input(|i| i.modifiers.shift)
+                {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
+                }
                 // A geometry row drag released over an operation row adds the
                 // dragged shapes to that operation (alternate to the button).
                 if let Some(drag) = egui::DragAndDrop::payload::<ListDrag<GeoKey>>(ui.ctx())
@@ -3741,6 +3863,42 @@ impl StencilApp {
                         }
                     }
                 }
+                // A member row drag released over another operation moves it
+                // (Shift adds it without removing it from the source).
+                if let Some(drag) = egui::DragAndDrop::payload::<ListDrag<OpKey>>(ui.ctx())
+                    && ui.input(|i| i.pointer.any_released())
+                {
+                    let copy = ui.input(|i| i.modifiers.shift);
+                    let members: Vec<(u64, u64)> = drag
+                        .items
+                        .iter()
+                        .filter_map(|key| match key {
+                            OpKey::Member { op, shape } => Some((*op, *shape)),
+                            _ => None,
+                        })
+                        .collect();
+                    if !members.is_empty() {
+                        let pos = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
+                        if let Some(pos) = pos
+                            && let Some(target) = rows.iter().find_map(|(key, rect)| {
+                                if rect.contains(pos)
+                                    && let OpKey::Op(index) = key
+                                {
+                                    doc.operations.get(*index).map(|op| op.id)
+                                } else {
+                                    None
+                                }
+                            })
+                        {
+                            *member_drop.borrow_mut() = Some(MemberDrop {
+                                target,
+                                members,
+                                copy,
+                            });
+                            let _ = egui::DragAndDrop::take_payload::<ListDrag<OpKey>>(ui.ctx());
+                        }
+                    }
+                }
             });
 
         self.op_selection = selection;
@@ -3750,6 +3908,28 @@ impl StencilApp {
         }
         if let Some((id, ids)) = drop_add.into_inner() {
             self.add_shapes_to_operation(id, &ids);
+        }
+        if let Some(MemberDrop {
+            target,
+            members,
+            copy,
+        }) = member_drop.into_inner()
+        {
+            let mut by_source: std::collections::BTreeMap<u64, Vec<u64>> =
+                std::collections::BTreeMap::new();
+            for (from, shape) in members {
+                if from != target {
+                    by_source.entry(from).or_default().push(shape);
+                }
+            }
+            for (from, ids) in by_source {
+                self.run_command(Command::Document(DocumentCommand::OperationMoveMembers {
+                    from,
+                    to: target,
+                    ids,
+                    copy,
+                }));
+            }
         }
 
         for ev in events {
@@ -3789,6 +3969,24 @@ impl StencilApp {
                                 ));
                             }
                             _ => {}
+                        }
+                    }
+                }
+                // The chain glyph between the kind icon and the profile
+                // swatch: breaking it is a session detach, not a settings edit.
+                ListEvent::Row(RowEvent::LinkToggled {
+                    row: OpKey::Op(index),
+                    linked,
+                    ..
+                }) => {
+                    if let Some(op) = self.engine.doc.operations.get(index) {
+                        let id = op.id;
+                        if linked {
+                            self.detached_ops.remove(&id);
+                            self.status = format!("linked operation {}", op.name);
+                        } else {
+                            self.detached_ops.insert(id);
+                            self.status = format!("unlinked operation {}", op.name);
                         }
                     }
                 }
@@ -3891,35 +4089,54 @@ impl StencilApp {
     /// the cog edits the profile's parameters.
     pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
         let mut link: Option<usize> = None;
-        let mut unlink: Option<usize> = None;
         let mut edit: Option<(usize, egui::Response)> = None;
         let mut extract = false;
         let mut import = false;
         let mut export = false;
-        let ids = self.selected_operation_ids();
 
         Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
             let _ = SectionHeader::new("profiles-header", "Profiles")
                 .collapsible(false)
                 .show(ui, |_| {});
             for (index, profile) in self.prefs.profiles.iter().enumerate() {
-                let name = &profile.name;
-                let linked = !ids.is_empty()
-                    && ids.iter().all(|id| {
-                        !self.detached_ops.contains(id)
-                            && self
-                                .engine
-                                .doc
-                                .operations
-                                .iter()
-                                .find(|op| op.id == *id)
-                                .is_some_and(|op| {
-                                    op.kind == profile.kind && op.settings == profile.settings
-                                })
-                    });
+                let name = profile.name.clone();
+                let count = linked_count(profile, &self.engine.doc.operations, &self.detached_ops);
+                let color = profile_color(profile);
+                let summary = profile.summary();
                 ui.horizontal(|ui| {
+                    // Left column: a dimmed chain and how many operations in
+                    // this document are linked to the profile (read-only).
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::hover());
+                    let linked_label = if count == 0 {
+                        format!("No operations linked to Profile {name}")
+                    } else {
+                        format!("{count} linked to Profile {name}")
+                    };
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, &linked_label)
+                    });
+                    craft_ui::icons::paint_in(
+                        ui,
+                        rect,
+                        Icon::Link,
+                        craft_ui::icons::active(ui.ctx()),
+                        12.0,
+                        1.4,
+                        ui.visuals().weak_text_color(),
+                    );
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                    let swatch_label = format!("Profile colour {name}");
+                    resp.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, &swatch_label)
+                    });
+                    ui.painter().rect_filled(rect, 2.0, color);
+                    // Name column: fixed width so the description reads as its
+                    // own column instead of trailing the button.
                     if ui
-                        .add(
+                        .add_sized(
+                            [120.0, 20.0],
                             Button::new(format!("Profile {name}"))
                                 .variant(ButtonVariant::Ghost)
                                 .size(ControlSize::Sm),
@@ -3931,7 +4148,7 @@ impl StencilApp {
                     {
                         link = Some(index);
                     }
-                    ui.add(Text::new(profile.summary()).content(Content::Muted));
+                    ui.add(Text::new(summary).content(Content::Muted));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let cog = ui
                             .add(IconButton::new(
@@ -3942,29 +4159,13 @@ impl StencilApp {
                         if cog.clicked() {
                             edit = Some((index, cog.clone()));
                         }
-                        let (icon, verb) = if linked {
-                            (Icon::Unlink, "Unlink")
-                        } else {
-                            (Icon::Link, "Link")
-                        };
-                        if ui
-                            .add(IconButton::new(icon, format!("{verb} Profile {name}")))
-                            .on_hover_text(format!("{verb} the selected operations"))
-                            .clicked()
-                        {
-                            if linked {
-                                unlink = Some(index);
-                            } else {
-                                link = Some(index);
-                            }
-                        }
                     });
                 });
             }
             ui.separator();
             ui.horizontal_wrapped(|ui| {
                 if ui
-                    .button("Extract profiles")
+                    .add(IconButton::new(Icon::Eyedropper, "Extract profiles"))
                     .on_hover_text("Add a profile for each operation whose settings it lacks")
                     .clicked()
                 {
@@ -3973,14 +4174,14 @@ impl StencilApp {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     if ui
-                        .button("Import profiles")
+                        .add(IconButton::new(Icon::FolderOpen, "Import profiles"))
                         .on_hover_text("Load profiles from a JSON file")
                         .clicked()
                     {
                         import = true;
                     }
                     if ui
-                        .button("Export profiles")
+                        .add(IconButton::new(Icon::Open, "Export profiles"))
                         .on_hover_text("Save the profile library to a JSON file")
                         .clicked()
                     {
@@ -4001,43 +4202,99 @@ impl StencilApp {
         if export {
             self.export_profiles();
         }
-        if let Some(index) = unlink {
-            let name = self.prefs.profiles[index].name.clone();
-            if ids.is_empty() {
-                self.status = format!("select an operation to unlink from Profile {name}");
-            } else {
-                for id in &ids {
-                    self.detached_ops.insert(*id);
-                }
-                self.status = format!("unlinked {} operation(s) from Profile {name}", ids.len());
-            }
-        }
         if let Some(index) = link {
-            let profile = self.prefs.profiles[index].clone();
-            if ids.is_empty() {
-                self.status = format!("select an operation to link to Profile {}", profile.name);
-            } else {
-                for id in &ids {
-                    self.run_command(Command::Document(DocumentCommand::OperationSetKind {
-                        id: *id,
-                        kind: profile.kind,
-                    }));
-                    self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
-                        id: *id,
-                        settings: profile.settings.clone(),
-                    }));
-                    self.detached_ops.remove(id);
-                }
-                self.status = format!(
-                    "linked {} operation(s) to Profile {}",
-                    ids.len(),
-                    profile.name
-                );
-            }
+            self.request_profile_link(index);
         }
         if let Some((index, anchor)) = edit {
             self.profile_edit = Some((index, anchor));
             self.profile_edit_open = true;
+        }
+    }
+
+    /// Apply a profile to the selected operations, asking first when any of
+    /// them has a different kind or settings (OP-03).
+    fn request_profile_link(&mut self, index: usize) {
+        let Some(profile) = self.prefs.profiles.get(index) else {
+            return;
+        };
+        let ids = self.selected_operation_ids();
+        let name = profile.name.clone();
+        if ids.is_empty() {
+            self.status = format!("select an operation to link to Profile {name}");
+            return;
+        }
+        let differing = ids
+            .iter()
+            .filter_map(|id| self.engine.doc.operations.iter().find(|op| op.id == *id))
+            .filter(|op| profile_differs(op, profile))
+            .count();
+        if differing > 0 {
+            self.pending_profile_link = Some(index);
+        } else {
+            self.apply_profile_to_selection(index, &ids);
+        }
+    }
+
+    fn apply_profile_to_selection(&mut self, index: usize, ids: &[u64]) {
+        let Some(profile) = self.prefs.profiles.get(index).cloned() else {
+            return;
+        };
+        for id in ids {
+            self.run_command(Command::Document(DocumentCommand::OperationSetKind {
+                id: *id,
+                kind: profile.kind,
+            }));
+            self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
+                id: *id,
+                settings: profile.settings.clone(),
+            }));
+            self.detached_ops.remove(id);
+        }
+        self.status = format!(
+            "linked {} operation(s) to Profile {}",
+            ids.len(),
+            profile.name
+        );
+    }
+
+    fn profile_link_confirm_dialog(&mut self, ui: &mut egui::Ui) {
+        let Some(index) = self.pending_profile_link else {
+            return;
+        };
+        let Some(profile) = self.prefs.profiles.get(index) else {
+            self.pending_profile_link = None;
+            return;
+        };
+        let ids = self.selected_operation_ids();
+        let differing = ids
+            .iter()
+            .filter_map(|id| self.engine.doc.operations.iter().find(|op| op.id == *id))
+            .filter(|op| profile_differs(op, profile))
+            .count();
+        let noun = if differing == 1 {
+            "operation differs"
+        } else {
+            "operations differ"
+        };
+        let body = format!("{differing} {noun}. Link anyway?");
+        let shown = Dialog::new(
+            "profile-link-confirm",
+            format!("Apply Profile {}", profile.name),
+        )
+        .footer(Footer::standard().ok("Link anyway").cancel("Cancel"))
+        .show(
+            ui.ctx(),
+            &mut self.profile_link_dialog,
+            &mut (),
+            |ui, ()| {
+                ui.add(Text::new(body.clone()).content(Content::Muted));
+            },
+        );
+        if shown.outcome == Some(Outcome::Ok) {
+            self.pending_profile_link = None;
+            self.apply_profile_to_selection(index, &ids);
+        } else if shown.closed {
+            self.pending_profile_link = None;
         }
     }
 
@@ -4265,7 +4522,7 @@ impl StencilApp {
                 });
                 ui.separator();
                 egui::Grid::new("operation-palette")
-                    .spacing([2.0, 2.0])
+                    .spacing([1.0, 1.0])
                     .show(ui, |ui| {
                         for (index, code) in OPERATION_PALETTE.iter().enumerate() {
                             let n = index + 1;
@@ -4273,7 +4530,7 @@ impl StencilApp {
                                 .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
                                 .unwrap_or(egui::Color32::BLACK);
                             let (rect, resp) = ui
-                                .allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::click());
+                                .allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click());
                             let label = format!("Palette colour {n}");
                             resp.widget_info(|| {
                                 egui::WidgetInfo::labeled(
@@ -4282,7 +4539,15 @@ impl StencilApp {
                                     &label,
                                 )
                             });
-                            ui.painter().rect_filled(rect, 2.0, swatch);
+                            ui.painter().rect_filled(rect, 1.5, swatch);
+                            if resp.hovered() || value == swatch {
+                                ui.painter().rect_stroke(
+                                    rect,
+                                    1.5,
+                                    egui::Stroke::new(1.0, ui.visuals().selection.stroke.color),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
                             if resp.clicked() {
                                 picked = Some(swatch);
                             }
@@ -4334,6 +4599,7 @@ impl StencilApp {
     /// their popups (they used to live inside the combined layers panel).
     pub fn operation_overlays(&mut self, ui: &mut egui::Ui) {
         self.bulk_confirm_dialog(ui);
+        self.profile_link_confirm_dialog(ui);
         self.tag_overflow_popup(ui);
         self.operation_color_popup(ui);
         self.operation_menu_popup(ui);
@@ -4601,7 +4867,8 @@ impl StencilApp {
         match parsed {
             Some(profiles) => {
                 let mut added = 0;
-                for profile in profiles {
+                let mut next_id = self.prefs.profiles.iter().map(|p| p.id).max().unwrap_or(0);
+                for mut profile in profiles {
                     let key = profile_key(profile.kind, &profile.settings);
                     if self
                         .prefs
@@ -4610,6 +4877,13 @@ impl StencilApp {
                         .any(|p| profile_key(p.kind, &p.settings) == key)
                     {
                         continue;
+                    }
+                    if profile.id == 0 || self.prefs.profiles.iter().any(|p| p.id == profile.id) {
+                        next_id += 1;
+                        profile.id = next_id;
+                    }
+                    if profile.color.is_empty() {
+                        profile.color = "#9aa0a6".to_string();
                     }
                     self.prefs.profiles.push(profile);
                     added += 1;
@@ -8637,6 +8911,31 @@ mod ui_e2e {
         raw_click(h, pos);
     }
 
+    pub(crate) fn has_label_containing(h: &App, needle: &str) -> bool {
+        h.query_all_by_label_contains(needle).next().is_some()
+    }
+
+    /// Double-click the first node whose accessible name contains `needle`.
+    pub(crate) fn raw_double_click_label_containing(h: &mut App, needle: &str) {
+        let pos = h
+            .query_all_by_label_contains(needle)
+            .next()
+            .map(|n| n.rect().center())
+            .unwrap_or_else(|| panic!("no label containing {needle:?}"));
+        for _ in 0..2 {
+            h.event(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            h.run();
+        }
+    }
+
     /// Click the first list row whose accessible name contains `needle`.
     pub(crate) fn raw_click_row_containing(h: &mut App, needle: &str) {
         let pos = h
@@ -8651,6 +8950,15 @@ mod ui_e2e {
     /// with real pointer events, so the source list starts its `ListDrag`
     /// payload and the target panel takes it on release.
     pub(crate) fn drag_row_containing(h: &mut App, from: &str, to: &str) {
+        drag_row_containing_with(h, from, to, egui::Modifiers::NONE);
+    }
+
+    pub(crate) fn drag_row_containing_with(
+        h: &mut App,
+        from: &str,
+        to: &str,
+        modifiers: egui::Modifiers,
+    ) {
         let center = |h: &App, needle: &str| {
             h.query_all_by_label_contains(needle)
                 .find(|n| is_row(n, |l| l.contains(needle)))
@@ -8663,8 +8971,9 @@ mod ui_e2e {
             pos,
             button: egui::PointerButton::Primary,
             pressed,
-            modifiers: egui::Modifiers::NONE,
+            modifiers,
         };
+        h.event(egui::Event::ModifiersChanged(modifiers));
         h.event(egui::Event::PointerMoved(start));
         h.event(button(start, true));
         h.run();
@@ -8673,6 +8982,8 @@ mod ui_e2e {
         h.event(egui::Event::PointerMoved(end));
         h.run();
         h.event(button(end, false));
+        h.run();
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
         h.run();
     }
 
@@ -8871,7 +9182,12 @@ mod ui_e2e {
         let op_id = h.state().engine.doc.operations[0].id;
         h.state_mut().open_ops.insert(op_id);
         h.run();
-        let pos = h.get_by_label("#2").rect().center();
+        let pos = h
+            .query_all_by_label_contains("#2 ·")
+            .next()
+            .expect("member row")
+            .rect()
+            .center();
         for _ in 0..2 {
             h.event(egui::Event::PointerMoved(pos));
             for pressed in [true, false] {
@@ -8974,7 +9290,7 @@ mod profile_tests {
 
     #[test]
     fn extract_renames_a_taken_name() {
-        let mut profiles = vec![Profile::new("Cut", OperationKind::Cut)];
+        let mut profiles = vec![Profile::new(1, "Cut", OperationKind::Cut, "#e5484d")];
         let ops = [op(1, "Cut", OperationKind::Cut, 42.0)];
         assert_eq!(extract_profiles(&mut profiles, &ops), 1);
         assert_eq!(profiles[1].name, "Perfil (1)");
@@ -8982,8 +9298,30 @@ mod profile_tests {
     }
 
     #[test]
+    fn extracted_profile_gets_a_fresh_id_and_the_operation_colour() {
+        let mut profiles = vec![Profile::new(1, "Cut", OperationKind::Cut, "#111111")];
+        let mut hot = op(1, "Hot", OperationKind::Cut, 42.0);
+        hot.color = Some("#ff0000".to_string());
+        assert_eq!(extract_profiles(&mut profiles, &[hot]), 1);
+        assert_eq!(profiles[1].id, 2);
+        assert_eq!(profiles[1].color, "#ff0000");
+    }
+
+    #[test]
+    fn linked_count_honours_detach() {
+        let profile = Profile::new(2, "Score", OperationKind::Score, "#f5a524");
+        let a = op(1, "A", OperationKind::Score, 0.0);
+        let b = op(2, "B", OperationKind::Score, 0.0);
+        let ops = [a.clone(), b];
+        let none = std::collections::BTreeSet::new();
+        assert_eq!(linked_count(&profile, &ops, &none), 2);
+        let detached = [a.id].into_iter().collect();
+        assert_eq!(linked_count(&profile, &ops, &detached), 1);
+    }
+
+    #[test]
     fn operation_profile_matches_kind_and_settings_and_honours_detach() {
-        let mut profiles = vec![Profile::new("Score", OperationKind::Score)];
+        let mut profiles = vec![Profile::new(2, "Score", OperationKind::Score, "#f5a524")];
         profiles[0].settings.power = 7.0;
         let matching = op(1, "S", OperationKind::Score, 7.0);
         let other = op(2, "S", OperationKind::Score, 8.0);

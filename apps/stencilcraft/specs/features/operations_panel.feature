@@ -59,7 +59,7 @@ Feature: Operations panel
   Scenario: double-clicking a member row selects that member
     Given a nested fixture with groups "outer" and "inner"
     When I expand operation 1
-    And I double-click the member row "#2"
+    And I double-click member 2 of operation 1
     Then the selected shapes are 2
 
   @UI-05
@@ -137,3 +137,34 @@ Feature: Operations panel
     And I press Ctrl+[
     Then operation 1 has members 1, 2
     And operation 2 has members 1, 2, 3
+
+  @OP-03
+  Scenario: a linked operation shows the profile chain
+    Given a nested fixture with groups "outer" and "inner"
+    Then the operations panel shows "Profile Cut"
+    And a label containing "Unlink Profile Cut" is on screen
+
+  @OP-03
+  Scenario: breaking the chain unlinks the operation
+    Given a nested fixture with groups "outer" and "inner"
+    When I click the link glyph "Unlink Profile Cut"
+    Then the operations panel shows "Profile none"
+    And a label containing "Unlink Profile Cut" is not on screen
+
+  @UI-04
+  Scenario: dragging a member row moves it to another operation
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1
+    When I expand operation 1
+    And I drag member 3 of operation 1 onto operation 2
+    Then operation 1 has members 1, 2
+    And operation 2 has members 1, 3
+
+  @UI-04
+  Scenario: shift-dragging a member row adds it to another operation
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1
+    When I expand operation 1
+    And I shift-drag member 3 of operation 1 onto operation 2
+    Then operation 1 has members 1, 2, 3
+    And operation 2 has members 1, 3

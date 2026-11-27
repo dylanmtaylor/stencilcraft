@@ -21,8 +21,9 @@ use stencilcraft_engine::ProductionCommand;
 
 use crate::ui_e2e::{
     App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_ops_profiles, boot_profiles,
-    boot_workspace, click, click_menu, drag_row_containing, expand_all, has, has_row_containing,
-    raw_click_label, raw_click_row_containing,
+    boot_workspace, click, click_menu, drag_row_containing, drag_row_containing_with, expand_all,
+    has, has_label_containing, has_row_containing, raw_click_label, raw_click_row_containing,
+    raw_double_click_label_containing,
 };
 use crate::*;
 
@@ -574,6 +575,53 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         drag_row_containing(w.h(), from, to);
         return Ok(());
     }
+    if let Some(rest) = text.strip_prefix("I drag the member row \"")
+        && let Some((from, tail)) = rest.split_once("\" onto the operation row \"")
+        && let Some(to) = tail.strip_suffix('"')
+    {
+        drag_row_containing(w.h(), from, to);
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I shift-drag the member row \"")
+        && let Some((from, tail)) = rest.split_once("\" onto the operation row \"")
+        && let Some(to) = tail.strip_suffix('"')
+    {
+        drag_row_containing_with(w.h(), from, to, egui::Modifiers::SHIFT);
+        return Ok(());
+    }
+    if let Some(rest) = text
+        .strip_prefix("I drag member ")
+        .or_else(|| text.strip_prefix("I shift-drag member "))
+    {
+        let shift = text.starts_with("I shift-drag");
+        let n = nums(rest);
+        if n.len() < 3 {
+            return Err(format!("expected shape, source and target: {text:?}"));
+        }
+        let shape = n[0];
+        let (_, from) = op_at(w, n[1] as usize)?;
+        let (_, to) = op_at(w, n[2] as usize)?;
+        let from = format!("#{shape} · {from}");
+        if shift {
+            drag_row_containing_with(w.h(), &from, &to, egui::Modifiers::SHIFT);
+        } else {
+            drag_row_containing(w.h(), &from, &to);
+        }
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I double-click member ") {
+        let n = nums(rest);
+        if n.len() < 2 {
+            return Err(format!("expected shape and operation: {text:?}"));
+        }
+        let (_, name) = op_at(w, n[1] as usize)?;
+        raw_double_click_label_containing(w.h(), &format!("#{} · {name}", n[0]));
+        return Ok(());
+    }
+    if let Some(label) = between(text, "I click the link glyph \"", "\"") {
+        raw_click_label(w.h(), label);
+        return Ok(());
+    }
     if let Some(label) = between(text, "I click the geometry row \"", "\"") {
         raw_click_label(w.h(), label);
         return Ok(());
@@ -937,6 +985,31 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
             fail(format!("the menu item {label:?} is not on screen"))
         };
     }
+    if let Some(needle) = between(text, "a label containing \"", "\" is on screen") {
+        return if has_label_containing(w.h(), needle) {
+            Ok(())
+        } else {
+            fail(format!("no label containing {needle:?} is on screen"))
+        };
+    }
+    if let Some(needle) = between(text, "a label containing \"", "\" is not on screen") {
+        return if has_label_containing(w.h(), needle) {
+            fail(format!("a label containing {needle:?} is on screen"))
+        } else {
+            Ok(())
+        };
+    }
+    if let Some(name) = between(text, "the profile row for \"", "\" shows a description") {
+        let button = has(w.h(), &format!("Profile {name}"));
+        let description = has_label_containing(w.h(), "mm/min");
+        return if button && description {
+            Ok(())
+        } else {
+            fail(format!(
+                "the profile row for {name:?} does not show a separate description"
+            ))
+        };
+    }
     if let Some(label) = text.strip_suffix(" is on screen") {
         let label = unquote(label);
         return if has(w.h(), label) {
@@ -1026,12 +1099,20 @@ fn write_gaps(
     }
     out.push_str("## Baseline failures\n\n");
     if failures.is_empty() {
-        out.push_str("None.\n");
+        out.push_str("None.\n\n");
     } else {
         for line in failures {
             out.push_str(&format!("- {line}\n"));
         }
+        out.push('\n');
     }
+    out.push_str("## Implementation notes\n\n");
+    out.push_str(
+        "- Profiles Import uses `Icon::FolderOpen`: `arrow-square-in` is not in the pinned craft-libs icon set and the pin is not bumped.\n",
+    );
+    out.push_str(
+        "- Unlink is a session-only marker (`detached_ops`); links are derived from kind+settings and reset on restart.\n",
+    );
     std::fs::write(dir.join("GAPS.md"), out)
 }
 

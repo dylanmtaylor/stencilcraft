@@ -36,7 +36,7 @@ pub struct SavedSelection {
 
 /// A row of the colour panels' swatches bound to `value`; with `none`, a first "Default"
 /// choice for no colour.
-fn swatch_row(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, none: bool) {
+pub(crate) fn swatch_row(ui: &mut egui::Ui, id: &str, value: &mut Option<String>, none: bool) {
     use craft_ui::choice::Swatch;
     ui.horizontal_wrapped(|ui| {
         if none && crate::panels::button(ui, "Default", value.is_some()) {

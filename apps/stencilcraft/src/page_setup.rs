@@ -237,6 +237,21 @@ impl StencilApp {
                                 &numbers,
                             );
                         });
+                        // Silhouette's Primary Lines and Secondary Lines colours.
+                        ui.label("Primary lines");
+                        crate::misc_panels::swatch_row(
+                            ui,
+                            "page-grid-primary",
+                            &mut prefs.grid_primary,
+                            true,
+                        );
+                        ui.label("Secondary lines");
+                        crate::misc_panels::swatch_row(
+                            ui,
+                            "page-grid-secondary",
+                            &mut prefs.grid_secondary,
+                            true,
+                        );
                     });
             });
 

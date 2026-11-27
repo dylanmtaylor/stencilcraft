@@ -470,3 +470,10 @@ Silhouette, replacing Silhouette's bytes one record at a time.
   (1.0689 × 4096) and by a smaller, irregular amount per unit of dy. Within the low 12 bits,
   bits 4–11 rise by exactly 1 for every 278 units of dx while the low nibble stays put, which
   points to a packing of more than two fields. Not decoded yet.
+
+## Grid Settings (2026-11-26, SS 5.0.556)
+
+- Page Setup › Grid tab: Show Print Border, Show Cut Border, Show Grid, Snap to Grid, Enable
+  Smart Snapping, Smart Snap only within media, Tolerance (0.059 in), then Grid Settings:
+  Square or Isometric, Spacing (0.394 in), Divisions (1), and Primary Lines / Secondary
+  Lines colour tabs, each a swatch row, a colour wheel and a HEX field.

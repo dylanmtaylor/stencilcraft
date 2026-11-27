@@ -50,12 +50,17 @@ This file is the contract for the next UI waves. Specs live beside it under
 ### OP-01 — Collapsible operation rows with members
 
 An operation row is a tree group. Expanding it lists its member shapes as child
-rows labelled `#{shape}` with the same `Spline` icon as the Geometry rows.
-Clicking a member row selects that shape. Each member row has a trash
-button `Remove #{shape} from {name}` that calls `operation.remove-members`.
+rows labelled `#{shape} · {name}` (the operation's name disambiguates them from
+the Geometry rows) with the same `Spline` icon as the Geometry rows. Clicking a
+member row selects that shape; double-clicking selects it too. Each member row
+has a trash button `Remove #{shape} from {name}` that calls
+`operation.remove-members`. Dragging a member row onto another operation row
+moves it (`operation.move-members`); Shift-drag copies it while keeping the
+source.
 
 Acceptance: expanding an operation shows one row per existing member; removing
-one updates the document and the row disappears.
+one updates the document and the row disappears; dragging moves the member and
+Shift-dragging duplicates it.
 
 ### OP-02 — Working colour swatch
 
@@ -68,26 +73,37 @@ Acceptance: setting `#ff0000` stores that colour; the swatch shows it.
 
 ### OP-03 — Operation profiles
 
-A `Profiles` dock panel lists the profile library. A profile is `{name, kind,
-settings}` stored in the app preferences (`UserPrefs.profiles`), so profiles are
-shared by every document and survive restarts. The default library is Cut,
-Score and Engrave with default settings (no Guide, no `New profile`).
+A `Profiles` dock panel lists the profile library. A profile is `{id, name,
+kind, settings, color}` stored in the app preferences (`UserPrefs.profiles`), so
+profiles are shared by every document and survive restarts. The default library
+is Cut, Score and Engrave with default settings and a colour (no Guide, no `New
+profile`); imported or extracted profiles get a fresh id and a fallback colour.
 
-Each row shows the name, a parameter summary and a cog (`Profile settings
-{name}`) that edits power/speed/passes/focus/kerf in a popup. A trailing `Link
-Profile {name}` / `Unlink Profile {name}` button acts on the selected
-operations: Link applies the kind and settings; Unlink detaches them without
-changing their values. Clicking the name also links.
+Each row shows a compact swatch (`Profile colour {name}`), the name button
+`Profile {name}`, a separate parameter-description column, the number of
+operations linked to it (`{n} linked to Profile {name}` or `No operations
+linked to Profile {name}`) and a cog (`Profile settings {name}`) that edits
+power/speed/passes/focus/kerf in a popup. Footer icons run `Extract profiles`,
+`Import profiles` and `Export profiles`.
 
-Links are derived from kind+settings because `Operation` has no profile field;
-the Unlink detach marker is session-only (see `GAPS.md`). `Extract profiles`
-adds a profile for each operation whose kind+settings the library lacks, naming
-a colliding one `Perfil (N)`. `Import profiles` / `Export profiles` merge or
-write the library as JSON (desktop only).
+Clicking the name applies the kind and settings to the selected operations. If
+any selected operation's kind+settings differ, a dialog reports `{n}
+operation(s) differ. Link anyway?` with `Cancel` and `Link anyway`.
 
-Acceptance: the base rows are present with no Guide; a row links and unlinks a
-selected operation; the cog opens the parameter editor; an operation with unique
-settings appears as a profile after extraction.
+The Operations row mirrors Photoshop: the kind thumbnail, a `Link`/`Unlink
+Profile {name}` glyph, then the profile swatch (or the operation's own colour at
+half strength when unlinked). The glyph toggles a session detach marker without
+changing the operation's values; a new link inherits the profile colour. Links
+are derived from kind+settings because `Operation` has no profile field; the
+detach marker is session-only (see `GAPS.md`). `Extract profiles` adds a profile
+for each unique operation kind+settings, naming a colliding one `Perfil (N)`;
+`Import profiles` / `Export profiles` merge or write the library as JSON
+(desktop only).
+
+Acceptance: the base rows are present with no Guide; a row links, asks before
+overwriting differing settings and unlinks a selected operation; the counter
+and the separate description are shown; the cog opens the parameter editor; an
+operation with unique settings appears as a profile after extraction.
 
 ### OP-04 — Row actions and `+`
 
@@ -146,6 +162,8 @@ Faster paths mirror that command:
   the same action.
 - Dragging one or more Geometry shape rows onto an operation row adds the
   dragged shapes. Group rows do not drag.
+- Dragging an operation's member row onto another operation moves that member;
+  Shift-drag copies it to the target and keeps it in the source.
 - A locked operation refuses with a status message.
 
 Acceptance: each path adds exactly the selected ids to the current operation;
@@ -162,6 +180,15 @@ hide/show, select members, view filter). The per-row gear buttons disappear.
 Acceptance: a shape with an operation shows a pill named after the operation;
 the old `Operations of #{id}` button is gone; the overflow menu still removes
 memberships.
+
+## Implementation notes
+
+- The Profiles footer's Import action uses `Icon::FolderOpen`: `arrow-square-in`
+  is not in the pinned craft-libs icon set and the pin is not bumped.
+- Unlink is a session-only marker (`detached_ops`); the document has no
+  `profile_id`, so links derive from kind+settings and reset on restart.
+- A member drag groups ids by source operation and issues one
+  `OperationMoveMembers` per source, so a single undo reverts the whole drag.
 
 ## Out of scope
 
@@ -187,13 +214,13 @@ memberships.
 
 | ID | Spec | UI | Status |
 | --- | --- | --- | --- |
-| OP-01 | wip | expandable member tree + remove + member double-click | wip |
+| OP-01 | wip | expandable member tree + remove + member double-click + move/Shift-copy drag | done |
 | OP-02 | wip | colour picker popup + 40-swatch palette | done |
-| OP-03 | wip | Profiles dock panel: Cut/Score/Engrave + provisional link | done |
+| OP-03 | wip | Profiles dock: swatch/counter/description + Photoshop link glyph + differ dialog | done |
 | OP-04 | wip | row actions, trash, `+` / chevron menu + appearance popup | done |
 | OP-05 | wip | settings popover (no lock, no view filter) | wip |
 | OP-06 | wip | drag + Ctrl+[ / ] reorder | wip |
-| OP-07 | wip | assignment dialog | wip |
+| OP-07 | wip | assignment dialog + geometry/member drag (Shift copies) | wip |
 | LY-01 | wip | contextual pills + per-operation overflow submenus | wip |
 
 Update the Status column as each wave lands: `todo` → `wip` → `done`.

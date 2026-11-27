@@ -149,6 +149,16 @@ pub enum DocumentCommand {
     /// the pass order is the operations order.
     #[serde(rename = "operation.move")]
     OperationMove { from: usize, to: usize },
+    /// Move (or with `copy`, add) member shapes from operation `from` to
+    /// operation `to`; one undo step, and a no-op for shapes already there.
+    #[serde(rename = "operation.move-members")]
+    OperationMoveMembers {
+        from: u64,
+        to: u64,
+        ids: Vec<u64>,
+        #[serde(default)]
+        copy: bool,
+    },
     /// Delete an operation and its memberships; the shapes' geometry stays in `Document::shapes`.
     #[serde(rename = "operation.delete")]
     OperationDelete { id: u64 },
@@ -1145,6 +1155,32 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
             let op = engine.doc.operations.remove(from);
             engine.doc.operations.insert(to, op);
             changed
+        }
+        DocumentCommand::OperationMoveMembers {
+            from,
+            to,
+            ids,
+            copy,
+        } => {
+            if from == to {
+                return Err(invalid(
+                    "operation.move-members: source and target are the same operation".to_string(),
+                ));
+            }
+            let p_from = op_index(engine, from, "operation.move-members")?;
+            let p_to = op_index(engine, to, "operation.move-members")?;
+            if engine.doc.operations[p_to].locked || (!copy && engine.doc.operations[p_from].locked)
+            {
+                return Err(invalid(
+                    "operation.move-members: operation is locked".to_string(),
+                ));
+            }
+            let ids = editable_ids(engine, &ids, "operation.move-members")?;
+            if !copy {
+                op_remove_members(&mut engine.doc, from, &ids);
+            }
+            op_add_members(&mut engine.doc, to, &ids);
+            Ok(Effect::ShapesStyled { ids })
         }
         DocumentCommand::OperationDelete { id } => {
             let p = op_index(engine, id, "operation.delete")?;
@@ -2409,6 +2445,12 @@ mod tests {
                 members: vec![1, 2],
             },
             DocumentCommand::OperationMove { from: 0, to: 1 },
+            DocumentCommand::OperationMoveMembers {
+                from: 1,
+                to: 2,
+                ids: vec![1, 2],
+                copy: false,
+            },
         ];
         for command in samples {
             let wrapped = Command::Document(command);
@@ -3715,6 +3757,68 @@ mod tests {
             ["engrave", "cut"],
             "Pass N is derived from operations order"
         );
+    }
+
+    #[test]
+    fn move_members_moves_or_copies_between_operations() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::OperationCreate {
+                name: "one".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![1, 2],
+            },
+        );
+        run(
+            &mut e,
+            DocumentCommand::OperationCreate {
+                name: "two".to_string(),
+                kind: OperationKind::Engrave,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![3],
+            },
+        );
+        let one = e.doc.operations[0].id;
+        let two = e.doc.operations[1].id;
+        run(
+            &mut e,
+            DocumentCommand::OperationMoveMembers {
+                from: one,
+                to: two,
+                ids: vec![2],
+                copy: false,
+            },
+        );
+        assert_eq!(e.doc.operations[0].members, [1]);
+        assert_eq!(e.doc.operations[1].members, [3, 2]);
+        run(
+            &mut e,
+            DocumentCommand::OperationMoveMembers {
+                from: one,
+                to: two,
+                ids: vec![1],
+                copy: true,
+            },
+        );
+        assert_eq!(e.doc.operations[0].members, [1]);
+        assert_eq!(e.doc.operations[1].members, [3, 2, 1]);
+        assert!(
+            e.run(Command::Document(DocumentCommand::OperationMoveMembers {
+                from: one,
+                to: one,
+                ids: vec![1],
+                copy: false,
+            }))
+            .is_err()
+        );
+        e.run(Command::Undo).unwrap();
+        assert_eq!(e.doc.operations[1].members, [3, 2]);
     }
 
     #[test]

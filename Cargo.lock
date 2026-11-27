@@ -1054,9 +1054,10 @@ dependencies = [
 [[package]]
 name = "craft-appkit"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "block2 0.6.2",
+ "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
 ]
@@ -1064,7 +1065,7 @@ dependencies = [
 [[package]]
 name = "craft-atomic"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "rustix 1.1.6",
 ]
@@ -1072,7 +1073,7 @@ dependencies = [
 [[package]]
 name = "craft-behavior"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "accesskit",
  "bitflags 2.13.2",
@@ -1090,7 +1091,7 @@ dependencies = [
 [[package]]
 name = "craft-cloud-ui"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "egui",
 ]
@@ -1098,7 +1099,7 @@ dependencies = [
 [[package]]
 name = "craft-cms"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "md-5",
  "rayon",
@@ -1107,12 +1108,12 @@ dependencies = [
 [[package]]
 name = "craft-codepage"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 
 [[package]]
 name = "craft-color-ui"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-cms",
@@ -1132,9 +1133,17 @@ dependencies = [
 [[package]]
 name = "craft-dds"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "rayon",
+]
+
+[[package]]
+name = "craft-docpath"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1143,17 +1152,9 @@ version = "0.1.0"
 source = "git+https://github.com/storytold/craft-libs?rev=92d392cff132eaf53e13afff77f38b5c11b73aa0#92d392cff132eaf53e13afff77f38b5c11b73aa0"
 
 [[package]]
-name = "craft-docpath"
-version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "craft-draw"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-color-ui",
@@ -1172,7 +1173,7 @@ dependencies = [
 [[package]]
 name = "craft-dxf"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-codepage",
  "encoding_rs",
@@ -1184,7 +1185,7 @@ dependencies = [
 [[package]]
 name = "craft-embroidery"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "kurbo",
  "thiserror 2.0.21",
@@ -1193,7 +1194,7 @@ dependencies = [
 [[package]]
 name = "craft-eps"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "kurbo",
  "thiserror 2.0.21",
@@ -1204,7 +1205,7 @@ dependencies = [
 [[package]]
 name = "craft-file-formats"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-eps",
  "craft-idml",
@@ -1217,13 +1218,13 @@ dependencies = [
 [[package]]
 name = "craft-file-import"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-dxf",
  "craft-embroidery",
  "craft-eps",
  "craft-file-formats",
- "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6)",
+ "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104)",
  "craft-raster-codecs",
  "craft-svg",
  "kurbo",
@@ -1234,7 +1235,7 @@ dependencies = [
 [[package]]
 name = "craft-font-catalog"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "fontique",
  "harfrust 0.13.3",
@@ -1249,7 +1250,7 @@ dependencies = [
 [[package]]
 name = "craft-font-manager"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-font-catalog",
@@ -1268,7 +1269,7 @@ dependencies = [
 [[package]]
 name = "craft-font-os-windows"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "windows-registry",
  "windows-sys 0.61.2",
@@ -1277,7 +1278,7 @@ dependencies = [
 [[package]]
 name = "craft-font-store"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "cap-primitives",
  "craft-atomic",
@@ -1300,12 +1301,12 @@ dependencies = [
 [[package]]
 name = "craft-fonts-build"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 
 [[package]]
 name = "craft-gcode"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1313,7 +1314,7 @@ dependencies = [
 [[package]]
 name = "craft-host"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bitflags 2.13.2",
  "craft-i18n",
@@ -1326,7 +1327,7 @@ dependencies = [
 [[package]]
 name = "craft-i18n"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "chrono",
  "fixed_decimal",
@@ -1354,7 +1355,7 @@ dependencies = [
 [[package]]
 name = "craft-idml"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-xml",
  "craft-zip",
@@ -1364,7 +1365,7 @@ dependencies = [
 [[package]]
 name = "craft-image-codecs"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-dds",
  "craft-jpeg",
@@ -1391,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "craft-jpeg"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "thiserror 2.0.21",
 ]
@@ -1399,7 +1400,7 @@ dependencies = [
 [[package]]
 name = "craft-jsonrpc"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "serde_json",
 ]
@@ -1407,7 +1408,7 @@ dependencies = [
 [[package]]
 name = "craft-keymap"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-host",
  "craft-i18n",
@@ -1422,7 +1423,7 @@ dependencies = [
 [[package]]
 name = "craft-mcp"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-jsonrpc",
  "serde_json",
@@ -1431,13 +1432,28 @@ dependencies = [
 [[package]]
 name = "craft-metadata"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "brotli-decompressor 6.3.1",
  "chrono",
  "craft-tiff",
  "quick-xml",
  "serde",
+]
+
+[[package]]
+name = "craft-pdf"
+version = "0.1.0"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
+dependencies = [
+ "bytemuck",
+ "hayro",
+ "hayro-interpret",
+ "hayro-syntax",
+ "krilla",
+ "kurbo",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1452,31 +1468,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "craft-pdf"
-version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
-dependencies = [
- "bytemuck",
- "hayro",
- "hayro-interpret",
- "hayro-syntax",
- "krilla",
- "kurbo",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "craft-platform"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "async-channel",
  "async-io",
  "async-process",
  "core-graphics2",
  "craft-atomic",
- "craft-docpath 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6)",
+ "craft-docpath 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104)",
  "craft-host",
  "craft-i18n",
  "craft-theme",
@@ -1500,7 +1501,7 @@ dependencies = [
 [[package]]
 name = "craft-plotter"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "kurbo",
  "serde",
@@ -1510,7 +1511,7 @@ dependencies = [
 [[package]]
 name = "craft-quit"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "dispatch2",
  "objc2 0.6.5",
@@ -1522,7 +1523,7 @@ dependencies = [
 [[package]]
 name = "craft-raster-codecs"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "base64 0.23.1",
  "craft-dds",
@@ -1534,7 +1535,7 @@ dependencies = [
 [[package]]
 name = "craft-settings"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-atomic",
  "craft-host",
@@ -1551,7 +1552,7 @@ dependencies = [
 [[package]]
 name = "craft-silhouette-studio"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "kurbo",
  "thiserror 2.0.21",
@@ -1560,7 +1561,7 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-document"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-atomic",
  "craft-stencilcraft-format",
@@ -1574,7 +1575,7 @@ dependencies = [
 [[package]]
 name = "craft-stencilcraft-format"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "serde",
  "serde_json",
@@ -1584,7 +1585,7 @@ dependencies = [
 [[package]]
 name = "craft-svg"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-xml",
  "flate2",
@@ -1601,7 +1602,7 @@ dependencies = [
 [[package]]
 name = "craft-text"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-host",
@@ -1617,7 +1618,7 @@ dependencies = [
 [[package]]
 name = "craft-theme"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bitflags 2.13.2",
  "craft-tracked",
@@ -1632,7 +1633,7 @@ dependencies = [
 [[package]]
 name = "craft-tiff"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -1642,12 +1643,12 @@ dependencies = [
 [[package]]
 name = "craft-tracked"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 
 [[package]]
 name = "craft-ui"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-cloud-ui",
  "craft-ui-canvas",
@@ -1661,7 +1662,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-canvas"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-i18n",
@@ -1677,7 +1678,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-contract"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "accesskit",
  "craft-behavior",
@@ -1715,7 +1716,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-macros"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -1726,7 +1727,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-panels"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-host",
@@ -1744,13 +1745,13 @@ dependencies = [
 [[package]]
 name = "craft-ui-patterns"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-host",
  "craft-i18n",
  "craft-keymap",
- "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6)",
+ "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104)",
  "craft-theme",
  "craft-ui-macros",
  "craft-ui-panels",
@@ -1765,7 +1766,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-shell"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-host",
@@ -1786,7 +1787,7 @@ dependencies = [
 [[package]]
 name = "craft-ui-widgets"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-behavior",
  "craft-host",
@@ -1805,7 +1806,7 @@ dependencies = [
 [[package]]
 name = "craft-win32"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "winsafe",
 ]
@@ -1813,7 +1814,7 @@ dependencies = [
 [[package]]
 name = "craft-window"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "craft-appkit",
  "craft-atomic",
@@ -1837,7 +1838,7 @@ dependencies = [
 [[package]]
 name = "craft-xml"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "quick-xml",
  "serde",
@@ -1847,7 +1848,7 @@ dependencies = [
 [[package]]
 name = "craft-zip"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "flate2",
  "thiserror 2.0.21",
@@ -3088,7 +3089,7 @@ dependencies = [
 [[package]]
 name = "hayro"
 version = "0.7.1"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bytemuck",
  "hayro-interpret",
@@ -3108,7 +3109,7 @@ checksum = "9f4d0e94ddd48749f06bbe4e5389fb9799a0c45bcaf00495042076ef05e3241a"
 [[package]]
 name = "hayro-cmap"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "brotli",
  "hayro-postscript",
@@ -3117,7 +3118,7 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.7.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bitflags 2.13.2",
  "hayro-cmap",
@@ -3135,7 +3136,7 @@ dependencies = [
 [[package]]
 name = "hayro-jbig2"
 version = "0.3.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "fearless_simd",
  "hayro-ccitt",
@@ -3153,12 +3154,12 @@ dependencies = [
 [[package]]
 name = "hayro-postscript"
 version = "0.1.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 
 [[package]]
 name = "hayro-syntax"
 version = "0.7.2"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "flate2",
  "hayro-ccitt",
@@ -3795,7 +3796,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "krilla"
 version = "0.8.2"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "base64 0.22.1",
  "bumpalo",
@@ -3943,7 +3944,7 @@ checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
 [[package]]
 name = "linesweeper"
 version = "0.5.0"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "arrayvec",
  "kurbo",
@@ -6323,7 +6324,7 @@ name = "stencilcraft-pdf"
 version = "0.1.0"
 dependencies = [
  "craft-file-import",
- "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6)",
+ "craft-pdf 0.1.0 (git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104)",
  "kurbo",
  "stencilcraft-doc",
  "stencilcraft-layout",
@@ -7434,7 +7435,7 @@ dependencies = [
 [[package]]
 name = "vello_common"
 version = "0.0.8"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bytemuck",
  "fearless_simd",
@@ -7483,7 +7484,7 @@ dependencies = [
 [[package]]
 name = "vello_cpu"
 version = "0.0.8"
-source = "git+https://github.com/dylanmtaylor/craft-libs?rev=d9270096f95ec093ef13ee783ff51ba285a474b6#d9270096f95ec093ef13ee783ff51ba285a474b6"
+source = "git+https://github.com/dylanmtaylor/craft-libs?rev=7d513f832c029ddbc6e591c672cd8e3db2960104#7d513f832c029ddbc6e591c672cd8e3db2960104"
 dependencies = [
  "bytemuck",
  "glifo 0.1.1",

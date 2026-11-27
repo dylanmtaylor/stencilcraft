@@ -395,3 +395,14 @@ Completed items should be marked here only when behavior is usable end-to-end.
   selected operations (derived link, session-only detach). `Extract profiles`
   dedupes by kind+settings (`Perfil (N)` on a name clash); Import/Export merge
   or write the library as JSON.
+
+- 2026-11-27 — operations/profiles UX wave: profile rows gained a compact
+  swatch, a separate description column, a linked-operation counter and footer
+  Extract/Import/Export icons; `Profile` now carries `id` and `color`.
+  Applying a profile to operations with different settings asks `{n}
+  operation(s) differ. Link anyway?`. The Operations row follows Photoshop: kind
+  thumbnail, `Link`/`Unlink Profile {name}` glyph and a profile-or-own swatch
+  (own colour at half strength when unlinked). The palette is 10 px with 1 px
+  gaps; member rows read `#{shape} · {name}` and drag onto another operation
+  (Shift-drag copies) through one undoable `OperationMoveMembers` per source.
+  Gherkin contract: 49 scenarios green; engine adds the move-members command.

@@ -6055,6 +6055,7 @@ dependencies = [
  "stencilcraft-machine",
  "stencilcraft-mcp",
  "stencilcraft-raster",
+ "stencilcraft-studio",
  "stencilcraft-svg",
  "stencilcraft-tiling",
  "stencilcraft-ui-egui",

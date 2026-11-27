@@ -155,6 +155,10 @@ pub struct UserPrefs {
     pub page_colour: Option<String>,
     /// Page Setup › Transparency, 0 (opaque) to 100 %. View only.
     pub page_transparency: f64,
+    /// Page Setup › Grid Settings › Primary Lines and Secondary Lines colours (`#rrggbb`);
+    /// `None` is the theme's grid colour.
+    pub grid_primary: Option<String>,
+    pub grid_secondary: Option<String>,
     /// Preferences › Import › DXF Open: Fit to Page (Silhouette's default) or As-is.
     pub dxf_fit_to_page: bool,
     /// Preferences › Import › Join lines into polylines (endpoints within 0.05 mm).
@@ -216,6 +220,8 @@ impl Default for UserPrefs {
             constrain_media: true,
             page_colour: None,
             page_transparency: 0.0,
+            grid_primary: None,
+            grid_secondary: None,
             panel_mode: PanelMode::Flexible,
             cut_to_page_edge: false,
             default_fill: None,
@@ -6482,6 +6488,18 @@ impl StencilApp {
                         .and_then(stencilcraft_ui_egui::parse_hex_colour)
                         .map(|c| [c.r(), c.g(), c.b()]),
                     page_transparency: self.prefs.page_transparency,
+                    grid_primary: self
+                        .prefs
+                        .grid_primary
+                        .as_deref()
+                        .and_then(stencilcraft_ui_egui::parse_hex_colour)
+                        .map(|c| [c.r(), c.g(), c.b()]),
+                    grid_secondary: self
+                        .prefs
+                        .grid_secondary
+                        .as_deref()
+                        .and_then(stencilcraft_ui_egui::parse_hex_colour)
+                        .map(|c| [c.r(), c.g(), c.b()]),
                     show_selection_bounds: true,
                     theme: self.theme,
                     outline_view: self.prefs.outline_view,

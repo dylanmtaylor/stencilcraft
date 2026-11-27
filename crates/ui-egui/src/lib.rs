@@ -204,6 +204,10 @@ pub struct CanvasOptions {
     pub page_colour: Option<[u8; 3]>,
     /// Page Setup's page transparency, 0 (opaque) to 100 % (the mat shows through).
     pub page_transparency: f64,
+    /// Grid line colours (Page Setup › Grid Settings): the spacing lines and the subdivision
+    /// lines between them; `None` is the theme's grid colour.
+    pub grid_primary: Option<[u8; 3]>,
+    pub grid_secondary: Option<[u8; 3]>,
 }
 
 /// The page's fill: Page Setup's colour (else `board`) with its transparency.
@@ -237,6 +241,8 @@ impl Default for CanvasOptions {
             show_dimensions: true,
             page_colour: None,
             page_transparency: 0.0,
+            grid_primary: None,
+            grid_secondary: None,
             cut_to_page_edge: false,
         }
     }
@@ -780,20 +786,21 @@ pub fn paint_document(
     // far enough apart, drawn only over the board as hairlines.
     if options.show_grid {
         let spacing = doc.grid.spacing_mm;
-        let pitch_mm = if f64::from(view.zoom) * doc.grid.step_mm() > 6.0 {
-            doc.grid.step_mm()
-        } else {
-            spacing
+        let colour = |c: Option<[u8; 3]>| {
+            c.map_or(palette.grid, |[r, g, b]| egui::Color32::from_rgb(r, g, b))
         };
-        if pitch_mm.is_finite() && pitch_mm > 0.0 && f64::from(view.zoom) * pitch_mm > 6.0 {
-            let (w, h) = (doc.board.width_mm, doc.board.height_mm);
+        let (w, h) = (doc.board.width_mm, doc.board.height_mm);
+        let lines = |pitch_mm: f64, colour: egui::Color32| {
+            if !(pitch_mm.is_finite() && pitch_mm > 0.0 && f64::from(view.zoom) * pitch_mm > 6.0) {
+                return;
+            }
             let seg = |x0, y0, x1, y1| {
                 painter.line_segment(
                     [
                         view.world_to_screen(stencilcraft_geom::Point::new(x0, y0)),
                         view.world_to_screen(stencilcraft_geom::Point::new(x1, y1)),
                     ],
-                    (1.0, palette.grid),
+                    (1.0, colour),
                 );
             };
             // At most 10 000 lines a side: a tiny pitch on a huge board stays bounded.
@@ -807,7 +814,14 @@ pub fn paint_document(
                 seg(0.0, j * pitch_mm, w, j * pitch_mm);
                 j += 1.0;
             }
+        };
+        // Subdivisions in the secondary colour once they are far enough apart, then the
+        // spacing lines over them in the primary colour.
+        let step = doc.grid.step_mm();
+        if step < spacing {
+            lines(step, colour(options.grid_secondary));
         }
+        lines(spacing, colour(options.grid_primary));
     }
 
     if options.print_cut_marks {
@@ -2570,6 +2584,51 @@ mod tests {
             panic!("a point gets a square marker: {:?}", shapes[1]);
         };
         assert_eq!(marker.rect.center(), egui::pos2(20.0, 20.0));
+    }
+
+    #[test]
+    fn grid_lines_take_their_primary_and_secondary_colours() {
+        let mut doc = stencilcraft_doc::Document::default();
+        doc.board.width_mm = 40.0;
+        doc.board.height_mm = 40.0;
+        doc.grid.spacing_mm = 10.0;
+        doc.grid.subdivisions = 2;
+        let view = View {
+            zoom: 10.0,
+            ..View::default()
+        };
+        let clip =
+            egui::Rect::from_min_size(egui::pos2(-500.0, -500.0), egui::vec2(2000.0, 2000.0));
+        let options = CanvasOptions {
+            grid_primary: Some([200, 0, 0]),
+            grid_secondary: Some([0, 0, 200]),
+            ..CanvasOptions::default()
+        };
+        let shapes = painted(|p| {
+            paint_document(
+                p,
+                clip,
+                &doc,
+                &view,
+                CanvasLayers {
+                    backdrop: None,
+                    image_textures: &std::collections::HashMap::new(),
+                },
+                options,
+                &SelectionState::default(),
+            )
+        });
+        let count = |c: egui::Color32| {
+            shapes
+                .iter()
+                .filter(
+                    |s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == c),
+                )
+                .count()
+        };
+        // 5 spacing lines a side, and 9 subdivision lines a side (every 5 mm).
+        assert_eq!(count(egui::Color32::from_rgb(200, 0, 0)), 10);
+        assert_eq!(count(egui::Color32::from_rgb(0, 0, 200)), 18);
     }
 
     #[test]

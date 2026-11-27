@@ -66,15 +66,28 @@ the first inside click). The popover offers an inline picker, a `Hex` field
 
 Acceptance: setting `#ff0000` stores that colour; the swatch shows it.
 
-### OP-03 — Operation profiles stub
+### OP-03 — Operation profiles
 
-A `Profiles` dock panel, listed under Panels, listing the base Cut, Score and
-Engrave profiles (no Guide). Profile values are provisional: a profile's
-defaults are its kind with default settings. Clicking a profile row applies
-those defaults to every selected operation, linking it back after an edit; a
-new operation links to Cut, and editing its numeric settings unlinks it
-(`Profile none`). No profile data model and no "New profile" action in this
-wave.
+A `Profiles` dock panel lists the profile library. A profile is `{name, kind,
+settings}` stored in the app preferences (`UserPrefs.profiles`), so profiles are
+shared by every document and survive restarts. The default library is Cut,
+Score and Engrave with default settings (no Guide, no `New profile`).
+
+Each row shows the name, a parameter summary and a cog (`Profile settings
+{name}`) that edits power/speed/passes/focus/kerf in a popup. A trailing `Link
+Profile {name}` / `Unlink Profile {name}` button acts on the selected
+operations: Link applies the kind and settings; Unlink detaches them without
+changing their values. Clicking the name also links.
+
+Links are derived from kind+settings because `Operation` has no profile field;
+the Unlink detach marker is session-only (see `GAPS.md`). `Extract profiles`
+adds a profile for each operation whose kind+settings the library lacks, naming
+a colliding one `Perfil (N)`. `Import profiles` / `Export profiles` merge or
+write the library as JSON (desktop only).
+
+Acceptance: the base rows are present with no Guide; a row links and unlinks a
+selected operation; the cog opens the parameter editor; an operation with unique
+settings appears as a profile after extraction.
 
 ### OP-04 — Row actions and `+`
 

@@ -388,3 +388,10 @@ Completed items should be marked here only when behavior is usable end-to-end.
   Geometry shape rows can be dragged onto an operation row (ListDrag payload).
   Member rows reserve the swatch/settings slots so their trash aligns with the
   operation rows' trash.
+
+- 2026-11-26 — operation profiles library: `Profile {name, kind, settings}` in
+  `UserPrefs` (shared across documents, saved through craft-settings). Rows show
+  the parameters, a cog popup edits them, and per-row Link/Unlink acts on the
+  selected operations (derived link, session-only detach). `Extract profiles`
+  dedupes by kind+settings (`Perfil (N)` on a name clash); Import/Export merge
+  or write the library as JSON.

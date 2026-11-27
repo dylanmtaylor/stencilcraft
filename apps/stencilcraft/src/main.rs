@@ -91,6 +91,84 @@ pub struct UserPrefs {
     /// Bulk "new operation" actions over more shapes than this ask first
     /// ("Create N operations? Continue?") (D-07; default 10).
     pub bulk_confirm_threshold: u32,
+    /// Operation profiles (OP-03), shared across documents. An operation is
+    /// linked to a profile when its kind and settings match it.
+    pub profiles: Vec<Profile>,
+}
+
+/// A reusable operation preset: a kind plus its settings, stored in the app
+/// preferences so it works in every document (OP-03).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Profile {
+    pub name: String,
+    pub kind: stencilcraft_doc::OperationKind,
+    pub settings: stencilcraft_doc::OperationSettings,
+}
+
+impl Profile {
+    fn new(name: impl Into<String>, kind: stencilcraft_doc::OperationKind) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+            settings: stencilcraft_doc::OperationSettings::default(),
+        }
+    }
+
+    /// The parameter summary shown under the profile name.
+    fn summary(&self) -> String {
+        let s = &self.settings;
+        format!(
+            "{}% · {} mm/min · {}× · focus {} · kerf {}",
+            s.power, s.speed_mm_per_min, s.passes, s.focus_mm, s.kerf_mm
+        )
+    }
+}
+
+/// The identity of a profile's kind+settings, used to dedupe extraction and to
+/// derive operation links. `f64` rules out `Hash`, so serialize instead.
+fn profile_key(
+    kind: stencilcraft_doc::OperationKind,
+    settings: &stencilcraft_doc::OperationSettings,
+) -> String {
+    serde_json::to_string(&(kind, settings)).unwrap_or_default()
+}
+
+/// Extract a profile from every operation whose kind+settings are not already
+/// in the library. Returns how many were added; a name taken by an existing
+/// profile falls back to `Perfil (N)`.
+fn extract_profiles(profiles: &mut Vec<Profile>, ops: &[stencilcraft_doc::Operation]) -> usize {
+    let mut added = 0;
+    for op in ops {
+        if op.kind == stencilcraft_doc::OperationKind::Guide {
+            continue;
+        }
+        let key = profile_key(op.kind, &op.settings);
+        if profiles
+            .iter()
+            .any(|p| profile_key(p.kind, &p.settings) == key)
+        {
+            continue;
+        }
+        let mut name = op.name.clone();
+        if profiles.iter().any(|p| p.name == name) {
+            let mut n = 1;
+            loop {
+                let candidate = format!("Perfil ({n})");
+                if !profiles.iter().any(|p| p.name == candidate) {
+                    name = candidate;
+                    break;
+                }
+                n += 1;
+            }
+        }
+        profiles.push(Profile {
+            name,
+            kind: op.kind,
+            settings: op.settings.clone(),
+        });
+        added += 1;
+    }
+    added
 }
 
 /// The keyboard modifier that turns an Add Layer click into the operation popup (D-02).
@@ -130,6 +208,10 @@ impl Default for UserPrefs {
             op_popup_modifier: OpPopupModifier::default(),
             import_legacy_style_operations: false,
             bulk_confirm_threshold: 10,
+            profiles: BASE_PROFILES
+                .iter()
+                .map(|(kind, name)| Profile::new(*name, *kind))
+                .collect(),
         }
     }
 }
@@ -848,15 +930,20 @@ pub(crate) const BASE_PROFILES: [(stencilcraft_doc::OperationKind, &str); 3] = [
     (stencilcraft_doc::OperationKind::Engrave, "Engrave"),
 ];
 
-/// The base profile an operation still matches, if any: same kind and settings
-/// unchanged from the defaults. Editing the settings unlinks it ("Profile none").
-fn operation_profile(op: &stencilcraft_doc::Operation) -> Option<&'static str> {
-    BASE_PROFILES
+/// The profile an operation is linked to, if any: same kind and settings and
+/// not explicitly unlinked this session. Editing the settings unlinks it.
+fn operation_profile<'a>(
+    op: &stencilcraft_doc::Operation,
+    profiles: &'a [Profile],
+    detached: &std::collections::BTreeSet<u64>,
+) -> Option<&'a str> {
+    if detached.contains(&op.id) {
+        return None;
+    }
+    profiles
         .iter()
-        .find(|(kind, _)| {
-            *kind == op.kind && op.settings == stencilcraft_doc::OperationSettings::default()
-        })
-        .map(|(_, name)| *name)
+        .find(|p| p.kind == op.kind && p.settings == op.settings)
+        .map(|p| p.name.as_str())
 }
 
 /// The name and colour of the Cut operation an appearance value creates;
@@ -925,6 +1012,9 @@ pub struct StencilApp {
     pub geo_selection: Selection<GeoKey>,
     /// The operations list's selection.
     pub op_selection: Selection<OpKey>,
+    /// Operation ids explicitly unlinked from a matching profile (OP-03).
+    /// Links are derived from kind+settings; this detach marker is session-only.
+    pub detached_ops: std::collections::BTreeSet<u64>,
     /// Operation ids whose member rows are expanded (OP-01).
     pub open_ops: std::collections::BTreeSet<u64>,
     /// A bulk action waiting for its confirm gate (D-07).
@@ -953,6 +1043,10 @@ pub struct StencilApp {
     pub op_settings: Option<(u64, egui::Response)>,
     /// One-frame open command for the settings popover.
     pub op_settings_open: bool,
+    /// The open profile-settings popup: the profile index and its anchor (OP-03).
+    pub profile_edit: Option<(usize, egui::Response)>,
+    /// One-frame open command for the profile-settings popup.
+    pub profile_edit_open: bool,
     /// The new-operation menu anchored to the plus button.
     pub bulk_menu: Option<egui::Response>,
     /// One-frame open command for the new-operation menu.
@@ -1172,6 +1266,7 @@ impl StencilApp {
             entered_group: None,
             geo_selection: Selection::default(),
             op_selection: Selection::default(),
+            detached_ops: Default::default(),
             open_ops: Default::default(),
             pending_bulk: None,
             bulk_dialog: DialogState::new(),
@@ -1186,6 +1281,8 @@ impl StencilApp {
             op_menu_open: false,
             op_settings: None,
             op_settings_open: false,
+            profile_edit: None,
+            profile_edit_open: false,
             bulk_menu: None,
             bulk_menu_open: false,
             appearance_shapes: None,
@@ -3314,6 +3411,24 @@ impl StencilApp {
         }
     }
 
+    /// Every operation id in the operations selection (member rows included),
+    /// without duplicates.
+    fn selected_operation_ids(&self) -> Vec<u64> {
+        let mut ids = Vec::new();
+        for key in &self.op_selection.items {
+            let id = match key {
+                OpKey::Op(index) => self.engine.doc.operations.get(*index).map(|op| op.id),
+                OpKey::Member { op, .. } => Some(*op),
+            };
+            if let Some(id) = id
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
     /// Add `ids` to operation `id`; the command skips ids already present.
     fn add_shapes_to_operation(&mut self, id: u64, ids: &[u64]) {
         let Some(op) = self.engine.doc.operations.iter().find(|op| op.id == id) else {
@@ -3389,7 +3504,7 @@ impl StencilApp {
                 op.members.len(),
                 op.settings.power,
                 op.settings.speed_mm_per_min,
-                operation_profile(op).unwrap_or("none")
+                operation_profile(op, &self.prefs.profiles, &self.detached_ops).unwrap_or("none")
             );
             visuals.push((
                 key,
@@ -3770,51 +3885,159 @@ impl StencilApp {
         }
     }
 
-    /// Operation profiles panel (OP-03): the built-in base profiles. An
-    /// operation shows its profile while its kind and settings still match it;
-    /// editing the settings unlinks it ("Profile none" in the Operations row).
+    /// Operation profiles panel (OP-03): reusable kind+settings stored in the
+    /// app preferences. Clicking the name (or Link) applies the profile to the
+    /// selected operations; Unlink detaches without changing their settings;
+    /// the cog edits the profile's parameters.
     pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
-        let mut link: Option<(stencilcraft_doc::OperationKind, &'static str)> = None;
+        let mut link: Option<usize> = None;
+        let mut unlink: Option<usize> = None;
+        let mut edit: Option<(usize, egui::Response)> = None;
+        let mut extract = false;
+        let mut import = false;
+        let mut export = false;
+        let ids = self.selected_operation_ids();
+
         Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
             let _ = SectionHeader::new("profiles-header", "Profiles")
                 .collapsible(false)
                 .show(ui, |_| {});
-            for (kind, name) in BASE_PROFILES {
-                // Profiles are provisional: their defaults are the base kind with
-                // default settings. Clicking one links the selected operations.
-                let resp = ui.button(format!("Profile {name}")).on_hover_text(format!(
-                    "Link the selected operations to the {name} defaults"
-                ));
-                if resp.clicked() {
-                    link = Some((kind, name));
-                }
+            for (index, profile) in self.prefs.profiles.iter().enumerate() {
+                let name = &profile.name;
+                let linked = !ids.is_empty()
+                    && ids.iter().all(|id| {
+                        !self.detached_ops.contains(id)
+                            && self
+                                .engine
+                                .doc
+                                .operations
+                                .iter()
+                                .find(|op| op.id == *id)
+                                .is_some_and(|op| {
+                                    op.kind == profile.kind && op.settings == profile.settings
+                                })
+                    });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            Button::new(format!("Profile {name}"))
+                                .variant(ButtonVariant::Ghost)
+                                .size(ControlSize::Sm),
+                        )
+                        .on_hover_text(format!(
+                            "Apply the {name} profile to the selected operations"
+                        ))
+                        .clicked()
+                    {
+                        link = Some(index);
+                    }
+                    ui.add(Text::new(profile.summary()).content(Content::Muted));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let cog = ui
+                            .add(IconButton::new(
+                                Icon::Settings,
+                                format!("Profile settings {name}"),
+                            ))
+                            .on_hover_text("Edit this profile's parameters");
+                        if cog.clicked() {
+                            edit = Some((index, cog.clone()));
+                        }
+                        let (icon, verb) = if linked {
+                            (Icon::Unlink, "Unlink")
+                        } else {
+                            (Icon::Link, "Link")
+                        };
+                        if ui
+                            .add(IconButton::new(icon, format!("{verb} Profile {name}")))
+                            .on_hover_text(format!("{verb} the selected operations"))
+                            .clicked()
+                        {
+                            if linked {
+                                unlink = Some(index);
+                            } else {
+                                link = Some(index);
+                            }
+                        }
+                    });
+                });
             }
+            ui.separator();
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .button("Extract profiles")
+                    .on_hover_text("Add a profile for each operation whose settings it lacks")
+                    .clicked()
+                {
+                    extract = true;
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if ui
+                        .button("Import profiles")
+                        .on_hover_text("Load profiles from a JSON file")
+                        .clicked()
+                    {
+                        import = true;
+                    }
+                    if ui
+                        .button("Export profiles")
+                        .on_hover_text("Save the profile library to a JSON file")
+                        .clicked()
+                    {
+                        export = true;
+                    }
+                }
+            });
         });
-        if let Some((kind, name)) = link {
-            let ids: Vec<u64> = self
-                .op_selection
-                .items
-                .iter()
-                .filter_map(|key| match key {
-                    OpKey::Op(index) => self.engine.doc.operations.get(*index).map(|op| op.id),
-                    _ => None,
-                })
-                .collect();
+
+        if extract {
+            let added = extract_profiles(&mut self.prefs.profiles, &self.engine.doc.operations);
+            self.save_prefs();
+            self.status = format!("extracted {added} profile(s)");
+        }
+        if import {
+            self.import_profiles();
+        }
+        if export {
+            self.export_profiles();
+        }
+        if let Some(index) = unlink {
+            let name = self.prefs.profiles[index].name.clone();
             if ids.is_empty() {
-                self.status = format!("select an operation to link to Profile {name}");
+                self.status = format!("select an operation to unlink from Profile {name}");
+            } else {
+                for id in &ids {
+                    self.detached_ops.insert(*id);
+                }
+                self.status = format!("unlinked {} operation(s) from Profile {name}", ids.len());
+            }
+        }
+        if let Some(index) = link {
+            let profile = self.prefs.profiles[index].clone();
+            if ids.is_empty() {
+                self.status = format!("select an operation to link to Profile {}", profile.name);
             } else {
                 for id in &ids {
                     self.run_command(Command::Document(DocumentCommand::OperationSetKind {
                         id: *id,
-                        kind,
+                        kind: profile.kind,
                     }));
                     self.run_command(Command::Document(DocumentCommand::OperationSetSettings {
                         id: *id,
-                        settings: stencilcraft_doc::OperationSettings::default(),
+                        settings: profile.settings.clone(),
                     }));
+                    self.detached_ops.remove(id);
                 }
-                self.status = format!("linked {} operation(s) to Profile {name}", ids.len());
+                self.status = format!(
+                    "linked {} operation(s) to Profile {}",
+                    ids.len(),
+                    profile.name
+                );
             }
+        }
+        if let Some((index, anchor)) = edit {
+            self.profile_edit = Some((index, anchor));
+            self.profile_edit_open = true;
         }
     }
 
@@ -4115,6 +4338,7 @@ impl StencilApp {
         self.operation_color_popup(ui);
         self.operation_menu_popup(ui);
         self.operation_settings_popup(ui);
+        self.profile_settings_popup(ui);
         self.bulk_menu_popup(ui);
         self.appearance_dialog(ui);
         self.assign_operation_dialog(ui);
@@ -4290,6 +4514,121 @@ impl StencilApp {
         } else {
             self.op_settings = None;
         }
+    }
+
+    /// The profile-settings popup (OP-03): edit a library profile's parameters.
+    fn profile_settings_popup(&mut self, _ui: &mut egui::Ui) {
+        let Some((index, anchor)) = self.profile_edit.clone() else {
+            return;
+        };
+        let Some(profile) = self.prefs.profiles.get(index).cloned() else {
+            self.profile_edit = None;
+            return;
+        };
+        let open_cmd = self
+            .profile_edit_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.profile_edit_open = false;
+
+        let mut settings = profile.settings.clone();
+        let mut close = false;
+        let shown = egui::Popup::from_response(&anchor)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .open_memory(open_cmd)
+            .show(|ui| {
+                let row = |ui: &mut egui::Ui, label: &str, value: &mut f64| {
+                    let word = ui.label(label);
+                    ui.add(egui::DragValue::new(value).speed(0.5))
+                        .labelled_by(word.id);
+                };
+                ui.horizontal(|ui| row(ui, "Power", &mut settings.power));
+                ui.horizontal(|ui| row(ui, "Speed", &mut settings.speed_mm_per_min));
+                ui.horizontal(|ui| {
+                    let word = ui.label("Passes");
+                    ui.add(egui::DragValue::new(&mut settings.passes).range(1..=100))
+                        .labelled_by(word.id);
+                });
+                ui.horizontal(|ui| row(ui, "Focus", &mut settings.focus_mm));
+                ui.horizontal(|ui| row(ui, "Kerf", &mut settings.kerf_mm));
+                if ui.button("Close").clicked() {
+                    close = true;
+                }
+            });
+
+        if settings != profile.settings {
+            if let Some(p) = self.prefs.profiles.get_mut(index) {
+                p.settings = settings;
+            }
+            self.save_prefs();
+        }
+        if shown.is_some() && !close {
+            self.profile_edit = Some((index, anchor));
+        } else {
+            self.profile_edit = None;
+        }
+    }
+
+    /// Write the profile library to a JSON file the user picks (OP-03).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_profiles(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_file_name("profiles.json")
+            .save_file()
+        else {
+            return;
+        };
+        let written = serde_json::to_string_pretty(&self.prefs.profiles)
+            .ok()
+            .and_then(|json| std::fs::write(&path, json).ok());
+        self.status = match written {
+            Some(()) => format!("exported profiles to {}", path.display()),
+            None => "could not export profiles".to_string(),
+        };
+    }
+
+    /// Merge profiles from a JSON file, skipping kinds+settings already present.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn import_profiles(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Profiles", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        let parsed = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Vec<Profile>>(&text).ok());
+        match parsed {
+            Some(profiles) => {
+                let mut added = 0;
+                for profile in profiles {
+                    let key = profile_key(profile.kind, &profile.settings);
+                    if self
+                        .prefs
+                        .profiles
+                        .iter()
+                        .any(|p| profile_key(p.kind, &p.settings) == key)
+                    {
+                        continue;
+                    }
+                    self.prefs.profiles.push(profile);
+                    added += 1;
+                }
+                self.save_prefs();
+                self.status = format!("imported {added} profile(s)");
+            }
+            None => self.status = "could not import profiles".to_string(),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn import_profiles(&mut self) {
+        self.status = "importing profiles needs the desktop app".to_string();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn export_profiles(&mut self) {
+        self.status = "exporting profiles needs the desktop app".to_string();
     }
 
     /// The new-operation menu anchored to the plus chevron (OP-04).
@@ -8195,6 +8534,7 @@ mod ui_e2e {
             .build_ui_state(
                 |ui, app: &mut StencilApp| {
                     egui::ScrollArea::vertical().show(ui, |ui| app.profiles_panel(ui));
+                    app.operation_overlays(ui);
                 },
                 app,
             );
@@ -8591,5 +8931,69 @@ mod ui_e2e {
             vec![2, 3],
             "membership removed via the overflow menu"
         );
+    }
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+    use stencilcraft_doc::{Operation, OperationKind, OperationSettings};
+
+    fn op(id: u64, name: &str, kind: OperationKind, power: f64) -> Operation {
+        Operation {
+            id,
+            name: name.to_string(),
+            kind,
+            settings: OperationSettings {
+                power,
+                ..Default::default()
+            },
+            color: None,
+            visible: true,
+            locked: false,
+            members: Vec::new(),
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn extract_dedupes_by_kind_and_settings() {
+        let mut profiles = Vec::new();
+        let ops = [
+            op(1, "Cut", OperationKind::Cut, 0.0),
+            op(2, "Cut copy", OperationKind::Cut, 0.0),
+            op(3, "Hot", OperationKind::Cut, 42.0),
+            op(4, "Guide", OperationKind::Guide, 0.0),
+        ];
+        assert_eq!(extract_profiles(&mut profiles, &ops), 2);
+        assert_eq!(
+            profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            ["Cut", "Hot"]
+        );
+    }
+
+    #[test]
+    fn extract_renames_a_taken_name() {
+        let mut profiles = vec![Profile::new("Cut", OperationKind::Cut)];
+        let ops = [op(1, "Cut", OperationKind::Cut, 42.0)];
+        assert_eq!(extract_profiles(&mut profiles, &ops), 1);
+        assert_eq!(profiles[1].name, "Perfil (1)");
+        assert_eq!(profiles[1].settings.power, 42.0);
+    }
+
+    #[test]
+    fn operation_profile_matches_kind_and_settings_and_honours_detach() {
+        let mut profiles = vec![Profile::new("Score", OperationKind::Score)];
+        profiles[0].settings.power = 7.0;
+        let matching = op(1, "S", OperationKind::Score, 7.0);
+        let other = op(2, "S", OperationKind::Score, 8.0);
+        let none = std::collections::BTreeSet::new();
+        assert_eq!(
+            operation_profile(&matching, &profiles, &none),
+            Some("Score")
+        );
+        assert_eq!(operation_profile(&other, &profiles, &none), None);
+        let detached = [matching.id].into_iter().collect();
+        assert_eq!(operation_profile(&matching, &profiles, &detached), None);
     }
 }

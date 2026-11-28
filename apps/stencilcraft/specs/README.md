@@ -24,6 +24,26 @@ are expected to fail; each failure is copied into [`GAPS.md`](GAPS.md) with the
 step that could not find its widget. A gap that starts passing is listed under
 "Closed gaps" so it can be promoted (remove the `@gap` tag).
 
+## UI review gate
+
+Gherkin checks the accessibility tree and the engine, not the pixels. Before and
+after a UI change, capture the affected surface and look at it:
+
+```sh
+./target/debug/stencilcraft --control 7979 examples/starter.stencilcraft &
+python3 - <<'PY'
+import json, socket
+s = socket.create_connection(("127.0.0.1", 7979))
+s.sendall(json.dumps({"id": 1, "method": "app.screenshot",
+                      "params": {"path": "/tmp/stencilcraft-ui/after.png"}}).encode() + b"\n")
+print(s.makefile().readline())
+PY
+```
+
+Open the PNG and check columns, alignment, spacing and footer placement against
+the requirements. The gate is mandatory: a UI task is not done on green specs
+alone (AGENTS.md).
+
 ## Layout
 
 ```

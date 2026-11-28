@@ -406,3 +406,17 @@ Completed items should be marked here only when behavior is usable end-to-end.
   gaps; member rows read `#{shape} · {name}` and drag onto another operation
   (Shift-drag copies) through one undoable `OperationMoveMembers` per source.
   Gherkin contract: 49 scenarios green; engine adds the move-members command.
+
+- 2026-11-27 — operations/profiles UI review corrections: the
+  colour well returns to the trailing edge of the operation row and the profile
+  link becomes its own toggle column beside the eye and lock; the kind icon
+  drops the thumbnail frame. A profile's swatch becomes a clickable
+  `craft_ui::controls::Swatch` that opens the operation colour popover through a
+  shared `ColorTarget`, so there is one picker; closing it persists the profile
+  colour as `#rrggbb` and recolours every linked operation (row well, geometry
+  pills and canvas). Profile colours are parsed as hex, not decimal, with a
+  per-kind fallback when missing. Extract/Import/Export move to the panel footer,
+  right-aligned like Operations. The 40-swatch picker uses
+  `craft_color::ui::SwatchPalette` (selection ring inside each cell) instead of
+  hand-painted wells. UI changes now require before/after screenshots under the
+  AGENTS.md gate.

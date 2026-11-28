@@ -27,6 +27,7 @@ rfd = "0.17"
 # Shared UI components and docking, pinned to aiongg/craft-libs design-system.
 craft-ui = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-theme = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
+craft-color = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-atomic = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50" }
 craft-draw = { git = "https://github.com/aiongg/craft-libs.git", rev = "8504e84805049d3af59baacf5239315eaaa74e50", features = ["ui"] }
 # TODO(push): switch to https://github.com/storytold/craft-libs.git at 24f2a743d977183688905c86df2177357ed4769b

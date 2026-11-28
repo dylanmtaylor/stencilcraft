@@ -7,19 +7,20 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use craft_color::ui::SwatchPalette;
 use craft_draw::ui::pen::{
     BezierNames, BezierOverlay, BezierTool, EditPath, EditSubpath, HandlesShown, PathSelection,
     PenDraft, PenNames,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use craft_settings::{Location, Settings, SettingsStore};
-use craft_theme::{ControlSize, TypeRole};
+use craft_theme::{ControlSize, Srgba, TypeRole};
 use craft_ui::behavior::{Axis, DropPosition, ListDrag, Move, Reorder, RowInfo, Selection};
 use craft_ui::canvas::{Readout, RefSize, ReferencePoint, RulerNames, RulerUnits, Rulers};
 use craft_ui::composites::{PanelFooter, PropertyGroup, PropertyLabel, PropertyRow, SectionHeader};
 use craft_ui::controls::{
     Button, ButtonVariant, Checkbox, IconButton, LinkButton, LinkMode, NumberField, Select, Slider,
-    SliderScale, TextField, ToggleButton,
+    SliderScale, Swatch, TextField, ToggleButton,
 };
 use craft_ui::dialog::{Dialog, DialogState, Footer, Outcome};
 use craft_ui::docking::{
@@ -28,7 +29,7 @@ use craft_ui::docking::{
 use craft_ui::edit::{CancelReason, EditEvent};
 use craft_ui::icons::Icon;
 use craft_ui::layout::{SplitAxis, SplitSize};
-use craft_ui::list::{List, ListEvent, ListRow, RowEvent, ThumbSize, ToggleColumn};
+use craft_ui::list::{List, ListEvent, ListRow, RowEvent, ToggleColumn};
 use craft_ui::localized::{LocaleNumbers, Unit};
 use craft_ui::menu::{Menu, MenuBar, MenuEntry, MenuItem};
 use craft_ui::patterns::{
@@ -734,6 +735,14 @@ pub enum CanvasViewCommand {
 }
 
 /// Stable key for one row of the geometry tree panel.
+/// What the shared colour popup edits: an operation's material colour or a
+/// profile's swatch colour. Both use the same picker so they cannot drift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColorTarget {
+    Operation(u64),
+    Profile(usize),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GeoKey {
     /// The ".." row shown while a group is entered.
@@ -767,9 +776,11 @@ struct RowVisual {
     icon: Option<Icon>,
     eye: Option<bool>,
     swatch: Option<egui::Color32>,
-    /// The profile this operation is linked to, if any; the row draws the link
-    /// glyph before the swatch and breaks the link on click.
-    linked: Option<String>,
+    /// The profile this operation's kind+settings match, linked or detached;
+    /// the row's link column names it and toggles the session detach marker.
+    profile: Option<String>,
+    /// Whether that profile link is live (not detached).
+    linked: bool,
     /// Operation pills shown at the trailing edge of a geometry row:
     /// `(operation id, name, fill)`.
     pills: Vec<(u64, String, egui::Color32)>,
@@ -887,7 +898,8 @@ fn push_shape_row(
             icon: Some(Icon::Spline),
             eye: None,
             swatch: None,
-            linked: None,
+            profile: None,
+            linked: false,
             pills,
             extra_ops,
             dimmed: false,
@@ -977,6 +989,15 @@ fn operation_profile<'a>(
 }
 
 /// The profile an operation is linked to, for its swatch colour.
+fn matching_profile<'a>(
+    op: &stencilcraft_doc::Operation,
+    profiles: &'a [Profile],
+) -> Option<&'a Profile> {
+    profiles
+        .iter()
+        .find(|p| p.kind == op.kind && p.settings == op.settings)
+}
+
 fn linked_profile<'a>(
     op: &stencilcraft_doc::Operation,
     profiles: &'a [Profile],
@@ -985,9 +1006,7 @@ fn linked_profile<'a>(
     if detached.contains(&op.id) {
         return None;
     }
-    profiles
-        .iter()
-        .find(|p| p.kind == op.kind && p.settings == op.settings)
+    matching_profile(op, profiles)
 }
 
 /// How many operations in the document are linked to `profile` right now.
@@ -1008,14 +1027,24 @@ fn profile_differs(op: &stencilcraft_doc::Operation, profile: &Profile) -> bool 
     op.kind != profile.kind || op.settings != profile.settings
 }
 
+/// The swatch colour a profile kind uses when its stored colour is missing.
+fn profile_fallback_color(kind: stencilcraft_doc::OperationKind) -> &'static str {
+    match kind.kind_name() {
+        "cut" => "#e5484d",
+        "score" => "#f5a524",
+        "engrave" => "#30a46c",
+        _ => "#9aa0a6",
+    }
+}
+
 /// `#rrggbb` → egui colour; unparseable text falls back to the muted ink.
 fn profile_color(profile: &Profile) -> egui::Color32 {
-    profile
-        .color
-        .trim_start_matches('#')
-        .parse::<u32>()
+    let hex = profile.color.trim_start_matches('#');
+    if hex.len() != 6 {
+        return egui::Color32::from_rgb(0x9a, 0xa0, 0xa6);
+    }
+    u32::from_str_radix(hex, 16)
         .ok()
-        .filter(|_| profile.color.len() == 7)
         .map(|v| {
             egui::Color32::from_rgb(
                 ((v >> 16) & 0xff) as u8,
@@ -1109,8 +1138,8 @@ pub struct StencilApp {
     pub tag_popup: Option<(u64, TagTarget, egui::Response)>,
     /// One-frame open command for the tag popup.
     pub tag_popup_open: bool,
-    /// The open colour-picker popup (UI-05): the operation id it targets and the anchor.
-    pub color_popup: Option<(u64, egui::Response)>,
+    /// The open colour-picker popup (UI-05): what it edits and the anchor.
+    pub color_popup: Option<(ColorTarget, egui::Response)>,
     /// Working colour while the colour popup is open; committed on close when dirty.
     pub color_popup_value: egui::Color32,
     /// The hex text shown in the colour popup.
@@ -1127,6 +1156,12 @@ pub struct StencilApp {
     pub op_settings: Option<(u64, egui::Response)>,
     /// One-frame open command for the settings popover.
     pub op_settings_open: bool,
+    /// The rename popover: the operation id and its anchor.
+    pub op_rename: Option<(u64, egui::Response)>,
+    /// One-frame open command for the rename popover.
+    pub op_rename_open: bool,
+    /// Working operation name while the rename popover is open.
+    pub op_rename_text: String,
     /// The open profile-settings popup: the profile index and its anchor (OP-03).
     pub profile_edit: Option<(usize, egui::Response)>,
     /// One-frame open command for the profile-settings popup.
@@ -1367,6 +1402,9 @@ impl StencilApp {
             op_menu_open: false,
             op_settings: None,
             op_settings_open: false,
+            op_rename: None,
+            op_rename_open: false,
+            op_rename_text: String::new(),
             profile_edit: None,
             profile_edit_open: false,
             bulk_menu: None,
@@ -1499,6 +1537,7 @@ impl StencilApp {
             let (store, _report) = SettingsStore::<UserPrefs>::open(Location::Auto);
             self.prefs = store.get().clone();
             self.settings_store = Some(store);
+            self.normalize_profile_colors();
             if !self.prefs.recent_files.is_empty() {
                 self.recent_files = self.prefs.recent_files.clone();
             }
@@ -1518,6 +1557,35 @@ impl StencilApp {
             stencilcraft_ui_egui::ColorTheme::Light
         };
         self
+    }
+
+    /// Migrate prefs saved before profile colours existed and repaint linked
+    /// operations from their profile. Colour is presentation metadata, so the
+    /// document is synchronised directly rather than through the undo stack.
+    fn normalize_profile_colors(&mut self) {
+        let mut changed = false;
+        for profile in &mut self.prefs.profiles {
+            if stencilcraft_doc::canvas::parse_hex_color(&profile.color).is_none() {
+                profile.color = profile_fallback_color(profile.kind).to_string();
+                changed = true;
+            }
+        }
+        if changed {
+            self.save_prefs();
+        }
+        let mut doc_changed = false;
+        for op in &mut self.engine.doc.operations {
+            let Some(profile) = matching_profile(op, &self.prefs.profiles) else {
+                continue;
+            };
+            if op.color.as_deref() != Some(profile.color.as_str()) {
+                op.color = Some(profile.color.clone());
+                doc_changed = true;
+            }
+        }
+        if doc_changed {
+            self.saved_document = self.engine.doc.clone();
+        }
     }
 
     pub fn save_prefs(&mut self) {
@@ -3224,7 +3292,8 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
-                            linked: None,
+                            profile: None,
+                            linked: false,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3253,7 +3322,8 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
-                            linked: None,
+                            profile: None,
+                            linked: false,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3279,7 +3349,8 @@ impl StencilApp {
                             icon: Some(Icon::Layers),
                             eye: None,
                             swatch: None,
-                            linked: None,
+                            profile: None,
+                            linked: false,
                             pills: Vec::new(),
                             extra_ops: 0,
                             dimmed: false,
@@ -3573,8 +3644,6 @@ impl StencilApp {
         let member_drop: std::cell::RefCell<Option<MemberDrop>> = std::cell::RefCell::new(None);
 
         let doc = &self.engine.doc;
-        let ink = ui.visuals().text_color();
-        let icon_set = craft_ui::icons::active(ui.ctx());
         let op_count = doc.operations.len();
         let mut row_infos: Vec<RowInfo<OpKey>> = Vec::with_capacity(op_count);
         let mut visuals: Vec<(OpKey, RowVisual)> = Vec::with_capacity(op_count);
@@ -3613,7 +3682,8 @@ impl StencilApp {
                     icon: Some(operation_icon(op)),
                     eye: Some(op.visible),
                     swatch: Some(swatch),
-                    linked: link.map(|p| p.name.clone()),
+                    profile: matching_profile(op, &self.prefs.profiles).map(|p| p.name.clone()),
+                    linked: link.is_some(),
                     pills: Vec::new(),
                     extra_ops: 0,
                     dimmed: !op.visible,
@@ -3711,24 +3781,7 @@ impl StencilApp {
                                 if !v.detail.is_empty() {
                                     row = row.detail(v.detail.clone());
                                 }
-                                // Photoshop's layer+mask layout: the kind icon,
-                                // then the link glyph, then the profile swatch.
-                                if let (Some(col), OpKey::Op(_)) = (v.swatch, key) {
-                                    let icon = v.icon.unwrap_or(Icon::Spline);
-                                    row = row
-                                        .thumb(ThumbSize::Small, move |painter, rect| {
-                                            craft_ui::icons::paint_on(
-                                                painter, rect, icon, icon_set, 12.0, 1.4, ink,
-                                            );
-                                        })
-                                        .extra_thumb(move |painter, rect| {
-                                            painter.rect_filled(rect.shrink(2.0), 2.0, col);
-                                        });
-                                    if let Some(profile) = v.linked.clone() {
-                                        row = row
-                                            .thumb_link(true, format!("Unlink Profile {profile}"));
-                                    }
-                                } else if let Some(icon) = v.icon {
+                                if let Some(icon) = v.icon {
                                     row = row.icon(icon);
                                 }
                                 if let Some(on) = v.eye {
@@ -3747,6 +3800,20 @@ impl StencilApp {
                                         op.locked,
                                     ));
                                 }
+                                // Link column: toggles the session detach marker.
+                                if let Some(profile) = v.profile.clone() {
+                                    let label = if v.linked {
+                                        format!("Unlink Profile {profile}")
+                                    } else {
+                                        format!("Link Profile {profile}")
+                                    };
+                                    row = row.toggle(ToggleColumn::new(
+                                        label,
+                                        Icon::Unlink,
+                                        Icon::Link,
+                                        v.linked,
+                                    ));
+                                }
                                 // Colour swatch: opens the colour picker for this operation.
                                 if let (Some(col), OpKey::Op(index)) = (v.swatch, key)
                                     && let Some(op) = doc.operations.get(index)
@@ -3754,18 +3821,10 @@ impl StencilApp {
                                     let hit = &swatch_click;
                                     let label = format!("Colour {}", op.name);
                                     row = row.trailing_item(12.0, move |ui| {
-                                        let (rect, resp) = ui.allocate_exact_size(
-                                            egui::vec2(10.0, 10.0),
-                                            egui::Sense::click(),
+                                        let resp = ui.add(
+                                            Swatch::new((op.id, "operation-colour"), label, col)
+                                                .dimensions(10.0, 10.0),
                                         );
-                                        resp.widget_info(|| {
-                                            egui::WidgetInfo::labeled(
-                                                egui::accesskit::Role::Button,
-                                                true,
-                                                &label,
-                                            )
-                                        });
-                                        ui.painter().rect_filled(rect, 2.0, col);
                                         if resp.clicked() {
                                             *hit.borrow_mut() = Some((op.id, resp.clone()));
                                         }
@@ -3968,6 +4027,15 @@ impl StencilApp {
                                     },
                                 ));
                             }
+                            2 => {
+                                if value.on {
+                                    self.detached_ops.remove(&op.id);
+                                    self.status = format!("linked operation {}", op.name);
+                                } else {
+                                    self.detached_ops.insert(op.id);
+                                    self.status = format!("unlinked operation {}", op.name);
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -3981,12 +4049,22 @@ impl StencilApp {
                 }) => {
                     if let Some(op) = self.engine.doc.operations.get(index) {
                         let id = op.id;
+                        let name = op.name.clone();
                         if linked {
                             self.detached_ops.remove(&id);
-                            self.status = format!("linked operation {}", op.name);
+                            if let Some(profile) = matching_profile(op, &self.prefs.profiles) {
+                                let color = profile.color.clone();
+                                self.run_command(Command::Document(
+                                    DocumentCommand::OperationSetColor {
+                                        id,
+                                        color: Some(color),
+                                    },
+                                ));
+                            }
+                            self.status = format!("linked operation {name}");
                         } else {
                             self.detached_ops.insert(id);
-                            self.status = format!("unlinked operation {}", op.name);
+                            self.status = format!("unlinked operation {name}");
                         }
                     }
                 }
@@ -4036,7 +4114,7 @@ impl StencilApp {
             ]);
             self.color_popup_dirty = false;
             self.color_popup_open = true;
-            self.color_popup = Some((id, anchor));
+            self.color_popup = Some((ColorTarget::Operation(id), anchor));
         }
         if let Some((id, anchor)) = settings_click.into_inner() {
             self.op_settings = Some((id, anchor));
@@ -4090,107 +4168,150 @@ impl StencilApp {
     pub fn profiles_panel(&mut self, ui: &mut egui::Ui) {
         let mut link: Option<usize> = None;
         let mut edit: Option<(usize, egui::Response)> = None;
+        let mut recolor_click: Option<(usize, egui::Response)> = None;
         let mut extract = false;
         let mut import = false;
         let mut export = false;
 
-        Panel::new("stencilcraft-profiles-panel").show(ui, |ui| {
-            let _ = SectionHeader::new("profiles-header", "Profiles")
-                .collapsible(false)
-                .show(ui, |_| {});
-            for (index, profile) in self.prefs.profiles.iter().enumerate() {
-                let name = profile.name.clone();
-                let count = linked_count(profile, &self.engine.doc.operations, &self.detached_ops);
-                let color = profile_color(profile);
-                let summary = profile.summary();
-                ui.horizontal(|ui| {
-                    // Left column: a dimmed chain and how many operations in
-                    // this document are linked to the profile (read-only).
-                    let (rect, resp) =
-                        ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::hover());
-                    let linked_label = if count == 0 {
-                        format!("No operations linked to Profile {name}")
-                    } else {
-                        format!("{count} linked to Profile {name}")
-                    };
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, &linked_label)
-                    });
-                    craft_ui::icons::paint_in(
-                        ui,
-                        rect,
-                        Icon::Link,
-                        craft_ui::icons::active(ui.ctx()),
-                        12.0,
-                        1.4,
-                        ui.visuals().weak_text_color(),
-                    );
-                    let (rect, resp) =
-                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                    let swatch_label = format!("Profile colour {name}");
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, &swatch_label)
-                    });
-                    ui.painter().rect_filled(rect, 2.0, color);
-                    // Name column: fixed width so the description reads as its
-                    // own column instead of trailing the button.
-                    if ui
-                        .add_sized(
-                            [120.0, 20.0],
-                            Button::new(format!("Profile {name}"))
-                                .variant(ButtonVariant::Ghost)
-                                .size(ControlSize::Sm),
-                        )
-                        .on_hover_text(format!(
-                            "Apply the {name} profile to the selected operations"
-                        ))
-                        .clicked()
-                    {
-                        link = Some(index);
-                    }
-                    ui.add(Text::new(summary).content(Content::Muted));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let cog = ui
-                            .add(IconButton::new(
-                                Icon::Settings,
-                                format!("Profile settings {name}"),
-                            ))
-                            .on_hover_text("Edit this profile's parameters");
-                        if cog.clicked() {
-                            edit = Some((index, cog.clone()));
+        Panel::new("stencilcraft-profiles-panel")
+            .footer_label("Profile actions")
+            .footer(|ui| {
+                PanelFooter::show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(IconButton::new(Icon::Eyedropper, "Extract profiles"))
+                            .on_hover_text(
+                                "Add a profile for each operation whose settings it lacks",
+                            )
+                            .clicked()
+                        {
+                            extract = true;
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            if ui
+                                .add(IconButton::new(Icon::FolderOpen, "Import profiles"))
+                                .on_hover_text("Load profiles from a JSON file")
+                                .clicked()
+                            {
+                                import = true;
+                            }
+                            if ui
+                                .add(IconButton::new(Icon::Open, "Export profiles"))
+                                .on_hover_text("Save the profile library to a JSON file")
+                                .clicked()
+                            {
+                                export = true;
+                            }
                         }
                     });
                 });
-            }
-            ui.separator();
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add(IconButton::new(Icon::Eyedropper, "Extract profiles"))
-                    .on_hover_text("Add a profile for each operation whose settings it lacks")
-                    .clicked()
-                {
-                    extract = true;
-                }
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    if ui
-                        .add(IconButton::new(Icon::FolderOpen, "Import profiles"))
-                        .on_hover_text("Load profiles from a JSON file")
-                        .clicked()
-                    {
-                        import = true;
-                    }
-                    if ui
-                        .add(IconButton::new(Icon::Open, "Export profiles"))
-                        .on_hover_text("Save the profile library to a JSON file")
-                        .clicked()
-                    {
-                        export = true;
-                    }
+            })
+            .show(ui, |ui| {
+                let _ = SectionHeader::new("profiles-header", "Profiles")
+                    .collapsible(false)
+                    .show(ui, |_| {});
+                for (index, profile) in self.prefs.profiles.iter().enumerate() {
+                    let name = profile.name.clone();
+                    let count =
+                        linked_count(profile, &self.engine.doc.operations, &self.detached_ops);
+                    let color = profile_color(profile);
+                    let summary = profile.summary();
+                    ui.horizontal(|ui| {
+                        // Left column: a dimmed chain and how many operations in
+                        // this document are linked to the profile (read-only).
+                        let (rect, resp) =
+                            ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::hover());
+                        let linked_label = if count == 0 {
+                            format!("No operations linked to Profile {name}")
+                        } else {
+                            format!("{count} linked to Profile {name}")
+                        };
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::accesskit::Role::Image,
+                                true,
+                                &linked_label,
+                            )
+                        });
+                        craft_ui::icons::paint_in(
+                            ui,
+                            rect,
+                            Icon::Link,
+                            craft_ui::icons::active(ui.ctx()),
+                            12.0,
+                            1.4,
+                            ui.visuals().weak_text_color(),
+                        );
+                        let swatch = ui.add(
+                            Swatch::new(
+                                ("profile-colour", index),
+                                format!("Profile colour {name}"),
+                                color,
+                            )
+                            .dimensions(16.0, 16.0),
+                        );
+                        if swatch.clicked() {
+                            recolor_click = Some((index, swatch));
+                        }
+                        // Name column: fixed width so the description reads as its
+                        // own column instead of trailing the button.
+                        if ui
+                            .add_sized(
+                                [120.0, 20.0],
+                                Button::new(format!("Profile {name}"))
+                                    .variant(ButtonVariant::Ghost)
+                                    .size(ControlSize::Sm),
+                            )
+                            .on_hover_text(format!(
+                                "Apply the {name} profile to the selected operations"
+                            ))
+                            .clicked()
+                        {
+                            link = Some(index);
+                        }
+                        ui.add(Text::new(summary).content(Content::Muted));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let cog = ui
+                                .add(IconButton::new(
+                                    Icon::Settings,
+                                    format!("Profile settings {name}"),
+                                ))
+                                .on_hover_text("Edit this profile's parameters");
+                            if cog.clicked() {
+                                edit = Some((index, cog.clone()));
+                            }
+                        });
+                    });
                 }
             });
-        });
 
+        if let Some((index, anchor)) = recolor_click
+            && self.prefs.profiles.get(index).is_some()
+        {
+            if matches!(
+                self.color_popup,
+                Some((ColorTarget::Profile(open), _)) if open == index
+            ) {
+                if self.color_popup_dirty {
+                    self.commit_profile_color(index);
+                }
+                self.color_popup = None;
+            } else {
+                let color = self
+                    .prefs
+                    .profiles
+                    .get(index)
+                    .map(profile_color)
+                    .unwrap_or(egui::Color32::WHITE);
+                self.color_popup_value = color;
+                self.color_popup_hex =
+                    stencilcraft_doc::canvas::format_hex_color([color.r(), color.g(), color.b()]);
+                self.color_popup_dirty = false;
+                self.color_popup_open = true;
+                self.color_popup = Some((ColorTarget::Profile(index), anchor));
+            }
+        }
         if extract {
             let added = extract_profiles(&mut self.prefs.profiles, &self.engine.doc.operations);
             self.save_prefs();
@@ -4248,6 +4369,10 @@ impl StencilApp {
                 id: *id,
                 settings: profile.settings.clone(),
             }));
+            self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                id: *id,
+                color: Some(profile.color.clone()),
+            }));
             self.detached_ops.remove(id);
         }
         self.status = format!(
@@ -4255,6 +4380,45 @@ impl StencilApp {
             ids.len(),
             profile.name
         );
+    }
+
+    /// Write the working colour into profile `index`, persist it and repaint
+    /// every linked operation.
+    fn commit_profile_color(&mut self, index: usize) {
+        let c = self.color_popup_value;
+        let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
+        if let Some(profile) = self.prefs.profiles.get_mut(index) {
+            profile.color = hex;
+        }
+        self.color_popup_dirty = false;
+        self.save_prefs();
+        self.recolor_linked_operations(index);
+    }
+
+    /// Paint every operation linked to profile `index` with its swatch colour,
+    /// so layers, geometry pills and the canvas follow a profile recolour.
+    fn recolor_linked_operations(&mut self, index: usize) {
+        let Some(profile) = self.prefs.profiles.get(index).cloned() else {
+            return;
+        };
+        let ids: Vec<u64> = self
+            .engine
+            .doc
+            .operations
+            .iter()
+            .filter(|op| {
+                !self.detached_ops.contains(&op.id)
+                    && op.kind == profile.kind
+                    && op.settings == profile.settings
+            })
+            .map(|op| op.id)
+            .collect();
+        for id in ids {
+            self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                id,
+                color: Some(profile.color.clone()),
+            }));
+        }
     }
 
     fn profile_link_confirm_dialog(&mut self, ui: &mut egui::Ui) {
@@ -4455,23 +4619,35 @@ impl StencilApp {
         }
     }
 
-    /// The colour-picker popup for an operation row (UI-05); the picked colour
-    /// is canonicalised and dispatched as OperationSetColor when it closes.
+    /// The shared colour-picker popup (UI-05): operation rows and profile wells
+    /// open the same picker, and the picked colour is committed when it closes.
     ///
     /// It must not use `Popup::menu`: that closes on any click inside, so the
     /// picker and the hex field could never be used.
-    fn operation_color_popup(&mut self, _ui: &mut egui::Ui) {
-        let Some((id, anchor)) = self.color_popup.clone() else {
+    fn color_popup(&mut self, _ui: &mut egui::Ui) {
+        let Some((target, anchor)) = self.color_popup.clone() else {
             return;
         };
-        let name = self
-            .engine
-            .doc
-            .operations
-            .iter()
-            .find(|op| op.id == id)
-            .map(|op| op.name.clone())
-            .unwrap_or_else(|| "operation".to_string());
+        let (name, is_operation) = match target {
+            ColorTarget::Operation(id) => (
+                self.engine
+                    .doc
+                    .operations
+                    .iter()
+                    .find(|op| op.id == id)
+                    .map(|op| op.name.clone())
+                    .unwrap_or_else(|| "operation".to_string()),
+                true,
+            ),
+            ColorTarget::Profile(index) => (
+                self.prefs
+                    .profiles
+                    .get(index)
+                    .map(|profile| format!("Profile {}", profile.name))
+                    .unwrap_or_else(|| "profile".to_string()),
+                false,
+            ),
+        };
         let open_cmd = self
             .color_popup_open
             .then_some(egui::SetOpenCommand::Bool(true));
@@ -4521,47 +4697,39 @@ impl StencilApp {
                     }
                 });
                 ui.separator();
-                egui::Grid::new("operation-palette")
-                    .spacing([1.0, 1.0])
-                    .show(ui, |ui| {
-                        for (index, code) in OPERATION_PALETTE.iter().enumerate() {
-                            let n = index + 1;
-                            let swatch = stencilcraft_doc::canvas::parse_hex_color(code)
-                                .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
-                                .unwrap_or(egui::Color32::BLACK);
-                            let (rect, resp) = ui
-                                .allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::click());
-                            let label = format!("Palette colour {n}");
-                            resp.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::accesskit::Role::Button,
-                                    true,
-                                    &label,
-                                )
-                            });
-                            ui.painter().rect_filled(rect, 1.5, swatch);
-                            if resp.hovered() || value == swatch {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    1.5,
-                                    egui::Stroke::new(1.0, ui.visuals().selection.stroke.color),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            if resp.clicked() {
-                                picked = Some(swatch);
-                            }
-                            if n % 8 == 0 {
-                                ui.end_row();
-                            }
-                        }
-                    });
+                let palette: Vec<(String, Srgba)> = OPERATION_PALETTE
+                    .iter()
+                    .enumerate()
+                    .map(|(index, code)| {
+                        let [r, g, b] =
+                            stencilcraft_doc::canvas::parse_hex_color(code).unwrap_or([0, 0, 0]);
+                        (
+                            format!("Palette colour {}", index + 1),
+                            Srgba::rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
+                        )
+                    })
+                    .collect();
+                let selected = OPERATION_PALETTE.iter().position(|code| {
+                    stencilcraft_doc::canvas::parse_hex_color(code)
+                        .map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+                        == Some(value)
+                });
+                let table = SwatchPalette::table("operation-palette", "Palette", palette)
+                    .selected(selected)
+                    .columns(8)
+                    .show(ui);
+                if let Some(index) = table.selected
+                    && let Some(code) = OPERATION_PALETTE.get(index)
+                    && let Some([r, g, b]) = stencilcraft_doc::canvas::parse_hex_color(code)
+                {
+                    picked = Some(egui::Color32::from_rgb(r, g, b));
+                }
                 if let Some(col) = picked {
                     value = col;
                     dirty = true;
                     hex = stencilcraft_doc::canvas::format_hex_color([col.r(), col.g(), col.b()]);
                 }
-                if ui.button("Clear colour").clicked() {
+                if is_operation && ui.button("Clear colour").clicked() {
                     clear = true;
                 }
                 if ui.button("Close").clicked() {
@@ -4572,24 +4740,34 @@ impl StencilApp {
         self.color_popup_hex = hex;
         self.color_popup_dirty = dirty;
 
-        if clear {
-            self.run_command(Command::Document(DocumentCommand::OperationSetColor {
-                id,
-                color: None,
-            }));
+        if clear && is_operation {
+            if let ColorTarget::Operation(id) = target {
+                self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                    id,
+                    color: None,
+                }));
+            }
             self.color_popup = None;
         } else if close || shown.is_none() {
             if self.color_popup_dirty {
                 let c = self.color_popup_value;
                 let hex = stencilcraft_doc::canvas::format_hex_color([c.r(), c.g(), c.b()]);
-                self.run_command(Command::Document(DocumentCommand::OperationSetColor {
-                    id,
-                    color: Some(hex),
-                }));
+                match target {
+                    ColorTarget::Operation(id) => {
+                        self.run_command(Command::Document(DocumentCommand::OperationSetColor {
+                            id,
+                            color: Some(hex),
+                        }));
+                    }
+                    ColorTarget::Profile(index) => {
+                        self.color_popup_hex = hex;
+                        self.commit_profile_color(index);
+                    }
+                }
             }
             self.color_popup = None;
         } else {
-            self.color_popup = Some((id, anchor));
+            self.color_popup = Some((target, anchor));
         }
     }
 
@@ -4601,9 +4779,10 @@ impl StencilApp {
         self.bulk_confirm_dialog(ui);
         self.profile_link_confirm_dialog(ui);
         self.tag_overflow_popup(ui);
-        self.operation_color_popup(ui);
+        self.color_popup(ui);
         self.operation_menu_popup(ui);
         self.operation_settings_popup(ui);
+        self.operation_rename_popup(ui);
         self.profile_settings_popup(ui);
         self.bulk_menu_popup(ui);
         self.appearance_dialog(ui);
@@ -4633,6 +4812,7 @@ impl StencilApp {
         self.op_menu_open = false;
         #[derive(Clone, Copy, PartialEq)]
         enum Act {
+            Rename,
             Settings,
             Kind(stencilcraft_doc::OperationKind),
             Lock(bool),
@@ -4641,6 +4821,7 @@ impl StencilApp {
             Delete,
         }
         let mut entries: Vec<MenuEntry<Act>> = Vec::new();
+        entries.push(MenuItem::new(format!("Rename {}", op.name), Act::Rename).into());
         entries.push(MenuItem::new(format!("Settings {}", op.name), Act::Settings).into());
         for preset in operations::OperationPreset::ALL {
             entries.push(
@@ -4669,6 +4850,11 @@ impl StencilApp {
         let shown = Menu::new(&entries).show(ui, egui::Popup::menu(&anchor).open_memory(open_cmd));
         if let Some(action) = shown.chosen {
             match action {
+                Act::Rename => {
+                    self.op_rename_text = op.name.clone();
+                    self.op_rename = Some((id, anchor));
+                    self.op_rename_open = true;
+                }
                 Act::Settings => {
                     self.op_settings = Some((id, anchor));
                     self.op_settings_open = true;
@@ -4779,6 +4965,61 @@ impl StencilApp {
             self.op_settings = Some((id, anchor));
         } else {
             self.op_settings = None;
+        }
+    }
+
+    /// The rename popover: one text field. Enter or `Rename` commits; an empty
+    /// name is rejected and the popover stays open.
+    fn operation_rename_popup(&mut self, _ui: &mut egui::Ui) {
+        let Some((id, anchor)) = self.op_rename.clone() else {
+            return;
+        };
+        let open_cmd = self
+            .op_rename_open
+            .then_some(egui::SetOpenCommand::Bool(true));
+        self.op_rename_open = false;
+
+        let mut text = std::mem::take(&mut self.op_rename_text);
+        let mut commit = false;
+        let mut cancel = false;
+        let shown = egui::Popup::from_response(&anchor)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .open_memory(open_cmd)
+            .show(|ui| {
+                let label = ui.label("Operation name");
+                let edit = ui
+                    .add(egui::TextEdit::singleline(&mut text).desired_width(180.0))
+                    .labelled_by(label.id);
+                if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    commit = true;
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Rename").clicked() {
+                        commit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if commit {
+            let name = text.trim();
+            if name.is_empty() {
+                self.op_rename_text = text;
+                self.op_rename = Some((id, anchor));
+                return;
+            }
+            self.run_command(Command::Document(DocumentCommand::OperationRename {
+                id,
+                name: name.to_string(),
+            }));
+            self.op_rename = None;
+        } else if cancel || shown.is_none() {
+            self.op_rename = None;
+        } else {
+            self.op_rename_text = text;
+            self.op_rename = Some((id, anchor));
         }
     }
 
@@ -8911,6 +9152,17 @@ mod ui_e2e {
         raw_click(h, pos);
     }
 
+    /// Click the first node with `label`; some composites (a `ColorPopover`)
+    /// expose the same label on the well and its wrapper group.
+    pub(crate) fn raw_click_first_label(h: &mut App, label: &str) {
+        let pos = h
+            .query_all_by_label_contains(label)
+            .next()
+            .map(|n| n.rect().center())
+            .unwrap_or_else(|| panic!("no label containing {label:?}"));
+        raw_click(h, pos);
+    }
+
     pub(crate) fn has_label_containing(h: &App, needle: &str) -> bool {
         h.query_all_by_label_contains(needle).next().is_some()
     }
@@ -9270,6 +9522,21 @@ mod profile_tests {
             members: Vec::new(),
             icon: None,
         }
+    }
+
+    #[test]
+    fn profile_colour_parses_stored_hex_and_falls_back_per_kind() {
+        let cut = Profile::new(1, "Cut", OperationKind::Cut, "#e5484d");
+        assert_eq!(
+            profile_color(&cut),
+            egui::Color32::from_rgb(0xe5, 0x48, 0x4d)
+        );
+        let mut empty = Profile::new(2, "Empty", OperationKind::Score, "");
+        empty.color = profile_fallback_color(empty.kind).to_string();
+        assert_eq!(
+            profile_color(&empty),
+            egui::Color32::from_rgb(0xf5, 0xa5, 0x24)
+        );
     }
 
     #[test]

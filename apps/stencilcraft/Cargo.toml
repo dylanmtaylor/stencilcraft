@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 craft-jsonrpc = { workspace = true }
 craft-atomic = { workspace = true }
+craft-color = { workspace = true }
 craft-draw = { workspace = true }
 craft-settings = { workspace = true }
 craft-theme = { workspace = true }

@@ -22,6 +22,16 @@ documentation of consumer laser/vinyl ecosystem software, cited by URL — never
   inspect this workspace's available craft-libs and reuse their public APIs. Do not claim
   parity with sibling applications unless the relevant components are actually in this
   checkout and wired into the app.
+- **Colour UI is `craft-color`.** `Swatch`, `SwatchPalette`/`SwatchTable` and
+  `ColorPopover` live in `craft_color` (already in the graph through `craft-draw`, same
+  pin). Use them for row wells and popovers; never hand-paint a swatch grid. The selection
+  ring belongs to the picker's swatch cells, not to list rows or kind icons.
+- **UI review gate (always).** A UI change is not done until its layout has been captured
+  and looked at, before and after. Run `./target/debug/stencilcraft --control 7979
+  <doc>`, send `{"id":1,"method":"app.screenshot","params":{"path":"/tmp/stencilcraft-ui/<name>.png"}}`
+  as one JSON line to `127.0.0.1:7979`, and open the PNG. Check columns, alignment,
+  spacing and footer placement against the contract. Green Gherkin is not visual proof;
+  keep the before/after paths in the task notes or commit body.
 
 ## Non-negotiables
 

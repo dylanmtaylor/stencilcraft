@@ -14,19 +14,20 @@ confirm with CodeGraph before relying on them.
 | "ocultar/mostrar una operación" | menu item `Hide|Show {operation}` (document visibility) | `main.rs` `tag_overflow_popup` |
 | "seleccionar los miembros de una operación" | menu item `Select members of {operation}` | `main.rs` `tag_overflow_popup` |
 | "panel de operaciones" | `Tree` labelled `Operations` | `main.rs` `operations_panel` |
-| "fila de operación" | `TreeItem` `{name}, Pass {n} · {kind} · … · Profile {label|none}`; child `Button` `Unlink Profile {name}` (only when linked) and trailing `Button` `Colour {name}` | `main.rs` `operations_panel` |
+| "fila de operación" | `TreeItem` `{name}, Pass {n} · {kind} · … · Profile {label|none}`; columns eye, lock, link toggle, label; trailing `Button` `Colour {name}` (craft-color well, no frame) | `main.rs` `operations_panel` |
 | "visibilidad de una operación" | toggle `Button` `Visibility {label}` (column 0) | `main.rs` `operations_panel` |
 | "bloquear una operación" | toggle `Button` `Lock {name}` (column 1) → `OperationSetLocked` | `main.rs` `operations_panel`, `craft_ui::list::ToggleColumn::lock` |
+| "enlazar/desenlazar un perfil" | toggle `Button` `Unlink Profile {name}` when linked / `Link Profile {name}` when detached (column 2); toggling edits the session detach marker | `main.rs` `operations_panel`, `craft_ui::list::ToggleColumn::new` |
 | "fila miembro" | `TreeItem` `#{shape} · {operation}`; click/double-click selects the shape; drag onto an operation row moves it, Shift-drag copies it | `main.rs` `operations_panel` |
 | "quitar un miembro" | `Button` `Remove #{shape} from {name}` (member row trailing) | `main.rs` `operations_panel` |
-| "color de una operación" | `Button` `Colour {name}`; popup palette `Palette colour 1`…`40`, `Hex`, `Clear colour`, `Close` | `main.rs` `operation_color_popup`, `OPERATION_PALETTE` |
+| "color de una operación" | trailing `Button` `Colour {name}`; popup `ListBox` `Palette` with cells `Palette colour 1`…`40` (`craft_color::SwatchTable`, ring inside the cell), plus `Hex`, `Clear colour`, `Close` | `main.rs` `operation_color_popup`, `OPERATION_PALETTE` |
 | "ajustes de una operación" | `Button` `Operation settings {name}`; popover `Kind`, `Power`, `Speed`, `Passes`, `Focus`, `Kerf` | `main.rs` `operation_settings_popup` |
 | "agrupar / desagrupar la selección" | `Button` `Group selection` / `Ungroup selected` | `main.rs` `geometry_panel` footer |
 | "confirmación de operación masiva" | dialog `Create {n} operations?`, `Button` `Continue` | `main.rs` `bulk_confirm_dialog` |
 | "crear una operación por forma / para todas / por apariencia" | `Button` `New operation from all selected`; menu `More new operation actions` → `New operation: each selected` / `all selected` / `by appearance` | `main.rs` `bulk_menu_popup` |
 | "ventana por apariencia" | window `New operation by appearance` with `Stroke`, `Fill`, `Both`; value buttons `{mode} {value}` | `main.rs` appearance dialog |
 | "añadir la geometría seleccionada a la operación actual" | footer button `Add selected to current operation`; menu item `All selected to current operation`; drag a Geometry row onto an operation row | `main.rs` `operations_panel`, `geometry_panel` |
-| "perfiles" | panel `Profiles`: swatch `Profile colour {name}`, button `Profile {name}` (links), separate description, counter `{n} linked to Profile {name}` / `No operations linked to Profile {name}`, cog `Profile settings {name}`; footer `Extract profiles`, `Import profiles`, `Export profiles`. A differing selection opens `{n} operation(s) differ. Link anyway?` with `Cancel` / `Link anyway`. No `Profile Guide`, no `New profile` | `main.rs` `profiles_panel` |
+| "perfiles" | panel `Profiles`: colour well button `Profile colour {name}` (opens a picker, writes `Profile.color`), button `Profile {name}` (links), separate description, counter `{n} linked to Profile {name}` / `No operations linked to Profile {name}`, cog `Profile settings {name}`; footer (right-aligned) `Extract profiles`, `Import profiles`, `Export profiles`. A differing selection opens `{n} operation(s) differ. Link anyway?` with `Cancel` / `Link anyway`. No `Profile Guide`, no `New profile` | `main.rs` `profiles_panel` |
 | "inspector" | `Header` `Shape #1 - Path` / `Document` | `main.rs` `inspector_panel` |
 | "operación efectiva de la selección" | section `Operation`, values exposed as accesskit `value` (`Cut`, source name) | `main.rs` inspector |
 | "capa heredada" | `Button` `Add Layer`, section `Layers` | `main.rs` inspector |

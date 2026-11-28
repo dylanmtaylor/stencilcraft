@@ -19,6 +19,7 @@ Feature: Operation profiles
     And I click "Profile Score"
     And I click "Link anyway"
     Then operation 2 has kind "score"
+    And operation 2 has colour "#f5a524"
     And the operations panel shows "Profile Score"
 
   @OP-03
@@ -71,6 +72,28 @@ Feature: Operation profiles
   Scenario: a profile row separates its description from the name button
     Given the profiles panel is open
     Then the profile row for "Score" shows a description
+
+  @OP-03
+  Scenario: a profile's colour well edits the profile colour
+    Given the profiles panel is open
+    When I click the colour well "Profile colour Cut"
+    And I set the picker colour to "#ff0000"
+    And I click the colour well "Profile colour Cut"
+    Then the profile "Cut" has colour "#ff0000"
+
+  @OP-03
+  Scenario: recolouring a profile recolours its linked operations
+    Given the operations and profiles panels are open
+    And a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1, 2, 3
+    When I select operation 2
+    And I click "Profile Score"
+    And I click "Link anyway"
+    And I click the colour well "Profile colour Score"
+    And I set the picker colour to "#00ff00"
+    And I click the colour well "Profile colour Score"
+    Then the profile "Score" has colour "#00ff00"
+    And operation 2 has colour "#00ff00"
 
   @OP-03
   Scenario: applying a profile with different settings asks first

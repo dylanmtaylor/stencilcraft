@@ -22,8 +22,8 @@ use stencilcraft_engine::ProductionCommand;
 use crate::ui_e2e::{
     App, add_nested_fixture, boot, boot_inspector, boot_menu, boot_ops_profiles, boot_profiles,
     boot_workspace, click, click_menu, drag_row_containing, drag_row_containing_with, expand_all,
-    has, has_label_containing, has_row_containing, raw_click_label, raw_click_row_containing,
-    raw_double_click_label_containing,
+    has, has_label_containing, has_row_containing, raw_click_first_label, raw_click_label,
+    raw_click_row_containing, raw_double_click_label_containing,
 };
 use crate::*;
 
@@ -457,6 +457,31 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         w.run();
         return Ok(());
     }
+    if let Some(hex) = between(text, "I set the picker colour to \"", "\"") {
+        w.h().get_by_label("Hex").set_text_value_accesskit(hex);
+        w.run();
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("the profile \"") {
+        let (name, tail) = rest
+            .split_once("\" has colour \"")
+            .ok_or("malformed profile colour step")?;
+        let want = tail.trim_end_matches('"');
+        let got = w
+            .state()
+            .prefs
+            .profiles
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.color.as_str());
+        return if got == Some(want) {
+            Ok(())
+        } else {
+            fail(format!(
+                "expected profile {name:?} colour {want:?}, got {got:?}"
+            ))
+        };
+    }
     if text == "I close the colour picker" {
         click(w.h(), "Close");
         return Ok(());
@@ -534,6 +559,25 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
         let (_, name) = op_at(w, n)?;
         open_op_menu(w, &name);
         click_menu(w.h(), &format!("Set kind {} for {name}", preset.label()));
+        return Ok(());
+    }
+    if let Some(rest) = text.strip_prefix("I rename operation ") {
+        let (left, right) = rest
+            .split_once(" to \"")
+            .ok_or_else(|| format!("expected `to \"…\"` in {rest:?}"))?;
+        let n = nums(left)
+            .first()
+            .copied()
+            .ok_or("operation number missing")? as usize;
+        let name = unquote(right);
+        let (_, old) = op_at(w, n)?;
+        open_op_menu(w, &old);
+        click_menu(w.h(), &format!("Rename {old}"));
+        w.h()
+            .get_by_label("Operation name")
+            .set_text_value_accesskit(&name);
+        w.run();
+        click(w.h(), "Rename");
         return Ok(());
     }
     if let Some(rest) = text.strip_prefix("I toggle the lock on operation ") {
@@ -620,6 +664,10 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
     }
     if let Some(label) = between(text, "I click the link glyph \"", "\"") {
         raw_click_label(w.h(), label);
+        return Ok(());
+    }
+    if let Some(label) = between(text, "I click the colour well \"", "\"") {
+        raw_click_first_label(w.h(), label);
         return Ok(());
     }
     if let Some(label) = between(text, "I click the geometry row \"", "\"") {
@@ -781,6 +829,28 @@ fn step(w: &mut World, text: &str) -> Result<(), String> {
                 fail(format!(
                     "expected operation {idx} power {want}, got {}",
                     op.settings.power
+                ))
+            };
+        }
+        if let Some((left, right)) = rest.split_once(" is named ") {
+            let idx = nums(left)
+                .first()
+                .copied()
+                .ok_or("operation number missing")? as usize;
+            let want = unquote(right);
+            let op = w
+                .state()
+                .engine
+                .doc
+                .operations
+                .get(idx.saturating_sub(1))
+                .ok_or_else(|| format!("there is no operation {idx}"))?;
+            return if op.name == want {
+                Ok(())
+            } else {
+                fail(format!(
+                    "expected operation {idx} name {want:?}, got {:?}",
+                    op.name
                 ))
             };
         }

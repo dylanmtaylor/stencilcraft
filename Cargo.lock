@@ -5728,6 +5728,7 @@ name = "stencilcraft"
 version = "0.1.0"
 dependencies = [
  "craft-atomic 0.1.0",
+ "craft-color",
  "craft-draw",
  "craft-jsonrpc",
  "craft-raster-codecs 0.2.0",

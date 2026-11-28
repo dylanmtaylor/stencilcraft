@@ -27,6 +27,13 @@ Feature: Operations panel
     Then operation 2 has kind "engrave"
 
   @UI-05
+  Scenario: renaming an operation
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1, 2, 3
+    When I rename operation 2 to "Engrave line"
+    Then operation 2 is named "Engrave line"
+
+  @UI-05
   Scenario: the operations list has a visible lock toggle
     Given a nested fixture with groups "outer" and "inner"
     And an operation "Cut 2" over shapes 1, 2, 3
@@ -150,6 +157,14 @@ Feature: Operations panel
     When I click the link glyph "Unlink Profile Cut"
     Then the operations panel shows "Profile none"
     And a label containing "Unlink Profile Cut" is not on screen
+    And a label containing "Link Profile Cut" is on screen
+
+  @OP-03
+  Scenario: the colour well stays on the operation row's trailing edge
+    Given a nested fixture with groups "outer" and "inner"
+    And an operation "Cut 2" over shapes 1, 2, 3
+    Then "Colour Cut 2" is on screen
+    And a label containing "Unlink Profile Cut" is on screen
 
   @UI-04
   Scenario: dragging a member row moves it to another operation

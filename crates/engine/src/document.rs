@@ -34,6 +34,8 @@ const PAGE_GAP_MM: f64 = 10.0;
 const MAX_DISTANCE_MM: f64 = 1_000_000.0;
 /// Most shapes the clipboard holds.
 const MAX_CLIPBOARD_SHAPES: usize = 10_000;
+/// Longest operation name accepted by `operation.rename`, characters.
+const MAX_OPERATION_NAME_CHARS: usize = 120;
 /// Thumbnail budget for `document.update-thumbnail`, bytes.
 const THUMBNAIL_BYTES: usize = 64 * 1024;
 
@@ -132,6 +134,9 @@ pub enum DocumentCommand {
     OperationRemoveMembers { id: u64, ids: Vec<u64> },
     #[serde(rename = "operation.set-kind")]
     OperationSetKind { id: u64, kind: OperationKind },
+    /// Rename an operation; the name is trimmed and must not be empty. Undoable.
+    #[serde(rename = "operation.rename")]
+    OperationRename { id: u64, name: String },
     #[serde(rename = "operation.set-settings")]
     OperationSetSettings {
         id: u64,
@@ -1104,6 +1109,22 @@ fn apply(engine: &mut Engine, command: DocumentCommand) -> Result<Effect, Engine
         DocumentCommand::OperationSetKind { id, kind } => {
             let p = op_index(engine, id, "operation.set-kind")?;
             engine.doc.operations[p].kind = kind;
+            changed
+        }
+        DocumentCommand::OperationRename { id, name } => {
+            let p = op_index(engine, id, "operation.rename")?;
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(invalid(
+                    "operation.rename: name cannot be empty".to_string(),
+                ));
+            }
+            if name.chars().count() > MAX_OPERATION_NAME_CHARS {
+                return Err(invalid(format!(
+                    "operation.rename: name is longer than {MAX_OPERATION_NAME_CHARS} characters"
+                )));
+            }
+            engine.doc.operations[p].name = name.to_string();
             changed
         }
         DocumentCommand::OperationSetSettings { id, settings } => {
@@ -3757,6 +3778,41 @@ mod tests {
             ["engrave", "cut"],
             "Pass N is derived from operations order"
         );
+    }
+
+    #[test]
+    fn rename_trims_and_rejects_blank_names() {
+        let mut e = three();
+        run(
+            &mut e,
+            DocumentCommand::OperationCreate {
+                name: "cut".to_string(),
+                kind: OperationKind::Cut,
+                settings: OperationSettings::default(),
+                color: None,
+                icon: None,
+                members: vec![1],
+            },
+        );
+        let id = e.doc.operations[0].id;
+        run(
+            &mut e,
+            DocumentCommand::OperationRename {
+                id,
+                name: "  Engrave line  ".to_string(),
+            },
+        );
+        assert_eq!(e.doc.operations[0].name, "Engrave line");
+        assert!(
+            e.run(Command::Document(DocumentCommand::OperationRename {
+                id,
+                name: "   ".to_string(),
+            }))
+            .is_err(),
+            "blank names are rejected"
+        );
+        assert!(e.undo());
+        assert_eq!(e.doc.operations[0].name, "cut");
     }
 
     #[test]
